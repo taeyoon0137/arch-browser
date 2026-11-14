@@ -47,8 +47,8 @@ enum CodexAgent {
     }
 
     /// A session's first turn. `--no-daemon` is a top-level flag, so it comes before `exec`.
-    static func firstTurnArguments(server: AIAgentToolServer, instructions: String, disabled: [String], model: String, effort: String?, levels: [String: [String]], folder: URL) -> [String] {
-        ["--no-daemon", "exec", "--json"] + options(settings: baseSettings + sessionSettings(server: server, instructions: instructions), disabled: disabled)
+    static func firstTurnArguments(server: AIAgentToolServer, instructions: String, disabled: [String], model: String, effort: String?, levels: [String: [String]], folder: URL, ephemeral: Bool = false) -> [String] {
+        ["--no-daemon", "exec", "--json"] + (ephemeral ? ["--ephemeral"] : []) + options(settings: baseSettings + sessionSettings(server: server, instructions: instructions), disabled: disabled)
             + modelArguments(model: model, effort: effort, levels: levels) + ["-C", folder.path, "-"]
     }
 
@@ -154,7 +154,9 @@ enum CodexAgent {
         let catalog = try await AIAgentCommand.run(executable, ["--no-daemon", "debug", "models", "--bundled"], environment: probeEnvironment)
         let levels = catalog.succeeded ? effortLevels(fromCatalog: Data(catalog.output.utf8)) : [:]
         try await checkConfiguration(executable: executable, environment: probeEnvironment, disabled: disabled, name: name)
-        return AIAgentProbeResult(version: version, disabledFeatures: disabled, effortLevels: levels)
+        let ephemeral = try await AIAgentCommand.run(executable, ["--no-daemon", "exec", "--ephemeral", "--help"], environment: probeEnvironment)
+        return AIAgentProbeResult(version: version, supportsRunOption: ephemeral.succeeded && ephemeral.output.contains("--ephemeral"),
+                                  disabledFeatures: disabled, effortLevels: levels)
     }
 
     /// The session's settings with placeholder values of the same types, since the probe validates keys, feature names, and value types, and the two free texts are TOML strings whatever they hold.

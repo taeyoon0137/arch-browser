@@ -51,11 +51,16 @@ public struct AIRequest: Sendable {
     public var output: AIOutputFormat
     /// nil uses 4,096.
     public var maxOutputTokens: Int?
-    /// The one model that serves the request, with no fallback; nil uses the feature's route.
+    /// The one model that serves the request, with no fallback; nil uses `route`, or the feature's route without one.
     public var pinnedModel: AIModelRef?
+    /// The route the request names for itself (Routing); nil uses the feature's route.
+    public var route: AIRouteChoice?
+    /// false leaves the request's Activity entry without content. true by default.
+    public var recordsContent: Bool
 
     public init(feature: AIFeatureID, instructions: String? = nil, messages: [AIMessage],
-                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil, pinnedModel: AIModelRef? = nil)
+                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil, pinnedModel: AIModelRef? = nil,
+                route: AIRouteChoice? = nil, recordsContent: Bool = true)
 }
 
 public struct AIMessage: Sendable {
@@ -220,7 +225,7 @@ extension AIClient {
 ```
 
 - `run` performs calls one at a time in the model's order. A call to a tool not in the request returns an error result to the model without throwing. Passing `maxRounds` throws `toolRoundLimit`; the last round's calls do not run.
-- `pinnedModel` serves a request on that model alone, also one the route does not list, if it still exists and meets the feature's requirements. `run` pins every round after the first to the model that served the first, so a conversation never moves to another model mid-loop. A request with tools goes only to HTTP models with `tools`, never to a command-line tool, whatever its capabilities say.
+- `pinnedModel` serves a request on that model alone, also one the route does not list, if it still exists and meets the feature's requirements. A stored automatic feature takes only one of its own route's models, as the model that served a loop's first round is, and refuses any other with `blockedByPolicy(.routeNotAllowed)`, as it refuses a request's route. `run` pins every round after the first to the model that served the first, so a conversation never moves to another model mid-loop. A request with tools goes only to HTTP models with `tools`, never to a command-line tool, whatever its capabilities say.
 - Before each round, `run` sends the results of rounds more than eight back as their notes, and an image in a result only until a reply follows a request that carried it (`docs/agents.md`, API-key sessions). While a request is over its model's input limit, the service sends whole results as notes too, oldest round first and never the newest, before it cuts page text. `conversationDidChange` gets the conversation after each round whose calls all ran and after the final reply or the round limit, with no tool call left without its result, so a caller can keep it across requests.
 - A tool result that the part checks refuse, for an excluded site or an undeclared kind, goes to the model as an error result that says why without naming the site, and the loop goes on; the check runs at every round, so a site excluded later is refused too. A model without `images` gets a note in place of each image in a result, and so does a `chatCompletions` model, since that format sends a tool result as text.
 - A model can ask for any offered tool, and a page can try to make it ask. A tool that changes state must therefore be safe for the model to call at any time. Hooks do not get tools that change state. They return actions that the host checks (see Hooks).
@@ -242,6 +247,8 @@ public struct AIFeature: Identifiable, Sendable {
     public var trigger: AITrigger
     public var data: AIDataScope
     public var requirements: Set<AIModelCapability>
+    /// `.stored` unless the feature says otherwise.
+    public var routing: AIFeatureRouting
 }
 
 public enum AITrigger: String, Codable, Sendable {
@@ -249,6 +256,13 @@ public enum AITrigger: String, Codable, Sendable {
     case user
     /// Requests start on their own, for example from a hook.
     case automatic
+}
+
+public enum AIFeatureRouting: String, Codable, Sendable {
+    /// The feature's route in `ai.json`, which Settings ▸ AI ▸ Features edits.
+    case stored
+    /// Each request names its route. Features does not list the feature; Usage lists it by name.
+    case perRequest
 }
 
 public enum AIModelCapability: String, Codable, Sendable {
@@ -273,8 +287,10 @@ public final class AIService: ObservableObject, AIClient {
 
     public func register(_ feature: AIFeature)
     public func unregister(_ id: AIFeatureID)
-    /// Whether the feature is on and has a usable route. Commands for a feature that is not available stay hidden.
-    public func isAvailable(_ id: AIFeatureID) -> Bool
+    /// Whether the feature is on and has a usable route, `route` when given. Commands for a feature that is not available stay hidden.
+    public func isAvailable(_ id: AIFeatureID, route: AIRouteChoice? = nil) -> Bool
+    /// The models a request with `route` would try, in order, after Routing's step 3 without its page data rule; throws as that request would.
+    public func resolvedModels(for id: AIFeatureID, route: AIRouteChoice? = nil) throws -> [AIModelRef]
     nonisolated public func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error>
 }
 ```
@@ -292,6 +308,7 @@ The first features:
 | `agent` | VII.17 registers it; VII.16 runs its sessions on Claude Code and Codex (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
+- Each agent hook registers one automatic feature, `agentHook.<hook id>`, and runs started by outside programs use `agentRun`. Both are `perRequest` features, which use the route in each request (Routing; `docs/hooks.md`, Model choice and tiers).
 
 ## Providers
 
@@ -456,11 +473,37 @@ public struct AIRoute: Codable, Sendable {
 }
 ```
 
+A request can also name its route, as agent runs do (`docs/hooks.md`, Model choice and tiers): a model tier, whose models the user assigns in Settings ▸ AI ▸ Model Tiers, or models of its own.
+
+```swift
+public enum AIModelTier: String, Codable, Hashable, Sendable, CaseIterable {
+    case fast, standard, deep
+    /// "Fast", "Standard", or "Deep".
+    public var title: String
+}
+
+/// `{"tier": "fast"}` or `{"models": [{"provider": …, "model": …}]}` in JSON.
+public enum AIRouteChoice: Codable, Hashable, Sendable {
+    case tier(AIModelTier)
+    /// A model and up to two fallbacks.
+    case models([AIModelRef])
+}
+
+extension AIFeatureID {
+    /// `tier.fast`, `tier.standard`, or `tier.deep`: the tier's route in `ai.json`, not a feature.
+    public static func tier(_ tier: AIModelTier) -> AIFeatureID
+}
+```
+
 The service resolves the route when a request starts and keeps it for the whole request:
 
-1. A feature with `isEnabled` off throws `notConfigured(.switchedOff)`.
-2. A route with models uses them. A route without models uses the `default` route when the feature's trigger is `user`. An automatic feature never uses the default route. Nothing runs on its own until the user assigns it a model; without one it throws `notConfigured(.noModel)`.
+1. A `perRequest` feature takes the request's route and throws `notConfigured(.noModel)` without one. A `stored` automatic feature refuses a request's route with `blockedByPolicy(.routeNotAllowed)`, so Tab Names keeps the models the user chose for it. Otherwise a feature with `isEnabled` off throws `notConfigured(.switchedOff)`.
+2. A request's route is used when it names one: a tier's models, or the models it lists. An empty tier throws `notConfigured(.emptyTier(_:))` and never falls back to another tier or the default route, and a request that lists no model throws `notConfigured(.noModel)`. Without one, a route with models uses them. A route without models uses the `default` route when the feature's trigger is `user`. An automatic feature never uses the default route. Nothing runs on its own until the user assigns it a model; without one it throws `notConfigured(.noModel)`.
 3. The service drops models whose provider is gone or that lack a capability the feature requires. For requests with page, selection, file, or download parts, it also drops models that run on a command-line tool without `runsWithoutTools`. If none remain, it throws `notConfigured(.noUsableModel)`, or `blockedByPolicy(.commandLineToolWithPageData)` when only the last rule removed models.
+
+- A tier is a route in `ai.json` under `tier.fast`, `tier.standard`, or `tier.deep` with a model and up to two fallbacks. Its `isEnabled` is written true and not read, so a hand-written tier may leave it out. A tier lists any connected model; step 3 drops the unsuitable ones when a request resolves it.
+- `AIAgentSessionRequest.route` serves sessions under the same rules when the request names no `model`. A session's `model` resolves as a route of that one model, so a stored automatic feature refuses it too and a stored feature's switch applies to it. A CLI session makes no Activity entry, so it has no `recordsContent`; an API-key session's rounds are requests and carry it. A turn of an automatic feature's session is one automatic request: it fails with `budgetReached` at the daily limit for automatic requests or the monthly spending limit before any model, counts once toward the daily limit whichever models it tries, and waits behind the user's requests for a provider slot.
+- A request with `recordsContent` false leaves its Activity entry without content: its part kinds and sizes, model, result, and usage stay, and Show Content does not appear. Budgets, rate limits, part checks, and usage apply to every request alike, so a `perRequest` automatic feature counts toward the daily limit for automatic requests and the monthly spending limit.
 
 | Feature | Default `isEnabled` | Default models |
 |---|---|---|
@@ -468,6 +511,7 @@ The service resolves the route when a request starts and keeps it for the whole 
 | `pageReader`, `pageQuestion`, `pluginComposer` | on | none (uses `default`) |
 | `hook.tabName`, `hook.downloadName` | off | none |
 | `plugin.<id>` | on once the user enables the plugin | none (uses `default` unless the plugin declares hooks, which makes it an automatic feature) |
+| `tier.fast`, `tier.standard`, `tier.deep` | on (not read) | none |
 
 ### Fallbacks
 
@@ -521,15 +565,16 @@ public final class AISettingsStore: ObservableObject {
   "routes": {
     "default": { "isEnabled": true, "models": [ { "provider": "6F1C…", "model": "model-a" } ] },
     "pageReader": { "isEnabled": true, "models": [] },
-    "hook.tabName": { "isEnabled": false, "models": [] }
+    "hook.tabName": { "isEnabled": false, "models": [] },
+    "tier.fast": { "isEnabled": true, "models": [ { "provider": "6F1C…", "model": "model-a" } ] }
   },
   "excludedSites": ["file:", "local-network"],
   "limits": { "automaticRequestsPerDay": 300 }
 }
 ```
 
-- A feature without an entry in `routes` uses the defaults in the table above. Removing a provider removes its models from every route; a route left empty falls back as described.
-- A field missing from the file takes its default, and so do these fields of a provider or route written by hand: a provider's `models` (none) and `limits` (those of its kind), an HTTP provider's `headers` (none) and `hasKey` (false), a route's `models` (none), and `automaticRequestsPerDay` in `limits` (300). A provider still needs its `id`, `name`, and `kind`, and a route its `isEnabled`.
+- A feature without an entry in `routes` uses the defaults in the table above. Removing a provider removes its models from every route, the tiers' among them; a route left empty falls back as described, and a tier left empty fails.
+- A field missing from the file takes its default, and so do these fields of a provider or route written by hand: a provider's `models` (none) and `limits` (those of its kind), an HTTP provider's `headers` (none) and `hasKey` (false), a route's `models` (none) and `isEnabled` (its feature's default in the table above, so a hook stays off), and `automaticRequestsPerDay` in `limits` (300). A provider still needs its `id`, `name`, and `kind`.
 - Arch renames a file that does not decode to `ai.json.unreadable`, replaces it with defaults, and reports this in Settings ▸ AI.
 
 ## Page access
@@ -608,10 +653,13 @@ public protocol AIPageSource: Sendable {
 
 Hooks let features act on browser events (row 54). The hook center lives in `AI`; `Browsing` posts the events and applies the actions.
 
+`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center). Its scheduling is `AIHookScheduler` beside it, which the center owns (`AIHookCenter.scheduler`) and plugin hooks and the hook registry are to share, so one event's hooks from all three run in one chain under the rules below (`docs/hooks.md`, The shared scheduler).
+
 ### Events
 
 ```swift
-public enum AIHookEventKind: Hashable, Sendable {
+/// The raw values are the bus's kind names, so the center's steps join the chain of the bus event they come from.
+public enum AIHookEventKind: String, Hashable, Sendable {
     case pageLoaded, tabOpened, downloadFinished
 }
 
@@ -654,9 +702,9 @@ public struct AIDownloadFinish: Sendable {
 }
 ```
 
-- `BrowserHooks` in `Browsing` follows the session's tabs, including favorites' tabs, and its downloads, so `BrowserSession` only attaches it. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- `BrowserHooks` in `Browsing` subscribes to the session's browser event bus (`docs/hooks.md`, Browser events), so `BrowserSession` only attaches it, and posts the bus's events under their identifiers with `post(_:event:)`, never for agent tabs. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists, with the file's URL from the session's entry. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
 - `AIDownloadInfo` carries the file's name, media type (from its extension), size, source address, and the address of the page the download started from (`EngineDownloadItem.pageURL`), without the page's title. Site exclusions apply to both addresses, so a file from an excluded page reaches no hook even when it comes from another site.
-- `BrowserHooks` calls `cancel(subject:)` when a tab leaves the session and when the user removes a download from the list.
+- `BrowserHooks` ends a tab's chains for other documents when the tab commits another document, ignoring the fragment (`scheduler.cancel(subject:otherThan:)`), ends its chains except the close's own when it closes (`scheduler.cancel(subject:except:)`), and calls `cancel(subject:)` when the user removes a download from the list.
 
 ### Subscription
 
@@ -701,14 +749,19 @@ public protocol AIHookHost: AnyObject {
 public final class AIHookCenter: ObservableObject {
     /// Each feature's last error: from its hooks' last request that failed, a hook that failed on its own or timed out, or a reached budget. A request that succeeds or a change to the feature's route clears it, and a hook that sends no request leaves it.
     @Published public private(set) var lastErrors: [AIFeatureID: any Error]
-    /// Features whose hooks paused after consecutive authentication or provider errors.
+    /// Features whose hooks paused after consecutive authentication or provider errors: the scheduler's paused owners.
     @Published public private(set) var pausedFeatures: Set<AIFeatureID>
     /// Set by `Browsing`, which owns it. Without a host, posted events reach no hook.
     public weak var host: (any AIHookHost)?
+    /// The shared scheduler that runs the center's hooks as steps under their features (`docs/hooks.md`, The shared scheduler).
+    public let scheduler: AIHookScheduler
 
     @discardableResult
     public func subscribe(_ registration: AIHookRegistration) -> AIHookSubscription
+    /// Posts under a new event identifier.
     public func post(_ event: AIHookEvent)
+    /// Posts in the chain of the browser event `id`, which other owners' steps for that event join.
+    public func post(_ event: AIHookEvent, event id: UUID)
     public func cancel(subject: UUID)
     public func resume(_ feature: AIFeatureID)
 }
@@ -725,19 +778,20 @@ public enum AIHookError: Error, Sendable {
 
 ### Ordering
 
-- Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once.
+- Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once. Once built, plugin hooks join the same chain at 200 and the hook registry's hooks at 1,000 and above, in the registry's order.
 - Each hook's actions apply as soon as it returns, before the next hook runs. Actions of kinds the registration does not allow never reach the host, and only actions the host applied appear in `appliedActions`.
 - Events for different subjects run independently within the providers' rate limits.
-- The center skips hooks without sending a request when their feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused. It also skips hooks whose feature has reached the daily limit for automatic requests or the monthly spending limit, and keeps that budget as the feature's last error. After each hook's delay, it repeats these checks and checks the event's site.
+- The scheduler skips the center's hooks without sending a request, after each hook's delay, when their feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused, and when it has reached the daily limit for automatic requests or the monthly spending limit, which the center keeps as the feature's last error. It checks the event's site when the center posts the event and again after each delay.
 
 ### Cancellation
 
 The center cancels a running hook and its request when:
 
 - a newer event of the same kind and subject arrives (the new event's chain starts after the old one stops);
-- the subject goes away (`cancel(subject:)`);
+- the subject goes away: the tab closes, or the user removes the download (`cancel(subject:)`);
+- the event's tab commits another document, ignoring the fragment, which would make its actions stale;
 - the user switches the feature off or changes its route;
-- the subscription is canceled;
+- the subscription is canceled, which ends its feature's hooks;
 - the timeout passes, which leaves `AIHookError.timedOut` as the feature's last error;
 - the app quits.
 
@@ -758,7 +812,7 @@ public enum AIHookAction: Sendable {
 
 `BrowserHooks` checks each action before applying it:
 
-- `renameTab` applies only to a `pageLoaded` event's tab, while it is a space's tab that the user has neither named nor turned the name down for, and that still shows the event's address, ignoring the fragment; a favorite's tab goes by its favorite's name. It takes the first line of the title, trimmed and cut to 60 characters, and sets `Tab.suggestedTitle`, separate from `customTitle`, so the user's name always wins: the row shows `customTitle ?? suggestedTitle?.title ?? pageTitle`. Moving to another address clears the suggested title; another fragment does not, and an address a single-page site sets within its document does, so the row shows the page's title, which such sites update, until the next document load. Renaming the tab to an empty name or to the page's title clears the user's name and turns the hook's name down: `suggestedTitle` keeps the address with a nil title, and hooks leave the tab until it moves to another address. Confirming the name the row shows changes nothing. `session.json` (snapshot version 12) stores each open tab's suggested title or refusal with its address; closed-tab records keep none.
+- `renameTab` applies only to a `pageLoaded` event's tab, while it is a space's tab that the user has neither named nor turned the name down for, and whose committed address (`Tab.committedURL`) is still the event's address, ignoring the fragment; a favorite's tab goes by its favorite's name. It takes the first line of the title, trimmed and cut to 60 characters, and sets `Tab.suggestedTitle`, separate from `customTitle`, so the user's name always wins: the row shows `customTitle ?? suggestedTitle?.title ?? pageTitle`. Moving to another address clears the suggested title once the tab commits it, so a WebKit navigation that fails, is stopped, or becomes a download leaves the name; another fragment does not, and an address a single-page site sets within its document does, so the row shows the page's title, which such sites update, until the next document load. Renaming the tab to an empty name or to the page's title clears the user's name and turns the hook's name down: `suggestedTitle` keeps the address with a nil title, and hooks leave the tab until it moves to another address. Confirming the name the row shows changes nothing. `session.json` (snapshot version 12) stores each open tab's suggested title or refusal with its address; closed-tab records keep none.
 - `renameDownload` applies only to a `downloadFinished` event's download, while the user has not chosen its name and its file is still at the event's path. It removes `/` and `:`, turns control characters into spaces, trims spaces and dots from both ends, keeps the file's extension (dropping it from the suggestion when the suggestion repeats it), with a compressed archive's `.tar.gz`, `.tar.bz2`, `.tar.xz`, or `.tar.zst` as one extension, limits the name to 80 characters with the extension, and picks an unused name in the file's folder. The download row then shows the new name and offers Restore Original Name in its context menu, which gives the file its original name, or the nearest unused one. A finished download's notification keeps the original path, so clicking it after a rename opens the file's folder.
 
 The first hooks (`BuiltInHooks` in `Browsing`):
@@ -790,7 +844,7 @@ The review uses the install sheet in `docs/plugins.md` (Lifecycle), with additio
 ### Lifetime
 
 - `plugins.json` records a plugin that AI wrote with `generated`, the requests and the model's name, in place of `source` (`docs/plugins.md`, Storage). Its section in Settings ▸ Plugins says that AI wrote it, with which model, when, and from which requests. It switches off and is removed like any installed plugin.
-- Not built yet: the `ai` permission, which would let a plugin send requests under its own feature `plugin.<id>` through `arch.ai.stream` and `arch.ai.reply`, with parts limited to the kinds it lists; plugin hooks, which would register with the hook center at priority 200 and make that feature automatic; reading pages through host calls, which a plugin with `ai` could do only off excluded sites, since its code could copy page text into a text part; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
+- Not built yet: the `ai` permission, which would let a plugin send requests under its own feature `plugin.<id>` through `arch.ai.stream` and `arch.ai.reply`, with parts limited to the kinds it lists; plugin hooks, which would run a plugin's event listeners as steps of the shared hook scheduler at order 200 under that feature, making it automatic, rather than register with the center (`docs/hooks.md`, Plugins); reading pages through host calls, which a plugin with `ai` could do only off excluded sites, since its code could copy page text into a text part; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
 
 ## Errors
 
@@ -811,8 +865,8 @@ public enum AIError: Error, Sendable {
     case cancelled
 }
 
-public enum AINotConfiguredReason: Sendable { case switchedOff, noModel, noUsableModel, unknownFeature }
-public enum AIPolicyReason: Sendable { case siteExcluded(String), dataNotDeclared(AIDataKind), commandLineToolWithPageData, agentUsedOwnTools(String) }
+public enum AINotConfiguredReason: Sendable { case switchedOff, noModel, noUsableModel, unknownFeature, emptyTier(AIModelTier) }
+public enum AIPolicyReason: Sendable { case siteExcluded(String), dataNotDeclared(AIDataKind), commandLineToolWithPageData, agentUsedOwnTools(String), routeNotAllowed }
 public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 ```
 
@@ -834,8 +888,10 @@ public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 | A preset that is not signed in, before a session starts | `authentication` |
 | A Claude Code `init` that fails the start check, or a Codex item or server that the watcher refuses | `blockedByPolicy(.agentUsedOwnTools(_:))` with a sentence such as "Codex ran a command." |
 | A reply cut by the length limit before any text or tool call, or a `.json` reply cut before its value was complete | `replyTooLong` |
+| A request that names a tier without a model | `notConfigured(.emptyTier(_:))`: "Assign a model to the Fast tier in Settings ▸ AI." |
+| A request that names a route, or a session that names a model, for a stored automatic feature | `blockedByPolicy(.routeNotAllowed)`, before any request goes out: "This feature uses the models chosen for it in Settings ▸ AI, so a request cannot name its own." |
 
-The interface shows each error as one sentence with one action. `AISettingsStore.message(for:)` gives that sentence, which the page reader, the question popover, the plugin writer's sheet, and Settings ▸ AI's features, Activity, and provider editors show, with the provider's name, as the user named it, in place of "The provider" for `authentication`, `providerUnavailable`, and `rateLimited`, so that after a route has moved through several models the user can tell whose key or service to check; a command-line tool that cannot start gives "\<tool> could not start (\<reason>)." as its detail. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, `budgetReached`, and `commandLineToolWithPageData`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; for `contextTooLong`, Start Over in the page reader when earlier questions went out with the question, which clears the conversation and asks it again on its own, and otherwise Open Settings ▸ AI for another model; and Retry for the rest except `cancelled`, which shows nothing.
+The interface shows each error as one sentence with one action. `AISettingsStore.message(for:)` gives that sentence, which the page reader, the question popover, the plugin writer's sheet, and Settings ▸ AI's features, Activity, and provider editors show, with the provider's name, as the user named it, in place of "The provider" for `authentication`, `providerUnavailable`, and `rateLimited`, so that after a route has moved through several models the user can tell whose key or service to check; a command-line tool that cannot start gives "\<tool> could not start (\<reason>)." as its detail. It offers Open Settings ▸ AI for `notConfigured`, `authentication`, `budgetReached`, and `commandLineToolWithPageData`; Open Terminal for a command-line tool's `authentication` or `providerUnavailable`; Allow on This Site for `siteExcluded`; for `contextTooLong`, Start Over in the page reader when earlier questions went out with the question, which clears the conversation and asks it again on its own, and otherwise Open Settings ▸ AI for another model; no action for `routeNotAllowed`, which neither a retry nor a setting changes; and Retry for the rest except `cancelled`, which shows nothing.
 
 ## Rate limits and budgets
 
@@ -901,10 +957,11 @@ public struct AIPrice: Codable, Sendable {
 ## Settings ▸ AI
 
 - Providers: Add Provider chooses HTTP API or Command-Line Tool. An HTTP provider has a name, format, base URL, key (entered once, then shown only as set, with Replace and Remove), extra headers, and models (Refresh from the provider or add by name). Each model has an input limit, price, and capability overrides. A command-line tool has a name, executable (found in the login shell's PATH or chosen with `NSOpenPanel`), arguments, environment, output format and paths, the Runs Without Its Own Tools checkbox with its explanation, Open Terminal, and Check. Each provider has its limits.
-- Features: one row per registered feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request.
+- Features: one row per registered `stored` feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request. A `perRequest` feature has no row, since its requests name their routes.
+- Model Tiers: a sentence on what a tier does and that the features under Features use the models chosen there, then Fast, Standard, and Deep, each with the Features rows' model menus (a model and up to two fallbacks, starting at None) and a sentence on what the tier is for, which names no feature. Every connected model is listed.
 - Sites: the exclusion list.
-- Usage: the totals, the monthly spending limit, and the daily limit for automatic features.
-- Activity: the in-memory request list.
+- Usage: the totals, the monthly spending limit, and the daily limit for automatic features. Totals keep each feature's name, so a `perRequest` feature is listed by name.
+- Activity: the in-memory request list. Show Content appears only for an entry with content.
 
 ## Testing
 
@@ -913,5 +970,6 @@ public struct AIPrice: Codable, Sendable {
 - Command-line provider tests write a shell script to a temporary folder for each test and run it as a command-line tool. Each script prints canned JSON lines or text, sleeps (to test cancellation and timeouts), or exits nonzero. Cancellation tests check that the process group is gone.
 - Agent session tests (`AgentSessionTests`) run shell scripts that answer as `claude` and `codex`, record each call's arguments, environment, and standard input, and replay the recorded streams in `Fixtures/Agent` (`docs/agents.md`, Tests). They check the exact arguments and environments, the start check and the watcher, the feature derivation and the configuration probe, the probes run again for a changed executable, the open input mode, Stop, also while a turn waits for a slot, the idle timer, fallbacks before `ready`, also at a usage limit, a message that starts with `/` refused with a skill folder, Codex's thread deletion, usage under `agent`, with a resumed Codex turn counted as what it added, the derived capability, and the presets' ordinary requests and Check. `PreferencesTests` check the presets' fields from a search path and the status read from fake status commands.
 - Service tests cover route resolution, the default route for user features only, fallback before and not after the first text, capability and command-line filtering, the part checks, truncation, site pattern matching (subdomains, `file:`, `local-network`), the rate limiter (slots, priority, the per-minute bucket, the cool-down a freed slot's next request waits for, doubling only across cool-downs, and an expired wait after a cool-down has ended), the daily and monthly limits, the site and spending limit checks repeated once a waiting request has its slot, a key the Keychain does not give, a provider whose key stays, usage months after the clock goes back, the defaults of fields a hand-written `ai.json` lacks, and usage normalization.
+- Model tier tests (`ModelTierTests.swift`) cover a tier's models with fallbacks, an empty tier's error and sentence without a fallback to the default route, a tier's `isEnabled` written true and not read, capability drops after a tier, a removed provider leaving the tiers, a `perRequest` feature without a route or with an empty one, a user feature's own route and its switch, a stored automatic feature refusing a route before any request whether on or off, with a sentence that blames no provider, three models at most, a session started on a tier with only its presets kept, a session's model refused for a stored automatic feature and for a feature that is off, the daily and spending limits for a `perRequest` automatic feature and its name in usage, an Activity entry without content, the tier routes written to and read from `ai.json`, a hand-written tier, a hand-written route without `isEnabled`, and `AIRouteChoice`'s JSON, which refuses a value with both keys.
 - Hook tests (`AIHookTests`) cover ordering by priority and feature ID, `stop`, allowed and refused actions, replacement by a newer event for the same subject, `cancel(subject:)`, timeouts, also of a hook that does not stop when canceled, discarded actions after cancellation, stopping a hook when its feature is switched off or its subscription ends, the checks that skip hooks without a request, site exclusions, requests under the hook's own feature, the daily limit, and pausing after three failures until Resume or a route change. `BrowsingTests` cover the safe download names, renaming and restoring a file, tab names from replies, and suggested titles in `session.json`.
 - Composer tests (`PluginComposerTests`) run the composer against the scripted provider, one reply per request, and stage in temporary folders: a plugin staged without being installed, with the request and model as its origin and only text sent; a problem sent back and the corrected reply staged; each unusable reply, from the reply's form, sites, page scripts, file names, and text to the checks staging makes, ending after three; a reply over the size limit ending at once; a change sent with the last version and keeping its identifier; and a route without a JSON model. `PluginsTests` cover staging the files AI writes, a path that leaves the package, and installing, listing again at launch, and removing a plugin that AI wrote with its origin.

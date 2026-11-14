@@ -6,6 +6,89 @@ import Testing
 @testable import Agent
 
 @MainActor @Suite(.serialized) struct PageScriptTests {
+    private func session(sharing fixture: PageFixture) -> AgentSession {
+        fixture.host.userTabIDs.insert(fixture.tabID)
+        var scope = AgentSiteScope()
+        scope.add(fixture.page.url)
+        return AgentSession(title: "Read this page", personaID: FakeHost.defaultPersona.id, spaceID: fixture.grant.spaceID, origin: .app, mode: .readOnly,
+                            model: nil, effort: nil, scope: scope, attachedTabIDs: [fixture.tabID], tools: [])
+    }
+
+    @Test func aSharedSessionOutlineRedactsValuesAndScopesRefsAndDiffsToItsDocument() async throws {
+        let fixture = try await PageFixture(shared: true)
+        let session = session(sharing: fixture)
+        func snapshot(_ handle: String = "t1", diff: Bool = false, ref: String? = nil) async -> AgentToolResult {
+            var args: [String: AgentJSON] = ["tab": .string(handle), "diff": .bool(diff)]
+            args["ref"] = ref.map(AgentJSON.string)
+            return await fixture.toolHost.run(AgentToolCall(name: "snapshot", arguments: args), in: session, searchesHistory: false)
+        }
+        let original = await snapshot()
+        #expect(original.status == .ok && original.text.contains("Place order"))
+        let converted = AgentAPISession.result(original, of: AgentToolCall(name: "snapshot", arguments: ["tab": "t1"]), callID: "outline")
+        let pages = converted.parts.compactMap { part -> String? in
+            if case .page(let page) = part { return page.text }
+            return nil
+        }
+        #expect(!converted.isError && pages.count == 1 && pages[0].contains("Place order") && !pages[0].contains("Alex Kim"))
+        for secret in ["Alex Kim", "Leave at the door", "SAVE10", "Standard", "session=secret"] { #expect(!original.text.contains(secret)) }
+        #expect(await snapshot(ref: "e17").status == .ok)
+        #expect((await snapshot(diff: true)).text.contains("Nothing changed"))
+        fixture.host.tabs[0].documentID = UUID()
+        _ = try await fixture.page.evaluate("document.querySelectorAll('button').forEach(b => { if (b.textContent.includes('Place order')) b.textContent = 'Continue'; })")
+        #expect(await snapshot(ref: "e17").status == .stale)
+        let replaced = await snapshot(diff: true)
+        #expect(replaced.status == .ok && replaced.text.contains("Continue") && replaced.text.contains("first snapshot") && !replaced.text.contains("Place order"))
+
+        session.unshare(tabID: fixture.tabID)
+        #expect(await snapshot().code == "tabNotFound")
+        let fresh = session.share(tabID: fixture.tabID, url: fixture.page.url)
+        #expect(fresh != "t1" && session.snapshots.records.isEmpty)
+        #expect(await snapshot(fresh, ref: "e17").status == .stale)
+        #expect((await snapshot(fresh, diff: true)).text.contains("first snapshot"))
+        session.stop()
+        #expect(session.snapshots.records.isEmpty)
+        #expect(await snapshot(fresh, ref: "e17").status == .stale)
+    }
+
+    @Test func aSessionChecksItsAttachmentAndDocumentAgainAfterAnOutline() async throws {
+        let fixture = try await PageFixture(shared: true)
+        let session = session(sharing: fixture)
+        let call = AgentToolCall(name: "snapshot", arguments: ["tab": "t1"])
+        fixture.host.onPageScript = { fixture.host.tabs[0].documentID = UUID() }
+        let stale = await fixture.toolHost.run(call, in: session, searchesHistory: false)
+        #expect(stale.code == "pageChanged" && !stale.text.contains("Place order") && session.snapshots.records.isEmpty)
+        fixture.host.onPageScript = {
+            session.unshare(tabID: fixture.tabID)
+            _ = session.share(tabID: fixture.tabID, url: fixture.page.url)
+        }
+        let revoked = await fixture.toolHost.run(call, in: session, searchesHistory: false)
+        #expect(revoked.status == .refused && revoked.code == "P17" && session.snapshots.records.isEmpty)
+        fixture.host.onPageScript = nil
+        let handle = session.handles.tabs.handle(for: fixture.tabID)
+        let current = AgentToolCall(name: "snapshot", arguments: ["tab": .string(handle)])
+        fixture.host.userTabIDs = []
+        #expect(await fixture.toolHost.run(current, in: session, searchesHistory: false).code == "P17")
+        fixture.host.userTabIDs = [fixture.tabID]
+        let excluded = AgentToolHost(host: fixture.host, allowsAI: { _ in false })
+        #expect(await excluded.run(current, in: session, searchesHistory: false).code == "P16")
+    }
+
+    @Test func cancellingASessionOutlineReleasesASilentPageWithoutCreatingRefs() async throws {
+        let fixture = try await PageFixture(shared: true)
+        let session = session(sharing: fixture)
+        let call = AgentToolCall(name: "snapshot", arguments: ["tab": "t1"])
+        fixture.host.silentTabIDs = [fixture.tabID]
+        var started = false
+        fixture.host.onPageScript = { started = true }
+        let read = Task { await fixture.toolHost.run(call, in: session, searchesHistory: false) }
+        try await waitUntil { started }
+        let stop = ContinuousClock.now
+        read.cancel()
+        let result = await read.value
+        #expect(ContinuousClock.now - stop < .seconds(1))
+        #expect(result.code == "ended" && session.snapshots.records.isEmpty)
+    }
+
     @Test func theOutlineHasRolesNamesRefsAndFingerprints() async throws {
         let fixture = try await PageFixture()
         let result = await fixture.call("snapshot", ["tab": "t1"])
@@ -29,7 +112,7 @@ import Testing
             #expect(lines.contains(expected), "\(expected)")
         }
         // The host keeps each ref's fingerprint with the document's address, and a link's full address, query and fragment included, which the outline shows reduced.
-        let record = try #require(fixture.state.snapshots[fixture.tabID])
+        let record = try #require(fixture.state.snapshots.records[fixture.tabID])
         #expect(record.url == fixture.page.url)
         #expect(record.refs["e17"]?.fingerprint == "button|button||Place order")
         #expect(record.refs["e6"]?.fingerprint == "input|textbox|text|Name")

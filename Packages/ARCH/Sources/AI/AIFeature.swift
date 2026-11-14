@@ -1,4 +1,4 @@
-// Features register with the service before they make requests. A feature names what starts its requests, the page data they may carry, and the capabilities its models need.
+// Features register with the service before they make requests. A feature names what starts its requests, the page data they may carry, the capabilities its models need, and where its requests' routes come from.
 import Foundation
 
 public struct AIFeature: Identifiable, Sendable {
@@ -9,14 +9,17 @@ public struct AIFeature: Identifiable, Sendable {
     public var trigger: AITrigger
     public var data: AIDataScope
     public var requirements: Set<AIModelCapability>
+    public var routing: AIFeatureRouting
 
-    public init(id: AIFeatureID, name: String, summary: String, trigger: AITrigger, data: AIDataScope, requirements: Set<AIModelCapability> = []) {
+    public init(id: AIFeatureID, name: String, summary: String, trigger: AITrigger, data: AIDataScope, requirements: Set<AIModelCapability> = [],
+                routing: AIFeatureRouting = .stored) {
         self.id = id
         self.name = name
         self.summary = summary
         self.trigger = trigger
         self.data = data
         self.requirements = requirements
+        self.routing = routing
     }
 }
 
@@ -25,6 +28,13 @@ public enum AITrigger: String, Codable, Sendable {
     case user
     /// Requests start on their own, for example from a hook.
     case automatic
+}
+
+public enum AIFeatureRouting: String, Codable, Sendable {
+    /// The feature's route in `ai.json`, which Settings ▸ AI ▸ Features edits. The default.
+    case stored
+    /// Each request names its route, as an agent hook's runs do. Features does not list the feature; Usage lists it by name.
+    case perRequest
 }
 
 public enum AIModelCapability: String, Codable, Sendable, CaseIterable {

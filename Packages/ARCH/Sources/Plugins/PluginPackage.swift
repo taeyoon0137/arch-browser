@@ -17,6 +17,8 @@ public struct PluginPackage: Identifiable, Sendable {
     public let files: [String]
     /// The package path of a script plugin's background script, if it has one.
     let background: String?
+    /// The files of a package held in memory, by package path, which are served in place of `rootURL`'s; nil for a package on disk.
+    let memoryFiles: [String: Data]?
     /// What each engine that runs the kind on this Mac found when it checked the package at staging. Empty for kinds that Arch runs alike on every engine.
     public internal(set) var engineChecks: [EngineKind: PluginEngineCheck] = [:]
     /// The installed plugin that the package matches as a version of the same extension, by the rule in Engine versions ▸ Counterparts: the one with the package's identifier, or else the first installed with its name and developer, while it is not in a pair. Nil without one, and for kinds that Arch runs alike on every engine.
@@ -44,7 +46,7 @@ public struct PluginPackage: Identifiable, Sendable {
         }
     }
 
-    private init(kind: PluginKind, manifest: PluginManifest, rootURL: URL, origin: PluginOrigin, proof: PluginProof?, files: [String], background: String?) {
+    private init(kind: PluginKind, manifest: PluginManifest, rootURL: URL, origin: PluginOrigin, proof: PluginProof?, files: [String], background: String?, memoryFiles: [String: Data]? = nil) {
         self.kind = kind
         self.manifest = manifest
         self.rootURL = rootURL
@@ -52,6 +54,12 @@ public struct PluginPackage: Identifiable, Sendable {
         self.proof = proof
         self.files = files
         self.background = background
+        self.memoryFiles = memoryFiles
+    }
+
+    /// A script plugin's package held in memory, as a hook script's is: the manifest and the background script's bytes at the package path `background`, served from memory, so the script that runs is the one the caller checked, whatever the disk holds by then. `rootURL` names where the script came from; nothing is read there.
+    public init(manifest: PluginManifest, background: String, source: Data, rootURL: URL) {
+        self.init(kind: .script, manifest: manifest, rootURL: rootURL, origin: .file(rootURL), proof: nil, files: [background], background: background, memoryFiles: [background: source])
     }
 
     /// The place from which a runtime names a package whose manifest has no key, as Chromium names an unpacked extension by its folder: the file or folder the user chose. A Web Store package's manifest carries its `.crx` file's key, so the package folder stands in. Nil for packages that AI writes and the app holds, which no runtime reads.
@@ -72,7 +80,8 @@ public struct PluginPackage: Identifiable, Sendable {
 
     /// The text of the file at a package path, as the review shows it. Nil for a path that names no file of the package, and for a file that is not UTF-8 text.
     public func text(of path: String) -> String? {
-        Self.file(path, in: rootURL).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        if let memoryFiles { return memoryFiles[path].flatMap { String(data: $0, encoding: .utf8) } }
+        return Self.file(path, in: rootURL).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
     }
 
     /// Where the package runs, as the review sheet says it: the engines whose check it passed, such as "Runs on WebKit tabs.", then why each engine that refused it did. Empty without checks.

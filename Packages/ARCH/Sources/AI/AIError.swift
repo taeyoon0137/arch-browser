@@ -15,6 +15,7 @@ public enum AIError: Error, Sendable {
     /// A reply that reached the request's output limit before any text or tool call, or a `.json` reply that reached it before its value was complete.
     case replyTooLong
     case toolRoundLimit
+    case toolCallLimit
     case cancelled
 }
 
@@ -23,6 +24,8 @@ public enum AINotConfiguredReason: Sendable {
     case noModel
     case noUsableModel
     case unknownFeature
+    /// The request named a tier that has no model in Settings ▸ AI ▸ Model Tiers.
+    case emptyTier(AIModelTier)
 }
 
 public enum AIPolicyReason: Sendable {
@@ -34,6 +37,10 @@ public enum AIPolicyReason: Sendable {
     case agentUsedOwnTools(String)
     /// A message that starts with `/` in a session where Claude Code loads Arch's skills, which Claude Code would run as one of its own commands.
     case agentMessageIsCommand
+    /// The hook's approved provider destination no longer matches its route or settings.
+    case unknownProvider
+    /// A request or session named a route or a model for a stored automatic feature, which keeps the models the user chose for it.
+    case routeNotAllowed
 }
 
 public enum AIBudget: Sendable {
@@ -61,7 +68,7 @@ extension AIError {
         switch self {
         case .providerUnavailable, .authentication, .rateLimited, .contextTooLong, .malformedReply:
             return true
-        case .notConfigured, .blockedByPolicy, .budgetReached, .invalidRequest, .refused, .replyTooLong, .toolRoundLimit, .cancelled:
+        case .notConfigured, .blockedByPolicy, .budgetReached, .invalidRequest, .refused, .replyTooLong, .toolRoundLimit, .toolCallLimit, .cancelled:
             return false
         }
     }
@@ -79,6 +86,8 @@ extension AIError: LocalizedError {
             return "None of this feature\u{2019}s models can serve it. Choose another in Settings \u{25B8} AI."
         case .notConfigured(.unknownFeature):
             return "This AI feature is not available."
+        case .notConfigured(.emptyTier(let tier)):
+            return "Assign a model to the \(tier.title) tier in Settings \u{25B8} AI."
         case .blockedByPolicy(.siteExcluded(let site)):
             return "AI is off for \(site)."
         case .blockedByPolicy(.dataNotDeclared(let kind)):
@@ -89,6 +98,10 @@ extension AIError: LocalizedError {
             return detail
         case .blockedByPolicy(.agentMessageIsCommand):
             return "Claude Code would run a message that starts with \"/\" as one of its own commands, so Arch does not send it."
+        case .blockedByPolicy(.unknownProvider):
+            return "The provider destination changed. Review it before running this hook."
+        case .blockedByPolicy(.routeNotAllowed):
+            return "This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own."
         case .budgetReached(.automaticRequestsPerDay):
             return "This feature reached its daily limit of automatic requests."
         case .budgetReached(.monthlySpending):
@@ -110,6 +123,8 @@ extension AIError: LocalizedError {
             return "The reply could not be read: \(message)"
         case .replyTooLong:
             return "The reply reached its length limit before it was complete."
+        case .toolCallLimit:
+            return "The run reached its tool call limit."
         case .toolRoundLimit:
             return "The model made too many rounds of tool calls."
         case .cancelled:

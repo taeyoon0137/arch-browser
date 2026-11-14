@@ -172,8 +172,12 @@ private let passes: (Int32) throws -> AgentPeer = { try AgentPeer.read(socket: $
 
     @Test func aConnectionClosedBeforeReadyExits6() throws {
         let listener = try TestListener()
-        let wait = listener.serveOnce { _ in }
-        let connection = try AgentControlConnection(location: listener.location, check: passes)
+        let peerChecked = DispatchSemaphore(value: 0)
+        let wait = listener.serveOnce { _ in peerChecked.wait() }
+        let connection = try AgentControlConnection(location: listener.location) { socket in
+            defer { peerChecked.signal() }
+            return try passes(socket)
+        }
         #expect(throws: AgentClientError.closedBeforeAnswer) { try connection.hello(AgentHello(client: .cli, version: "0.1.0")) }
         #expect(wait())
     }

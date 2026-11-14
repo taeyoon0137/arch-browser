@@ -25,6 +25,8 @@ struct SessionSnapshot: Codable {
         var engine: EngineKind?
         /// The engine's restorable page state, such as WebKit's back-forward list, which the file keeps sealed from version 13. `nil` for engines that keep none, in closed-tab records, in files before version 3, and when the state cannot be sealed or opened.
         var state: Data?
+        /// A synced engine change that waits until this tab is no longer visible.
+        var pendingSyncEngine: EngineKind? = nil
         /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
         var personaID: UUID?
         /// The name a hook gave the tab's document, or the user's refusal of it, with the document's address. `nil` without either, in closed-tab records, and in files before version 12.
@@ -139,7 +141,7 @@ struct SessionSnapshot: Codable {
     /// What the session starts from when nothing was saved or the file did not load. Normalizing it gives the default Persona and its first space.
     static var empty: SessionSnapshot { SessionSnapshot(spaces: [], currentSpaceID: UUID(), favorites: [], tabs: []) }
 
-    /// Gives every space and favorite a listed Persona, every Persona a space, and the tab records their Personas. Files before version 9 list none, so everything joins the default Persona. An item whose Persona is not listed joins the first Persona, as in sync's orphan rule.
+    /// Gives every space and favorite a listed Persona, every Persona a space, and the tab records their Personas. Files before version 9 list none, so everything joins the default Persona. An item whose Persona is not listed joins the first Persona. This local recovery rule preserves the old session.
     private mutating func assignPersonas() {
         // The default Persona is always there, first unless the file placed it elsewhere. A Persona listed twice keeps its first place.
         var listed: Set<UUID> = []
@@ -220,8 +222,18 @@ extension SessionSnapshot {
 
     /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch. A folder whose tabs the user kept is an ordinary folder.
     @MainActor static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
-        let agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
-        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !$0.isAgentFolder })
+        var agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
+        guard !agentFolderIDs.isEmpty else { return (tabs, folders) }
+        // An older hierarchy can contain descendants of an agent folder. Its owner marker is
+        // intentionally never encoded, so exclude the whole subtree before writing the file.
+        let children = Dictionary(grouping: folders, by: \.parentID)
+        var pending = Array(agentFolderIDs)
+        while let parent = pending.popLast() {
+            for folder in children[parent] ?? [] where agentFolderIDs.insert(folder.id).inserted {
+                pending.append(folder.id)
+            }
+        }
+        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !agentFolderIDs.contains($0.id) })
     }
 }
 
@@ -231,12 +243,19 @@ extension SessionSnapshot.TabRecord {
         self.init(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, lastActivatedAt: lastActivatedAt,
                   engine: tab.engineKind, state: tab.webContents.restorableState, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle, savedPage: tab.savedPage,
                   liveItemID: tab.liveItemID)
+        pendingSyncEngine = tab.pendingSyncEngine
     }
 }
 
 final class SessionStore {
     let fileURL: URL
     private var pendingSave: DispatchWorkItem?
+    /// Set on the main thread. Replacing the observer discards deliveries for the previous one.
+    var didWrite: ((SessionSnapshot) -> Void)? {
+        didSet { observerRevision &+= 1 }
+    }
+    private var observerRevision: UInt64 = 0
+
     private static let log = Logger(subsystem: "xyz.taeyoon.arch", category: "Session")
     /// Encodes and writes the snapshots in the order they were taken, away from the main thread.
     private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.session-store", qos: .utility)
@@ -300,7 +319,10 @@ final class SessionStore {
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, let snapshot = snapshot() else { return }
-            self.writeQueue.async { self.write(snapshot) }
+            let notify = self.completion(for: snapshot)
+            self.writeQueue.async {
+                if case .success = self.write(snapshot) { notify?() }
+            }
         }
         pendingSave = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
@@ -310,7 +332,25 @@ final class SessionStore {
     @discardableResult
     func saveNow(_ snapshot: SessionSnapshot) -> Result<Void, Error> {
         pendingSave?.cancel()
-        return writeQueue.sync { write(snapshot) }
+        let notify = completion(for: snapshot)
+        return writeQueue.sync {
+            let result = write(snapshot)
+            if case .success = result { notify?() }
+            return result
+        }
+    }
+
+    /// The serial writer queues successful captures back onto main in their actual file order,
+    /// including synchronous flushes that overtake a previously queued main-thread callback.
+    private func completion(for snapshot: SessionSnapshot) -> (() -> Void)? {
+        guard didWrite != nil else { return nil }
+        let revision = observerRevision
+        return { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.observerRevision == revision else { return }
+                self.didWrite?(snapshot)
+            }
+        }
     }
 
     @discardableResult

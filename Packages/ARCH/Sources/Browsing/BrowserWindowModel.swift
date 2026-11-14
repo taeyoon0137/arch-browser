@@ -347,6 +347,7 @@ public enum BrowserWindowKind {
         }
         tab.forgetExternalAppDecline()
         tab.userDidNavigate()
+        tab.pendingCause = nil
         tab.webContents.navigationController.load(URLRequest(url: url))
     }
 
@@ -520,10 +521,8 @@ public enum BrowserWindowKind {
     func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) {
         switch kind {
         case .main:
-            let tab = session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false)
-            tab.opener = opener
-            selectTab(tab.id)
-        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID).selectedTab?.opener = opener
+            selectTab(session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false, opener: opener).id)
+        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID, opener: opener)
         }
     }
 
@@ -596,6 +595,7 @@ public enum BrowserWindowKind {
         if let tab = selectedTab {
             tab.forgetExternalAppDecline()
             tab.userDidNavigate()
+            tab.pendingCause = nil
             tab.webContents.navigationController.load(URLRequest(url: url))
         } else {
             openTab(url: url)
@@ -751,7 +751,7 @@ public enum BrowserWindowKind {
 
     // MARK: Agent panel
 
-    /// Whether a Claude Code or Codex model can run a session, for the palette's Ask Agent row and Continue as Agent Task.
+    /// Whether a connected model can run a session, for the palette's Ask Agent row and Continue as Agent Task.
     var canStartAgentTask: Bool {
         !(session.agents?.agentModels().isEmpty ?? true)
     }
@@ -766,6 +766,25 @@ public enum BrowserWindowKind {
     static func agentComposerContext(in space: Space, personas: [Persona], selectedTab: AgentTabInfo?, isPageCovered: Bool, text: String) -> AgentComposerContext {
         let persona = personas.first { $0.id == space.resolvedPersonaID }?.name ?? "Default"
         return AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: isPageCovered ? nil : selectedTab, text: text)
+    }
+
+    /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
+    func sidebarAgentDraft(for tab: Tab) -> AgentComposerContext? {
+        guard kind == .main, canStartAgentTask, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
+              session.allTabs.contains(where: { $0 === tab }) else { return nil }
+        return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas,
+                                     allowsAI: AIService.shared.settings.allowsAI(on:))
+    }
+
+    static func sidebarAgentDraft(for tab: AgentTabInfo, in space: Space, personas: [Persona], allowsAI: (URL) -> Bool) -> AgentComposerContext? {
+        guard tab.spaceID == space.id else { return nil }
+        let context = agentComposerContext(in: space, personas: personas, selectedTab: tab, isPageCovered: false, text: "")
+        return context.attachableTab(allowsAI: allowsAI) == nil ? nil : context
+    }
+
+    func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext) {
+        guard let context = sidebarAgentDraft(for: tab), context.tab?.documentID == reviewed.tab?.documentID, context.tab?.url == reviewed.tab?.url else { return }
+        showAgentPanel(.composer(context))
     }
 
     /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.
@@ -989,12 +1008,13 @@ public enum BrowserWindowKind {
 
     // MARK: Navigation
 
-    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it. Each tells the tab that the user asked for the load (`Tab.userDidNavigate()`), Back and Forward only when there is a page to go to.
+    // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it. Each tells the tab that the user asked for the load (`Tab.userDidNavigate()`), Back and Forward only when there is a page to go to. The user's navigation drops the cause of one that code started (`Tab.pendingCause`).
     public func goBack() {
         if let preview { return preview.webContents.navigationController.goBack() }
         internalPage = nil
         guard let tab = selectedTab else { return }
         if tab.webContents.canGoBack { tab.userDidNavigate() }
+        tab.pendingCause = nil
         tab.webContents.navigationController.goBack()
     }
     public func goForward() {
@@ -1002,6 +1022,7 @@ public enum BrowserWindowKind {
         internalPage = nil
         guard let tab = selectedTab else { return }
         if tab.webContents.canGoForward { tab.userDidNavigate() }
+        tab.pendingCause = nil
         tab.webContents.navigationController.goForward()
     }
     /// The selected tab's earlier pages, most recent first, for the History menu.
@@ -1015,12 +1036,14 @@ public enum BrowserWindowKind {
         closePreview()
         internalPage = nil
         tab.userDidNavigate()
+        tab.pendingCause = nil
         tab.webContents.navigationController.go(to: item)
     }
     public func reload() {
         if let preview { return preview.webContents.navigationController.reload() }
         guard internalPage == nil, let tab = selectedTab else { return }
         tab.userDidNavigate()
+        tab.pendingCause = nil
         tab.webContents.navigationController.reload()
     }
     public func stopLoading() {
@@ -1425,6 +1448,7 @@ public enum BrowserWindowKind {
         let now = Date()
         for tab in session.allTabs where shownTabIDs.contains(tab.id) && !ids.contains(tab.id) { tab.lastActivatedAt = now }
         shownTabIDs = ids
+        session.applyPendingSyncEngines()
     }
 
     /// The panes of `panes` that a window shows, and so loads, after a change: its selected tab, the panes it shows already (`shownTabIDs`), and each other pane that no other window shows.

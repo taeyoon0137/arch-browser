@@ -35,11 +35,18 @@ public struct AIRequest: Sendable {
     public var output: AIOutputFormat
     /// nil uses 4,096.
     public var maxOutputTokens: Int?
-    /// The one model that serves the request, with no fallback, so that every round of a conversation stays on the model of its first; nil uses the feature's route. It must still exist and meet the feature's requirements.
+    /// The one model that serves the request, with no fallback, so that every round of a conversation stays on the model of its first; nil uses `route`, or the feature's route without one. It must still exist and meet the feature's requirements.
     public var pinnedModel: AIModelRef?
+    /// The route the request names for itself, which a `perRequest` feature needs and a feature the user starts may use instead of its own; nil uses the feature's route. A stored automatic feature refuses one with `blockedByPolicy(.routeNotAllowed)`.
+    public var route: AIRouteChoice?
+    /// false leaves the request's Activity entry without content, so Show Content has nothing to show; its part kinds and sizes, model, result, and usage stay.
+    public var recordsContent: Bool
+    /// Provider destinations approved for a hook, checked again before dispatch. Other features leave this nil.
+    public var knownProviders: [AIProviderID: String]? = nil
 
     public init(feature: AIFeatureID, instructions: String? = nil, messages: [AIMessage],
-                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil, pinnedModel: AIModelRef? = nil) {
+                tools: [AITool] = [], output: AIOutputFormat = .text, maxOutputTokens: Int? = nil, pinnedModel: AIModelRef? = nil,
+                route: AIRouteChoice? = nil, recordsContent: Bool = true) {
         self.feature = feature
         self.instructions = instructions
         self.messages = messages
@@ -47,6 +54,8 @@ public struct AIRequest: Sendable {
         self.output = output
         self.maxOutputTokens = maxOutputTokens
         self.pinnedModel = pinnedModel
+        self.route = route
+        self.recordsContent = recordsContent
     }
 }
 
@@ -284,15 +293,22 @@ public struct AIToolHandler: Sendable {
 }
 
 extension AIClient {
-    /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run. Calls run one at a time in the order the model made them; a call to a tool not offered, or one whose handler throws, becomes an error result for the model. Every round's events are passed on except its `finished(.toolUse)`.
+    /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run. Calls run one at a time in the order the model made them; a call to a tool not offered, or one whose handler throws, becomes an error result for the model. Every round's events are passed on except its `finished(.toolUse)`. One-shot callers can perform the last round's calls and set a total call limit. Reaching either limit ends the run without another model request.
     ///
     /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, and `AIService` sends older results as notes while a request is over its model's input limit, so a long conversation stays within it. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it.
-    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8,
+    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8, performsFinalCalls: Bool = false, maximumToolCalls: Int? = nil,
                     conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error> {
+        run(request, tools: tools, maxRounds: maxRounds, performsFinalCalls: performsFinalCalls, maximumToolCalls: maximumToolCalls,
+            unavailableTool: nil, conversationDidChange: conversationDidChange)
+    }
+
+    /// The same tool loop, with notice of calls rejected before any offered handler can see them. The notice carries no model-supplied name or arguments.
+    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?,
+                    unavailableTool: (@Sendable () async -> Void)?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await runRounds(request, tools: tools, maxRounds: maxRounds, conversationDidChange: conversationDidChange, continuation: continuation)
+                    try await runRounds(request, tools: tools, maxRounds: maxRounds, performsFinalCalls: performsFinalCalls, maximumToolCalls: maximumToolCalls, unavailableTool: unavailableTool, conversationDidChange: conversationDidChange, continuation: continuation)
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: AIError.cancelled)
@@ -304,10 +320,11 @@ extension AIClient {
         }
     }
 
-    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
+    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?, unavailableTool: (@Sendable () async -> Void)?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
                            continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
         var request = request
         request.tools = tools.map(\.tool)
+        var callCount = 0
         for round in 1...max(maxRounds, 1) {
             request.messages = AIToolHistory.prepared(request.messages)
             var text = ""
@@ -332,8 +349,8 @@ extension AIClient {
                 }
             }
             try Task.checkCancellation()
-            // The last round's calls do not run once the limit is reached, so its text stays without them.
-            guard !calls.isEmpty, round < maxRounds else {
+            // A bounded one-shot run can apply the final calls without paying for another model request.
+            guard !calls.isEmpty, round < maxRounds || performsFinalCalls else {
                 if !text.isEmpty { request.messages.append(AIMessage(role: .assistant, parts: [.text(text)])) }
                 await conversationDidChange?(request.messages)
                 guard calls.isEmpty else { break }
@@ -343,20 +360,24 @@ extension AIClient {
             var results: [AIPart] = []
             for call in calls {
                 try Task.checkCancellation()
-                results.append(.toolResult(await Self.perform(call, with: tools)))
+                if let maximumToolCalls, callCount >= maximumToolCalls { break }
+                callCount += 1
+                results.append(.toolResult(await Self.perform(call, with: tools, unavailableTool: unavailableTool)))
             }
             try Task.checkCancellation()
-            let reply: [AIPart] = (text.isEmpty ? [] : [.text(text)]) + calls.map { .toolCall($0) }
+            let reply: [AIPart] = (text.isEmpty ? [] : [.text(text)]) + calls.prefix(results.count).map { .toolCall($0) }
             request.messages.append(AIMessage(role: .assistant, parts: reply))
             request.messages.append(AIMessage(role: .user, parts: results))
             request.pinnedModel = request.pinnedModel ?? servingModel
             await conversationDidChange?(request.messages)
+            if let maximumToolCalls, callCount >= maximumToolCalls { throw AIError.toolCallLimit }
         }
         throw AIError.toolRoundLimit
     }
 
-    private static func perform(_ call: AIToolCall, with tools: [AIToolHandler]) async -> AIToolResult {
+    private static func perform(_ call: AIToolCall, with tools: [AIToolHandler], unavailableTool: (@Sendable () async -> Void)?) async -> AIToolResult {
         guard let handler = tools.first(where: { $0.tool.name == call.name }) else {
+            await unavailableTool?()
             return AIToolResult(callID: call.id, parts: [.text("There is no tool named \(call.name).")], isError: true)
         }
         do {

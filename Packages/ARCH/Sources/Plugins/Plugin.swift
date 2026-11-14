@@ -1,6 +1,7 @@
 // The plugin API: the protocols a plugin implements, the context through which it reaches the browser, and the values it receives. Every kind of plugin calls the same API, and a plugin gains a capability only when `PluginContext` gains a member.
 import AppKit
 import ARCHEngine
+import Events
 
 /// A running plugin in one Persona.
 @MainActor
@@ -15,6 +16,8 @@ public protocol Plugin: AnyObject {
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
     /// The panel of one of the plugin's sidebar items whose action is `.panel`. The manager asks each time the item opens it, and the popover holds it while it shows.
     func panel(for sidebarItemID: String) -> NSViewController?
+    /// An event of a kind the manifest's `events` lists. The manager starts the plugin for it and ignores what it throws; a hook script's run ends when it returns and fails when it throws, a script plugin's with `PluginError.noListener` or `listenerFailed` for its listeners.
+    func handle(_ event: PluginEvent) async throws
 }
 
 extension Plugin {
@@ -23,6 +26,8 @@ extension Plugin {
     public func receive(_ message: PluginPageMessage) async throws -> PluginValue? { nil }
     /// Without an implementation, the item opens nothing.
     public func panel(for sidebarItemID: String) -> NSViewController? { nil }
+    /// Without an implementation, the plugin ignores events.
+    public func handle(_ event: PluginEvent) async throws {}
 }
 
 /// A plugin compiled into the app. The app passes the list of these types to the plugin manager.
@@ -50,6 +55,28 @@ public protocol PluginContext: AnyObject {
     func setBadge(_ text: String?, onSidebarItem id: String)
     /// Needs `clipboard`.
     func copyToClipboard(_ text: String) throws
+    /// The tabs the plugin reaches, in sidebar order, each without what the grant does not cover: its Persona's open tabs, never agent tabs. Needs no permission.
+    func tabs() throws -> [PluginTab]
+    /// One of the tabs the plugin reaches, or nil for any other tab.
+    func tab(_ id: PluginTab.ID) throws -> PluginTab?
+    /// Needs `tabs.rename`. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
+    func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
+}
+
+/// A sandbox that may hand a script's agent options to a user-authorized browser hook.
+@MainActor
+public protocol PluginAgentContext: PluginContext {
+    var permitsAgentRuns: Bool { get }
+    func runAgent(_ options: PluginValue) async throws -> PluginValue
+}
+
+/// What `Browsing` provides so that plugins and hook scripts reach tabs without `Plugins` depending on `Browsing`. One host serves every Persona.
+@MainActor
+public protocol PluginBrowserHost: AnyObject {
+    /// The Persona's open tabs in sidebar order, with titles and addresses before any grant applies; never agent tabs.
+    func tabs(in persona: PersonaID) -> [PluginTab]
+    /// Sets the tab's suggested name under the AI hooks' rules (`docs/hooks.md`, hook decision 13): the name's first line, trimmed and cut to `PluginTab.maximumNameLength` characters, while the tab still shows `document`, ignoring the fragment, the user has not named it, and the user has not turned down a suggested name for that document. Nil removes a suggested name for the document. A nil `document` stands for the tab's committed address now. The change's events carry `cause`. With `applying` false, nothing changes and the answer says whether the tab would take it. False for a favorite's tab, which goes by its favorite's name, for an agent tab, and for a tab that is gone.
+    func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
 }
 
 /// What a command runs on.
@@ -84,6 +111,9 @@ public struct PluginPageMessage: Sendable {
 
 /// A tab as a plugin sees it.
 public struct PluginTab: Identifiable, Hashable, Sendable {
+    /// The longest name that code gives a tab.
+    public static let maximumNameLength = 60
+
     public let id: UUID
     /// `nil` for a favorite's tab, which belongs to no space.
     public var spaceID: UUID?
@@ -94,8 +124,12 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
     public var engine: EngineKind
     public var isPinned: Bool
     public var isSelected: Bool
+    /// Where the tab lives, as events name it.
+    public var kind: BrowserTabKind
+    /// Arch uses this token to bind a hook to its document. Script values omit it.
+    public var documentID: UUID?
 
-    public init(id: UUID, spaceID: UUID?, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool) {
+    public init(id: UUID, spaceID: UUID?, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool, kind: BrowserTabKind = .open, documentID: UUID? = nil) {
         self.id = id
         self.spaceID = spaceID
         self.title = title
@@ -103,6 +137,15 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
         self.engine = engine
         self.isPinned = isPinned
         self.isSelected = isSelected
+        self.kind = kind
+        self.documentID = documentID
+    }
+
+    /// The name that code gives a tab from `text`: its first line, trimmed and cut to `maximumNameLength` characters, or nil when nothing is left.
+    public static func name(from text: String) -> String? {
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let name = String(line.trimmingCharacters(in: .whitespaces).prefix(maximumNameLength)).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
     }
 
     /// The tab without what the grant does not cover.
@@ -112,6 +155,18 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
         tab.title = nil
         tab.url = nil
         return tab
+    }
+}
+
+/// An event a plugin receives: only the kinds its manifest's `events` lists reach it.
+public enum PluginEvent: Sendable {
+    /// A bus event as the receiver's grant lets it see it (`BrowserEvent.view(_:)`), with members that the sender adds to its JSON, such as a hook script's `hook`.
+    case browser(BrowserEventScriptView, extra: [String: PluginValue] = [:])
+
+    public var kind: BrowserEventKind {
+        switch self {
+        case .browser(let view, _): return view.kind
+        }
     }
 }
 
@@ -200,6 +255,12 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidVersions(String)
     /// The manager's Persona was deleted, so it stages, installs, and stores nothing.
     case closed
+    /// The call names a tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover.
+    case notGranted(UUID)
+    /// A script plugin's background script set no listener for the event's kind with `arch.events.on`.
+    case noListener
+    /// A listener of the event threw, or its promise rejected, with what it threw as text, such as an error's message.
+    case listenerFailed(String)
 }
 
 extension PluginError: LocalizedError {
@@ -217,6 +278,9 @@ extension PluginError: LocalizedError {
         case .timedOut: return "The plugin did not answer in time."
         case let .invalidVersions(reason): return reason
         case .closed: return "The plugin\u{2019}s Persona was deleted."
+        case .notGranted: return "The tab is not one this plugin or hook may reach."
+        case .noListener: return "The plugin\u{2019}s script set no listener for the event."
+        case let .listenerFailed(message): return message
         }
     }
 }

@@ -271,8 +271,15 @@ public enum AgentToolCatalog {
         ]),
     ]
 
+    /// Offered only when a hook grants it. Outside and interactive clients keep their own tool lists.
+    public static let renameTab = AgentTool("rename_tab", .navigates, [], "Suggest a sidebar name for a run tab.", [
+        AgentToolParameter("tab", .string, required: true, "The tab handle, such as t1."),
+        AgentToolParameter("name", .string, required: true, "The suggested name, or an empty string to clear it.")
+    ])
+
     public static func tool(named name: String) -> AgentTool? {
-        tools.first { $0.name == name }
+        if name == renameTab.name { return renameTab }
+        return tools.first { $0.name == name }
     }
 
     /// The catalog as MCP's `tools/list` result, `{"tools": […]}`.

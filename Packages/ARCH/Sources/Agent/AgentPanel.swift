@@ -10,6 +10,8 @@ public struct AgentSessionPanel: View {
     let actions: AgentPanelActions
     @State private var draft = ""
     @State private var problem: String?
+    @State private var showsSharedTabs = false
+    @State private var sharingProblem: String?
     @State private var raisingTo: AgentAccessLevel?
 
     public init(service: AgentService, session: AgentSession, actions: AgentPanelActions) {
@@ -78,6 +80,14 @@ public struct AgentSessionPanel: View {
                 .lineLimit(2)
             HStack(spacing: 6) {
                 modeMenu
+                if service.canEditAttachments(of: session) {
+                    Button("Shared Tabs (\(session.handles.sharedTabIDs.count))") {
+                        sharingProblem = nil
+                        showsSharedTabs.toggle()
+                    }
+                    .controlSize(.small)
+                    .popover(isPresented: $showsSharedTabs) { sharedTabs }
+                }
                 Text(scopeText)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -87,6 +97,46 @@ public struct AgentSessionPanel: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    private var sharedTabs: some View {
+        let shared = session.handles.sharedTabIDs
+        let visible = service.host.userTabs(in: session.personaID)
+        let available = service.shareableTabs(for: session)
+        return VStack(alignment: .leading, spacing: 9) {
+            Text("Shared with this session").font(.headline)
+            if shared.isEmpty { Text("No shared tabs.").foregroundStyle(.secondary) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(shared, id: \.self) { id in
+                        let tab = visible.first { $0.id == id }
+                        HStack {
+                            Text(tab.map(tabLabel) ?? "Unavailable tab").lineLimit(1)
+                            Spacer()
+                            Button("Stop Sharing") { service.stopSharing(id, with: session) }
+                        }
+                    }
+                }
+            }.frame(maxHeight: shared.isEmpty ? 0 : min(160, CGFloat(shared.count) * 32))
+            Menu("Share a Tab…") {
+                ForEach(available) { tab in
+                    Button(tabLabel(tab)) {
+                        sharingProblem = service.share(tab, with: session) ? nil : "This tab changed or is no longer available."
+                    }
+                }
+            }
+            .disabled(available.isEmpty)
+            if let sharingProblem { Text(sharingProblem).foregroundStyle(.secondary) }
+        }
+        .controlSize(.small)
+        .padding(12)
+        .frame(width: 320)
+    }
+
+    private func tabLabel(_ tab: AgentTabInfo) -> String {
+        let host = tab.url?.host ?? ""
+        if tab.title.isEmpty { return host.isEmpty ? "Tab" : host }
+        return host.isEmpty || host == tab.title ? tab.title : "\(tab.title) · \(host)"
     }
 
     /// The tool and model, and the place as "Persona / Space".
@@ -304,7 +354,13 @@ private struct AgentTranscriptRow: View {
         if let usage {
             parts.append("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens")
         }
-        parts.append("Included in your subscription")
+        if let model, let provider = settings.providers.first(where: { $0.id == model.provider }) {
+            if provider.commandLineAgent != nil {
+                parts.append("Included in your subscription")
+            } else if let usage, let cost = settings.estimatedCost(of: usage, on: model) {
+                parts.append("about \(cost.amount.formatted(.currency(code: cost.currency).precision(.fractionLength(2...4))))")
+            }
+        }
         return parts.joined(separator: " \u{00B7} ")
     }
 }

@@ -15,7 +15,7 @@ public struct SavedPage: Codable, Equatable, Hashable {
 
 extension URL {
     /// Bookmark rule 3: whether this address shows the same page as `other`. The fragment, `http` against `https`, the host's case, a leading `www.`, and a trailing slash do not count; anything else, such as another path or query, does.
-    func isSamePage(as other: URL) -> Bool {
+    public func isSamePage(as other: URL) -> Bool {
         guard let page = ComparedAddress(self), let otherPage = ComparedAddress(other) else { return self == other }
         return page == otherPage
     }

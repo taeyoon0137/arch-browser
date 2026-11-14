@@ -20,9 +20,26 @@ struct AgentSnapshotRecord {
     }
 
     var url: URL
+    var documentID: UUID
     var document: Int
     var refs: [String: Ref]
     var lines: [String]
+}
+
+/// Snapshot memory for one grant or session. Ref fingerprints and diff lines belong to the captured document.
+@MainActor final class AgentSnapshotStore {
+    var records: [UUID: AgentSnapshotRecord] = [:]
+    var counts: [UUID: Int] = [:]
+
+    func current(_ tab: AgentTabInfo, pages: Int) -> AgentSnapshotRecord? {
+        guard let record = records[tab.id], record.documentID == tab.documentID, record.url == tab.url, record.document == pages else { return nil }
+        return record
+    }
+
+    func remove(_ id: UUID) {
+        records[id] = nil
+        counts[id] = nil
+    }
 }
 
 /// A call that runs: its task, which Stop, Stop All Agents, revocation, expiry, and its connection's close cancel, and once it answered `approvalPending`, the outcome that `approval_wait` takes and the service records when it comes.
@@ -74,6 +91,11 @@ struct AgentHandleTable {
         return handle
     }
 
+    /// A removed handle stays invalid even if the same tab is shared again later.
+    mutating func remove(_ id: UUID) {
+        if let handle = handles.removeValue(forKey: id) { ids.removeValue(forKey: handle) }
+    }
+
     /// The ID behind a handle this table gave; a handle from elsewhere reads as not found.
     func id(for handle: String) -> UUID? {
         ids[handle]
@@ -120,8 +142,7 @@ struct AgentTabActivity: Equatable {
     private var callsDay: Date?
     private var calls = 0
     /// Each tab's latest snapshot, and how many it had this launch.
-    var snapshots: [UUID: AgentSnapshotRecord] = [:]
-    var snapshotCounts: [UUID: Int] = [:]
+    let snapshots = AgentSnapshotStore()
     /// Allow on This Page: the tab's page count when the user allowed it, which lasts until the tab shows another page.
     var pageAllowances: [UUID: Int] = [:]
     /// Allow on <site> for This Session, and Allow Downloads from This Site for This Session, by host.

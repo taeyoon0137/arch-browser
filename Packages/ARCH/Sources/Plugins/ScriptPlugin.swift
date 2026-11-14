@@ -1,17 +1,23 @@
-// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command or page script value starts. A call the background script leaves unanswered past the hang limit, or the end of its web content process, fails the instance; an instance without calls for the idle limit stops. Either way it releases its web view and tells the manager, which starts a new instance at the next use.
+// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, page script value, or event starts. A call the background script leaves unanswered past the hang limit, or the end of its web content process, fails the instance; an instance without calls for the idle limit stops. Either way it releases its web view and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
+import JavaScriptCore
 import WebKit
 
 /// How long, in seconds, a background script may leave a call unanswered before it counts as hung, and an instance may go without calls before it stops.
-struct ScriptPluginLimits {
-    var hang: TimeInterval
-    var idle: TimeInterval
+public struct ScriptPluginLimits: Sendable {
+    public var hang: TimeInterval
+    public var idle: TimeInterval
+
+    public init(hang: TimeInterval, idle: TimeInterval) {
+        self.hang = hang
+        self.idle = idle
+    }
 
     /// The starting values of `docs/plugins.md`.
-    static let standard = ScriptPluginLimits(hang: 10, idle: 30)
+    public static let standard = ScriptPluginLimits(hang: 10, idle: 30)
 }
 
 /// Why a script plugin's instance stopped on its own.
-enum ScriptPluginStop: Equatable {
+public enum ScriptPluginStop: Equatable, Sendable {
     /// It went without calls for the idle limit.
     case idle
     /// Its background script hung, or its web content process ended, as the sentence says.
@@ -19,27 +25,56 @@ enum ScriptPluginStop: Equatable {
 }
 
 @MainActor
-final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
+public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     private let package: PluginPackage
     private let limits: ScriptPluginLimits
-    /// Tells the manager that the instance stopped on its own, so that it drops the instance.
-    var onStop: ((ScriptPluginStop) -> Void)?
+    /// Tells the owner that the instance stopped on its own, so that it drops the instance.
+    public var onStop: ((ScriptPluginStop) -> Void)?
     /// The background script's web view, from the activation until the instance stops. A plugin without a background script has none.
     private var webView: WKWebView?
-    /// The calls that wait for the background script, by number: the load of its document, commands, and page script values.
+    /// The calls that wait for the background script, by number: the load of its document, commands, page script values, and events.
     private var waitingCalls: [Int: CheckedContinuation<Any?, any Error>] = [:]
     private var nextCallNumber = 0
     /// Settles the call that waits for the background document to load.
     private var settleLoad: (@MainActor (Result<Any?, any Error>) -> Void)?
     private var idleStop: Task<Void, Never>?
+    /// While true, the instance does not stop for being idle. The hook runner holds an instance from when it picks it for a run until the run ends, so the idle stop cannot end it between the pick and the event's delivery.
+    public var isHeld = false {
+        didSet {
+            if isHeld {
+                idleStop?.cancel()
+                idleStop = nil
+            } else if oldValue {
+                stopWhenIdle()
+            }
+        }
+    }
 
-    init(package: PluginPackage, limits: ScriptPluginLimits) {
+    /// An instance of a script plugin's package, installed or held in memory, as a hook script's is.
+    public init(package: PluginPackage, limits: ScriptPluginLimits) {
         self.package = package
         self.limits = limits
     }
 
+    /// The syntax error of `source` as a classic script, as the background document runs it, such as `SyntaxError: Unexpected end of script (line 3)`, or nil when it parses. JavaScriptCore checks it without running any of it.
+    public nonisolated static func syntaxError(in source: String) -> String? {
+        syntaxError(in: source, context: JSContext())
+    }
+
+    /// As `syntaxError(in:)`, in a context the caller keeps for several checks.
+    nonisolated static func syntaxError(in source: String, context: JSContext?) -> String? {
+        guard let context else { return "JavaScriptCore could not check it" }
+        let script = JSStringCreateWithCFString(source as CFString)
+        defer { JSStringRelease(script) }
+        var exception: JSValueRef?
+        guard !JSCheckScriptSyntax(context.jsGlobalContextRef, script, nil, 1, &exception) else { return nil }
+        guard let error = JSValue(jsValueRef: exception, in: context), let text = error.toString() else { return "SyntaxError" }
+        guard let line = error.objectForKeyedSubscript("line"), line.isNumber else { return text }
+        return "\(text) (line \(line.toInt32()))"
+    }
+
     /// Loads the background document in a new web view and waits, at most for the hang limit, until the background script has run and set its listeners.
-    func activate(in context: any PluginContext) async throws {
+    public func activate(in context: any PluginContext) async throws {
         guard package.background != nil else { return }
         let webView = WKWebView(frame: .zero, configuration: try await PluginSandbox.configuration(for: package, bridge: ScriptPluginBridge(context: context)))
         webView.navigationDelegate = self
@@ -55,19 +90,28 @@ final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         }
     }
 
-    func deactivate() async {
+    public func deactivate() async {
         end(failing: .stopped)
     }
 
     /// Runs the listener that the background script set with `arch.commands.onRun(id, listener)`, and fails when there is none or it throws.
-    func run(_ command: String, _ invocation: PluginInvocation) async throws {
+    public func run(_ command: String, _ invocation: PluginInvocation) async throws {
         _ = try await deliver("command", CommandDelivery(command: command, invocation: ScriptInvocation(invocation)))
     }
 
     /// Passes the value to the listener that the background script set with `arch.pages.onMessage(listener)` and returns what it returns. Nil when the plugin has no background script, or the script no listener.
-    func receive(_ message: PluginPageMessage) async throws -> PluginValue? {
+    public func receive(_ message: PluginPageMessage) async throws -> PluginValue? {
         guard package.background != nil, let reply = try await deliver("message", PageMessageDelivery(message)) as? String else { return nil }
         return try JSONDecoder().decode(PluginValue.self, from: Data(reply.utf8))
+    }
+
+    /// Runs, one after another, the listeners that the background script set with `arch.events.on(kind, listener)` for the event's kind, and returns once the last one's promise settles. Throws `PluginError.noListener` when the script set none for the kind, and `listenerFailed` with what a listener threw.
+    public func handle(_ event: PluginEvent) async throws {
+        guard package.background != nil,
+              let reply = try await deliver("event", EventDelivery(try event.scriptValue())) as? String else { return }
+        let failure = try JSONDecoder().decode(EventFailure.self, from: Data(reply.utf8))
+        if failure.noListener == true { throw PluginError.noListener }
+        throw PluginError.listenerFailed(failure.error ?? "")
     }
 
     /// Hands the payload to the bridge script's delivery function and returns what it returns.
@@ -100,10 +144,10 @@ final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         }
     }
 
-    /// Stops the instance once it has gone without calls for the idle limit.
+    /// Stops the instance once it has gone without calls for the idle limit, unless it is held.
     private func stopWhenIdle() {
         idleStop?.cancel()
-        guard waitingCalls.isEmpty, webView != nil else { return }
+        guard waitingCalls.isEmpty, webView != nil, !isHeld else { return }
         idleStop = Task { [weak self, idle = limits.idle] in
             try? await Task.sleep(for: .seconds(idle))
             guard let self, !Task.isCancelled else { return }
@@ -135,22 +179,22 @@ final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
 
     // MARK: WKNavigationDelegate
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         settleLoad?(.success(nil))
         settleLoad = nil
     }
 
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+    public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
         settleLoad?(.failure(error))
         settleLoad = nil
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+    public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
         settleLoad?(.failure(error))
         settleLoad = nil
     }
 
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         fail("The background script\u{2019}s process ended unexpectedly.", throwing: .stopped)
     }
 }
@@ -193,13 +237,46 @@ private struct PageMessageDelivery: Encodable {
     }
 }
 
-/// A tab as script plugins see it, with its identifiers as text and its engine as `webKit` or `chromium`. Absent values are left out.
+/// How the delivery function reports an event its listeners did not handle: `noListener` when the script set none for the kind, or `error` with what a listener threw.
+private struct EventFailure: Decodable {
+    let noListener: Bool?
+    let error: String?
+}
+
+/// An event as the delivery function receives it: its kind, which picks the listeners, and its JSON.
+private struct EventDelivery: Encodable {
+    let kind: String
+    let event: PluginValue
+
+    init(_ event: (kind: String, value: PluginValue)) {
+        kind = event.kind
+        self.event = event.value
+    }
+}
+
+extension PluginEvent {
+    /// The event's kind and JSON as listeners receive it: the view's members, with its dates in ISO 8601, and the sender's.
+    func scriptValue() throws -> (kind: String, value: PluginValue) {
+        switch self {
+        case .browser(let view, let extra):
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            // A view encodes as an object.
+            guard case .object(var members) = try JSONDecoder().decode(PluginValue.self, from: encoder.encode(view)) else { return (view.kind.rawValue, .object(extra)) }
+            members.merge(extra) { _, added in added }
+            return (view.kind.rawValue, .object(members))
+        }
+    }
+}
+
+/// A tab as script plugins see it, with its identifiers as text, its engine as `webKit` or `chromium`, and its kind as events name it. Absent values are left out.
 private struct ScriptTab: Encodable {
     let id: String
     let spaceId: String?
     let title: String?
     let url: String?
     let engine: String
+    let kind: String
     let isPinned: Bool
     let isSelected: Bool
 
@@ -209,7 +286,22 @@ private struct ScriptTab: Encodable {
         title = tab.title
         url = tab.url?.absoluteString
         engine = tab.engine.rawValue
+        kind = tab.kind.rawValue
         isPinned = tab.isPinned
         isSelected = tab.isSelected
+    }
+}
+
+extension PluginTab {
+    /// The tab as `arch.tabs` returns it.
+    var scriptValue: PluginValue {
+        var members: [String: PluginValue] = [
+            "id": .string(id.uuidString), "engine": .string(engine.rawValue), "kind": .string(kind.rawValue),
+            "isPinned": .bool(isPinned), "isSelected": .bool(isSelected),
+        ]
+        if let spaceID { members["spaceId"] = .string(spaceID.uuidString) }
+        if let title { members["title"] = .string(title) }
+        if let url { members["url"] = .string(url.absoluteString) }
+        return .object(members)
     }
 }

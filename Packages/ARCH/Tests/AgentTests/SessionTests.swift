@@ -28,6 +28,23 @@ import Testing
 
     // MARK: Tickets
 
+    @Test func cancellingOneGatedCallReleasesOnlyItsWaitAndCannotRunItAfterHandBack() async throws {
+        let gate = AgentGate(isOpen: false)
+        var stopped: Bool?
+        var continued: Bool?
+        let cancelled = Task { stopped = await gate.wait(timeout: .seconds(30)) }
+        let remaining = Task { continued = await gate.wait(timeout: .seconds(30)) }
+        await Task.yield()
+        cancelled.cancel()
+        try await waitUntil { stopped != nil }
+        #expect(stopped == false)
+        #expect(continued == nil)
+        gate.open()
+        await remaining.value
+        #expect(continued == true)
+        #expect(stopped == false)
+    }
+
     @Test func aTicketBindsOnlyFromTheSessionsProcessTree() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -42,19 +59,19 @@ import Testing
         runner.startProcess(Self.cliProcess)
         // This process is outside the CLI's tree.
         await #expect(throws: AgentClientError.refused(AgentRefusal(reason: .ticket, message: "No agent session in Arch has this ticket for this program."))) {
-            try await TestClient(harness.location).hello(ticket: session.ticket.text)
+            try await TestClient(harness.location).hello(ticket: session.ticket?.text)
         }
         #expect(session.items.contains { $0.kind == .notice("Another program tried to use this session\u{2019}s access.") })
         #expect(service.activity.entries.last?.event == .refusedPeer && service.activity.entries.last?.sessionID == session.id)
         // A process that reused the CLI's process ID after it ended is not the CLI.
         harness.addProcess(getpid(), parent: Self.cliProcess)
         harness.addProcess(Self.cliProcess, parent: 1, start: AgentProcessStart(seconds: 1_700_000_100, microseconds: 0))
-        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket.text) }
+        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket?.text) }
         // Inside the tree, the connection is the session's, with outside access off, but only for `arch-mcp`.
         harness.addProcess(Self.cliProcess, parent: 1, start: Self.cliStart)
-        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket.text, client: .cli) }
+        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: session.ticket?.text, client: .cli) }
         let bound = try TestClient(harness.location)
-        #expect(try await bound.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await bound.hello(ticket: session.ticket?.text).status == .bound)
         #expect(try await bound.call(AgentControlMethod.grantShow) == AgentJSON.object(["protocol": 1, "version": "9.9.9", "status": "bound"]))
         // Another ticket, even one of the same length, binds nothing.
         await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: AgentSessionTicket.make().text) }
@@ -67,7 +84,7 @@ import Testing
         let service = try await harness.makeOpenService()
         let (session, runner) = try start(service, harness)
         spawnCLI(runner, harness)
-        let ticket = session.ticket.text
+        let ticket = session.ticket?.text
         let bound = try TestClient(harness.location)
         #expect(try await bound.hello(ticket: ticket).status == .bound)
         await service.deleteSession(session.id)
@@ -124,8 +141,8 @@ import Testing
         let request = try #require(harness.requests.last)
         #expect(request.instructions == AgentHarness.instructions)
         #expect(request.toolServer.arguments == ["--session"])
-        #expect(request.toolServer.environment == [AgentMCPServer.ticketVariable: session.ticket.text])
-        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "read_text", "guide"])
+        #expect(request.toolServer.environment == [AgentMCPServer.ticketVariable: try #require(session.ticket).text])
+        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "guide"])
         #expect(request.skills?.plugin == "arch")
         #expect(request.skills?.names == AgentHarness.sessionSkills.map(\.name))
         let skills = try #require(request.skills)
@@ -168,7 +185,7 @@ import Testing
 
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        _ = try await client.hello(ticket: session.ticket.text)
+        _ = try await client.hello(ticket: try #require(session.ticket).text)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
         try await waitUntil { session.model != nil }
         let info = try await client.callTool("session_info")
@@ -193,10 +210,79 @@ import Testing
         #expect(!(try await client.callTool("session_info")).text.contains(answer))
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
         harness.host.tabs = [tab]
-        session.handles.sharedTabIDs = []
+        service.stopSharing(tab.id, with: session)
         #expect(!(try await client.callTool("session_info")).text.contains(selected))
+        #expect(service.share(tab, with: session))
+        let reshared = try await client.callTool("session_info")
+        #expect(reshared.text.contains("t2") && !reshared.text.contains(selected) && !reshared.text.contains(answer))
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "tabNotFound")
         start.usesAgentsPersona = true
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+    }
+
+    @Test func sharingBelongsToTheOpenAppSessionAndRechecksTheUserChosenDocument() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Article", url: URL(string: "https://docs.example/articles"), isLoading: false, engine: .chromium)
+        var excluded = tab, internalTab = tab, agent = tab, elsewhere = tab
+        excluded.id = UUID()
+        excluded.url = URL(string: "https://excluded.example/articles")
+        internalTab.id = UUID()
+        internalTab.url = URL(string: "arch://settings")
+        agent.id = UUID()
+        agent.agentOwnerID = UUID()
+        elsewhere.id = UUID()
+        host.tabs = [tab, excluded, internalTab, agent, elsewhere]
+        // The fake host returns the user tabs in the session's Persona.
+        host.userTabIDs = [tab.id, excluded.id, internalTab.id, agent.id]
+        let (one, _) = try start(service, harness)
+        let (two, _) = try start(service, harness)
+        #expect(service.shareableTabs(for: one).map(\.id) == [tab.id])
+        #expect(!service.share(elsewhere, with: one) && !service.share(excluded, with: one) && !service.share(internalTab, with: one) && !service.share(agent, with: one))
+        host.tabs[0].documentID = UUID()
+        #expect(!service.share(tab, with: one))
+        let fresh = host.tabs[0]
+        #expect(service.share(fresh, with: one) && !service.share(fresh, with: one))
+        #expect(one.handles.sharedTabIDs == [tab.id] && two.handles.sharedTabIDs.isEmpty)
+        var external = AgentService.SessionStart(task: "External task", personaID: FakeHost.defaultPersona.id, spaceID: space.id, attachedTabIDs: [], mode: .readOnly, model: nil, effort: nil)
+        external.origin = .outsideClient(grantID: UUID(), clientName: "Fixture", deniesApprovals: true)
+        let externalSession = try service.startSession(external)
+        #expect(!service.canEditAttachments(of: externalSession) && service.shareableTabs(for: externalSession).isEmpty)
+        #expect(!service.share(fresh, with: externalSession))
+        host.tabs = []
+        service.stopSharing(fresh.id, with: one)
+        #expect(one.handles.sharedTabIDs.isEmpty && one.handles.tabs.id(for: "t1") == nil)
+        await service.deleteSession(one.id)
+        #expect(!service.canEditAttachments(of: one) && !service.share(fresh, with: one))
+    }
+
+    @Test func aReviewedComposerAttachmentRequiresTheSameDocumentWhenTheUserStarts() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Original", url: URL(string: "https://docs.example/article"), isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        let context = AgentComposerContext(personaID: persona, spaceID: space.id, place: "Research", tab: tab)
+        let start = context.sessionStart(task: "Review this page", mode: .readOnly, allowsAI: { _ in true })
+        #expect(service.sessions.isEmpty)
+        harness.host.tabs[0].documentID = UUID()
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+        harness.host.tabs = [tab]
+        harness.host.tabs[0].url = URL(string: "https://docs.example/next")
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+        harness.host.tabs = [tab]
+        harness.excludedHosts.value.insert("docs.example")
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+        #expect(service.sessions.isEmpty && harness.runners.isEmpty)
+        harness.excludedHosts.value = []
+        let session = try service.startSession(start)
+        #expect(session.handles.sharedTabIDs == [tab.id])
     }
 
     @Test func readerExcerptsHaveABoundedUnicodePreview() throws {
@@ -238,8 +324,8 @@ import Testing
         let (session, runner) = try start(service, harness, mode: .readOnly)
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
-        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "read_text", "guide"]])
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
+        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "guide"]])
         // Before `ready`, a call waits and is then refused, so no page data flows before the start check passed.
         let early = try await client.callTool("list_tabs")
         #expect(early.status == .refused && early.code == "notReady")
@@ -261,7 +347,7 @@ import Testing
         session.reportedTools = ["session_info"]
         _ = try await client.call(AgentControlMethod.toolsList)
         _ = try await client.call(AgentControlMethod.toolsList)
-        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "read_text", "guide"]])
+        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "guide"]])
         // While the user has taken the session over, calls wait until Hand Back.
         session.takeOver()
         let waiting = Task { try await client.callTool("list_spaces") }
@@ -289,7 +375,7 @@ import Testing
         #expect(session.handles.sharedTabIDs == [tab.id])
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
         let result = try await client.callTool("read_text", ["tab": "t1", "max_chars": 5])
         #expect(result.status == .ok)
@@ -309,14 +395,20 @@ import Testing
             host.userTabIDs = [tab.id]
         }
         try await checkRead(after: { host.userTabIDs.remove(tab.id) }, code: "P17")
-        try await checkRead(after: { host.tabs[0].documentID = UUID() }, code: "pageChanged")
         try await checkRead(after: { host.tabs[0].url = URL(string: "https://excluded.example/private") }, code: "P16")
         try await checkRead(after: { host.tabs[0].documentID = UUID() }, code: "pageChanged")
         try await checkRead(after: { host.tabs[0].url = URL(string: "https://example.org/another") }, code: "pageChanged")
         try await checkRead(after: { host.tabs.removeAll() }, code: "tabNotFound")
         try await checkRead(after: { session.takeOver() }, code: "stopped")
         session.handBack()
-        try await checkRead(after: { session.stop() }, code: "stopped")
+        try await checkRead(after: {
+            service.stopSharing(tab.id, with: session)
+            #expect(service.share(tab, with: session))
+        }, code: "P17")
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "tabNotFound")
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).status == .ok)
+        host.beforeReturningContent = { session.stop() }
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).code == "stopped")
     }
 
     @Test func callsWaitAgainAfterEachProcessStartUntilItsOwnOutput() async throws {
@@ -327,7 +419,7 @@ import Testing
         let (session, runner) = try start(service, harness)
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
         try await waitUntil { session.model != nil }
         #expect(try await client.callTool("list_spaces").status == .ok)
@@ -347,7 +439,7 @@ import Testing
         let (session, runner) = try start(service, harness)
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket.text).status == .bound)
+        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
         try await waitUntil { session.model != nil }
         session.takeOver()
@@ -449,6 +541,9 @@ import Testing
     @Test func aTaskFromAnOutsideClientIsCappedAndAddsNoScope() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
+        let apiModel = AIModelRef(provider: AIProviderID(rawValue: "http"), model: "api-model")
+        harness.agentModels.append(apiModel)
+        harness.sessionRoute = { _ in .http(pinnedModel: apiModel) }
         let service = try await harness.makeOpenService()
         harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.workPersona.id), level: .actInAgentTabs, scopes: AgentGrantScopes(startTasks: true))]
         let client = try TestClient(harness.location)
@@ -459,6 +554,9 @@ import Testing
         #expect(answer.mode == .askBeforeActing)
         #expect(answer.place == "Work / Office")
         let session = try #require(service.session(withID: answer.id))
+        #expect(session.commandLineRunner != nil)
+        #expect(session.ticket != nil)
+        await #expect(throws: AgentClientError.self) { try await client.call(AgentControlMethod.taskStart, params: AgentJSON(encoding: AgentTaskStart(task: "Read", model: apiModel.model))) }
         #expect(session.personaID == FakeHost.workPersona.id)
         #expect(session.siteScope.isEmpty)
         #expect(session.origin == .outsideClient(grantID: try #require(service.grants.first).id, clientName: "agent in Agent", deniesApprovals: true))

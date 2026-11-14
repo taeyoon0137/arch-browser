@@ -120,16 +120,9 @@ public final class PluginComposer {
         name.hasSuffix(".js") && !name.hasPrefix(".") && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) }
     }
 
-    /// The syntax error of `source` as a classic script, as the background document runs it, such as `SyntaxError: Unexpected end of script (line 3)`, or nil when it parses. JavaScriptCore checks it without running any of it.
+    /// The syntax error of `source` as a classic script, as the background document runs it (`ScriptPlugin.syntaxError(in:)`).
     private static func syntaxError(in source: String, context: JSContext?) -> String? {
-        guard let context else { return "JavaScriptCore could not check it" }
-        let script = JSStringCreateWithCFString(source as CFString)
-        defer { JSStringRelease(script) }
-        var exception: JSValueRef?
-        guard !JSCheckScriptSyntax(context.jsGlobalContextRef, script, nil, 1, &exception) else { return nil }
-        guard let error = JSValue(jsValueRef: exception, in: context), let text = error.toString() else { return "SyntaxError" }
-        guard let line = error.objectForKeyedSubscript("line"), line.isNumber else { return text }
-        return "\(text) (line \(line.toInt32()))"
+        ScriptPlugin.syntaxError(in: source, context: context)
     }
 }
 

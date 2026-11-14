@@ -1,4 +1,4 @@
-// Agent sessions on the user's CLI (docs/agents.md, Tests ▸ AITests): the exact arguments and environments of Claude Code and Codex, the start check and the stream watcher, the feature derivation and the configuration probe, the probes that run again when the executable changes, the open input mode, Stop, the idle timer, fallbacks before `ready`, Codex's thread deletion, usage under `agent`, the derived `agent` capability, and the presets' ordinary requests. Shell scripts stand in for `claude` and `codex` and replay the recorded streams in `Fixtures/Agent`, so no test reaches a real tool or a model.
+// Agent sessions on the user's CLI (docs/agents.md, Tests ▸ AITests): the exact arguments and environments of Claude Code and Codex, the start check and the stream watcher, the feature derivation and the configuration probe, the probes that run again when the executable changes, the open input mode, Stop, the idle timer, fallbacks before `ready`, Codex's thread deletion, usage under `agent`, an automatic feature's turns under the daily limit and behind the user's requests, the derived `agent` capability, and the presets' ordinary requests. Shell scripts stand in for `claude` and `codex` and replay the recorded streams in `Fixtures/Agent`, so no test reaches a real tool or a model.
 import Darwin
 import Foundation
 import Testing
@@ -11,6 +11,9 @@ private let ticketServer = AIAgentToolServer(executable: URL(fileURLWithPath: "/
 /// The skill folder of the recorded `claude-skills` run.
 private let recordedSkills = AIAgentSkills(folder: URL(fileURLWithPath: "/private/var/folders/xx/fixture/T/arch-skills"), plugin: "arch", names: ["arch-browser"])
 private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", trigger: .user, data: AIDataScope(kinds: [.page, .selection, .file]), requirements: [.agent])
+/// An agent hook's feature, whose runs start sessions on a route of their own.
+private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHook.test"), name: "Hook Test", summary: "", trigger: .automatic, data: .textOnly,
+                                              requirements: [.agent], routing: .perRequest)
 
 // MARK: - Arguments and environment
 
@@ -120,7 +123,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
                         "developer_instructions=\"You are a browser agent in Arch.\\nUse only Arch's tools; say \\\"done\\\" when finished.\""]
         let options = ["--skip-git-repo-check", "--ignore-user-config", "--ignore-rules"] + settings.flatMap { ["-c", $0] } + disabled.flatMap { ["--disable", $0] }
         let model = ["-m", "gpt-6-luna", "-c", "model_reasoning_effort=\"low\""]
-        let turns = cli.calls().filter { $0.contains("exec") }
+        let turns = cli.calls().filter { $0.contains("exec") && !$0.contains("--help") }
         #expect(turns.count == 2)
         #expect(turns.first == ["--no-daemon", "exec", "--json"] + options + model + ["-C", fixture.folder.path, "-"])
         #expect(turns.last == ["--no-daemon", "exec", "resume", "00000000-0000-4000-8000-000000000136", "--json"] + options + model + ["-"])
@@ -388,7 +391,8 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(result.disabledFeatures.count == 132)
         #expect(result.effortLevels["gpt-6-luna"] == ["low", "medium", "high", "xhigh", "max"])
         let homes = cli.text("codex-home.log").split(separator: "\n").map(String.init)
-        #expect(homes.count == 3)
+        #expect(homes.count == 4)
+        #expect(result.supportsRunOption)
         #expect(homes.allSatisfy { $0.contains("/Arch-Codex-Probe-") && !FileManager.default.fileExists(atPath: $0) })
         let probe = try #require(cli.calls().first { $0.contains("--strict-config") })
         #expect(probe.prefix(2) == ["--no-daemon", "--strict-config"])
@@ -587,6 +591,72 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(total.requests == 1)
     }
 
+    @Test func anImmediateStopNeverSendsTheOneTimePrompt() async throws {
+        let cli = try FakeCLI.codex()
+        let session = try AgentFixture(cli: cli, kind: .codex).start(ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        session.stop()
+        try await log.waitForEnd()
+        #expect(log.events == ["finished:stopped"])
+        #expect(cli.calls().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: session.folder.path))
+    }
+
+    @Test func aOneTimeCodexRunHasNoThreadToResumeOrDelete() async throws {
+        let cli = try FakeCLI.codex()
+        let fixture = try AgentFixture(cli: cli, kind: .codex)
+        let session = try fixture.start(maxTurns: 1, ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        #expect(throws: AIError.self) { try session.send("Second message") }
+        try await log.waitForEnd()
+        #expect(log.events.contains("finished:completed"))
+        #expect(session.threadID == nil)
+        #expect(!FileManager.default.fileExists(atPath: fixture.folder.path))
+        #expect(throws: AIError.self) { try session.send("Another message") }
+        await session.end()
+        let exec = cli.calls().filter { $0.contains("exec") && !$0.contains("--help") }
+        #expect(exec.count == 1)
+        #expect(exec.first?.contains("--ephemeral") == true)
+        #expect(!cli.calls().contains { $0.contains("delete") })
+    }
+
+    @Test func aOneTimeClaudeRunClosesAtItsRequestedTurnLimit() async throws {
+        let turn = try #require(claudeTurns("claude-session").first)
+        let limited = turn.replacingOccurrences(of: #""subtype":"success""#, with: #""subtype":"error_max_turns""#)
+        let cli = try FakeCLI.claude(turns: [limited])
+        let fixture = try AgentFixture(cli: cli)
+        #expect(throws: AIError.self) { try fixture.start(maxTurns: 0, ephemeral: true) }
+        #expect(!FileManager.default.fileExists(atPath: fixture.folder.path))
+        let session = try fixture.start(maxTurns: 2, ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        try await log.waitForEnd()
+        #expect(log.events.contains("finished:completed"))
+        let args = try #require(cli.calls().first { $0.contains("--input-format") })
+        let i = try #require(args.firstIndex(of: "--max-turns"))
+        #expect(args[i + 1] == "2")
+        #expect(args.contains("--no-session-persistence"))
+        #expect(session.processID == nil)
+        #expect(!FileManager.default.fileExists(atPath: fixture.folder.path))
+    }
+
+    @Test(arguments: [AIAgentKind.claudeCode, .codex])
+    func anUnsupportedRunOptionStopsBeforeThePromptReachesTheCLI(_ kind: AIAgentKind) async throws {
+        let cli = try kind == .codex ? FakeCLI.codex(acceptsEphemeral: false) : FakeCLI.claude(turns: [], acceptsTurnLimit: false)
+        let session = try AgentFixture(cli: cli, kind: kind).start(maxTurns: 1, ephemeral: true)
+        let log = AgentEventLog(session)
+        try session.send("Read the attached tab.")
+        try await log.waitForEnd()
+        guard case .providerUnavailable? = log.error else {
+            Issue.record("Expected a provider capability error.")
+            return
+        }
+        #expect(!cli.calls().contains { $0.contains("--input-format") || $0.contains("-C") })
+        #expect(!FileManager.default.fileExists(atPath: session.folder.path))
+    }
+
     @Test func aResumedCodexTurnCountsOnlyWhatItAdded() async throws {
         let cli = try FakeCLI.codex()
         let fixture = try AgentFixture(cli: cli, kind: .codex, model: "gpt-6-luna")
@@ -684,6 +754,89 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(cli.calls().isEmpty)
     }
 
+    /// An automatic feature's session, as an agent run on a CLI: each turn is one automatic request, and a turn at the daily limit fails before any model.
+    @Test func anAutomaticFeaturesTurnsCountTowardTheDailyLimit() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli, feature: automaticAgentFeature)
+        fixture.service.settings.limits.automaticRequestsPerDay = 1
+        let session = try fixture.start(route: fixture.firstModelRoute)
+        let log = AgentEventLog(session)
+        try session.send("Call the session_info tool.")
+        try await log.wait { $0.contains("finished:completed") }
+        #expect(fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1)
+        // The next turn is over the limit: it fails without reaching the tool or counting, and the session goes on.
+        try session.send("Now call list_tabs.")
+        try await log.wait { $0.contains { $0.hasPrefix("failed:") } }
+        #expect(fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1)
+        #expect(cli.text("stdin.log").split(separator: "\n").count == 1)
+        #expect(!session.hasEnded)
+        await session.end()
+        // A session at the limit ends at its first message without starting the tool.
+        let later = try fixture.start(route: fixture.firstModelRoute)
+        let laterLog = AgentEventLog(later)
+        try later.send("Hello")
+        try await laterLog.waitForEnd()
+        guard case .budgetReached(.automaticRequestsPerDay)? = laterLog.error else {
+            Issue.record("Expected the daily limit, got \(String(describing: laterLog.error))")
+            return
+        }
+        #expect(cli.calls().filter { $0.contains("--input-format") }.count == 1)
+        await later.end()
+    }
+
+    @Test func changingTheExecutableWhileAHookWaitsRunsNeitherCLI() async throws {
+        let first = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let replacement = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: first, feature: automaticAgentFeature)
+        var provider = fixture.provider
+        let limiter = fixture.service.limiter(for: provider.id)
+        await limiter.update(provider.limits)
+        for _ in 0..<2 { try await limiter.acquire(isUser: true) { _ in } }
+        let session = try fixture.start(route: fixture.firstModelRoute, ephemeral: true, known: [provider.id: provider.hookDestination])
+        let log = AgentEventLog(session)
+        try session.send("One hook turn")
+        try #require(await eventually { fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1 })
+        if case .commandLine(var tool) = provider.kind {
+            tool.executable = replacement.executable
+            provider.kind = .commandLine(tool)
+        }
+        fixture.service.settings.save(provider)
+        for _ in 0..<2 { await limiter.release() }
+        try await log.waitForEnd()
+        guard case .blockedByPolicy(.unknownProvider)? = log.error else { Issue.record("Expected unknownProvider"); return }
+        #expect(first.calls().isEmpty && replacement.calls().isEmpty)
+    }
+
+    /// An automatic feature's turn takes a provider slot only after the user's requests that wait for one, though it asked first.
+    @Test func anAutomaticFeaturesTurnWaitsBehindTheUsersRequests() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli, feature: automaticAgentFeature)
+        let limiter = fixture.service.limiter(for: fixture.provider.id)
+        await limiter.update(fixture.provider.limits)
+        // Other sessions hold both of the preset's slots.
+        for _ in 0..<2 { try await limiter.acquire(isUser: true) { _ in } }
+        let session = try fixture.start(route: fixture.firstModelRoute)
+        let log = AgentEventLog(session)
+        try session.send("Call the session_info tool.")
+        try await Task.sleep(for: .milliseconds(200))
+        let user = Task { () -> Bool in
+            try await limiter.acquire(isUser: true) { _ in }
+            return true
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        await limiter.release()
+        try await Task.sleep(for: .milliseconds(300))
+        // The freed slot went to the user's request, so the turn has not reached the tool.
+        #expect(cli.calls().allSatisfy { !$0.contains("--input-format") })
+        user.cancel()
+        let userHasSlot = (try? await user.value) == true
+        #expect(userHasSlot)
+        if userHasSlot { await limiter.release() }
+        try await log.wait { $0.contains("finished:completed") }
+        await session.end()
+        await limiter.release()
+    }
+
     @Test func aCodexCommandEndsTheSession() async throws {
         let cli = try FakeCLI.codex(first: """
         {"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000140"}
@@ -738,7 +891,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(throws: AIError.self) { try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer)) }
     }
 
-    @Test func aSessionWithoutAChosenModelStartsOnTheRoutesPresetsOrElseOnTheComposersFirstModel() throws {
+    @Test func sessionsUseTheFirstEligibleModelFromTheirRouteAndOfferOtherModelsInTheComposer() throws {
         let directory = temporaryDirectory()
         let keys = InMemoryKeys()
         let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: keys)
@@ -759,26 +912,27 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
             try service.agentSessionCandidates(named: ref, for: agentFeature).map(\.ref)
         }
 
-        // Agent Tasks without models falls back to the default route, which has no preset model: the session starts on the composer's first model.
         settings.setRoute(AIRoute(isEnabled: true, models: []), for: .agent)
         settings.setRoute(AIRoute(isEnabled: true, models: [apiModel]), for: .defaultRoute)
+        #expect(try candidates() == [apiModel])
+        #expect(service.agentSessionModels().first == apiModel)
+        #expect(try service.agentSessionRoute(for: nil) == .http(pinnedModel: nil))
+        settings.setRoute(AIRoute(isEnabled: false, models: []), for: .defaultRoute)
         #expect(try candidates() == [haiku])
-        #expect(service.agentSessionModels().first == haiku)
-        settings.setRoute(AIRoute(isEnabled: true, models: []), for: .defaultRoute)
-        #expect(try candidates() == [haiku])
-        settings.setRoute(AIRoute(isEnabled: true, models: [apiModel]), for: .agent)
-        #expect(try candidates() == [haiku])
-        // A route with preset models keeps their order, as the composer's menu does, and its fallbacks.
+        #expect(try service.agentSessionRoute(for: nil) == .commandLine)
         settings.setRoute(AIRoute(isEnabled: true, models: [apiModel, luna, sonnet]), for: .agent)
-        #expect(try candidates() == [luna, sonnet])
-        #expect(Array(service.agentSessionModels().prefix(2)) == [luna, sonnet])
-        // A model the user picks serves alone; an API model cannot.
-        #expect(try candidates(named: haiku) == [haiku])
-        #expect(throws: AIError.self) { try candidates(named: apiModel) }
-        // Without a preset, nothing can run a session, and the palette and the reader offer none.
+        #expect(try candidates() == [apiModel, luna, sonnet])
+        #expect(Array(service.agentSessionModels().prefix(3)) == [apiModel, luna, sonnet])
+        #expect(try service.agentSessionCandidates(named: nil, for: agentFeature, commandLineOnly: true).map(\.ref) == [luna, sonnet])
+        #expect(try service.agentSessionRoute(for: apiModel) == .http(pinnedModel: apiModel))
+        #expect(try service.agentSessionRoute(for: haiku) == .commandLine)
         settings.providers = [api]
-        #expect(throws: AIError.self) { try candidates() }
+        #expect(try candidates() == [apiModel])
+        settings.setRoute(AIRoute(isEnabled: true), for: .agent)
+        #expect(try service.agentSessionRoute(for: nil) == .http(pinnedModel: apiModel))
+        settings.setRoute(AIRoute(isEnabled: false, models: [apiModel]), for: .agent)
         #expect(service.agentSessionModels().isEmpty)
+        #expect(throws: AIError.self) { try service.agentSessionRoute(for: apiModel) }
     }
 
     @Test func aPresetsOrdinaryRequestGetsPageDataAndRunsWithoutTools() async throws {
@@ -813,7 +967,7 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         let result = await collect(fixture.service.stream(textRequest(userFeature)))
         #expect(result.error == nil)
         #expect(result.events == ["started:gpt-6-luna", "text:ready (VII9-C8632520)", "usage:1208/13/6912", "finished:completed"])
-        let call = try #require(cli.calls().last { $0.contains("--ephemeral") })
+        let call = try #require(cli.calls().last { $0.contains("--ephemeral") && !$0.contains("--help") })
         #expect(call.suffix(5) == ["--disable", "code_mode_host", "-m", "gpt-6-luna", "-"])
     }
 
@@ -876,7 +1030,7 @@ private struct FakeCLI {
     private static let logCall = #"{ printf '<<CALL>>'; printf '%s\0' "$@"; printf '\n'; } >> "$DIR/calls.log""#
 
     static func claude(turns: [String], interrupt: String? = nil, ordinary: String? = nil, signedIn: Bool = true,
-                       help: String? = nil) throws -> FakeCLI {
+                       help: String? = nil, acceptsTurnLimit: Bool = true) throws -> FakeCLI {
         let cli = try FakeCLI(kind: .claudeCode)
         try cli.write("help.txt", help ?? ClaudeCodeAgent.requiredFlags.map { "  \($0) <value>  Something" }.joined(separator: "\n") + "\n")
         for (index, turn) in turns.enumerated() { try cli.write("turn-\(index + 1).jsonl", turn) }
@@ -887,6 +1041,7 @@ private struct FakeCLI {
           "--version") echo "2.1.323 (Claude Code)"; exit 0;;
           "auth status --json") echo '{"loggedIn":\(signedIn),"email":"someone@example.org"}'; exit 0;;
           "--help") cat "$DIR/help.txt"; exit 0;;
+          "--max-turns") echo "\(acceptsTurnLimit ? "option '--max-turns <turns>' argument missing" : "unknown option '--max-turns'")" >&2; exit 1;;
         esac
         case "$*" in
           *"--input-format"*) ;;
@@ -907,7 +1062,7 @@ private struct FakeCLI {
         return cli
     }
 
-    static func codex(first: String? = nil, firstSleeps: Bool = false, refusedSetting: String? = nil) throws -> FakeCLI {
+    static func codex(first: String? = nil, firstSleeps: Bool = false, refusedSetting: String? = nil, acceptsEphemeral: Bool = true) throws -> FakeCLI {
         let cli = try FakeCLI(kind: .codex)
         try cli.write("features.txt", String(contentsOf: agentFixtures.appendingPathComponent("codex-features-list.txt"), encoding: .utf8))
         try cli.write("models.json", #"{"models":[{"slug":"gpt-6-luna","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}]}"#)
@@ -918,6 +1073,7 @@ private struct FakeCLI {
         try cli.writeScript("""
         case "$*" in
           "--version") echo "codex-cli 0.164.0"; exit 0;;
+          "--no-daemon exec --ephemeral --help") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; echo "exec --ephemeral"; exit \(acceptsEphemeral ? 0 : 2);;
           "--no-daemon login status") echo "Logged in"; exit 0;;
           "--no-daemon features list") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; cat "$DIR/features.txt"; exit 0;;
           "--no-daemon debug models --bundled") echo "$CODEX_HOME" >> "$DIR/codex-home.log"; cat "$DIR/models.json"; exit 0;;
@@ -934,6 +1090,7 @@ private struct FakeCLI {
           exit 0
         fi
         case "$*" in
+          *"mcp_servers.arch.command="*) case "$*" in *"exec resume"*) turn=resume;; *) turn=first;; esac;;
           *"--ephemeral"*) turn=ordinary;;
           *"exec resume"*) turn=resume;;
           *) turn=first;;
@@ -1029,9 +1186,15 @@ private struct AgentFixture {
         folder = temporaryDirectory().appendingPathComponent("Arch-Agent-\(UUID().uuidString)", isDirectory: true)
     }
 
-    func start(effort: String? = nil, skills: AIAgentSkills? = nil) throws -> AIAgentSession {
+    /// The first provider's model as a route, which a `perRequest` feature's session needs.
+    var firstModelRoute: AIRouteChoice { .models([AIModelRef(provider: provider.id, model: provider.models[0].name)]) }
+
+    func start(effort: String? = nil, skills: AIAgentSkills? = nil, route: AIRouteChoice? = nil, maxTurns: Int? = nil, ephemeral: Bool = false, known: [AIProviderID: String]? = nil) throws -> AIAgentSession {
         try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
-        return try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer, folder: folder, effort: effort, skills: skills))
+        var request = AIAgentSessionRequest(feature: feature.id, route: route, instructions: harness, toolServer: ticketServer, folder: folder,
+                                            effort: effort, skills: skills, maxTurns: maxTurns, ephemeral: ephemeral)
+        request.knownProviders = known
+        return try service.startAgentSession(request)
     }
 }
 

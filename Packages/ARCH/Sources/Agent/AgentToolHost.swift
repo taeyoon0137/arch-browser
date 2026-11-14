@@ -425,8 +425,7 @@ import Foundation
 
     /// The tab's latest snapshot while the tab still shows its page.
     func currentSnapshot(of tab: AgentTabInfo, state: AgentGrantState) -> AgentSnapshotRecord? {
-        guard let record = state.snapshots[tab.id], record.document == state.activity(of: tab.id).pages, record.url == tab.url else { return nil }
-        return record
+        state.snapshots.current(tab, pages: state.activity(of: tab.id).pages)
     }
 
     static func stale(_ handle: String) -> Outcome {
@@ -495,7 +494,7 @@ import Foundation
         return await readText(arguments, tab: tab, handle: handle) { mayStillRead($0, grant, state: state) }
     }
 
-    private func readText(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, mayReadTab: (AgentTabInfo) -> Bool) async -> Outcome {
+    func readText(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, mayReadTab: (AgentTabInfo) -> Bool) async -> Outcome {
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         let content: EngineReadableContent
         switch await read(tab, handle: handle, mayReadTab: mayReadTab) {
@@ -540,11 +539,21 @@ import Foundation
         }
         let host = host
         let wait = scriptWait
-        let answer: Result<EngineReadableContent, any Error>? = await withCheckedContinuation { continuation in
-            let once = AgentOnce(continuation)
-            host.readableContent(of: tab.id, limit: AgentLimits.readTextMaximumCharacters) { once.resume(with: $0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { once.resume(with: nil) }
+        let reply = AgentOnce<Result<EngineReadableContent, any Error>>()
+        let timeout = Task {
+            try await Task.sleep(for: .seconds(wait))
+            reply.resume(with: nil)
         }
+        defer { timeout.cancel() }
+        let answer = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard reply.begin(continuation) else { return }
+                host.readableContent(of: tab.id, limit: AgentLimits.readTextMaximumCharacters) { reply.resume(with: $0) }
+            }
+        } onCancel: {
+            reply.resume(with: nil)
+        }
+        guard !Task.isCancelled else { return .outcome(Self.ended) }
         switch answer {
         case nil:
             return .outcome(Outcome(result: AgentToolResult(status: .timeout, code: "notResponding", text: "\(handle) shows a dialog or does not respond. It waits for the user.")))
@@ -998,7 +1007,7 @@ struct AgentToolClient {
 /// An in-app session's calls (docs/agents.md, In-app sessions), which run the tools that need no agent tab until plan task VII.17.1 runs them on the grant's path with the session as the agent folder's owner, its site scope (P13), and the cards in its panel.
 extension AgentToolHost {
     /// The tools an in-app session runs in this build; its `tools/list` lists only these, and the others answer that they are not available yet.
-    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "read_text", "guide"]
+    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "guide"]
 
     /// The tools an in-app session in `mode` with `scopes` can call, in catalog order, for its `tools/list`.
     static func sessionTools(for mode: AgentAccessLevel, scopes: AgentGrantScopes) -> [AgentTool] {
@@ -1019,16 +1028,23 @@ extension AgentToolHost {
         case "session_info": return sessionInfo(ofSession: client, handles: &session.handles)
         case "list_spaces": return listSpaces(ofSession: client, handles: &session.handles)
         case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &session.handles)
-        case "read_text":
+        case "read_text", "snapshot":
             let handle = call.arguments["tab"]?.stringValue ?? ""
             guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
                 return Self.error("tabNotFound", "This session has no open tab \(handle).").result
             }
-            let read = await readText(call.arguments, tab: tab, handle: handle) { current in
-                if current.agentOwnerID == session.id { return true }
-                return session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
+            let epoch = session.callEpoch
+            func mayRead(_ current: AgentTabInfo) -> Bool {
+                guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.handles.tabs.id(for: handle) == id else { return false }
+                if current.agentOwnerID == session.id { return host.agentTabs(of: session.id).contains { $0.id == id } }
+                return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
             }
-            return read.result
+            if call.name == "read_text" { return await readText(call.arguments, tab: tab, handle: handle, mayReadTab: mayRead).result }
+            let snapshots = session.snapshots
+            let shared = tab.agentOwnerID == nil
+            return await snapshot(call.arguments, tab: tab, handle: handle, shared: shared, store: snapshots, pages: 0) { current in
+                session.snapshots === snapshots && current.agentOwnerID == tab.agentOwnerID && mayRead(current)
+            }.result
         default: return AgentToolResult(status: .error, code: "notAvailable", text: "In-app sessions do not run \(tool.name) in this build of Arch yet.")
         }
     }
@@ -1153,12 +1169,26 @@ final class AgentOnce<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Value?, Never>?
 
-    init(_ continuation: CheckedContinuation<Value?, Never>) {
+    private var ended = false
+
+    init(_ continuation: CheckedContinuation<Value?, Never>? = nil) {
         self.continuation = continuation
+    }
+
+    /// A cancellation or timeout can end a read before its continuation is installed.
+    func begin(_ continuation: CheckedContinuation<Value?, Never>) -> Bool {
+        let shouldStart = lock.withLock {
+            guard !ended else { return false }
+            self.continuation = continuation
+            return true
+        }
+        if !shouldStart { continuation.resume(returning: nil) }
+        return shouldStart
     }
 
     func resume(with value: Value?) {
         let waiting = lock.withLock {
+            ended = true
             defer { continuation = nil }
             return continuation
         }

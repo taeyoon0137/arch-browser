@@ -18,7 +18,7 @@ public struct AIActivityEntry: Identifiable, Sendable {
     public var parts: [(kind: String, characters: Int)]
     public var result: Result
     public var usage: AIUsage?
-    /// What was sent, as text. Settings ▸ AI shows it on request; quitting clears it.
+    /// What was sent, as text. Settings ▸ AI shows it on request; quitting clears it. Empty for a request with `recordsContent` false and for one that ended before its parts were checked.
     public var content: String
 }
 
@@ -77,10 +77,15 @@ public final class AIService: ObservableObject, AIClient {
         features.removeAll { $0.id == id }
     }
 
-    /// Whether the feature is on and has a usable route. Commands for a feature that is not available stay hidden.
-    public func isAvailable(_ id: AIFeatureID) -> Bool {
-        guard let feature = features.first(where: { $0.id == id }) else { return false }
-        return (try? settings.routeModels(for: feature)) != nil
+    /// Whether the feature is on and has a usable route, the request's `route` when it names one. A `perRequest` feature is available only with a route. Commands for a feature that is not available stay hidden.
+    public func isAvailable(_ id: AIFeatureID, route: AIRouteChoice? = nil) -> Bool {
+        (try? resolvedModels(for: id, route: route)) != nil
+    }
+
+    /// The models a request of the feature that names `route`, or none, would try in order: the first, then its fallbacks, after the models without their provider or a capability the feature requires are dropped. Throws as that request would before it starts. The command-line rule for page data is left out, since it depends on the request's parts.
+    public func resolvedModels(for id: AIFeatureID, route: AIRouteChoice? = nil) throws -> [AIModelRef] {
+        guard let feature = features.first(where: { $0.id == id }) else { throw AIError.notConfigured(.unknownFeature) }
+        return try settings.routeModels(for: feature, route: route).map(\.ref)
     }
 
     /// The provider's model names, for Settings ▸ AI. `key` is a key the user has typed but not saved; without one the provider's saved key is used, while the configuration keeps the saved base URL.
@@ -157,11 +162,15 @@ public final class AIService: ObservableObject, AIClient {
         throw lastError
     }
 
-    /// The models that may serve the request: its pinned model alone, under the same rules as a route's models, or the feature's route. A request with tools uses only HTTP models that take tools, so a tool loop never reaches a command-line tool, also one whose capabilities the user overrode to list tool calls. Throws as `routeModels(for:carryingPageData:)` does when none is left.
+    /// The models that may serve the request: its pinned model alone, under the same rules as a route's models, so that a stored automatic feature takes only one of the models the user chose for it, or the request's route, or the feature's route. A request with tools uses only HTTP models that take tools, so a tool loop never reaches a command-line tool, also one whose capabilities the user overrode to list tool calls. Throws as `routeModels(for:route:carryingPageData:)` does when none is left.
     private func models(for request: AIRequest, feature: AIFeature) throws -> [AIRouteModel] {
         let carriesPageData = AIPartText.carriesData(request.messages)
         var models: [AIRouteModel]
         if let ref = request.pinnedModel {
+            // A tool loop pins its later rounds to the model that served the first, which an automatic feature's own route gave, so nothing pins Tab Names to another model.
+            if feature.routing == .stored, feature.trigger == .automatic, !settings.route(for: feature.id).models.contains(ref) {
+                throw AIError.blockedByPolicy(.routeNotAllowed)
+            }
             guard settings.route(for: feature.id).isEnabled else { throw AIError.notConfigured(.switchedOff) }
             guard let provider = settings.providers.first(where: { $0.id == ref.provider }),
                   let model = provider.models.first(where: { $0.name == ref.model }),
@@ -169,7 +178,7 @@ public final class AIService: ObservableObject, AIClient {
             if carriesPageData, !provider.acceptsPageData { throw AIError.blockedByPolicy(.commandLineToolWithPageData) }
             models = [AIRouteModel(ref: ref, provider: provider, model: model)]
         } else {
-            models = try settings.routeModels(for: feature, carryingPageData: carriesPageData)
+            models = try settings.routeModels(for: feature, route: request.route, carryingPageData: carriesPageData)
         }
         if !request.tools.isEmpty {
             models = models.filter { candidate in
@@ -184,6 +193,7 @@ public final class AIService: ObservableObject, AIClient {
     /// One attempt on one model: rate limiting, page access checks for the model's limit, the provider's stream, and usage.
     private func send(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, attempt: inout AIAttempt, entry: inout AIActivityEntry) async throws -> AIFinishReason {
         entry.model = candidate.ref
+        try checkDestination(of: candidate.provider, known: request.knownProviders)
         // A part the checks refuse ends the attempt before it waits.
         _ = try prepare(request, feature: feature, on: candidate, entry: &entry)
         let limiter = limiter(for: candidate.provider.id)
@@ -197,6 +207,7 @@ public final class AIService: ObservableObject, AIClient {
             key = try await storedKey(for: candidate.provider)
             // The waits for the slot, a cool-down, and the Keychain can last minutes. Meanwhile the request may have been cancelled, the user may have moved the provider to another base URL with that server's key, which the read by the provider's ID gave, switched AI off for the page's site, or the request ahead of it may have reached the spending limit, so each is checked again just before the request goes out.
             try Task.checkCancellation()
+            try checkDestination(of: candidate.provider, known: request.knownProviders)
             if key != nil, settings.providers.first(where: { $0.id == candidate.provider.id })?.keepsItsKey(in: candidate.provider) != true {
                 throw AIError.providerUnavailable(candidate.provider.id, detail: "The provider's settings changed while the request waited.")
             }
@@ -253,7 +264,16 @@ public final class AIService: ObservableObject, AIClient {
         return try outcome.get()
     }
 
-    /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit, which older tool results meet as their notes before any page text is cut. The activity entry shows its parts and content.
+    /// Checks both the captured route candidate and the current settings, also when a queued request has no Keychain key.
+    func checkDestination(of provider: AIProviderConfiguration, known: [AIProviderID: String]?) throws {
+        guard let known else { return }
+        guard let approved = known[provider.id], provider.hookDestination == approved,
+              settings.providers.first(where: { $0.id == provider.id })?.hookDestination == approved else {
+            throw AIError.blockedByPolicy(.unknownProvider)
+        }
+    }
+
+    /// The request for the candidate's model after the page access checks against the feature's scope, the excluded sites as they are now, and the model's input limit, which older tool results meet as their notes before any page text is cut. The activity entry shows its parts, and its content unless the request records none.
     private func prepare(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, entry: inout AIActivityEntry) throws -> AIProviderRequest {
         let policy = AIPartPolicy(scope: feature.data, excludedSites: settings.excludedSites, inputCharacterLimit: candidate.model.inputCharacterLimit, provider: candidate.provider.id)
         let checked = Self.checkedToolResults(in: request.messages, policy: policy, imageNote: Self.imageNote(for: candidate))
@@ -263,7 +283,7 @@ public final class AIService: ObservableObject, AIClient {
                                                 messages: messages, tools: request.tools, output: request.output,
                                                 maxOutputTokens: request.maxOutputTokens ?? 4096)
         entry.parts = Self.partSummary(messages)
-        entry.content = AIPartText.transcript(of: providerRequest)
+        entry.content = request.recordsContent ? AIPartText.transcript(of: providerRequest) : ""
         return providerRequest
     }
 

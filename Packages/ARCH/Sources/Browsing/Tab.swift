@@ -3,6 +3,7 @@ import Agent
 import AppKit
 import ARCHEngine
 import Combine
+import Events
 import Foundation
 import LiveFolders
 
@@ -26,6 +27,8 @@ import LiveFolders
             savedPage = isPinned ? currentPage : nil
         }
     }
+    /// A synced engine choice waits while a window shows this page.
+    var pendingSyncEngine: EngineKind?
     /// The page a pinned tab returns to (bookmark rule 2): set as the tab becomes pinned, from its record when it restores or reopens, and by Use Current Page as Saved Page and Edit Saved Address…. Nil for every other tab. `docs/bookmarks.md`, Saved pages, describes the rest.
     @Published public internal(set) var savedPage: SavedPage?
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
@@ -39,9 +42,11 @@ import LiveFolders
     @Published public private(set) var title: String
     /// The name the user gave the tab, shown in place of the page's title. A window's rename sets it, and the session restores it.
     @Published public internal(set) var customTitle: String?
-    /// The name a hook gave the tab's document, shown while the user has not named the tab, or a mark that the user turned it down. Another address clears it, even one a single-page site sets within its document, since the name may no longer fit; another fragment does not. The session restores it.
+    /// The name a hook gave the tab's document, shown while the user has not named the tab, or a mark that the user turned it down. Another address clears it once the tab commits it (`committedURL`), even one a single-page site sets within its document, since the name may no longer fit; another fragment does not. The session restores it.
     @Published var suggestedTitle: SuggestedTitle?
     @Published public private(set) var url: URL?
+    /// The address of the document the tab shows, which its events carry and a hook's name goes by. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails, stops, or becomes a download, while Chromium reports an address only once it commits, so `url` counts at once when it changes while the page does not load, and otherwise once the load or its document's load ends.
+    @Published private(set) var committedURL: URL?
     @Published public private(set) var isLoading: Bool
     @Published public private(set) var canGoBack: Bool
     @Published public private(set) var canGoForward: Bool
@@ -108,14 +113,16 @@ import LiveFolders
     var recordVisit: ((URL, String) -> Void)?
     /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens. Closing a pinned tab clears it (`unloadToSavedPage()`).
     var isRestored = false
+    /// The cause of a navigation or new tab that code started, which the event source attaches to the tab's next `addressChanged` events and `pageLoaded`, which uses it up (`docs/hooks.md`, Causes). A load that ends without a `pageLoaded` drops it, and so does a navigation the user starts in the tab from the app.
+    var pendingCause: BrowserEventCause?
     /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session then closes the tab as `TabCloseAction` decides for such a tab: a pinned tab unloads, and any other leaves without a closed-list entry.
     var didOpenOnlyDownload: ((Bool) -> Void)?
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
     private(set) var isDownloadOnly = false
     /// Whether the page may start downloads without asking (`BrowserSession`'s download delegate).
     var pageDownloads = PageDownloadGate()
-    /// The address of the document the main frame last committed, or nil before the web contents commits one. A page's dialogs name it as their page: `url` can already be the address of a navigation the page started and has not committed, as WebKit gives it.
-    private var committedURL: URL?
+    /// The address of the document the main frame last committed, as the engine reports the commit, or nil before the web contents commits one. A page's dialogs name it as their page: `url` can already be the address of a navigation the page started and has not committed, as WebKit gives it. The tab's events and a hook's name go by `committedURL` instead.
+    private var engineCommittedURL: URL?
     /// The session sets this to name the agent whose agent folder has the given ID, or nil for a folder of the user's.
     var agentOwnerOfFolder: ((UUID) -> UUID?)?
     /// Where an agent tab asks about its navigations and reports what its rules did. The session sets it.
@@ -129,6 +136,7 @@ import LiveFolders
         self.personaID = personaID
         self.title = webContents.title
         self.url = webContents.url?.withoutCredentials
+        self.committedURL = webContents.url?.withoutCredentials
         self.isLoading = webContents.isLoading
         self.canGoBack = webContents.canGoBack
         self.canGoForward = webContents.canGoForward
@@ -193,15 +201,21 @@ import LiveFolders
     var isListedInSidebar: Bool { !isInSmallWindow }
 
     /// The user's name for the tab, a hook's name for its page, or the page's title. A live folder item's tab shows its item's title, which its saved page keeps, while it is on the saved page, and takes no hook's name.
-    public var displayTitle: String {
-        if let customTitle { return customTitle }
-        guard liveItemID != nil else { return suggestedTitle?.title ?? pageTitle }
-        if let saved = savedPage, !saved.title.isEmpty, url.map({ $0.isSamePage(as: saved.url) }) ?? true { return saved.title }
-        return pageTitle
-    }
+    public var displayTitle: String { Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: url, livePage: liveItemID == nil ? nil : savedPage) }
 
     /// The page's title, or its host if it has no title.
-    public var pageTitle: String {
+    public var pageTitle: String { Self.pageTitle(title: title, url: url) }
+
+    /// The name a tab with these inputs shows, which the event source computes from a change's new value before the tab publishes it.
+    nonisolated static func displayTitle(customTitle: String?, suggestedTitle: SuggestedTitle?, title: String, url: URL?, livePage: SavedPage?) -> String {
+        if let customTitle { return customTitle }
+        if let livePage {
+            if !livePage.title.isEmpty, url.map({ $0.isSamePage(as: livePage.url) }) ?? true { return livePage.title }
+        } else if let name = suggestedTitle?.title { return name }
+        return pageTitle(title: title, url: url)
+    }
+
+    nonisolated private static func pageTitle(title: String, url: URL?) -> String {
         if !title.isEmpty { return title }
         return url?.host ?? "New Tab"
     }
@@ -251,7 +265,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         url = webContents.url?.withoutCredentials
         reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
-        if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
+        if !webContents.isLoading { commitURL() }
         if isPinned, savedPage == nil, let url { savedPage = SavedPage(url: url, title: "") }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
@@ -268,7 +282,10 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
-        if !isLoading { didFinishLoad?() }
+        if !isLoading {
+            commitURL()
+            didFinishLoad?()
+        }
         if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
         // Record a page when it finishes loading, when its title is usually known. An agent's tab records none (Persona rule 6).
         if !isLoading, !isDownloadOnly, agentOwnerID == nil, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
@@ -278,12 +295,19 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
         documentID = UUID()
-        committedURL = url
+        engineCommittedURL = url
         pageDownloads.documentDidCommit(site: Self.site(of: url))
     }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
+        commitURL()
         didLoadDocument.send()
         reportToAgent(.loaded(url: webContents.url, title: webContents.title))
+    }
+
+    /// Takes `url` as the committed address, then drops a hook's name, or its refusal, that is not for it.
+    private func commitURL() {
+        if committedURL != url { committedURL = url }
+        if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
     }
 
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
@@ -344,12 +368,13 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         answersBeforeUnloadWithStay = false
         hasCrashed = false
         isDownloadOnly = false
-        committedURL = nil
+        engineCommittedURL = nil
     }
 
     /// Loads the crashed page's address again, which starts a new page process.
     public func reloadAfterCrash() {
         userDidNavigate()
+        pendingCause = nil
         guard let url else { return webContents.navigationController.reload() }
         webContents.navigationController.load(URLRequest(url: url))
     }
@@ -433,9 +458,18 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         sections += [handed.fieldSubmenus, handed.share]
         if sections.allSatisfy(\.isEmpty) {
             sections = [[
-                EngineActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak webContents] in webContents?.navigationController.goBack() },
-                EngineActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak webContents] in webContents?.navigationController.goForward() },
-                EngineActionMenuItem("Reload") { [weak webContents] in webContents?.navigationController.reload() },
+                EngineActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak self, weak webContents] in
+                    self?.pendingCause = nil
+                    webContents?.navigationController.goBack()
+                },
+                EngineActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak self, weak webContents] in
+                    self?.pendingCause = nil
+                    webContents?.navigationController.goForward()
+                },
+                EngineActionMenuItem("Reload") { [weak self, weak webContents] in
+                    self?.pendingCause = nil
+                    webContents?.navigationController.reload()
+                },
             ]]
         }
         PageContextMenuSections.show(sections, in: menu)
@@ -518,7 +552,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
 
     /// The page that shows a dialog of the frame at `frameOrigin`: the document the main frame last committed, or before the first one, the frame's own, as for the empty page of a new tab whose opener's script runs it.
     private func dialogPage(of frameOrigin: URL?) -> URL? {
-        committedURL ?? frameOrigin
+        engineCommittedURL ?? frameOrigin
     }
 
     /// The page of a dialog as its asker.

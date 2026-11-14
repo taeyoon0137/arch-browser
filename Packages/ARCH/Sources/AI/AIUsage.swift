@@ -111,6 +111,7 @@ public final class AIUsageStore: ObservableObject {
         var months: [Month]
         var day: String
         var automaticRequests: [String: Int]
+        var agentRuns: [String: Int]?
     }
 
     public static let keptMonths = 13
@@ -119,6 +120,7 @@ public final class AIUsageStore: ObservableObject {
     @Published public private(set) var months: [Month] = []
     private var day = ""
     private var automaticRequests: [String: Int] = [:]
+    private var agentRuns: [String: Int] = [:]
     let fileURL: URL
     private let now: () -> Date
     private var pendingSave: DispatchWorkItem?
@@ -131,6 +133,7 @@ public final class AIUsageStore: ObservableObject {
                 months = Self.oneEntryPerMonth(file.months)
                 day = file.day
                 automaticRequests = file.automaticRequests
+                agentRuns = file.agentRuns ?? [:]
             } else {
                 // Like `ai.json`, a file that does not decode is set aside, so the first save does not overwrite its totals.
                 let unreadable = fileURL.appendingPathExtension("unreadable")
@@ -211,13 +214,28 @@ public final class AIUsageStore: ObservableObject {
     }
 
     func countAutomaticRequest(for feature: AIFeatureID) {
+        beginToday()
+        automaticRequests[feature.rawValue, default: 0] += 1
+        scheduleSave()
+    }
+
+    /// Reserves one agent run before its first request. A run can span several requests.
+    public func reserveAgentRun(for feature: AIFeatureID, dailyLimit: Int) -> Bool {
+        beginToday()
+        let count = agentRuns[feature.rawValue, default: 0]
+        guard count >= 0, count < dailyLimit else { return false }
+        agentRuns[feature.rawValue] = count + 1
+        scheduleSave()
+        return true
+    }
+
+    private func beginToday() {
         let today = Self.dayKey(now())
         if day != today {
             day = today
-            automaticRequests = [:]
+            automaticRequests.removeAll()
+            agentRuns.removeAll()
         }
-        automaticRequests[feature.rawValue, default: 0] += 1
-        scheduleSave()
     }
 
     /// The current month's estimated cost in `currency`, whatever the case of the codes the costs were counted under.
@@ -243,7 +261,7 @@ public final class AIUsageStore: ObservableObject {
     func saveNow() {
         pendingSave?.cancel()
         pendingSave = nil
-        let file = File(months: months, day: day, automaticRequests: automaticRequests)
+        let file = File(months: months, day: day, automaticRequests: automaticRequests, agentRuns: agentRuns.isEmpty ? nil : agentRuns)
         guard let data = try? JSONEncoder.aiFiles.encode(file) else { return }
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: fileURL, options: .atomic)

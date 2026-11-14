@@ -36,6 +36,7 @@ import Foundation
 
     /// True once the gate is open, false when it is shut or `timeout` passes first.
     func wait(timeout: Duration) async -> Bool {
+        if Task.isCancelled { return false }
         if isOpen { return true }
         if isShut { return false }
         let id = UUID()
@@ -44,8 +45,12 @@ import Foundation
             self?.resume(id, false)
         }
         defer { timer.cancel() }
-        return await withCheckedContinuation { continuation in
-            waiters[id] = continuation
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                waiters[id] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.resume(id, false) }
         }
     }
 
