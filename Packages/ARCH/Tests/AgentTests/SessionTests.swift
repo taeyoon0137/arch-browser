@@ -210,10 +210,53 @@ import Testing
         #expect(!(try await client.callTool("session_info")).text.contains(answer))
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
         harness.host.tabs = [tab]
-        session.handles.sharedTabIDs = []
+        service.stopSharing(tab.id, with: session)
         #expect(!(try await client.callTool("session_info")).text.contains(selected))
+        #expect(service.share(tab, with: session))
+        let reshared = try await client.callTool("session_info")
+        #expect(reshared.text.contains("t2") && !reshared.text.contains(selected) && !reshared.text.contains(answer))
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "tabNotFound")
         start.usesAgentsPersona = true
         #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+    }
+
+    @Test func sharingBelongsToTheOpenAppSessionAndRechecksTheUserChosenDocument() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let host = harness.host
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Article", url: URL(string: "https://docs.example/articles"), isLoading: false, engine: .chromium)
+        var excluded = tab, internalTab = tab, agent = tab, elsewhere = tab
+        excluded.id = UUID()
+        excluded.url = URL(string: "https://excluded.example/articles")
+        internalTab.id = UUID()
+        internalTab.url = URL(string: "arch://settings")
+        agent.id = UUID()
+        agent.agentOwnerID = UUID()
+        elsewhere.id = UUID()
+        host.tabs = [tab, excluded, internalTab, agent, elsewhere]
+        // The fake host returns the user tabs in the session's Persona.
+        host.userTabIDs = [tab.id, excluded.id, internalTab.id, agent.id]
+        let (one, _) = try start(service, harness)
+        let (two, _) = try start(service, harness)
+        #expect(service.shareableTabs(for: one).map(\.id) == [tab.id])
+        #expect(!service.share(elsewhere, with: one) && !service.share(excluded, with: one) && !service.share(internalTab, with: one) && !service.share(agent, with: one))
+        host.tabs[0].documentID = UUID()
+        #expect(!service.share(tab, with: one))
+        let fresh = host.tabs[0]
+        #expect(service.share(fresh, with: one) && !service.share(fresh, with: one))
+        #expect(one.handles.sharedTabIDs == [tab.id] && two.handles.sharedTabIDs.isEmpty)
+        var external = AgentService.SessionStart(task: "External task", personaID: FakeHost.defaultPersona.id, spaceID: space.id, attachedTabIDs: [], mode: .readOnly, model: nil, effort: nil)
+        external.origin = .outsideClient(grantID: UUID(), clientName: "Fixture", deniesApprovals: true)
+        let externalSession = try service.startSession(external)
+        #expect(!service.canEditAttachments(of: externalSession) && service.shareableTabs(for: externalSession).isEmpty)
+        #expect(!service.share(fresh, with: externalSession))
+        host.tabs = []
+        service.stopSharing(fresh.id, with: one)
+        #expect(one.handles.sharedTabIDs.isEmpty && one.handles.tabs.id(for: "t1") == nil)
+        await service.deleteSession(one.id)
+        #expect(!service.canEditAttachments(of: one) && !service.share(fresh, with: one))
     }
 
     @Test func readerExcerptsHaveABoundedUnicodePreview() throws {
@@ -332,7 +375,14 @@ import Testing
         try await checkRead(after: { host.tabs.removeAll() }, code: "tabNotFound")
         try await checkRead(after: { session.takeOver() }, code: "stopped")
         session.handBack()
-        try await checkRead(after: { session.stop() }, code: "stopped")
+        try await checkRead(after: {
+            service.stopSharing(tab.id, with: session)
+            #expect(service.share(tab, with: session))
+        }, code: "P17")
+        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "tabNotFound")
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).status == .ok)
+        host.beforeReturningContent = { session.stop() }
+        #expect(try await client.callTool("read_text", ["tab": "t2"]).code == "stopped")
     }
 
     @Test func callsWaitAgainAfterEachProcessStartUntilItsOwnOutput() async throws {

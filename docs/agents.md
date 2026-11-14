@@ -873,6 +873,8 @@ In-app `read_text` uses the same page extraction, size limits, and untrusted tex
 
 Continue as Agent Task opens the composer with the user's draft or question. Share reader excerpt lets the user preview the selection and previous answer, up to 4,096 UTF-8 bytes each. They are available to the model through `session_info` as quoted page data while the original tab and address are still shared and allowed. The quotes do not add destinations to the session's site scope. HTTP sessions receive the quotes as source-labeled page parts with the query and fragment removed from the address.
 
+The Shared Tabs button in an app-started session lists its attached tabs. Share a Tab offers readable user tabs from that session’s Persona and checks the chosen document again before attaching it. Stop Sharing removes that session’s handle and any attached reader excerpt immediately. Sharing the same tab again issues a new handle. A read waiting for the engine under the old handle discards its answer. The conversation continues on its existing model, with previously sent messages and previously allowed sites in its scope. Outside-client tasks have no attachment controls in the panel.
+
 ## Checks from the bundle
 
 Each task that needs the app adds its check at the end of the regression checklist in `docs/plan.md`, under the next free number there, which this list and the queue use: checks 74 to 86. Run them on both engines with a fresh Application Support folder.

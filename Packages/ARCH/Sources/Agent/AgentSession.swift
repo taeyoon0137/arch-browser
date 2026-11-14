@@ -113,7 +113,6 @@ extension AgentAPISession: AgentSessionRunning {
     var taskEvent: ((AgentTaskEvent.Kind, String) -> Void)?
     /// The service's: one sentence and an action for an error, with the tool's name.
     var describe: (AIError) -> (String, AgentErrorAction?) = { ($0.localizedDescription, .retry) }
-    private var attachedTabHandles: [String] = []
     /// Available through session_info after the model starts, while the user still shares the source page.
     var readerExcerpt: AgentReaderExcerpt?
     private var hasSentFirstMessage = false
@@ -135,7 +134,7 @@ extension AgentAPISession: AgentSessionRunning {
         siteScope = scope.sites
         reportedTools = tools
         handles.sharedTabIDs = attachedTabIDs
-        attachedTabHandles = attachedTabIDs.map { handles.tabs.handle(for: $0) }
+        for tabID in attachedTabIDs { _ = handles.tabs.handle(for: tabID) }
     }
 
     /// The folder name from the task's first words: at most six words and 40 characters.
@@ -278,7 +277,7 @@ extension AgentAPISession: AgentSessionRunning {
         if !isFromOutsideClient { scope.addAddresses(inUserText: text) }
         callsThisTurn = 0
         callEpoch += 1
-        let message = hasSentFirstMessage ? text : AgentSessionPreamble.firstMessage(text, attachedTabHandles: attachedTabHandles)
+        let message = hasSentFirstMessage ? text : AgentSessionPreamble.firstMessage(text, attachedTabHandles: handles.sharedTabIDs.map { handles.tabs.handle(for: $0) })
         do {
             try runner.send(message)
             hasSentFirstMessage = true
@@ -384,9 +383,21 @@ extension AgentAPISession: AgentSessionRunning {
 
     /// A tab the user shares later, with its handle; its site joins the scope.
     func share(tabID: UUID, url: URL?) -> String {
-        if !handles.sharedTabIDs.contains(tabID) { handles.sharedTabIDs.append(tabID) }
+        if !handles.sharedTabIDs.contains(tabID) {
+            objectWillChange.send()
+            handles.sharedTabIDs.append(tabID)
+        }
         if let url { scope.add(url) }
         return handles.tabs.handle(for: tabID)
+    }
+
+    func unshare(tabID: UUID) {
+        guard handles.sharedTabIDs.contains(tabID) else { return }
+        objectWillChange.send()
+        handles.sharedTabIDs.removeAll { $0 == tabID }
+        handles.actingSharedTabIDs.remove(tabID)
+        handles.tabs.remove(tabID)
+        if readerExcerpt?.tabID == tabID { readerExcerpt = nil }
     }
 
     // MARK: Ending

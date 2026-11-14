@@ -634,6 +634,31 @@ import Foundation
         sessions.first { $0.id == id }
     }
 
+    /// The panel lists only the user's eligible tabs in this app-started session's Persona.
+    func shareableTabs(for session: AgentSession) -> [AgentTabInfo] {
+        guard canEditAttachments(of: session) else { return [] }
+        return host.userTabs(in: session.personaID).filter { tab in
+            tab.agentOwnerID == nil && !session.handles.sharedTabIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
+        }
+    }
+
+    func canEditAttachments(of session: AgentSession) -> Bool {
+        self.session(withID: session.id) === session && session.origin == .app && !session.hasEnded
+    }
+
+    /// Recheck the choice against the live tab and document when the user picks it from the panel.
+    @discardableResult func share(_ choice: AgentTabInfo, with session: AgentSession) -> Bool {
+        guard let current = shareableTabs(for: session).first(where: { $0.id == choice.id && $0.documentID == choice.documentID && $0.url == choice.url }) else { return false }
+        _ = session.share(tabID: current.id, url: current.url)
+        return true
+    }
+
+    /// Removal works even after the tab closes or becomes ineligible for reading.
+    func stopSharing(_ tabID: UUID, with session: AgentSession) {
+        guard canEditAttachments(of: session) else { return }
+        session.unshare(tabID: tabID)
+    }
+
     /// The models that can run a session, the `agent` route's first, for the composer's menu.
     public func agentModels() -> [AIModelRef] {
         dependencies.agentModels()
@@ -658,7 +683,7 @@ import Foundation
         var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
         let attachedIDs = Set(attached)
         let tabs = host.userTabs(in: personaID).filter { tab in
-            attachedIDs.contains(tab.id) && tab.url.map { AgentSite.of($0) != nil && dependencies.allowsAI($0) } == true
+            tab.agentOwnerID == nil && attachedIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
         }
         if let excerpt = start.readerExcerpt, !tabs.contains(where: excerpt.matches) {
             throw SessionError(message: "The source page changed or is no longer shared. Turn off Share reader excerpt to continue.")
