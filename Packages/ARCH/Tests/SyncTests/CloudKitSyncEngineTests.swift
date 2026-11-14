@@ -1,4 +1,4 @@
-// The CloudKit sync engine's mapping (docs/sync.md, Container, database, and zone, Conflicts, and Offline behavior): the fetch options that name only `ArchSync1`, CloudKit's save errors as Arch's failures, the changes an atomic batch sends again, and pending changes, account changes, and zone deletion reasons. The test process has no iCloud entitlements, so it creates no `CKSyncEngine`; it builds `CKError` values and records without reaching CloudKit's servers.
+// The CloudKit sync engine's mapping (docs/sync.md, Container, database, and zone, Conflicts, Offline behavior, and Sync engine): the fetch options that name only `ArchSync1`, CloudKit's save errors as Arch's failures, the changes an atomic batch sends again, the zone's sent changes, the zone fetch's failure that a fetch's end reports, and pending changes, account changes, and zone deletion reasons. The test process has no iCloud entitlements, so it creates no `CKSyncEngine`; it builds `CKError` values and records without reaching CloudKit's servers.
 import CloudKit
 import Foundation
 import Testing
@@ -54,7 +54,35 @@ import Testing
         let codes: [CKError.Code] = [.networkFailure, .networkUnavailable, .requestRateLimited, .serviceUnavailable, .zoneBusy, .notAuthenticated, .accountTemporarilyUnavailable, .operationCancelled, .batchRequestFailed]
         for code in codes {
             #expect(CloudKitSyncEngine.failure(for: CKError(code)) == nil, "\(code)")
+            // The batch's other changes are added back, so the engine itself retries none of them.
+            #expect(CloudKitSyncEngine.isRetried(code) == (code != .batchRequestFailed), "\(code)")
         }
+        #expect(!CloudKitSyncEngine.isRetried(.quotaExceeded))
+        #expect(!CloudKitSyncEngine.isRetried(.serverRecordChanged))
+    }
+
+    @Test func aSentZoneChangeReportsItsSaveOrDeletionAndOnlyTheFailuresTheEngineDoesNotRetry() {
+        let zoneID = SyncCloudKitRecords.zoneID
+        #expect(CloudKitSyncEngine.sentZoneChanges(savedZoneIDs: [zoneID], deletedZoneIDs: [], failedSaves: [], failedDeletes: [:]) == SyncSentZoneChanges(savedZone: true))
+        #expect(CloudKitSyncEngine.sentZoneChanges(savedZoneIDs: [], deletedZoneIDs: [zoneID], failedSaves: [], failedDeletes: [:]) == SyncSentZoneChanges(deletedZone: true))
+        #expect(CloudKitSyncEngine.sentZoneChanges(savedZoneIDs: [], deletedZoneIDs: [], failedSaves: [(zoneID, CKError(.quotaExceeded))], failedDeletes: [:]) == SyncSentZoneChanges(failedSave: .quotaExceeded))
+        #expect(CloudKitSyncEngine.sentZoneChanges(savedZoneIDs: [], deletedZoneIDs: [], failedSaves: [], failedDeletes: [zoneID: CKError(.permissionFailure)]) == SyncSentZoneChanges(failedDelete: .permissionFailure))
+        // A deletion that waits for the network stays pending, so nothing tells the controller it is done.
+        #expect(CloudKitSyncEngine.sentZoneChanges(savedZoneIDs: [], deletedZoneIDs: [], failedSaves: [], failedDeletes: [zoneID: CKError(.networkUnavailable)]) == nil)
+        #expect(CloudKitSyncEngine.sentZoneChanges(savedZoneIDs: [], deletedZoneIDs: [], failedSaves: [(zoneID, CKError(.zoneBusy))], failedDeletes: [:]) == nil)
+        // Another zone, which this engine never adds, gives nothing.
+        #expect(CloudKitSyncEngine.sentZoneChanges(savedZoneIDs: [laterZone], deletedZoneIDs: [laterZone], failedSaves: [(laterZone, CKError(.quotaExceeded))], failedDeletes: [laterZone: CKError(.quotaExceeded)]) == nil)
+    }
+
+    @Test func aFetchsEndReportsTheFailureOfTheZonesLastFetch() {
+        let zoneID = SyncCloudKitRecords.zoneID
+        let failed = CloudKitSyncEngine.fetchFailure(nil, afterFetchOf: zoneID, error: CKError(.networkFailure))
+        #expect(failed == .networkFailure)
+        // Another zone leaves the failure as it was.
+        #expect(CloudKitSyncEngine.fetchFailure(failed, afterFetchOf: laterZone, error: nil) == .networkFailure)
+        #expect(CloudKitSyncEngine.fetchFailure(nil, afterFetchOf: laterZone, error: CKError(.networkFailure)) == nil)
+        // The zone fetched again within the same fetch, without an error, completes it.
+        #expect(CloudKitSyncEngine.fetchFailure(failed, afterFetchOf: zoneID, error: nil) == nil)
     }
 
     @Test func reportsAnyOtherErrorWithItsCode() {

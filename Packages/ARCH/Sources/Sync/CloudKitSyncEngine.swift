@@ -22,6 +22,7 @@ public final class CloudKitSyncEngine: SyncEngineClient {
     }
 
     public func add(_ changes: [SyncPendingChange]) {
+        guard !relay.isStopped else { return }
         let databaseChanges = changes.compactMap(Self.databaseChange(for:))
         let recordChanges = changes.compactMap(Self.recordZoneChange(for:))
         if !databaseChanges.isEmpty { engine.state.add(pendingDatabaseChanges: databaseChanges) }
@@ -29,6 +30,7 @@ public final class CloudKitSyncEngine: SyncEngineClient {
     }
 
     public func remove(_ changes: [SyncPendingChange]) {
+        guard !relay.isStopped else { return }
         let removed = Set(changes)
         // Removes the engine's own values, so they match whatever way the engine compares its changes.
         let databaseChanges = engine.state.pendingDatabaseChanges.filter { Self.change(from: $0).map(removed.contains) ?? false }
@@ -49,6 +51,12 @@ public final class CloudKitSyncEngine: SyncEngineClient {
 
     public func stop() async {
         relay.isStopped = true
+        // The engine sends the zone's changes without asking the delegate, so only an empty list keeps it from sending them. Its state update is not delivered, so `sync.json` keeps the changes.
+        let state = engine.state
+        let databaseChanges = state.pendingDatabaseChanges
+        let recordChanges = state.pendingRecordZoneChanges
+        if !databaseChanges.isEmpty { state.remove(pendingDatabaseChanges: databaseChanges) }
+        if !recordChanges.isEmpty { state.remove(pendingRecordZoneChanges: recordChanges) }
         await engine.cancelOperations()
     }
 
@@ -62,8 +70,17 @@ public final class CloudKitSyncEngine: SyncEngineClient {
         return options
     }
 
-    /// The failure to report for a save that the server refused with `error`, or nil for none. The engine keeps a change pending and retries it after a network failure, a rate limit, an unavailable service or account, a busy zone, and a missing authentication. A cancelled operation comes only from `stop()`, after which nothing is reported. A save that failed only because another record of its atomic batch failed (`batchRequestFailed`) is sent again (`changesToResend(failedSaves:failedDeletes:)`).
+    /// Whether the engine keeps a change that failed with `code` pending and sends it again, so nothing reports it: a network failure, a rate limit, an unavailable service or account, a busy zone, and a missing authentication. A cancelled operation comes only from `stop()`, after which nothing is reported.
+    nonisolated static func isRetried(_ code: CKError.Code) -> Bool {
+        switch code {
+        case .networkFailure, .networkUnavailable, .requestRateLimited, .serviceUnavailable, .zoneBusy, .notAuthenticated, .accountTemporarilyUnavailable, .operationCancelled: true
+        default: false
+        }
+    }
+
+    /// The failure to report for a save that the server refused with `error`, or nil for none: one the engine retries (`isRetried(_:)`), or one that failed only because another record of its atomic batch failed (`batchRequestFailed`), which is sent again (`changesToResend(failedSaves:failedDeletes:)`).
     nonisolated static func failure(for error: CKError) -> SyncSaveFailure? {
+        guard !isRetried(error.code) else { return nil }
         switch error.code {
         case .serverRecordChanged:
             guard let serverRecord = error.serverRecord else { return .other(error.code) }
@@ -72,11 +89,29 @@ public final class CloudKitSyncEngine: SyncEngineClient {
             return .unknownItem
         case .zoneNotFound:
             return .zoneNotFound
-        case .networkFailure, .networkUnavailable, .requestRateLimited, .serviceUnavailable, .zoneBusy, .notAuthenticated, .accountTemporarilyUnavailable, .operationCancelled, .batchRequestFailed:
+        case .batchRequestFailed:
             return nil
         default:
             return .other(error.code)
         }
+    }
+
+    /// The zone's sent changes as Arch reports them, or nil when nothing is left to report: the zone `ArchSync1` saved or deleted, and the save or deletion that the server refused for a reason the engine does not retry. Other zones, which this engine never adds, are left out.
+    nonisolated static func sentZoneChanges(savedZoneIDs: [CKRecordZone.ID], deletedZoneIDs: [CKRecordZone.ID], failedSaves: [(zoneID: CKRecordZone.ID, error: CKError)], failedDeletes: [CKRecordZone.ID: CKError]) -> SyncSentZoneChanges? {
+        let zoneID = SyncCloudKitRecords.zoneID
+        let refused = { (error: CKError?) in error.map(\.code).flatMap { isRetried($0) ? nil : $0 } }
+        let sent = SyncSentZoneChanges(
+            savedZone: savedZoneIDs.contains(zoneID),
+            deletedZone: deletedZoneIDs.contains(zoneID),
+            failedSave: refused(failedSaves.first { $0.zoneID == zoneID }?.error),
+            failedDelete: refused(failedDeletes[zoneID])
+        )
+        return sent == SyncSentZoneChanges() ? nil : sent
+    }
+
+    /// The failure that a fetch's end reports, `current` until now, once the engine's fetch of `zoneID` ended with `error`: CloudKit's code when the fetch of `ArchSync1` failed, and nil when it completed, as when the engine fetched it again within the same fetch. Another zone, which this engine never fetches, leaves `current`.
+    nonisolated static func fetchFailure(_ current: CKError.Code?, afterFetchOf zoneID: CKRecordZone.ID, error: CKError?) -> CKError.Code? {
+        zoneID == SyncCloudKitRecords.zoneID ? error?.code : current
     }
 
     /// The changes to add again after a batch: the saves and deletions that the server refused only because another record of the same atomic batch failed (`batchRequestFailed`). The engine keeps only the changes that fail for a reason it retries, so it would drop these. Saves keep their order in the batch, and deletions follow, sorted by record name.
@@ -97,8 +132,8 @@ public final class CloudKitSyncEngine: SyncEngineClient {
         )
     }
 
-    /// Arch's events for one of the engine's events. The engine's events that Sync does not use, such as the start of a fetch or a send, or a zone that a send saved, give none.
-    nonisolated static func events(from event: CKSyncEngine.Event) -> [SyncEvent] {
+    /// Arch's events for one of the engine's events. A fetch's end carries `fetchFailure`, the failure of the zone's fetch within that fetch (`fetchFailure(_:afterFetchOf:error:)`). The engine's events that Sync does not use, such as the start of a fetch or a send, give none, and so does the end of a zone's fetch, which only `fetchFailure` reports.
+    nonisolated static func events(from event: CKSyncEngine.Event, fetchFailure: CKError.Code?) -> [SyncEvent] {
         switch event {
         case .stateUpdate(let update):
             // A serialization that does not encode leaves `sync.json` with the previous state; the next update writes it.
@@ -112,10 +147,13 @@ public final class CloudKitSyncEngine: SyncEngineClient {
             let deletions = changes.deletions.map { SyncFetchedChanges.Deletion(recordID: $0.recordID, recordType: $0.recordType) }
             return [.fetchedChanges(SyncFetchedChanges(records: changes.modifications.map(\.record), deletions: deletions))]
         case .didFetchChanges:
-            return [.fetchEnded]
+            return [.fetchEnded(failure: fetchFailure)]
         case .sentRecordZoneChanges(let sent):
             return [.sentChanges(sentChanges(savedRecords: sent.savedRecords, deletedRecordIDs: sent.deletedRecordIDs, failedSaves: sent.failedRecordSaves.map { ($0.record, $0.error) }))]
-        case .sentDatabaseChanges, .willFetchChanges, .willFetchRecordZoneChanges, .didFetchRecordZoneChanges, .willSendChanges, .didSendChanges:
+        case .sentDatabaseChanges(let sent):
+            let zoneChanges = sentZoneChanges(savedZoneIDs: sent.savedZones.map(\.zoneID), deletedZoneIDs: sent.deletedZoneIDs, failedSaves: sent.failedZoneSaves.map { ($0.zone.zoneID, $0.error) }, failedDeletes: sent.failedZoneDeletes)
+            return zoneChanges.map { [.sentZoneChanges($0)] } ?? []
+        case .willFetchChanges, .willFetchRecordZoneChanges, .didFetchRecordZoneChanges, .willSendChanges, .didSendChanges:
             return []
         @unknown default:
             return []
@@ -188,17 +226,15 @@ extension SyncZoneDeletionReason {
 private final class Relay: CKSyncEngineDelegate {
     weak var delegate: (any SyncEngineDelegate)?
     var isStopped = false
+    /// The failure of the zone's fetch within the fetch under way, which its end reports.
+    private var fetchFailure: CKError.Code?
 
     init(delegate: any SyncEngineDelegate) {
         self.delegate = delegate
     }
 
     nonisolated func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
-        if case .sentRecordZoneChanges(let sent) = event {
-            let resend = CloudKitSyncEngine.changesToResend(failedSaves: sent.failedRecordSaves.map { ($0.record.recordID, $0.error) }, failedDeletes: sent.failedRecordDeletes)
-            if !resend.isEmpty { syncEngine.state.add(pendingRecordZoneChanges: resend) }
-        }
-        await deliver(CloudKitSyncEngine.events(from: event))
+        await report(event, syncEngine: syncEngine)
     }
 
     /// The next batch: the pending record changes within the send's scope, as many as fit in one request, saved atomically (`docs/sync.md`, Conflicts). A change outside the scope would fail the send. A save the delegate has no record for leaves the pending changes, so the engine does not ask for it again.
@@ -211,6 +247,8 @@ private final class Relay: CKSyncEngineDelegate {
             syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
             return nil
         }
+        // The provider can suspend while stop() clears the queue.
+        guard await isRunning else { return nil }
         batch?.atomicByZone = true
         return batch
     }
@@ -221,6 +259,26 @@ private final class Relay: CKSyncEngineDelegate {
 
     private var isRunning: Bool {
         !isStopped && delegate != nil
+    }
+
+    /// Hands over Arch's events for the engine's event, keeping the zone fetch's failure from a fetch's start to its end.
+    private func report(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) {
+        // Check and requeue on the same actor as stop(), so a late event cannot refill the cleared queue.
+        guard isRunning else { return }
+        switch event {
+        case .sentRecordZoneChanges(let sent):
+            let resend = CloudKitSyncEngine.changesToResend(failedSaves: sent.failedRecordSaves.map { ($0.record.recordID, $0.error) }, failedDeletes: sent.failedRecordDeletes)
+            if !resend.isEmpty { syncEngine.state.add(pendingRecordZoneChanges: resend) }
+        case .willFetchChanges:
+            fetchFailure = nil
+        case .didFetchRecordZoneChanges(let fetched):
+            fetchFailure = CloudKitSyncEngine.fetchFailure(fetchFailure, afterFetchOf: fetched.zoneID, error: fetched.error)
+        default:
+            break
+        }
+        let events = CloudKitSyncEngine.events(from: event, fetchFailure: fetchFailure)
+        if case .didFetchChanges = event { fetchFailure = nil }
+        deliver(events)
     }
 
     private func deliver(_ events: [SyncEvent]) {

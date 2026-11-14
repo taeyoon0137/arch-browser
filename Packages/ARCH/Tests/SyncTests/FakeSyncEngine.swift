@@ -1,11 +1,15 @@
-// A sync engine for tests (docs/sync.md, Module layout). It keeps pending changes in memory as `CKSyncEngine` keeps them, builds each send's records through its delegate, saves a batch atomically, and reports the events a test scripts, so no test reaches CloudKit's servers.
+// A sync engine for tests (docs/sync.md, Module layout). It keeps pending changes in memory as `CKSyncEngine` keeps them, sends the zone's changes and then batches of record changes until none is left, builds each batch's records through its delegate, saves a batch atomically, and reports the events and failures a test scripts, so no test reaches CloudKit's servers.
 import CloudKit
 import Foundation
 @testable import Sync
 
 @MainActor
 final class FakeSyncEngine: SyncEngineClient {
-    /// What one send sent.
+    enum SendError: Error {
+        case batchLimitExceeded
+    }
+
+    /// What one batch sent.
     struct Batch: Equatable {
         /// The records the delegate built for the batch's saves, saved or refused.
         var records: [CKRecord]
@@ -21,11 +25,19 @@ final class FakeSyncEngine: SyncEngineClient {
 
     /// The events the next fetch reports before its state update and its end, such as fetched changes and zone deletions.
     var fetchScript: [SyncEvent] = []
-    /// The failure for the next save of each record name. A batch with a failure saves nothing, as an atomic batch does, and its other changes stay pending, as `CloudKitSyncEngine` adds them again.
+    /// The failure of the next fetch's zone fetch, which its end reports and its call throws, as after a network that dropped between pages.
+    var fetchFailure: CKError.Code?
+    /// The failure for the next save of each record name. A batch with a failure saves nothing, as an atomic batch does, and its other changes stay pending, as `CloudKitSyncEngine` adds them back, so the send's next batch takes them.
     var saveFailures: [String: SyncSaveFailure] = [:]
+    /// The failure for the next send of the zone's change. A code the engine retries (`CloudKitSyncEngine.isRetried(_:)`) keeps the change pending and reports nothing, as when offline. Any other drops the change and reports it.
+    var zoneFailure: CKError.Code?
+    /// The most changes one batch holds, as one request holds at most 250 records.
+    var batchLimit = 250
+    /// The most batches one send builds before it throws, since a delegate that adds a change back after each refusal would keep the engine sending without end.
+    var batchesPerSendLimit = 100
     private(set) var fetchCount = 0
     private(set) var batches: [Batch] = []
-    /// The zone's changes that sends have sent, in order.
+    /// The zone's changes that the server took, in order.
     private(set) var sentZoneChanges: [SyncPendingChange] = []
     private(set) var isStopped = false
 
@@ -46,9 +58,16 @@ final class FakeSyncEngine: SyncEngineClient {
         }
     }
 
+    /// The state serialization of an engine with `changes` pending. The same changes always give the same bytes, so a test can compare serializations.
+    static func stateSerialization(of changes: [SyncPendingChange]) -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(changes.map(StoredChange.init))) ?? Data()
+    }
+
     /// The state serialization, which holds the pending changes.
     var stateSerialization: Data {
-        (try? JSONEncoder().encode(pendingChanges.map(StoredChange.init))) ?? Data()
+        Self.stateSerialization(of: pendingChanges)
     }
 
     var pendingChanges: [SyncPendingChange] {
@@ -56,6 +75,7 @@ final class FakeSyncEngine: SyncEngineClient {
     }
 
     func add(_ changes: [SyncPendingChange]) {
+        guard !isStopped else { return }
         for change in changes {
             let isZoneChange = change == .saveZone || change == .deleteZone
             var list = isZoneChange ? zoneChanges : recordChanges
@@ -66,36 +86,83 @@ final class FakeSyncEngine: SyncEngineClient {
     }
 
     func remove(_ changes: [SyncPendingChange]) {
+        guard !isStopped else { return }
         zoneChanges.removeAll(where: changes.contains)
         recordChanges.removeAll(where: changes.contains)
     }
 
-    /// Reports the fetch script, then the state and the fetch's end.
+    /// Reports the fetch script, then the state and the fetch's end, and throws the scripted failure.
     func fetchChanges() async throws {
         guard !isStopped else { return }
         fetchCount += 1
         let script = fetchScript
+        let failure = fetchFailure
         fetchScript = []
+        fetchFailure = nil
         deliver(script)
-        deliver([.stateUpdate(stateSerialization)])
-        deliver([.fetchEnded])
+        deliverStateUpdate()
+        deliver([.fetchEnded(failure: failure)])
+        if let failure { throw CKError(failure) }
     }
 
-    /// Sends the zone's changes, then every pending record change in one batch, and reports the batch and the state.
+    /// Sends the zone's changes, then batches of the pending record changes until none is left, the changes added while the delegate handles a batch included, and reports each with the state.
     func sendChanges() async throws {
         guard !isStopped else { return }
-        sentZoneChanges += zoneChanges
+        sendZoneChanges()
+        var count = 0
+        while !isStopped, !recordChanges.isEmpty {
+            guard count < batchesPerSendLimit else {
+                throw SendError.batchLimitExceeded
+            }
+            count += 1
+            sendBatch()
+        }
+    }
+
+    /// Drops the pending changes, as `CloudKitSyncEngine` does, so a later engine starts from the state update a test kept.
+    func stop() async {
+        isStopped = true
         zoneChanges = []
-        let changes = recordChanges
         recordChanges = []
+    }
+
+    /// Reports events as the engine does, one after another, until it stops.
+    func deliver(_ events: [SyncEvent]) {
+        for event in events {
+            guard !isStopped, let delegate else { return }
+            delegate.handle(event)
+        }
+    }
+
+    /// Sends the zone's pending changes and reports what the server did, unless the scripted failure is one the engine retries.
+    private func sendZoneChanges() {
+        guard !zoneChanges.isEmpty else { return }
+        let changes = zoneChanges
+        let failure = zoneFailure
+        zoneFailure = nil
+        if let failure, CloudKitSyncEngine.isRetried(failure) { return }
+        zoneChanges = []
+        let sent: SyncSentZoneChanges
+        if let failure {
+            sent = SyncSentZoneChanges(failedSave: changes.contains(.saveZone) ? failure : nil, failedDelete: changes.contains(.deleteZone) ? failure : nil)
+        } else {
+            sentZoneChanges += changes
+            sent = SyncSentZoneChanges(savedZone: changes.contains(.saveZone), deletedZone: changes.contains(.deleteZone))
+        }
+        deliver([.sentZoneChanges(sent)])
+        deliverStateUpdate()
+    }
+
+    /// Sends the next batch: the pending record changes in order, up to `batchLimit`. A save without a record drops its pending change, as `CloudKitSyncEngine` drops it, and takes no place in the batch.
+    private func sendBatch() {
         var records: [CKRecord] = []
         var deletions: [String] = []
         var failures: [SyncFailedSave] = []
         var sent: [SyncPendingChange] = []
-        for change in changes {
+        while sent.count < batchLimit, !recordChanges.isEmpty {
+            let change = recordChanges.removeFirst()
             switch change {
             case .saveRecord(let name):
-                // A save without a record leaves the pending changes, as `CloudKitSyncEngine` drops it.
                 guard let record = delegate?.record(toSave: name) else { continue }
                 records.append(record)
                 sent.append(change)
@@ -108,29 +175,23 @@ final class FakeSyncEngine: SyncEngineClient {
             }
         }
         guard !sent.isEmpty else {
-            deliver([.stateUpdate(stateSerialization)])
+            deliverStateUpdate()
             return
         }
         batches.append(Batch(records: records, deletedRecordNames: deletions))
-        guard failures.isEmpty else {
+        if !failures.isEmpty {
             let refused = Set(failures.map { SyncPendingChange.saveRecord($0.recordName) })
             add(sent.filter { !refused.contains($0) })
-            deliver([.sentChanges(SyncSentChanges(failedSaves: failures)), .stateUpdate(stateSerialization)])
-            return
+            deliver([.sentChanges(SyncSentChanges(failedSaves: failures))])
+        } else {
+            deliver([.sentChanges(SyncSentChanges(savedRecords: records, deletedRecordNames: deletions))])
         }
-        deliver([.sentChanges(SyncSentChanges(savedRecords: records, deletedRecordNames: deletions)), .stateUpdate(stateSerialization)])
+        deliverStateUpdate()
     }
 
-    func stop() async {
-        isStopped = true
-    }
-
-    /// Reports events as the engine does, one after another, until it stops.
-    func deliver(_ events: [SyncEvent]) {
-        for event in events {
-            guard !isStopped, let delegate else { return }
-            delegate.handle(event)
-        }
+    /// Reports the state as it is once the events before it have been handled, with the changes their handling added.
+    private func deliverStateUpdate() {
+        deliver([.stateUpdate(stateSerialization)])
     }
 
     private static func opposite(of change: SyncPendingChange) -> SyncPendingChange {

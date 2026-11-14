@@ -93,6 +93,25 @@ public struct SyncSentChanges: Equatable, Sendable {
     }
 }
 
+/// The zone's save or deletion that one send sent (`SyncPendingChange.saveZone` and `.deleteZone`). The engine sends only the zone `ArchSync1`. A zone change that failed for a reason the engine retries stays pending and is not reported, as a record's is not.
+public struct SyncSentZoneChanges: Equatable, Sendable {
+    /// Whether the server saved the zone.
+    public var savedZone: Bool
+    /// Whether the server deleted the zone and every record in it, as Delete iCloud Data asks.
+    public var deletedZone: Bool
+    /// CloudKit's code for a save of the zone that the server refused for a reason the engine does not retry, such as a full iCloud storage (`quotaExceeded`). The engine drops the save, so no later send creates the zone unless the controller adds it again.
+    public var failedSave: CKError.Code?
+    /// CloudKit's code for a deletion of the zone that the server refused for a reason the engine does not retry. The engine drops the deletion, and the zone stays.
+    public var failedDelete: CKError.Code?
+
+    public init(savedZone: Bool = false, deletedZone: Bool = false, failedSave: CKError.Code? = nil, failedDelete: CKError.Code? = nil) {
+        self.savedZone = savedZone
+        self.deletedZone = deletedZone
+        self.failedSave = failedSave
+        self.failedDelete = failedDelete
+    }
+}
+
 /// What the engine reports, in the order it happens.
 public enum SyncEvent: Equatable, Sendable {
     /// The engine's state changed, such as its change token or its pending changes. `sync.json` keeps the serialization (`SyncMirror.engineState`) for the engine's next start on the same database.
@@ -102,10 +121,12 @@ public enum SyncEvent: Equatable, Sendable {
     case fetchedChanges(SyncFetchedChanges)
     /// A fetch found this zone deleted. It can be another zone than `ArchSync1`, which the controller ignores.
     case zoneDeleted(CKRecordZone.ID, SyncZoneDeletionReason)
-    /// A fetch ended, after every page it brought. A child whose parent has not arrived waits until then (`docs/sync.md`, Mapping the session store to records ▸ Incoming changes).
-    case fetchEnded
-    /// One batch was sent.
+    /// A fetch ended, after every page it brought, the engine's own fetches included. `failure` is nil when the fetch of the zone completed or the fetch did not need one. Otherwise it is CloudKit's code for the zone fetch's failure, such as a network that dropped between pages: the pages that came hold only part of the zone's changes, and a later fetch brings the rest. A child whose parent has not arrived waits until a fetch ends without a failure (`docs/sync.md`, Mapping the session store to records ▸ Incoming changes, and Sync engine).
+    case fetchEnded(failure: CKError.Code?)
+    /// One batch of record changes was sent.
     case sentChanges(SyncSentChanges)
+    /// The zone's save or deletion was sent, and the server took it or refused it for a reason the engine does not retry.
+    case sentZoneChanges(SyncSentZoneChanges)
 }
 
 /// What the engine asks of the controller. The engine holds its delegate weakly.
@@ -133,10 +154,10 @@ public protocol SyncEngineClient: AnyObject {
     /// Fetches the zone's changes now and returns once the fetch's events have been handled.
     func fetchChanges() async throws
 
-    /// Sends the pending changes now and returns once the send's events have been handled.
+    /// Sends the pending changes now and returns once the send's events have been handled. One send asks for batches until no pending record change is left, so a change added while the delegate handles one of its batches, such as a merged save, goes in the same send.
     func sendChanges() async throws
 
-    /// Cancels the engine's operations. It reports no event after this, and fetches and sends nothing, so turning sync off or an account change that ends sync stops the engine before dropping it.
+    /// Stops the engine before the controller drops it, as when sync turns off or an account change ends it. The engine then reports no event, ignores `add(_:)`, `remove(_:)`, `fetchChanges()`, and `sendChanges()`, drops its pending changes, the zone's included, so it has nothing left to send, and cancels its operations. The last state update that `sync.json` kept still holds the pending changes. An operation already under way can still finish, since CloudKit cancels operations asynchronously, and the engine can still fetch on its own until it is freed, but nothing of either reaches the delegate or `sync.json`.
     func stop() async
 }
 
