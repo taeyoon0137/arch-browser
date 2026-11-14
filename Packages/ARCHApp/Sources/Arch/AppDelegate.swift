@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.installEngineVersion = { PreferencesWindowController.shared.showPlugin($1, in: $0, installingVersionFor: $2) }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
+        session.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.session = session
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()

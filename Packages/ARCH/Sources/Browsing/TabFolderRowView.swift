@@ -99,6 +99,7 @@ struct TabFolderRowView: View {
                 if status.dismissedCount > 0 {
                     Button("Show Dismissed Items (\(status.dismissedCount))") { withAnimation(.easeInOut(duration: 0.15)) { session.showDismissedItems(inLiveFolder: folder.id) } }
                 }
+                Button("Edit Live Folder\u{2026}") { windowModel.showEditLiveFolderSheet(folder.id) }
                 Divider()
             }
             Button("Rename Folder") { windowModel.renamingFolderID = folder.id }

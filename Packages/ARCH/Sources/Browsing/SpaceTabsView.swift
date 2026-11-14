@@ -430,6 +430,7 @@ struct SpaceMenuItems: View {
             .disabled(personaSpaces.last?.id == space.id)
         Divider()
         Button("New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(toSpace: space.id) } }
+        Button("New Live Folder\u{2026}") { windowModel.showNewLiveFolderSheet(inSpace: space.id) }
         Button("New Space", action: windowModel.addSpace)
         Button("Delete Space") { session.deleteSpace(space.id) }
             .disabled(!session.canDeleteSpace(space.id))

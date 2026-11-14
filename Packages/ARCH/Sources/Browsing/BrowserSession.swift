@@ -73,6 +73,8 @@ public final class BrowserSession: ObservableObject {
     public private(set) var undoableCloseCount = 0
     /// The app sets this to open its Settings window from the library.
     public var showSettings: (() -> Void)?
+    /// The app sets this to open the built-in terminal, where the New Live Folder sheet sends the user to install `gh` and sign in (live folder rule 3).
+    public var openTerminal: (() -> Void)?
     /// The app sets this to open Settings ▸ Plugins at a plugin in a Persona with the open panel for the plugin's version for an engine, for Install <Engine> Version… in the site settings popover.
     public var installEngineVersion: ((Persona.ID, PluginID, EngineKind) -> Void)?
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
@@ -1515,6 +1517,11 @@ public final class BrowserSession: ObservableObject {
         folder.parentID = parentID
         folders.append(folder)
         return folder
+    }
+
+    /// Appends a folder made elsewhere, such as New Live Folder…'s, which then follows its space's other folders in its list.
+    func appendFolder(_ folder: TabFolder) {
+        folders.append(folder)
     }
 
     /// Applies a change of the folder tree to the session's folders and tabs. Both are set, so that the session publishes a change even when only a tab's folder changed. A live folder item's tab that the change takes out of its folder becomes an ordinary tab.

@@ -328,6 +328,41 @@ extension BrowserSession {
         updateLiveFolderStatus(id)
     }
 
+    // MARK: New Live Folder… and Edit Live Folder…
+
+    /// The live folders of every space and Persona, which live folder rule 7 limits to 20.
+    var liveFolderCount: Int {
+        folders.filter { $0.live != nil }.count
+    }
+
+    /// New Live Folder…'s Add (`docs/bookmarks.md`, Interface): a private feed's whole address goes to the Keychain first (live folder rule 8), then the folder joins the space's pinned list after its folders, expanded, and registering it refreshes it. Returns the folder's ID, or nil when the space went meanwhile; throws the Keychain's failure, or `LiveFolderSheetError.folderLimit` when the app reached 20 live folders meanwhile.
+    @MainActor func addLiveFolder(_ submission: LiveFolderSheetModel.Submission, toSpace spaceID: UUID) async throws -> UUID? {
+        guard liveFolderCount < LiveFolderConfiguration.maximumFolders else { throw LiveFolderSheetError.folderLimit }
+        let folder = submission.newFolder(in: spaceID)
+        if let address = submission.keychainAddress {
+            try await liveFolderService.setPrivateAddress(address, for: folder.id, folderName: folder.name)
+        }
+        let isAtLimit = liveFolderCount >= LiveFolderConfiguration.maximumFolders
+        guard !isAtLimit, spaces.contains(where: { $0.id == spaceID }) else {
+            // No folder will register the address written for it.
+            if submission.keychainAddress != nil { try? await liveFolderService.addresses.removeAddress(for: folder.id) }
+            if isAtLimit { throw LiveFolderSheetError.folderLimit }
+            return nil
+        }
+        appendFolder(folder)
+        return folder.id
+    }
+
+    /// Edit Live Folder…'s Save: the folder takes the sheet's name, source, item limit, and refresh interval. A private feed's new whole address goes to the Keychain first (live folder rule 8), which starts over a private feed whose whole address alone changed; registering the change starts the folder over when its source changed and refreshes it when its item limit changed (`LiveFolderService`). A folder that went or stopped being live meanwhile changes nothing.
+    @MainActor func editLiveFolder(_ id: UUID, with submission: LiveFolderSheetModel.Submission) async throws {
+        guard folders.contains(where: { $0.id == id && $0.live != nil }) else { return }
+        if let address = submission.keychainAddress {
+            try await liveFolderService.setPrivateAddress(address, for: id, folderName: submission.name)
+        }
+        guard folders.contains(where: { $0.id == id && $0.live != nil }) else { return }
+        updateFolder(id) { submission.apply(to: &$0) }
+    }
+
     // MARK: Commands
 
     /// Refresh Now.

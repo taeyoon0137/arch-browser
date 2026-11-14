@@ -5,6 +5,7 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
+import LiveFolders
 import PDFKit
 import Plugins
 import SwiftUI
@@ -1156,6 +1157,61 @@ public final class BrowserWindowModel: ObservableObject {
     /// Does not interrupt renaming another folder that may have started meanwhile.
     public func endRenamingFolder(_ id: UUID) {
         if renamingFolderID == id { renamingFolderID = nil }
+    }
+
+    // MARK: Live folders
+
+    /// New Live Folder…: the sheet that makes a live folder in the space (`docs/bookmarks.md`, Live folders ▸ Interface), with the Address field prefilled with the selected tab's address when it shows a web page. Add puts the folder in the space and shows the space. Nothing shows while the window shows another sheet.
+    @MainActor public func showNewLiveFolderSheet(inSpace spaceID: UUID) {
+        guard nsWindow?.attachedSheet == nil, let space = session.spaces.first(where: { $0.id == spaceID }) else { return }
+        let address = selectedTab?.url.flatMap { url in ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? url : nil }
+        let model = LiveFolderSheetModel(newIn: space, personas: session.personas, liveFolderCount: session.liveFolderCount, address: address,
+                                         openTerminal: session.openTerminal) { [weak self] submission in
+            guard let self, try await self.session.addLiveFolder(submission, toSpace: spaceID) != nil else { return }
+            self.switchToSpace(spaceID)
+        }
+        presentLiveFolderSheet(model)
+    }
+
+    /// Edit Live Folder…: the same sheet with the folder's values, a private feed's whole address read from the Keychain first (live folder rule 8).
+    @MainActor func showEditLiveFolderSheet(_ folderID: UUID) {
+        guard nsWindow?.attachedSheet == nil, let live = session.folders.first(where: { $0.id == folderID })?.live else { return }
+        guard case .feed(_, isPrivate: true) = live.source else { return presentEditLiveFolderSheet(folderID, wholeAddress: nil, keychainReadError: nil) }
+        let addresses = session.liveFolderService.addresses
+        Task { @MainActor [weak self] in
+            var whole: URL?
+            var failure: String?
+            do {
+                whole = try await addresses.address(for: folderID)
+            } catch {
+                failure = LiveFolderSheetModel.message(for: error)
+            }
+            self?.presentEditLiveFolderSheet(folderID, wholeAddress: whole, keychainReadError: failure)
+        }
+    }
+
+    @MainActor private func presentEditLiveFolderSheet(_ folderID: UUID, wholeAddress: URL?, keychainReadError: String?) {
+        guard let folder = session.folders.first(where: { $0.id == folderID }), let live = folder.live,
+              let space = session.spaces.first(where: { $0.id == folder.spaceID }) else { return }
+        let model = LiveFolderSheetModel(editing: folder, configuration: live, in: space, personas: session.personas, wholeAddress: wholeAddress,
+                                         keychainReadError: keychainReadError, openTerminal: session.openTerminal) { [weak self] submission in
+            try await self?.session.editLiveFolder(folderID, with: submission)
+        }
+        presentLiveFolderSheet(model)
+    }
+
+    /// Shows the sheet on the window. Its Add, Save, and Cancel end it; closing the window from code ends it too (`close()`). The form's size pins the sheet's, so the sheet grows and shrinks with the form, as when a page's feeds appear.
+    @MainActor private func presentLiveFolderSheet(_ model: LiveFolderSheetModel) {
+        guard let nsWindow, nsWindow.attachedSheet == nil else { return }
+        let controller = NSHostingController(rootView: LiveFolderSheetView(model: model))
+        controller.sizingOptions = [.minSize, .maxSize]
+        let sheet = NSWindow(contentViewController: controller)
+        sheet.isReleasedWhenClosed = false
+        model.dismiss = { [weak sheet] in
+            guard let sheet, let parent = sheet.sheetParent else { return }
+            parent.endSheet(sheet)
+        }
+        nsWindow.beginSheet(sheet)
     }
 
     // MARK: Panes and split view
