@@ -113,3 +113,13 @@ public struct SidebarSyncDeletions {
 
     public init() {}
 }
+
+/// Local IDs that adopt existing server IDs at the first sync. A space or folder moves its
+/// local-only contents as well as its synced rows. Persona identities never change.
+public struct SidebarSyncReplacements {
+    public var spaces: [UUID: UUID] = [:]
+    public var folders: [UUID: UUID] = [:]
+    public var favorites: [UUID: UUID] = [:]
+    public var tabs: [UUID: UUID] = [:]
+    public init() {}
+}

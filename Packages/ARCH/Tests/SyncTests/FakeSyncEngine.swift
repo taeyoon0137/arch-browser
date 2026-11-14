@@ -99,6 +99,7 @@ final class FakeSyncEngine: SyncEngineClient {
         let failure = fetchFailure
         fetchScript = []
         fetchFailure = nil
+        deliver([.fetchStarted])
         deliver(script)
         deliverStateUpdate()
         deliver([.fetchEnded(failure: failure)])
@@ -110,7 +111,7 @@ final class FakeSyncEngine: SyncEngineClient {
         guard !isStopped else { return }
         sendZoneChanges()
         var count = 0
-        while !isStopped, !recordChanges.isEmpty {
+        while !isStopped, delegate?.canSendRecords == true, !recordChanges.isEmpty {
             guard count < batchesPerSendLimit else {
                 throw SendError.batchLimitExceeded
             }

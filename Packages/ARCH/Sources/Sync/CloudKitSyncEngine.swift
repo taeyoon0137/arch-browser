@@ -132,7 +132,7 @@ public final class CloudKitSyncEngine: SyncEngineClient {
         )
     }
 
-    /// Arch's events for one of the engine's events. A fetch's end carries `fetchFailure`, the failure of the zone's fetch within that fetch (`fetchFailure(_:afterFetchOf:error:)`). The engine's events that Sync does not use, such as the start of a fetch or a send, give none, and so does the end of a zone's fetch, which only `fetchFailure` reports.
+    /// Arch's events for one of the engine's events. A fetch's end carries `fetchFailure`, the failure of the zone's fetch within that fetch (`fetchFailure(_:afterFetchOf:error:)`). The engine's events that Sync does not use, such as the start of a send, give none, and so does the end of a zone's fetch, which only `fetchFailure` reports.
     nonisolated static func events(from event: CKSyncEngine.Event, fetchFailure: CKError.Code?) -> [SyncEvent] {
         switch event {
         case .stateUpdate(let update):
@@ -153,7 +153,8 @@ public final class CloudKitSyncEngine: SyncEngineClient {
         case .sentDatabaseChanges(let sent):
             let zoneChanges = sentZoneChanges(savedZoneIDs: sent.savedZones.map(\.zoneID), deletedZoneIDs: sent.deletedZoneIDs, failedSaves: sent.failedZoneSaves.map { ($0.zone.zoneID, $0.error) }, failedDeletes: sent.failedZoneDeletes)
             return zoneChanges.map { [.sentZoneChanges($0)] } ?? []
-        case .willFetchChanges, .willFetchRecordZoneChanges, .didFetchRecordZoneChanges, .willSendChanges, .didSendChanges:
+        case .willFetchChanges: return [.fetchStarted]
+        case .willFetchRecordZoneChanges, .didFetchRecordZoneChanges, .willSendChanges, .didSendChanges:
             return []
         @unknown default:
             return []
@@ -239,16 +240,17 @@ private final class Relay: CKSyncEngineDelegate {
 
     /// The next batch: the pending record changes within the send's scope, as many as fit in one request, saved atomically (`docs/sync.md`, Conflicts). A change outside the scope would fail the send. A save the delegate has no record for leaves the pending changes, so the engine does not ask for it again.
     nonisolated func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
-        guard await isRunning else { return nil }
+        guard await canBuildBatch else { return nil }
         let scope = context.options.scope
         let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
         var batch = await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { recordID in
             if let record = await self.record(toSave: recordID.recordName) { return record }
+            guard await self.canBuildBatch else { return nil }
             syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
             return nil
         }
         // The provider can suspend while stop() clears the queue.
-        guard await isRunning else { return nil }
+        guard await canBuildBatch else { return nil }
         batch?.atomicByZone = true
         return batch
     }
@@ -256,6 +258,8 @@ private final class Relay: CKSyncEngineDelegate {
     nonisolated func nextFetchChangesOptions(_ context: CKSyncEngine.FetchChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.FetchChangesOptions {
         CloudKitSyncEngine.fetchOptions(from: context.options)
     }
+
+    private var canBuildBatch: Bool { !isStopped && delegate?.canSendRecords == true }
 
     private var isRunning: Bool {
         !isStopped && delegate != nil
