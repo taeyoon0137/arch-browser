@@ -1,5 +1,6 @@
 import AgentControl
 import AI
+import ARCHEngine
 import Foundation
 import Testing
 @testable import Agent
@@ -229,10 +230,15 @@ import Testing
         let call = try #require(binding)
         host.silentTabIDs = [tab]
         let read = Task { await call.call(AgentToolCall(name: "read_text", arguments: ["tab": "t1"])) }
-        try await waitUntil { cli.activeToolCalls > 0 }
+        try await waitUntil { host.pendingReads[tab] != nil }
+        let pending = host.pendingReads.removeValue(forKey: tab)
+        let late = try #require(pending)
+        let cancelledAt = ContinuousClock.now
         runner.cancelAll()
-        read.cancel()
-        _ = await read.value
+        let stopped = await read.value
+        #expect(ContinuousClock.now - cancelledAt < .seconds(2))
+        #expect(stopped.status == .denied && stopped.code == "ended")
+        late(.success(EngineReadableContent(url: page, title: "Old", text: "Late secret", isTruncated: false)))
         #expect(await task.value.status == .cancelled)
         #expect(service.activity.entries.filter { $0.hookID == hook }.map(\.outcome) == ["cancelled"])
         #expect(runner.keptRuns.isEmpty && service.sessions.isEmpty)

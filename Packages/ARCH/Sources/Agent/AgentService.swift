@@ -340,7 +340,7 @@ import Foundation
         dependencies.prompt.cancelAll()
         runService?.cancelAll()
         for binding in hookCLIs.values {
-            binding.ready.shut()
+            binding.finish()
             binding.runner?.endProcesses()
         }
         for session in sessions where !session.isCleanedUp { session.endProcessesAtQuit() }
@@ -856,7 +856,7 @@ import Foundation
     }
 
     func finishHookCLI(_ binding: AgentHookCLIRun) {
-        binding.ready.shut()
+        binding.finish()
         hookCLIs.removeValue(forKey: binding.id)
         for connection in connections.values where connection.sessionID == binding.id { endpoint?.close(connection.id) }
         if !acceptsOutsideClients, !sessionsNeedChannel, hookCLIs.isEmpty { updateListening() }

@@ -281,7 +281,7 @@ public final class AgentRunner: ObservableObject {
             result.message = error.localizedDescription
         }
         run.active = false
-        binding.ready.shut()
+        binding.finish()
         await session.end(keepingThread: false)
         if !reply.isEmpty {
             result.reply = reply
