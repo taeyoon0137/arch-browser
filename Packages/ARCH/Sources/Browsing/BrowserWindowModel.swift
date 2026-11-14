@@ -470,9 +470,9 @@ public enum BrowserWindowKind {
         showPreview(of: favorite.url, engine: session.defaultEngine, in: favorite.resolvedPersonaID)
     }
 
-    /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview that opened with the same address stays as it is. The preview refuses the page's downloads, so closing the panel always closes the page at once.
+    /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview opened with the same address, Persona and requested engine stays as it is. The preview refuses the page's downloads, so closing the panel always closes the page at once.
     func showPreview(of url: URL, engine: EngineKind, in personaID: Persona.ID) {
-        guard preview?.openedURL != url else { return }
+        if let preview, preview.openedURL == url, preview.personaID == personaID, preview.requestedEngine == engine { return }
         closePreview()
         // The panel covers the page that a search, a region capture, or the question popover belongs to, so all three end.
         hideFindBar()
@@ -480,12 +480,12 @@ public enum BrowserWindowKind {
         closePageQuestion()
         let runtime = session.runtime(for: engine, in: personaID)
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
-        let preview = PagePreview(webContents: webContents, personaID: personaID, openedURL: url)
+        let preview = PagePreview(webContents: webContents, personaID: personaID, requestedEngine: engine, openedURL: url)
         // A page the preview opens, as for a link to a new window or a sign-in popup, comes from the preview's runtime and keeps the previewed page as its opener. The previewed page becomes a tab of the preview's Persona, as Open in Tab makes one but without loading again, and the page it opened becomes the selected tab after it, taking the panel's place. The engine is still in its callback, so the panel goes on the next turn of the run loop.
         preview.openNewTab = { [weak self, weak preview] popup in
             guard let self, let preview else { return }
             runtime.browser.takeOwnership(of: popup)
-            self.showOpenedPage(preview.webContents, personaID: personaID)
+            self.showOpenedPage(preview.webContents, personaID: personaID, preferredEngine: preview.requestedEngine)
             self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents)
             DispatchQueue.main.async { [weak self] in
                 if let self, self.preview === preview { self.removePreview(closingPage: false) }
@@ -500,11 +500,12 @@ public enum BrowserWindowKind {
         self.preview = preview
     }
 
-    /// Opens the page the panel shows, wherever the user went in it, in a new tab of the same engine and Persona with its page focused, and closes the panel.
+    /// Opens the page the panel shows, wherever the user went in it, in a new tab of the requested engine and Persona with its page focused, and closes the panel.
     func openPreviewInTab() {
         guard let preview else { return }
         closePreview()
-        showOpenedPage(session.makeWebContents(url: preview.url, engine: preview.webContents.engineKind, state: nil, in: preview.personaID), personaID: preview.personaID)
+        let page = session.makeWebContents(url: preview.url, engine: preview.requestedEngine, state: nil, in: preview.personaID)
+        showOpenedPage(page, personaID: preview.personaID, preferredEngine: preview.requestedEngine)
         focusPage()
     }
 
@@ -536,11 +537,11 @@ public enum BrowserWindowKind {
     }
 
     /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11). A page of another Persona, as from a preview that stayed open while the window moved to another Persona's space, goes to its Persona's preferred space instead. `opener` is the page that opened it, which the window returns to when the new page closes itself.
-    func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) {
+    func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil, preferredEngine: EngineKind? = nil) {
         switch kind {
         case .main:
-            selectTab(session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false, opener: opener).id)
-        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID, opener: opener)
+            selectTab(session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false, opener: opener, preferredEngine: preferredEngine).id)
+        case .small: session.openSmallWindow(webContents, spaceID: currentSpaceID, personaID: personaID, opener: opener, preferredEngine: preferredEngine)
         }
     }
 

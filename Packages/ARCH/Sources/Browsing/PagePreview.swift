@@ -8,7 +8,9 @@ final class PagePreview: ObservableObject {
     let webContents: any EngineWebContents
     /// The Persona whose profile the page uses, as the tab or favorite it came from does.
     let personaID: Persona.ID
-    /// The address the preview opened with. Previewing it again keeps this preview.
+    /// The engine to request when the preview opens as a tab, even if its Persona is using a fallback.
+    let requestedEngine: EngineKind
+    /// The address the preview opened with, which it keeps across navigation.
     let openedURL: URL
     @Published private(set) var title = ""
     /// The page's address, which follows the page as the user moves around in it.
@@ -21,9 +23,10 @@ final class PagePreview: ObservableObject {
     /// The window that shows the preview sets this callback to close the panel when the page closes itself.
     var didClose: (() -> Void)?
 
-    init(webContents: any EngineWebContents, personaID: Persona.ID, openedURL: URL) {
+    init(webContents: any EngineWebContents, personaID: Persona.ID, requestedEngine: EngineKind, openedURL: URL) {
         self.webContents = webContents
         self.personaID = personaID
+        self.requestedEngine = requestedEngine
         self.openedURL = openedURL
         url = webContents.url ?? openedURL
         isLoading = webContents.isLoading

@@ -66,7 +66,7 @@ import Testing
 
     @Test func thePreviewPlacesTheHandedItemsAsTheTabDoesWithoutTheTabsOwn() throws {
         let contents = UnloadedWebContents(url: URL(string: "https://example.com/"), title: "", engine: .webKit, state: nil)
-        let preview = PagePreview(webContents: contents, personaID: UUID(), openedURL: URL(string: "https://example.com/")!)
+        let preview = PagePreview(webContents: contents, personaID: UUID(), requestedEngine: contents.engineKind, openedURL: URL(string: "https://example.com/")!)
         let element = EngineContextMenuElement(selectedText: "mispeled", isEditable: true)
         let menu = handedMenu([EngineContextMenuItem.spellingSuggestion, EngineContextMenuItem.ignoreSpelling, EngineContextMenuItem.learnSpelling,
                                EngineContextMenuItem.cut, EngineContextMenuItem.copy, EngineContextMenuItem.paste, EngineContextMenuItem.selectAll], for: element)
