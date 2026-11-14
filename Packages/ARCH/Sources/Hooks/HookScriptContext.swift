@@ -116,6 +116,7 @@ final class HookScriptContext: PluginAgentContext {
         if !grant.returnsReply { result.reply = nil }
         actions.append(contentsOf: result.actions)
         agentUse = HookAgentUse(model: result.model ?? agentUse?.model, usage: (agentUse?.usage ?? AIUsage(inputTokens: 0, outputTokens: 0)) + result.usage)
+        if invocation.isTest { agentUse?.reply = result.reply }
         if result.status != .completed, failure == nil || result.code == "unknownProvider" {
             failure = .failed(code: result.code ?? result.status.rawValue, message: result.message ?? "The agent run did not finish.")
         }

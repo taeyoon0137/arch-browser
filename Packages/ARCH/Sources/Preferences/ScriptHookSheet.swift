@@ -44,9 +44,18 @@ struct ScriptHookDraft: Identifiable {
     var agentPrompt = ""
     var agentRenamesTabs = false
     var readsPageText = false
+    var guided = false
+    var generated = false
+    var origin: HookOrigin = .user
+    var agentRecord: AgentRunRecord = .none
+    var seconds = 30
+    var rounds = 2
+    var toolCalls = 5
+    var dailyLimit = 200
+    var delay = 1.5
     var script: String
 
-    init(new places: [HookPersonaPlaces]) {
+    init(new places: [HookPersonaPlaces], guided: Bool = false) {
         id = UUID()
         stored = nil
         isReview = false
@@ -54,7 +63,11 @@ struct ScriptHookDraft: Identifiable {
         name = "New Hook"
         kind = .pageLoaded
         script = Self.template(for: .pageLoaded)
-        renamesTabs = true
+        renamesTabs = !guided
+        self.guided = guided
+        generated = guided
+        enablesAgent = guided
+        if guided { name = "New Agent Hook" }
     }
 
     init(editing hook: Hook, script: String, places: [HookPersonaPlaces], reviewing: Bool) {
@@ -65,6 +78,18 @@ struct ScriptHookDraft: Identifiable {
         name = hook.name
         kind = hook.trigger.kind
         self.script = script
+        origin = hook.origin
+        guided = hook.agent != nil && !hook.origin.isOutsideProgram
+        if case .javaScript(_, let isGenerated) = hook.script { generated = isGenerated && !reviewing }
+        agentRecord = hook.agent?.record ?? hook.record
+        if let limits = hook.agent?.limits {
+            seconds = Int(limits.timeout.components.seconds)
+            rounds = limits.rounds
+            toolCalls = limits.toolCalls
+        }
+        dailyLimit = hook.timing.runsPerDay
+        let components = hook.timing.delay.components
+        delay = Double(components.seconds) + Double(components.attoseconds) / 1e18
         switch hook.trigger {
         case .tabClosed(let reasons): closeReasons = reasons
         case .pageLoaded(let loads, let includesRestoredTabs):
@@ -100,6 +125,40 @@ struct ScriptHookDraft: Identifiable {
         readsPageText = hook.grant.agent?.tools.contains("read_text") == true
         readsTabs = hook.grant.permissions.contains(.tabs)
         renamesTabs = hook.grant.permissions.contains(.tabsRename)
+    }
+
+    var scriptText: String { guided && generated ? AgentHookTemplate.script(for: kind) : script }
+
+    mutating func editGeneratedScript() {
+        script = scriptText
+        generated = false
+    }
+
+    func makeHook() throws -> (hook: Hook, script: Data) {
+        let bytes = Data(scriptText.utf8)
+        func invalid(_ reason: String) -> HookRegistryError { .invalidAgentOptions(reason) }
+        if let problem = HookScriptRunner.problem(in: bytes) ?? sitePatterns().problem { throw invalid(problem) }
+        guard isEverywhere || !chosenPlaces.isEmpty else { throw invalid("Choose where the hook runs.") }
+        guard kind != .titleChanged || !titleSources.isEmpty else { throw invalid("Choose which title changes start the hook.") }
+        guard tabKinds.isEmpty || !tabKinds.isDisjoint(with: Self.offeredTabKinds) else { throw invalid("Choose its tab kinds.") }
+        var hook = stored ?? Hook(id: id, name: name, trigger: trigger, origin: origin)
+        hook.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hook.name.isEmpty else { throw invalid("Name the hook.") }
+        if hook.trigger.kind != kind { hook.timing = HookTiming(for: trigger) }
+        hook.trigger = trigger
+        hook.filter = filter
+        hook.grant.permissions = hook.grant.permissions.intersection([.agent])
+        if readsTabs { hook.grant.permissions.insert(.tabs) }
+        if renamesTabs { hook.grant.permissions.insert(.tabsRename) }
+        if !hook.origin.isOutsideProgram { try configureAgent(in: &hook) }
+        if guided, let model = agentModel {
+            let tools = (agentRenamesTabs ? ["rename_tab"] : []) + (readsPageText ? ["read_text"] : [])
+            let options = AgentRunOptions(prompt: agentPrompt, tabAccess: readsPageText ? .page : .title, model: model, record: agentRecord,
+                                          tools: tools, limits: AgentRunLimits(timeout: .seconds(seconds), rounds: rounds, toolCalls: toolCalls))
+            AgentHookTemplate.configure(&hook, options: options, dailyLimit: dailyLimit, delay: .seconds(delay), generated: generated)
+            if let reason = hook.grant.agent?.refusal(for: options) { throw invalid(reason) }
+        }
+        return (hook, bytes)
     }
 
     /// Keep a stored grant's ceilings. A newly authorized script can use titles and suggest names only.
@@ -220,7 +279,12 @@ struct ScriptHookSheet: View {
     @ObservedObject var registry: HookRegistry
     @ObservedObject private var aiSettings = AIService.shared.settings
     @State var draft: ScriptHookDraft
+    var currentTab: () -> UUID? = { nil }
     let dismiss: () -> Void
+    @State private var showsScript = false
+    @State private var appliesTest = false
+    @State private var testing: Task<Void, Never>?
+    @State private var testResult: String?
     @State private var problem: String?
 
     var body: some View {
@@ -236,36 +300,15 @@ struct ScriptHookSheet: View {
                 }
                 whenSection
                 whereSection
-                Section {
-                    Toggle("Read Tab Titles and Addresses", isOn: $draft.readsTabs)
-                    Toggle("Rename Tabs", isOn: $draft.renamesTabs)
-                } header: {
-                    Text("Tabs")
-                } footer: {
-                    aiFootnote("The script reaches only the tabs above, in the event's Persona. Without Read Tab Titles and Addresses, it sees which tabs they are but not their pages. A name from the script never replaces a name you gave a tab.")
-                }
-                if draft.stored?.origin.isOutsideProgram != true {
-                    Section("Agent") {
-                        Toggle("Allow Agent Runs", isOn: $draft.enablesAgent)
-                        if draft.enablesAgent {
-                            Picker("Model", selection: $draft.agentModel) {
-                                Text("Choose a model").tag(nil as AIRouteChoice?)
-                                ForEach(agentRoutes, id: \.self) { route in
-                                    Text(agentRouteName(route)).tag(Optional(route))
-                                }
-                            }
-                            Toggle("Allow the Agent to Rename Tabs", isOn: $draft.agentRenamesTabs)
-                            Toggle("Allow the Agent to Read Page Text", isOn: $draft.readsPageText)
-                            TextField("Instructions for the agent", text: $draft.agentPrompt, axis: .vertical)
-                            Text("Use await arch.agent.run(event.hook.agent) in your script to send these instructions and the event tab’s title and address to this provider.").font(.caption)
-                        }
+                if !draft.guided || !draft.generated {
+                    Section("Script permissions") {
+                        Toggle("Read Tab Titles and Addresses", isOn: $draft.readsTabs)
+                        Toggle("Rename Tabs", isOn: $draft.renamesTabs)
                     }
                 }
-                Section("Script") {
-                    TextEditor(text: $draft.script)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minHeight: 180)
-                }
+                if draft.stored?.origin.isOutsideProgram != true { agentSettings }
+                if draft.guided { testSection }
+                scriptSection
             }
             .formStyle(.grouped)
             HStack {
@@ -277,14 +320,128 @@ struct ScriptHookSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(draft.stored == nil ? "Add" : "Save") { save() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(testing != nil || draft.name.trimmingCharacters(in: .whitespaces).isEmpty || routeProblem != nil)
             }
             .padding(16)
         }
         .frame(width: 560, height: 640)
+        .onDisappear { testing?.cancel() }
         .onChange(of: draft.kind) { oldKind, newKind in
             // An untouched template follows the situation.
             if draft.script == ScriptHookDraft.template(for: oldKind) { draft.script = ScriptHookDraft.template(for: newKind) }
+        }
+    }
+
+    @ViewBuilder private var agentSettings: some View {
+        Section("Agent") {
+            if !draft.guided { Toggle("Allow Agent Runs", isOn: $draft.enablesAgent) }
+            if draft.enablesAgent {
+                TextField("Instructions", text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language."), axis: .vertical)
+                Toggle(draft.kind == .tabClosed ? "Read Text of the Tabs Left" : "Read Page Text", isOn: $draft.readsPageText)
+                Text(draft.readsPageText ? "The model may read page text on the allowed tabs. Sites excluded from AI are skipped." : "The model receives titles and reduced addresses on the allowed tabs.").font(.caption)
+                if draft.kind == .tabClosed { Text("The closed tab provides its last title and address. Actions apply to tabs left in its space.").font(.caption) }
+            }
+        }
+        if draft.enablesAgent {
+            Section("Model") {
+                Picker("Use", selection: $draft.agentModel) {
+                    Text("Choose a model").tag(nil as AIRouteChoice?)
+                    ForEach(agentRoutes, id: \.self) { route in Text(agentRouteName(route)).tag(Optional(route)) }
+                }
+                if let routeProblem { Text(routeProblem).font(.caption).foregroundStyle(.secondary) }
+                if let route = draft.agentModel {
+                    let refs = models(on: route)
+                    if case .tier(let tier) = route, refs.isEmpty {
+                        Menu("Choose a model for the \(tier.title) tier") {
+                            ForEach(connectedModels, id: \.self) { ref in Button(aiSettings.title(of: ref)) { aiSettings.setRoute(AIRoute(isEnabled: true, models: [ref]), for: .tier(tier)) } }
+                        }
+                    }
+                    ForEach(refs, id: \.self) { model in
+                        if let provider = aiSettings.providers.first(where: { $0.id == model.provider }) {
+                            let destination = AgentRunRequest.destination(of: provider)
+                            Text("\(aiSettings.title(of: model)) · \(destination)").font(.caption).textSelection(.enabled)
+                            if case .commandLine = provider.kind { Text("Each run starts the signed-in command-line tool and can take a few seconds.").font(.caption) }
+                        }
+                    }
+                }
+            }
+            Section("Allowed actions") {
+                Toggle(draft.kind == .tabClosed ? "Rename the Tabs Left" : "Rename the Tab", isOn: $draft.agentRenamesTabs)
+            }
+            if draft.guided {
+                Section("Record") {
+                    Picker("Keep", selection: $draft.agentRecord) {
+                        Text("Nothing").tag(AgentRunRecord.none)
+                        Text("Activity Only").tag(AgentRunRecord.activity)
+                        Text("The Session").tag(AgentRunRecord.session)
+                    }
+                    Text(recordDetail).font(.caption)
+                }
+                Section("Limits") {
+                    Stepper("Time limit · \(draft.seconds) seconds", value: $draft.seconds, in: 5...600)
+                    Stepper("Model rounds · \(draft.rounds)", value: $draft.rounds, in: 1...20)
+                    Stepper("Tool calls · \(draft.toolCalls)", value: $draft.toolCalls, in: 1...50)
+                    Stepper("Runs per day · \(draft.dailyLimit)", value: $draft.dailyLimit, in: 1...2000)
+                    Stepper("Wait before running · \(draft.delay.formatted()) seconds", value: $draft.delay, in: 0...60, step: 0.5)
+                }
+            }
+        }
+    }
+
+    private var recordDetail: String {
+        switch draft.agentRecord {
+        case .none: return "Keep usage totals only."
+        case .activity: return "Keep activity without page content or replies."
+        case .session: return "Keep the transcript in memory until quit."
+        }
+    }
+
+    private var scriptSection: some View {
+        Section("Script") {
+            if draft.guided {
+                if draft.generated {
+                    Toggle("Show Script", isOn: $showsScript)
+                    if showsScript {
+                        Text(draft.scriptText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        Button("Edit Script") { draft.editGeneratedScript() }
+                    }
+                } else { Button("Restore Arch’s Script") { draft.generated = true; showsScript = true } }
+            }
+            if !draft.guided || !draft.generated {
+                TextEditor(text: $draft.script).font(.system(.body, design: .monospaced)).frame(minHeight: 140)
+            }
+        }
+    }
+
+    private var testSection: some View {
+        Section("Test") {
+            Toggle("Apply Changes", isOn: $appliesTest)
+            Button(testing == nil ? "Test on Current Tab" : "Stop Test") {
+                if let testing { testing.cancel(); return }
+                guard let tab = currentTab() else { testResult = "Select a tab first."; return }
+                do {
+                    let (hook, bytes) = try draft.makeHook()
+                    let applying = appliesTest
+                    testing = Task { @MainActor in
+                        let started = ContinuousClock.now
+                        let result = await registry.testDraft(hook, script: bytes, onTab: tab, applying: applying)
+                        var lines = [HookSummary.description(of: result, hookName: hook.name)]
+                        if case .finished(.completed(let actions, let use)) = result {
+                            lines = [applying ? "Applied changes" : "Preview"]
+                            if actions.isEmpty { lines.append("No changes.") }
+                            for case .renamedTab(_, let name) in actions { lines.append("Suggested name: \(name)") }
+                            if let reply = use?.reply { lines.append(reply) }
+                            if let use, let model = use.model { lines.append("\(aiSettings.title(of: model)) · \(use.usage.inputTokens) input · \(use.usage.outputTokens) output tokens") }
+                        }
+                        lines.append(started.duration(to: .now).formatted())
+                        testResult = lines.joined(separator: "\n")
+                        testing = nil
+                    }
+                } catch { testResult = error.localizedDescription }
+            }
+            .disabled(testing == nil && routeProblem != nil)
+            Text("Testing sends a request to the selected provider.").font(.caption)
+            if let testResult { Text(testResult).textSelection(.enabled) }
         }
     }
 
@@ -317,7 +474,10 @@ struct ScriptHookSheet: View {
                 setToggle("Your names", .user, in: $draft.titleSources)
                 setToggle("Names from hooks and agents", .suggested, in: $draft.titleSources)
             case .tabClosed:
-                Toggle("Only when you close the tab", isOn: Binding(get: { draft.closeReasons == [.user] }, set: { draft.closeReasons = $0 ? [.user] : [] }))
+                if draft.guided {
+                    ForEach(BrowserTabCloseReason.allCases, id: \.self) { reason in setToggle(reason.rawValue.capitalized, reason, in: $draft.closeReasons) }
+                    Text("Leave all reasons off to include every close.").font(.caption)
+                } else { Toggle("Only when you close the tab", isOn: Binding(get: { draft.closeReasons == [.user] }, set: { draft.closeReasons = $0 ? [.user] : [] })) }
             case .spaceSwitched:
                 Toggle("Only when the Persona changes", isOn: $draft.personaChangesOnly)
             default:
@@ -379,52 +539,41 @@ struct ScriptHookSheet: View {
         return HookSummary.model(of: route)
     }
 
-    private var agentRoutes: [AIRouteChoice] {
-        var routes = aiSettings.providers.flatMap { provider -> [AIRouteChoice] in
-            guard case .http = provider.kind else { return [] }
-            return provider.models.filter { provider.capabilities(of: $0).contains(.agent) }
-                .map { .models([AIModelRef(provider: provider.id, model: $0.name)]) }
+    private var connectedModels: [AIModelRef] {
+        aiSettings.providers.flatMap { provider in
+            provider.models.filter { provider.capabilities(of: $0).contains(.agent) }
+                .map { AIModelRef(provider: provider.id, model: $0.name) }
         }
+    }
+
+    private func models(on route: AIRouteChoice) -> [AIModelRef] {
+        switch route {
+        case .models(let models): return models
+        case .tier(let tier): return aiSettings.route(for: .tier(tier)).models
+        }
+    }
+
+    private var routeProblem: String? {
+        guard draft.enablesAgent, draft.stored?.origin.isOutsideProgram != true else { return nil }
+        guard let route = draft.agentModel else { return "Choose the model for this hook." }
+        let refs = models(on: route)
+        guard !refs.isEmpty, refs.allSatisfy(connectedModels.contains) else { return "Choose a connected model that supports agent runs." }
+        let cli = refs.compactMap { ref in aiSettings.providers.first { $0.id == ref.provider } }.filter { provider in
+            if case .commandLine = provider.kind { return true }
+            return false
+        }
+        return cli.isEmpty || cli.count == refs.count ? nil : "Choose only API models or only command-line models for this route."
+    }
+
+    private var agentRoutes: [AIRouteChoice] {
+        var routes = AIModelTier.allCases.map(AIRouteChoice.tier) + connectedModels.map { .models([$0]) }
         if let current = draft.agentModel, !routes.contains(current) { routes.append(current) }
         return routes
     }
 
     private func save() {
-        let data = Data(draft.script.utf8)
-        if let problem = HookScriptRunner.problem(in: data) {
-            self.problem = problem
-            return
-        }
-        if let sentence = draft.sitePatterns().problem {
-            problem = sentence
-            return
-        }
-        if !draft.isEverywhere && draft.chosenPlaces.isEmpty {
-            problem = "Choose where the hook runs."
-            return
-        }
-        if draft.kind == .titleChanged && draft.titleSources.isEmpty {
-            problem = "Choose which title changes start the hook."
-            return
-        }
-        if draft.tabKinds.isEmpty == false && draft.tabKinds.isDisjoint(with: ScriptHookDraft.offeredTabKinds) {
-            problem = "Choose the tabs the hook runs for."
-            return
-        }
-        let trigger = draft.trigger
-        var hook = draft.stored ?? Hook(name: draft.name, trigger: trigger)
-        hook.name = draft.name.trimmingCharacters(in: .whitespaces)
-        if hook.trigger.kind != trigger.kind { hook.timing = HookTiming(for: trigger) }
-        hook.trigger = trigger
-        hook.filter = draft.filter
-        var permissions = hook.grant.permissions.intersection([.agent])
-        if draft.readsTabs { permissions.insert(.tabs) }
-        if draft.renamesTabs { permissions.insert(.tabsRename) }
-        hook.grant.permissions = permissions
-        // A script the user wrote or changed is the user's, which the agent hook editor no longer writes.
-        if case .javaScript(let digest, true) = hook.script, HookStore.digest(of: data) != digest { hook.script = .javaScript(digest: digest, generated: false) }
         do {
-            if hook.origin.isOutsideProgram == false { try draft.configureAgent(in: &hook) }
+            let (hook, data) = try draft.makeHook()
             if draft.stored == nil {
                 try registry.add(hook, script: data)
             } else {

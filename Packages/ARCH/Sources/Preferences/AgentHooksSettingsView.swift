@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Agent Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Agent Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, and every hook in run order. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. New Agent Hook…, the presets, and Allow Shell Scripts come with the tasks that build them.
+// Settings ▸ AI ▸ Agent Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Agent Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, and every hook in run order. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
 import Agent
 import AI
 import Browsing
@@ -8,6 +8,7 @@ import SwiftUI
 
 struct AgentHooksPage: View {
     @ObservedObject var registry: HookRegistry
+    @ObservedObject private var aiSettings = AIService.shared.settings
     /// The front main window's selected tab, for Run on Current Tab.
     let currentTab: () -> UUID?
     @State private var sheet: ScriptHookDraft?
@@ -37,6 +38,10 @@ struct AgentHooksPage: View {
             }
             HStack {
                 Spacer()
+                if aiSettings.providers.contains(where: { provider in provider.models.contains { provider.capabilities(of: $0).contains(.agent) } }) {
+                    Button("New Agent Hook…") { sheet = ScriptHookDraft(new: registry.places, guided: true) }
+                        .disabled(!registry.isReady)
+                }
                 Button("New Script Hook…") { sheet = ScriptHookDraft(new: registry.places) }
                     .disabled(!registry.isReady)
             }
@@ -58,7 +63,7 @@ struct AgentHooksPage: View {
             }
         }
         .sheet(item: $sheet) { draft in
-            ScriptHookSheet(registry: registry, draft: draft) { sheet = nil }
+            ScriptHookSheet(registry: registry, draft: draft, currentTab: currentTab) { sheet = nil }
         }
         .confirmationDialog("Allow this hook’s provider destinations?", isPresented: Binding(get: { providerReview != nil }, set: { if !$0 { providerReview = nil } }),
                             titleVisibility: .visible, presenting: providerReview) { review in

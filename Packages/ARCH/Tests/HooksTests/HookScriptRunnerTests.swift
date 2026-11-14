@@ -168,6 +168,31 @@ extension PluginValue {
                               documents: documents ?? [tab.id: tab.url!], closedTab: nil, knownProviders: [:], requestDidEnd: { _ in })
     }
 
+    @Test func theGeneratedCloseScriptPreviewsOnlyTheTabsLeftInTheSpace() async throws {
+        defer { harness.cleanUp() }
+        var call: AgentRunRequest?
+        harness.javaScriptRunner = HookScriptRunner(host: plugins, allowsAI: { _ in true }) { request, _ in
+            call = request
+            return AgentRunResult(status: .completed, reply: "Preview reply")
+        }
+        let registry = try await harness.start()
+        var draft = instantHook("Close preview", .tabClosed(reasons: [.user]))
+        let options = AgentRunOptions(prompt: "Name the remaining tab.", model: .tier(.fast), tools: ["rename_tab"])
+        AgentHookTemplate.configure(&draft, options: options, dailyLimit: 20, delay: .zero, generated: true)
+        let selected = harness.tab("/selected"), left = harness.tab("/left"), elsewhere = harness.tab("/home", space: HookIDs.home)
+        [selected, left, elsewhere].forEach(harness.host.show)
+        let result = await registry.testDraft(draft, script: Data(AgentHookTemplate.script(for: .tabClosed).utf8), onTab: selected.id, applying: false)
+        guard case .finished(.completed(_, let use)) = result else { Issue.record("The generated script failed: \(result)"); return }
+        let request = try #require(call)
+        #expect(request.tabs == [left.id] && request.options.closedTab == selected.id && request.options.dryRun)
+        #expect(request.options.model == options.model && request.options.prompt == options.prompt)
+        #expect(request.knownProviders?[harness.provider.id] == HookKnownProvider(harness.provider).destination)
+        #expect(request.closedTab?.url == selected.url && use?.reply == "Preview reply")
+        #expect(registry.hooks.isEmpty && harness.host.tab(selected.id) != nil)
+        #expect(!harness.service.features.contains { $0.id == request.feature })
+        #expect(!FileManager.default.fileExists(atPath: harness.folder.appendingPathComponent("hooks.json").path))
+    }
+
     @Test func aJavaScriptAgentCallUsesTheSavedRouteAndTheInvocationsAuthority() async throws {
         defer { harness.cleanUp() }
         let tab = harness.tab("/article", id: Probe.covered)
