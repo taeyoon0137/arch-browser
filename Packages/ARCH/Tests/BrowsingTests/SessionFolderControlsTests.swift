@@ -9,7 +9,7 @@ import Testing
 @testable import Agent
 @testable import Browsing
 
-@MainActor @Suite struct SessionFolderControlsTests {
+@MainActor @Suite(.serialized) struct SessionFolderControlsTests {
     private func fixture(in directory: URL, client: any AIClient) throws -> (BrowserSession, BrowserAgentHost, AgentService) {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
@@ -61,9 +61,8 @@ import Testing
         #expect(service.session(withID: first.id) === first && first.isTurnRunning)
         window.switchToSpace(home.id)
         await window.perform(.stop, on: oldFolder, reviewed: first)
-        let deadline = ContinuousClock.now + .seconds(2)
-        while first.isTurnRunning && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(first.state == .stopped && first.statusText == "Stopped" && second.isTurnRunning)
+        try #require(await eventually { first.state == .stopped })
+        #expect(first.statusText == "Stopped" && second.isTurnRunning)
         await window.perform(.keepTabs, on: oldFolder, reviewed: first)
         #expect(window.agentSession(of: oldFolder) == nil)
         #expect(browser.tabs.first { $0.id == kept.id }?.agentOwnerID == nil)
