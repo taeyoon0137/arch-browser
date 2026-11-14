@@ -131,7 +131,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 | `ARCHDefaultEngine` | A raw value of `EngineKind` | `EngineRegistry` reads it for the next new tab and uses its usual fallback if that engine is missing on this Mac |
 | `ARCHSearchEngine` | A raw value of `SearchEngine` | The palette reads it for the next search |
 | `ARCHArchiveAfterHours` | A whole number from 0 to 168 | The session reads it at its next archive pass |
-| `ARCHUnloadAfterHours` | A whole number from 0 to 168, from III.17; `SyncedSettings.list` adds it after `ARCHArchiveAfterHours` once III.17 is on `main` | The session reads it at its next unload pass |
+| `ARCHUnloadAfterHours` | A whole number from 0 to 168. Zero turns off idle unloading. | The session reads it at its next unload pass |
 | `ARCHOpensLinksInSmallWindow` | `true` or `false` | The app shell reads it for the next link from another app |
 | `ARCHAskWhereToSaveDownloads` | `true` or `false` | Every engine context follows it at once |
 

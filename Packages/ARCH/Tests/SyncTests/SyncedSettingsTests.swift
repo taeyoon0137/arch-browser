@@ -36,6 +36,7 @@ import Testing
             EngineRegistry.defaultEngineKey,
             SearchEngine.defaultsKey,
             BrowserSession.archiveAfterHoursKey,
+            TabUnloading.unloadAfterHoursKey,
             BrowserSession.opensLinksInSmallWindowKey,
             BrowserSession.asksWhereToSaveDownloadsKey,
         ])
@@ -46,10 +47,11 @@ import Testing
         #expect(values(SearchEngine.defaultsKey) == .oneOf(SearchEngine.allCases.map(\.rawValue)))
         // Settings ▸ Sidebar's stepper takes 0 to 168 hours.
         #expect(values(BrowserSession.archiveAfterHoursKey) == .wholeNumber(0...168))
+        #expect(values(TabUnloading.unloadAfterHoursKey) == .wholeNumber(0...168))
         #expect(values(BrowserSession.opensLinksInSmallWindowKey) == .flag)
         #expect(values(BrowserSession.asksWhereToSaveDownloadsKey) == .flag)
         // Paths, shortcuts, zoom, and keys that only a later build lists stay on each Mac.
-        for key in ["ARCHDownloadsFolder", "ARCHShortcuts", "ARCHZoomFactorsByHost", "ARCHSyncEnabled", "ARCHUnloadAfterHours"] {
+        for key in ["ARCHDownloadsFolder", "ARCHShortcuts", "ARCHZoomFactorsByHost", "ARCHSyncEnabled", "ARCHFutureSetting"] {
             #expect(SyncedSettings.setting(forKey: key) == nil)
         }
     }
@@ -71,7 +73,7 @@ import Testing
 
     @Test func savesEachValueAsTheAppReadsIt() {
         let settings = SyncedSettings(defaults: store)
-        for (key, text) in [(appearance, "dark"), (tintStrength, "strong"), (EngineRegistry.defaultEngineKey, "webKit"), (searchEngine, "duckDuckGo"), (archiveAfterHours, "24"), (BrowserSession.opensLinksInSmallWindowKey, "false"), (BrowserSession.asksWhereToSaveDownloadsKey, "true")] {
+        for (key, text) in [(appearance, "dark"), (tintStrength, "strong"), (EngineRegistry.defaultEngineKey, "webKit"), (searchEngine, "duckDuckGo"), (archiveAfterHours, "24"), (TabUnloading.unloadAfterHoursKey, "4"), (BrowserSession.opensLinksInSmallWindowKey, "false"), (BrowserSession.asksWhereToSaveDownloadsKey, "true")] {
             #expect(settings.apply(record(key, text)))
         }
         #expect(store.string(forKey: appearance).flatMap(AppearanceSetting.init(rawValue:)) == .dark)
@@ -80,6 +82,7 @@ import Testing
         #expect(store.string(forKey: searchEngine).flatMap(SearchEngine.init(rawValue:)) == .duckDuckGo)
         // Integers and Booleans, as `@AppStorage` writes them.
         #expect(store.object(forKey: archiveAfterHours) as? Int == 24)
+        #expect(store.object(forKey: TabUnloading.unloadAfterHoursKey) as? Int == 4)
         #expect(store.object(forKey: BrowserSession.opensLinksInSmallWindowKey) as? Bool == false)
         #expect(store.object(forKey: BrowserSession.asksWhereToSaveDownloadsKey) as? Bool == true)
 
@@ -115,7 +118,7 @@ import Testing
         #expect(store.object(forKey: archiveAfterHours) as? Int == 12)
         #expect(store.object(forKey: BrowserSession.asksWhereToSaveDownloadsKey) as? Bool == true)
 
-        for key in ["ARCHUnloadAfterHours", "ARCHDownloadsFolder", "ARCHShortcuts"] {
+        for key in ["ARCHFutureSetting", "ARCHDownloadsFolder", "ARCHShortcuts"] {
             #expect(!settings.apply(record(key, "12")))
             #expect(store.object(forKey: key) == nil)
             #expect(settings.text(forKey: key) == nil)
@@ -159,7 +162,7 @@ import Testing
 
         // Unlisted keys and a value saved again are no change.
         store.set("/Users/Shared", forKey: "ARCHDownloadsFolder")
-        store.set(12, forKey: "ARCHUnloadAfterHours")
+        store.set(12, forKey: "ARCHFutureSetting")
         store.set("dark", forKey: appearance)
         #expect(settings.changedKeys().isEmpty)
 
@@ -198,7 +201,7 @@ import Testing
         store.set("bing", forKey: searchEngine)
         store.set(12, forKey: archiveAfterHours)
         // A newer build wrote a search engine and a kind of tint value that this build refuses, and a key that only it lists.
-        let mirror = [record(appearance, "dark"), record(tintStrength, .number(2)), record(searchEngine, "newer-engine"), record("ARCHUnloadAfterHours", "12")]
+        let mirror = [record(appearance, "dark"), record(tintStrength, .number(2)), record(searchEngine, "newer-engine"), record("ARCHFutureSetting", "12")]
         let settings = SyncedSettings(defaults: store)
         #expect(!settings.apply(mirror[2]))
 
