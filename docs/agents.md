@@ -926,6 +926,8 @@ Fixture pages: a fresh `ai.json` excludes `file:` and `local-network` (`AISitePa
 
 ## Facts
 
+- A signed debug bundle on Chromium and WebKit exercised three clarification cards on each engine with isolated profiles and a loopback HTTP model. Selecting a choice and submitting typed text returned the chosen answer. Cancel returned a denial. Return in the answer field left the question open, and the agents indicator reopened a waiting conversation from another panel. Each engine made six model requests.
+
 - On November 14, 2026, a signed Chromium app sent four requests to a loopback HTTP model. The model listed the shared tab and read its text. The third request contained the article title, heading and link text. After the user chose Stop Sharing and sent a follow-up, the fourth request replaced the earlier result with a refusal and contained none of those three strings. The input field’s value appeared in none of the requests.
 
 - In a signed debug bundle with two loopback providers, a draft kept its question and model through switching Agent Tasks off, choosing Open Features, and switching it back on. Removing the explicitly selected provider required a new choice, even with another eligible model connected. Removing the final provider made Open Providers select the Providers page from Features. The session made no model requests during these checks.
