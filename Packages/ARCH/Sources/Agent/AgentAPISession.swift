@@ -9,6 +9,12 @@ import Foundation
     var tools: [AgentTool] { get }
     /// Runs one call through the tool host and its rules. Stop and `end()` cancel the task that awaits the call: a call that waits, as on an approval card, withdraws the approval as denied and returns at once, and the session drops its result.
     func run(_ call: AgentToolCall) async -> AgentToolResult
+    /// Captures the source grants before the call suspends. The resulting check runs on each HTTP round and attempt.
+    func historyCheck(for call: AgentToolCall) -> (@MainActor @Sendable (AIToolResult) -> AIToolResult)?
+}
+
+extension AgentSessionTools {
+    public func historyCheck(for call: AgentToolCall) -> (@MainActor @Sendable (AIToolResult) -> AIToolResult)? { nil }
 }
 
 @MainActor public final class AgentAPISession {
@@ -186,7 +192,15 @@ import Foundation
             return AIToolResult(callID: call.id, parts: [.text("The arguments of \(call.name) are not a JSON object.")], isError: true)
         }
         let agentCall = AgentToolCall(name: call.name, arguments: arguments)
-        return Self.result(await tools.run(agentCall), of: agentCall, callID: call.id)
+        let check = tools.historyCheck(for: agentCall)
+        var result = Self.result(await tools.run(agentCall), of: agentCall, callID: call.id)
+        if !result.isError && result.parts.contains(where: { part in
+            switch part {
+            case .page, .file: return true
+            default: return false
+            }
+        }) { result.checkingAccess = check }
+        return result
     }
 
     /// A call's arguments as an object; empty arguments, which some providers send for a tool without parameters, are none.
