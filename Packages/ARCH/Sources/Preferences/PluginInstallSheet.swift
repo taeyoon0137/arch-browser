@@ -82,8 +82,8 @@ struct PluginInstallSheet: View {
                     .padding(20)
             }
         }
-        // A plugin that AI wrote shows its sources wider. The review, whose form scrolls, is no taller than Settings ▸ Plugins, and the store sheet and the last step take the height of what they show.
-        .frame(width: isWrittenByAI ? 600 : 480, height: isStoreSheet || isLastStep ? nil : 520)
+        // A plugin that AI wrote shows its sources wider, as wide as the Settings window, so the sheet stays within it. The review, whose form scrolls, is no taller than Settings ▸ Plugins, and the store sheet and the last step take the height of what they show.
+        .frame(width: isWrittenByAI ? sectionWidth : 480, height: isStoreSheet || isLastStep ? nil : 520)
         .interactiveDismissDisabled()
     }
 

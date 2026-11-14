@@ -274,7 +274,8 @@ struct SidebarTopRow: View {
                 if tab?.isLoading == true {
                     SidebarIconButton(symbol: "xmark", label: "Stop Loading", shortcut: shortcut("stopLoading"), action: windowModel.stopLoading)
                 } else {
-                    SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: shortcut("reload"), action: windowModel.reload).disabled(tab == nil)
+                    // Disabled where Reload Page is, as under an internal page, which it does not reach.
+                    SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: shortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
                 }
             }
         }

@@ -89,7 +89,7 @@ private struct SmallWindowTopRow: View {
             if tab.isLoading {
                 SidebarIconButton(symbol: "xmark", label: "Stop Loading", shortcut: session.menuShortcut("stopLoading"), action: windowModel.stopLoading)
             } else {
-                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: session.menuShortcut("reload"), action: windowModel.reload)
+                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: session.menuShortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
             }
             LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)

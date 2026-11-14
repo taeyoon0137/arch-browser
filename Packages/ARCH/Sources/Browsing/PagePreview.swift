@@ -95,8 +95,7 @@ struct PagePreviewPanel: View {
                         .controlSize(.small)
                         .scaleEffect(0.7)
                 } else {
-                    // The address pill's symbols.
-                    Image(systemName: preview.url.isFileURL ? "doc" : preview.url.scheme == "https" ? "lock.fill" : "globe")
+                    Image(systemName: AddressPillView.symbol(for: preview.url, internalPage: nil))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
                 }

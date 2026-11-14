@@ -71,16 +71,18 @@ private struct TabSwitcherRow: View {
                 .lineLimit(1)
             Spacer(minLength: 8)
             if let site {
+                // Keeps its width, so a long title truncates first, as in the palette's rows.
                 Text(site)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .layoutPriority(1)
             }
         }
         .padding(.horizontal, 10)
         .frame(height: TabSwitcherView.rowHeight)
         .background(RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius - PaletteRowHighlight.panelInset, style: .continuous)
-            .fill(isHighlighted ? Color.accentColor.opacity(0.24) : .clear))
+            .fill(isHighlighted ? Color.accentColor.opacity(PaletteRowHighlight.selectedOpacity) : .clear))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isHighlighted ? .isSelected : [])
     }

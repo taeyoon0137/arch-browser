@@ -62,6 +62,15 @@ struct CommandPaletteView: View {
         return "Search for \u{201C}\(trimmed)\u{201D}"
     }
 
+    /// The primary row's symbol while another row has the selection, so that the Return symbol marks only the row Return runs: the address pill's symbol for an internal page or an address, else the search's.
+    private var actionSymbol: String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if let page = InternalPage(address: trimmed) { return AddressPillView.symbol(for: nil, internalPage: page) }
+        if let search = session.siteSearch.match(text), search.shortcut.resultsURL(for: search.query) != nil { return "magnifyingglass" }
+        if let url = BrowserSession.url(forInput: trimmed) { return AddressPillView.symbol(for: url, internalPage: nil) }
+        return "magnifyingglass"
+    }
+
     /// Ask About This Page appears once the typed words begin its name, while the selected tab's page can be asked about.
     private var offersAskAboutPage: Bool {
         let words = text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
@@ -154,7 +163,7 @@ struct CommandPaletteView: View {
     @ViewBuilder private func rowView(for row: PaletteItem, isSelected: Bool) -> some View {
         switch row {
         case .primary:
-            PaletteRow(symbol: "arrow.turn.down.left", title: actionLabel, isPrimary: true, isSelected: isSelected)
+            PaletteRow(symbol: isSelected ? "arrow.turn.down.left" : actionSymbol, title: actionLabel, isPrimary: true, isSelected: isSelected)
         case .typedStore:
             PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.typedTitle, isSelected: isSelected)
         case .command(let command):
@@ -542,6 +551,8 @@ extension View {
 struct PaletteRowHighlight: ViewModifier {
     static let panelRadius: CGFloat = 26
     static let panelInset: CGFloat = 8
+    /// The accent's opacity behind the row that the keyboard selects, here and in the tab switcher, which shares the panel.
+    static let selectedOpacity = 0.16
 
     var isSelected = false
     @State private var isHovering = false
@@ -549,7 +560,7 @@ struct PaletteRowHighlight: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(RoundedRectangle(cornerRadius: Self.panelRadius - Self.panelInset, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(isHovering ? 0.24 : 0.16) : Color.primary.opacity(isHovering ? 0.07 : 0)))
+                .fill(isSelected ? Color.accentColor.opacity(isHovering ? 0.24 : Self.selectedOpacity) : Color.primary.opacity(isHovering ? 0.07 : 0)))
             .onHover { isHovering = $0 }
     }
 }

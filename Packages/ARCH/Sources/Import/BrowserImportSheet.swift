@@ -233,11 +233,15 @@ struct BrowserImportSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            // The app's warning color, as the plugin install sheet's warnings use.
+            // An orange triangle beside text in the primary color, as the plugin install sheet's warnings show: orange text falls below the contrast that body text needs.
             if model.checkedPinnedTabCount > BrowserImportModel.pinnedTabLimit {
-                Label("The checked items add \(model.checkedPinnedTabCount.formatted()) pinned tabs, which load whenever Arch opens.", systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
+                Label {
+                    Text("The checked items add \(model.checkedPinnedTabCount.formatted()) pinned tabs, which load whenever Arch opens.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+                .font(.callout)
             }
             buttons
         }
@@ -270,8 +274,15 @@ struct BrowserImportSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(6)
         } label: {
-            Text("Search Engine")
-                .font(.headline)
+            // A symbol in the app icons' box, so that its name starts where the browsers' names do.
+            Label {
+                Text("Search Engine")
+                    .font(.headline)
+            } icon: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15))
+                    .frame(width: 18, height: 18)
+            }
         }
     }
 

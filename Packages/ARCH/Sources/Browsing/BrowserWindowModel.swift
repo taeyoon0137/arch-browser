@@ -805,7 +805,7 @@ public final class BrowserWindowModel: ObservableObject {
         if let preview { return preview.webContents.navigationController.stop() }
         selectedTab?.webContents.navigationController.stop()
     }
-    /// Whether the commands above have a page to act on, the preview's while the panel shows, for the menu bar.
+    /// Whether the commands above have a page to act on, the preview's while the panel shows, for the menu bar and, for Reload, the sidebar's and the small window's buttons.
     public var canGoBack: Bool { preview?.webContents.canGoBack ?? (selectedTab?.canGoBack == true) }
     public var canGoForward: Bool { preview?.webContents.canGoForward ?? (selectedTab?.canGoForward == true) }
     public var canReload: Bool { preview != nil || (internalPage == nil && selectedTab != nil) }

@@ -265,8 +265,7 @@ extension SidebarDragState {
     }
 }
 
-/// Shows where a tab dragged over the page area opens in split view, over the half of the pane on the side it takes.
-/// In the current space's tint, as the focused pane's ring over the same pages.
+/// Shows where a tab dragged over the page area opens in split view, over the half of the pane on the side it takes, in the current space's tint, as the focused pane's ring over the same pages.
 struct SplitDropIndicator: View {
     @ObservedObject var sidebarDrag: SidebarDragState
     @Environment(\.spaceTheme) private var theme

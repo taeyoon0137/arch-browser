@@ -149,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// What stops when Arch quits.
     private static func quitWarning(downloads: Int, runsProgram: Bool) -> String {
         switch (downloads, runsProgram) {
-        case (0, _): return "The program running in the terminal will stop."
+        case (0, _): return "A program is running in the terminal. It stops when Arch quits."
         case (1, false): return "A download has not finished. It stops when Arch quits."
         case (_, false): return "\(downloads) downloads have not finished. They stop when Arch quits."
         case (1, true): return "A download has not finished, and a program is running in the terminal. Both stop when Arch quits."
