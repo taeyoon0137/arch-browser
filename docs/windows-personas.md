@@ -554,7 +554,7 @@ Loading (`SessionStore.load()` keeps its signature)
 `normalized()` rules, in order
 1. Tab records, open and closed, without an ID or with a duplicate ID get a new one.
 2. A nil or empty `personas` becomes `[Persona(id: Persona.defaultID, name: "Default")]`. A list without the default Persona gets it at the front.
-3. A space or favorite without `personaID` takes the default Persona. One whose Persona is unknown takes the first Persona, the orphan rule of `docs/sync.md`.
+3. A space or favorite without `personaID` takes the default Persona. One whose Persona is unknown takes the first Persona. This repairs a local file. Sync deletes a missing Persona's items (sync decision 11 of `docs/sync.md`).
 4. Spaces are stably sorted by Persona order, so each Persona's spaces are contiguous and keep their order.
 5. A Persona without spaces gets a space named "Personal", as sync's orphan rule and the first launch do.
 6. An open tab record takes its space's Persona. A closed record keeps its `personaID`, or takes its space's Persona, or the default Persona. Records whose space is missing are skipped at restore, as today.
@@ -671,7 +671,7 @@ Plugins (V.11)
 
 Sync (V.9)
 - `Persona.defaultID` maps to the record name `default`; other Personas use their UUID string. Step 1's `TabRecord.id` supplies the stable tab record names that `docs/sync.md` asks for.
-- `normalized()` uses sync's orphan rules: the first Persona, and a "Personal" space for a Persona without spaces.
+- `normalized()` gives a Persona without spaces a "Personal" space, as sync's orphan rule does. A tab keeps its Persona for life, so sync deletes a missing Persona's items rather than moving them to the first Persona (sync decision 11).
 - Sync applies changes through the session's Persona, space, favorite, and tab mutators, which select nothing. An incoming Persona deletion calls `deletePersona`.
 - Window records, frames, small windows, and `removedPersonaIDs` never sync.
 
