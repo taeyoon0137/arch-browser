@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model and merge. Queue tasks V.9.2 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model and merge. Queue tasks V.9.3 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, the `Sync` module creates no CloudKit object and makes no network request.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -21,7 +21,7 @@
 - Settings stores its choices in `UserDefaults`. Download settings apply to every engine context through `UserDefaults.didChangeNotification`. Appearance applies only at launch and in Settings' `onChange`.
 - The Settings window lists General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. `Preferences` depends on `Browsing`. The Delete Persona sheet's text is in `BrowserWindowModel.swift`.
 - `scripts/bundle_app.sh` signs the app with `codesign --deep`, without entitlements or a provisioning profile.
-- The `Sync` module holds `SyncRecord` and `SyncMerge`, without CloudKit code. No other target depends on it yet.
+- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, and `SyncDiff`, without CloudKit code. No other target depends on it yet.
 
 ### CloudKit
 
@@ -94,7 +94,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 - `persona`, `space`, `folder`, and `parent` are `CKRecord.Reference` values with no delete action. The Mac that deletes a parent also deletes or moves its children in the same batch. A folder at the top of its space's pinned list has no `parent`, and a tab outside folders has no `folder`. A tab's and a folder's `persona` never changes (decision 11).
 - A `Tab` record's `url` and `title` are the tab's saved page (decision 2). `customTitle` is the user's name for the tab.
-- `order` is a `Double` sort key among the record's siblings: spaces and favorites within their Persona, folders within their parent folder or among their space's top-level pinned folders, and pinned tabs within their folder or among their space's pinned tabs outside folders. Folders and tabs keep separate keys because a list shows folders before tabs. A move writes only the moved record. Its key becomes the midpoint of its new neighbors' keys. When no `Double` fits between two neighbors, the Mac renumbers that parent's children in one batch. Equal keys sort by record name.
+- `order` is a `Double` sort key among the record's siblings: spaces and favorites within their Persona, folders within their parent folder or among their space's top-level pinned folders, and pinned tabs within their folder or among their space's pinned tabs outside folders. Folders and tabs keep separate keys because a list shows folders before tabs. A move writes only the moved record. Its key becomes the midpoint of its new neighbors' keys. Several records placed between the same two neighbors take evenly spaced keys, a record past either end of the list takes a key 1 beyond the end's, and a new list numbers from 1. When no `Double` fits between two neighbors, the Mac renumbers that parent's children 1, 2, 3, and so on in one batch. Equal keys sort by record name, and a record without a usable key sorts after the others.
 - `fieldModifiedAt` gives each field's edit time: when a Mac found that field's latest edit. It also keeps the times of fields the record has lost, such as `folder` on a tab that left its folder, and of fields this build does not know. A field keeps its time until its value changes. Conflicts compare these times (decision 3). It is one encrypted string holding a JSON object from raw field name to seconds since 2001-01-01 (`Date.timeIntervalSinceReferenceDate`).
 - `modifiedAt` is the time a Mac found the record's latest edit. A merge unit whose fields have no time in `fieldModifiedAt` counts as edited then.
 - Edits made while sync was off count as made when sync turns on again, because `session.json` keeps no edit times. A first sync therefore keeps the server's values for records that both sides have (decision 4).
@@ -121,8 +121,8 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 ## Mapping the session store to records
 
-- `session.json` holds no sync fields. `sync.json`, beside it in Application Support, holds the sync engine's state serialization, each synced item's last known server record (the mirror) archived with secure coding, and each pending change's field edit times. Deleting `sync.json` makes the next sync a first sync.
-- Outgoing changes: session saves already combine changes within 0.5 seconds. After each save, `Browsing` hands Sync the sidebar's syncable state: the Personas, spaces, pinned folders, favorites, and pinned tabs in sidebar order, without open tabs and folders, a live folder's item tabs, or a feed folder whose address is in the Keychain. Sync turns the state into records and compares them with the mirror. Each difference adds a `.saveRecord` or `.deleteRecord` pending change to `CKSyncEngine.State`. A record that changes again before sending remains one pending change. A field takes the time when Sync finds its new value and keeps it while the value stays. Sync finds settings changes the same way on `UserDefaults.didChangeNotification`. This comparison includes edits made while sync was off, so they upload when it turns on again.
+- `session.json` holds no sync fields. `sync.json`, beside it in Application Support, holds the sync engine's state serialization, each synced item's last known server record (the mirror) archived with secure coding, and each pending save as the last comparison returned it, with its field values and edit times. The next comparison needs those values to tell whether a field still holds the value it found. Deleting `sync.json` makes the next sync a first sync.
+- Outgoing changes: session saves already combine changes within 0.5 seconds. After each save, `Browsing` hands Sync the sidebar's syncable state: the Personas, spaces, pinned folders, favorites, and pinned tabs in sidebar order, without open tabs and folders, a live folder's item tabs, or a feed folder whose address is in the Keychain. Sync turns the state into records and compares them with the mirror (`SyncDiff`). The result lists every change still to send and replaces the pending changes in `CKSyncEngine.State`: a `.saveRecord` for each record that differs from its mirror copy, and a `.deleteRecord` for each mirror record that the state lacks. A record that changes again before sending remains one pending change, and one changed back needs none. A field with the mirror's value keeps the mirror's time. Any other field takes the time when Sync finds its new value and keeps it while the value stays. The sidebar and the settings compare apart, each with the mirror's records of its own types. Sync finds settings changes the same way on `UserDefaults.didChangeNotification`. This comparison includes edits made while sync was off, so they upload when it turns on again.
 - The record provider builds each outgoing record from the mirror's copy and sets the known fields. Fields written by newer builds survive with their edit times.
 - Pinning a tab creates its `Tab` record. Unpinning it or Delete Tab deletes the record. Closing a pinned tab unloads it (III.17) and changes nothing. The record's `url` and `title` change only when the saved page changes (decision 2).
 - Incoming changes: Sync merges each fetched record with the local values field by field, using the mirror's copy as the base (decision 3). It applies the result to `BrowserSession` on the main actor through methods that insert, update, move, or delete a Persona, space, pinned folder, favorite, or pinned tab, or apply a setting. These methods select nothing and keep every tab in its Persona. Sync then updates the mirror so applied changes are not sent back. Within a fetch, parents apply before children: Personas, spaces, folders from the top level down, favorites, then tabs. A child whose parent has not arrived waits until the fetch ends.
@@ -143,7 +143,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
   4. Folders whose parents form a cycle, as when two Macs each move one folder under the other, are cut at the folder whose record name sorts first. It moves to the top of its space's pinned list, and the others stay under it.
   5. A folder whose parent is in another space takes the parent's space, and so does a pinned tab whose folder is in another space. Each stays in its folder, and the folder's contents follow it.
   6. A folder below the fourth level (bookmark rule 6 of `docs/bookmarks.md`) moves up to its ancestor at the third level. Applied from the top level down, a deeper subtree flattens into the fourth level.
-- Order keys: the local arrays keep the order. The `order` keys live only in the mirror. When the comparison finds siblings out of order, moved items get new keys. The others keep theirs.
+- Order keys: the local arrays keep the order. The `order` keys live only in the mirror. The comparison keeps the keys of the largest set of siblings already in order (the longest increasing subsequence) and gives the others new keys, so one move writes one record. A sibling keeps the key of its pending save, else of its mirror copy, when that copy is in the same sibling list.
 
 ## First sync on a Mac
 
@@ -174,7 +174,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 ## Offline behavior
 
-- Edits go into `session.json` at once. Pending changes live in the sync engine's state, which Sync writes to `sync.json` at every `stateUpdate` event, with each pending change's field edit times. They survive quitting. Sync sends them after a later launch.
+- Edits go into `session.json` at once. Pending changes live in the sync engine's state, which Sync writes to `sync.json` at every `stateUpdate` event, with each pending save's field values and edit times. They survive quitting. Sync sends them after a later launch.
 - `CKSyncEngine` retries network failures, rate limits, and service unavailability using CloudKit's requested delays. Sync handles the failures it can fix: `zoneNotFound` creates the zone and sends again, `serverRecordChanged` merges, and `unknownItem` applies the deletion.
 - `CKSyncEngine` fetches when CloudKit sends a change notification and at launch. Sync also calls `fetchChanges()` when the app becomes active to cover missed notifications.
 - A Mac that was offline for weeks sends its pending changes when it reconnects. Conflicts compare each field's edit time, so its old edits do not overwrite newer ones from other Macs, even after it edited another field of the same record.
@@ -224,8 +224,8 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 |---|---|---|
 | `Sync/SyncRecord.swift` | Record types, names, field values, merge units, field edit times, `modifiedAt`, and `schemaVersion`, without CloudKit types | Built |
 | `Sync/SyncMerge.swift` | Merge by field and merge unit against the mirror's copy, a first write, or a first sync | Built |
-| `Sync/SyncOrderKeys.swift` | Order keys: midpoints, renumbering, and sorting | V.9.2 |
-| `Sync/SyncDiff.swift` | Pending saves and deletions from the current records and the mirror | V.9.2 |
+| `Sync/SyncOrderKeys.swift` | Order keys: midpoints, renumbering, and sorting | Built |
+| `Sync/SyncDiff.swift` | Pending saves and deletions from the current records and the mirror | Built |
 | `Sync/SyncCloudKitRecords.swift` | `SyncRecord` values to `CKRecord` values and back | V.9.3 |
 | `Sync/SyncMirror.swift` | Reads and writes `sync.json` | V.9.3 |
 | `Sync/SyncedSettings.swift` | The Settings list: reading, validating, and applying values | V.9.4 |
@@ -245,7 +245,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 ## User steps
 
-Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.2 to V.9.13.
+Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.3 to V.9.13.
 
 1. In the Apple Developer account, make an explicit App ID for the app's bundle identifier (`CFBundleIdentifier` in `scripts/bundle_app.sh`) with the iCloud capability, CloudKit selected, and Push Notifications.
 2. Create an iCloud container and assign it to the App ID. Its identifier stays out of the repository.
