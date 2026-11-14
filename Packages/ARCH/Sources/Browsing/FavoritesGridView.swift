@@ -3,60 +3,91 @@ import AppKit
 import ARCHEngine
 import SwiftUI
 
+/// The number of shortcuts in a full row. The last row shares its available width among the remaining shortcuts.
+public enum FavoriteTileLayout {
+    public static let columnsKey = "ARCHFavoriteColumns"
+    public static let defaultColumns = 4
+    public static let choices = 1...4
+    static let spacing: CGFloat = 6
+    static let height: CGFloat = 44
+
+    public static func columnCount(_ stored: Int) -> Int {
+        min(max(stored, choices.lowerBound), choices.upperBound)
+    }
+}
+
+/// Keeps each favorite in the same view while it crosses rows during a drag.
+struct FavoriteRows: Layout {
+    let columns: Int
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = (subviews.count + columns - 1) / columns
+        return CGSize(width: proposal.width ?? SidebarView.defaultWidth,
+                      height: CGFloat(rows) * FavoriteTileLayout.height + CGFloat(max(0, rows - 1)) * FavoriteTileLayout.spacing)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let spacing = FavoriteTileLayout.spacing
+        for (index, tile) in subviews.enumerated() {
+            let row = index / columns
+            let itemsInRow = min(columns, subviews.count - row * columns)
+            let width = max(0, bounds.width - CGFloat(itemsInRow - 1) * spacing) / CGFloat(itemsInRow)
+            let origin = CGPoint(x: bounds.minX + CGFloat(index % columns) * (width + spacing),
+                                 y: bounds.minY + CGFloat(row) * (FavoriteTileLayout.height + spacing))
+            tile.place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(width: width, height: FavoriteTileLayout.height))
+        }
+    }
+}
+
 /// Shows the favorites that every space of the window's Persona shares as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others, and holding Shift over one previews it.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
+    let personaID: Persona.ID
+    @AppStorage(FavoriteTileLayout.columnsKey) private var columns = FavoriteTileLayout.defaultColumns
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Each tile's frame in the window, used to find the tile under a dragged favorite.
     @State private var tileFrames: [UUID: CGRect] = [:]
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
     var body: some View {
-        // Each Persona has its own grid, so the tiles cross-fade as the window moves to another Persona's space.
-        ZStack {
-            grid(of: session.favorites(in: windowModel.personaID))
-                .id(windowModel.personaID)
-                .transition(.opacity)
+        let favorites = session.favorites(in: personaID)
+        FavoriteRows(columns: FavoriteTileLayout.columnCount(columns)) {
+            ForEach(favorites) { favorite in
+                tile(favorite, selected: windowModel.selectedFavoriteID)
+            }
         }
-        .animation(.easeInOut(duration: 0.25), value: windowModel.personaID)
         .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }
     }
 
-    private func grid(of favorites: [Favorite]) -> some View {
-        let selectedFavoriteID = windowModel.selectedFavoriteID
-        return LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(favorites) { favorite in
-                FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasOpenPage(favorite),
-                                 prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
-                    // The release that ends a drag does not also open the favorite.
-                    .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
-                    .accessibilityAction { windowModel.openFavorite(favorite) }
-                    .contextMenu {
-                        // The favorite's address and title are its saved page (bookmark rule 2); the commands act on its open tab.
-                        if let tab = session.openTab(ofFavorite: favorite) {
-                            FavoriteTabSavedPageItems(tab: tab, session: session)
-                            SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
-                        } else {
-                            Button("Use Current Page as Saved Page") {}.disabled(true)
-                        }
-                        Button("Edit Favorite\u{2026}") { windowModel.promptToEditFavorite(favorite) }
-                        Button("Copy Address") { BrowserSession.copyAddress(favorite.url) }
-                        Divider()
-                        Button("Close Tab") { session.closeFavorite(favorite) }
-                            .disabled(!session.hasTab(favorite))
-                        Divider()
-                        Button("Remove from Favorites") { session.removeFavorite(favorite) }
-                    }
-                    .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 13) { reorder(favorite, at: $0) })
-                    .modifier(ShiftHoverPreview { if sidebarDrag.item == nil { windowModel.previewFavorite(favorite) } })
+    private func tile(_ favorite: Favorite, selected: Favorite.ID?) -> some View {
+        FavoriteTileView(favorite: favorite, isActive: favorite.id == selected, isOpen: session.hasOpenPage(favorite),
+                         prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
+            // The release that ends a drag does not also open the favorite.
+            .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
+            .accessibilityAction { windowModel.openFavorite(favorite) }
+            .contextMenu {
+                // The favorite's address and title are its saved page (bookmark rule 2); the commands act on its open tab.
+                if let tab = session.openTab(ofFavorite: favorite) {
+                    FavoriteTabSavedPageItems(tab: tab, session: session)
+                    SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
+                } else {
+                    Button("Use Current Page as Saved Page") {}.disabled(true)
+                }
+                Button("Edit Favorite\u{2026}") { windowModel.promptToEditFavorite(favorite) }
+                Button("Copy Address") { BrowserSession.copyAddress(favorite.url) }
+                Divider()
+                Button("Close Tab") { session.closeFavorite(favorite) }
+                    .disabled(!session.hasTab(favorite))
+                Divider()
+                Button("Remove from Favorites") { session.removeFavorite(favorite) }
             }
-        }
+            .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 10) { reorder(favorite, at: $0) })
+            .modifier(ShiftHoverPreview { if sidebarDrag.item == nil { windowModel.previewFavorite(favorite) } })
     }
 
     /// The tile under the pointer makes room for the dragged favorite, with a light haptic at each new position.
     private func reorder(_ favorite: Favorite, at location: CGPoint) {
-        guard let target = session.favorites(in: windowModel.personaID).first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }) else { return }
+        guard let target = session.favorites(in: personaID).first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }) else { return }
         withAnimation(.easeInOut(duration: 0.15)) { session.moveFavorite(favorite.id, to: target) }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
@@ -94,12 +125,13 @@ struct FavoriteTileView: View {
 
     var body: some View {
         // The selection lies over the tile's own fill and adds the step a tab row's selection adds, so in the dark appearance a selected tile stays apart from a hovered one. As with the selected row, only the light appearance lifts it.
-        RoundedRectangle(cornerRadius: 13, style: .continuous)
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(SidebarFill.field.color(in: colorScheme))
-            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(isActive ? 1 : 0))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(isActive ? 1 : 0))
             .shadow(color: .black.opacity(isActive && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.hover.color(in: colorScheme).opacity(isHovering && !isActive ? 1 : 0)))
-            .aspectRatio(1.5, contentMode: .fit)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(SidebarFill.hover.color(in: colorScheme).opacity(isHovering && !isActive ? 1 : 0)))
+            .frame(maxWidth: .infinity)
+            .frame(height: FavoriteTileLayout.height)
             .overlay {
                 if let icon {
                     Image(nsImage: icon)

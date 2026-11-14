@@ -120,16 +120,7 @@ struct SidebarView: View {
                     AddressPillView(session: session, tab: nil)
                 }
                 // Space pages reach the sidebar's edges to slide in from outside. Clip before the negative margin, which would move the clip inward and cut off a lifted tab's shadow.
-                VStack(alignment: .leading, spacing: 8) {
-                    if !session.favorites(in: windowModel.personaID).isEmpty {
-                        FavoritesGridView(session: session)
-                            .padding(.horizontal, Self.inset)
-                            .transition(.opacity)
-                    }
-                    PluginSidebarItemsView(plugins: windowModel.plugins)
-                    if let agents = session.agents { ConnectedAgentRows(agents: agents) }
-                    SpacePagesView(session: session, translation: swipeTranslation)
-                }
+                SpacePagesView(session: session, translation: swipeTranslation)
                 .frame(maxHeight: .infinity, alignment: .top)
                 .padding(.top, 6)
                 .clipped()

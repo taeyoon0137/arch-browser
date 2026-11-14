@@ -108,11 +108,19 @@ struct GeneralSection: View {
 
 /// How long an unpinned tab stays open without being selected, and how long pinned tabs and favorites keep their pages without being shown (bookmark rule 5).
 struct SidebarSection: View {
+    @AppStorage(FavoriteTileLayout.columnsKey) private var favoriteColumns = FavoriteTileLayout.defaultColumns
     @AppStorage(BrowserSession.archiveAfterHoursKey) private var archiveAfterHours = BrowserSession.archiveAfterHoursByDefault
     @AppStorage(TabUnloading.unloadAfterHoursKey) private var unloadAfterHours = TabUnloading.unloadAfterHoursByDefault
 
     var body: some View {
         Form {
+            Picker("Favorites per row", selection: Binding(get: { FavoriteTileLayout.columnCount(favoriteColumns) }, set: { favoriteColumns = $0 })) {
+                ForEach(FavoriteTileLayout.choices, id: \.self) { count in
+                    Text(String(count)).tag(count)
+                }
+            }
+            .pickerStyle(.segmented)
+
             Section {
                 // A saved delay outside the choices, such as 5, stays listed and selected. The session archives nothing for 0 or less.
                 Picker("Archive unpinned tabs", selection: Binding(get: { max(archiveAfterHours, 0) }, set: { archiveAfterHours = $0 })) {

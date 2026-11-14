@@ -99,7 +99,7 @@ struct SidebarItemDragLayer: View {
             if let favorite = session.favorites.first(where: { $0.id == id }) {
                 FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasOpenPage(favorite),
                                  prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
-                    .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
         case .space(let id):
             // The symbol keeps the size and color it has in the strip, as a lifted favorite keeps its tile, so it does not jump on lift or when it settles back.

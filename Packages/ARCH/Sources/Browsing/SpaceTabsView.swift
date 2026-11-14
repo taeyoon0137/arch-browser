@@ -11,11 +11,21 @@ struct SpacePagesView: View {
 
     var body: some View {
         let index = session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             ForEach(session.spaces) { space in
                 let isCurrent = space.id == windowModel.currentSpaceID
-                SpaceTabsView(session: session, space: space)
-                    .frame(width: width)
+                VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
+                    if !session.favorites(in: space.resolvedPersonaID).isEmpty {
+                        FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
+                            .padding(.horizontal, SidebarView.inset)
+                    }
+                    if isCurrent {
+                        PluginSidebarItemsView(plugins: windowModel.plugins)
+                        if let agents = session.agents { ConnectedAgentRows(agents: agents) }
+                    }
+                    SpaceTabsView(session: session, space: space)
+                }
+                    .frame(width: width, alignment: .topLeading)
                     // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar, or from reaching assistive apps.
                     .allowsHitTesting(isCurrent)
                     .accessibilityElement(children: isCurrent ? .contain : .ignore)
