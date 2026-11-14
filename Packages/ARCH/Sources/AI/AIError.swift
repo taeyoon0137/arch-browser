@@ -75,6 +75,13 @@ extension AIError {
 }
 
 extension AIError: LocalizedError {
+    /// Absolute local dates stay meaningful when a user returns to a saved message.
+    static func rateLimitMessage(provider: String, until: Date?) -> String {
+        let message = "\(provider) is limiting requests."
+        guard let until, until > Date() else { return message }
+        return "\(message) Try again after \(until.formatted(date: .abbreviated, time: .standard))."
+    }
+
     /// One sentence for the interface. It never contains a key.
     public var errorDescription: String? {
         switch self {
@@ -111,8 +118,7 @@ extension AIError: LocalizedError {
         case .authentication:
             return "The provider did not accept the API key."
         case .rateLimited(_, let until):
-            guard let until, until > Date() else { return "The provider is limiting requests. Try again shortly." }
-            return "The provider is limiting requests. Try again in \(Int(until.timeIntervalSinceNow.rounded(.up))) seconds."
+            return Self.rateLimitMessage(provider: "The provider", until: until)
         case .contextTooLong:
             return "The request is too long for the model."
         case .invalidRequest(let message):

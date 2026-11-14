@@ -150,9 +150,9 @@ public final class AIService: ObservableObject, AIClient {
                     return try await send(request, feature: feature, on: candidate, attempt: &attempt, entry: &entry)
                 } catch let error as AIError where !attempt.hasDeliveredContent && !Task.isCancelled && error.movesToNextModel {
                     lastError = error
-                    guard case .rateLimited(_, let until) = error else { break }
+                    guard case .rateLimited = error else { break }
                     // A cool-down of up to 10 seconds waits in the limiter and tries the same model again. A longer one goes to the next model; without one, a user request keeps waiting, while an automatic one has already waited its limit.
-                    let isLong = until.map { $0.timeIntervalSinceNow > 10 } ?? true
+                    let isLong = attempt.coolDownUntil.map { $0.timeIntervalSinceNow > 10 } ?? true
                     if isLong && (hasNext || feature.trigger == .automatic) { break }
                     retries += 1
                     if retries > 2 { break }
@@ -194,12 +194,18 @@ public final class AIService: ObservableObject, AIClient {
     private func send(_ request: AIRequest, feature: AIFeature, on candidate: AIRouteModel, attempt: inout AIAttempt, entry: inout AIActivityEntry) async throws -> AIFinishReason {
         entry.model = candidate.ref
         try checkDestination(of: candidate.provider, known: request.knownProviders)
+        attempt.coolDownUntil = nil
         // A part the checks refuse ends the attempt before it waits.
         _ = try prepare(request, feature: feature, on: candidate, entry: &entry)
         let limiter = limiter(for: candidate.provider.id)
         await limiter.update(candidate.provider.limits)
-        try await limiter.acquire(isUser: feature.trigger == .user) { [continuation = attempt.continuation] reason in
-            continuation.yield(.waiting(reason))
+        do {
+            try await limiter.acquire(isUser: feature.trigger == .user) { [continuation = attempt.continuation] reason in
+                continuation.yield(.waiting(reason))
+            }
+        } catch AIError.rateLimited(let provider, let until) {
+            attempt.coolDownUntil = until
+            throw AIError.rateLimited(provider, until: await limiter.providerReset)
         }
         let key: String?
         let providerRequest: AIProviderRequest
@@ -219,7 +225,7 @@ public final class AIService: ObservableObject, AIClient {
             throw error
         }
         var reported: AIUsage?
-        var outcome: Result<AIFinishReason, AIError>
+        let outcome: Result<AIFinishReason, AIError>
         do {
             var finishReason: AIFinishReason?
             for try await event in makeProvider(candidate.provider, key).stream(providerRequest) {
@@ -256,8 +262,8 @@ public final class AIService: ObservableObject, AIClient {
         switch outcome {
         case .success:
             await limiter.release(after: .answered)
-        case .failure(.rateLimited(let provider, let retryAfter)):
-            outcome = .failure(.rateLimited(provider, until: await limiter.release(after: .rateLimited(retryAfter: retryAfter))))
+        case .failure(.rateLimited(_, let retryAfter)):
+            attempt.coolDownUntil = await limiter.release(after: .rateLimited(retryAfter: retryAfter))
         case .failure:
             await limiter.release(after: .other)
         }
@@ -393,6 +399,8 @@ public final class AIService: ObservableObject, AIClient {
 private struct AIAttempt {
     let continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation
     var hasDeliveredContent = false
+    /// Arch also schedules a cool-down when the provider supplied no reset date. Only routing uses that estimate.
+    var coolDownUntil: Date?
     private var startedModel: AIModelRef?
 
     init(continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) {

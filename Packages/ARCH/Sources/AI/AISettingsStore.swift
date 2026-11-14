@@ -96,8 +96,7 @@ public final class AISettingsStore: ObservableObject {
         case .providerUnavailable(let id, let detail):
             return "\(name(of: id)) is unavailable: \(detail)"
         case .rateLimited(let id, let until):
-            guard let until, until > Date() else { return "\(name(of: id)) is limiting requests. Try again shortly." }
-            return "\(name(of: id)) is limiting requests. Try again in \(Int(until.timeIntervalSinceNow.rounded(.up))) seconds."
+            return AIError.rateLimitMessage(provider: name(of: id), until: until)
         default:
             return error.localizedDescription
         }

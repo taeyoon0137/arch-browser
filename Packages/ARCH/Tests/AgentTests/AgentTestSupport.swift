@@ -464,7 +464,7 @@ final class Shared<Value>: @unchecked Sendable {
         return AgentEndpoint.PeerChecks(read: readPeer ?? { try AgentPeer.read(socket: $0) }, verify: { try check.verify($0) })
     }
 
-    func makeService(checks: AgentEndpoint.PeerChecks? = nil) throws -> AgentService {
+    func makeService(checks: AgentEndpoint.PeerChecks? = nil, providerMessage: @escaping @MainActor (AIError) -> String = { $0.localizedDescription }) throws -> AgentService {
         let identity = identity
         let starts = processStarts
         let records = processRecords
@@ -493,6 +493,7 @@ final class Shared<Value>: @unchecked Sendable {
             sessionFolder: { sessionsFolder.appendingPathComponent($0.uuidString, isDirectory: true) },
             agentModels: { [unowned self] in self.agentModels },
             subscriptionToolName: { ["codex": "Codex", "claude": "Claude Code"][$0.rawValue] })
+        dependencies.providerMessage = providerMessage
         dependencies.attention = { [weak self] ownerID in self?.attentionOwners.append(ownerID) }
         if let answerWait { dependencies.answerWait = answerWait }
         let service = AgentService(directory: folder, host: host, version: "9.9.9", dependencies: dependencies)

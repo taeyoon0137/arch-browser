@@ -84,6 +84,7 @@ import Foundation
         /// The models that can run a session, in the `agent` route's order first, and a provider's tool name for errors, such as "Claude Code".
         var agentModels: @MainActor () -> [AIModelRef]
         var subscriptionToolName: @MainActor (AIProviderID) -> String?
+        var providerMessage: @MainActor (AIError) -> String = { $0.localizedDescription }
         /// How long a call waits for the user before it answers `approvalPending`, and how long an outside client's card stays open.
         var answerWait = TimeInterval(AgentLimits.callAnswerSeconds)
         var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
@@ -146,7 +147,8 @@ import Foundation
             mcpExecutable: AgentBundleLayout(bundleURL: Bundle.main.bundleURL).mcpExecutableURL,
             sessionFolder: AIAgentSession.folder(for:),
             agentModels: { AIService.shared.agentSessionModels() },
-            subscriptionToolName: { id in AIService.shared.settings.providers.first { $0.id == id }.flatMap { $0.commandLineAgent?.title } }))
+            subscriptionToolName: { id in AIService.shared.settings.providers.first { $0.id == id }.flatMap { $0.commandLineAgent?.title } },
+            providerMessage: { AIService.shared.settings.message(for: $0) }))
         AIService.shared.register(.agent)
     }
 
@@ -834,6 +836,8 @@ import Foundation
         case .authentication(let provider):
             if let name = dependencies.subscriptionToolName(provider) { return ("\(name) is not signed in.", .signIn(provider)) }
             return (error.localizedDescription, .openAISettings)
+        case .rateLimited:
+            return (dependencies.providerMessage(error), .retry)
         case .notConfigured, .budgetReached:
             return (error.localizedDescription, .openAISettings)
         case .blockedByPolicy(.agentMessageIsCommand):

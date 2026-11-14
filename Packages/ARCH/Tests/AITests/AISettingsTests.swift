@@ -92,7 +92,9 @@ import Testing
     @Test func coolDownDelaysTheNextRequest() async throws {
         let limiter = AIRateLimiter(provider: AIProviderID(), limits: .http)
         try await limiter.acquire(isUser: true) { _ in }
-        await limiter.release(after: .rateLimited(retryAfter: Date() + 0.3))
+        let reset = Date() + 0.3
+        await limiter.release(after: .rateLimited(retryAfter: reset))
+        #expect(await limiter.providerReset == reset)
         let waits = WaitLog()
         let start = ContinuousClock.now
         try await limiter.acquire(isUser: true) { waits.append($0) }
@@ -200,6 +202,7 @@ import Testing
         for _ in 0..<4 { ends.append(try #require(await limiter.release(after: .rateLimited(retryAfter: nil)))) }
         #expect(Set(ends).count == 1)
         #expect(abs(ends[0].timeIntervalSinceNow - 20) < 2)
+        #expect(await limiter.providerReset == nil)
     }
 }
 
@@ -231,6 +234,22 @@ private final class WaitLog: @unchecked Sendable {
 
 @MainActor
 @Suite struct SettingsFileTests {
+    @Test func rateLimitMessagesUseAnAbsoluteLocalResetDateForTheNamedProvider() {
+        let store = AISettingsStore(fileURL: temporaryDirectory().appendingPathComponent("ai.json"), keys: InMemoryKeys())
+        let configured = provider("Work subscription", models: [])
+        store.providers = [configured]
+        let future = Date().addingTimeInterval(27 * 60 * 60)
+        let suffix = " Try again after \(future.formatted(date: .abbreviated, time: .standard))."
+        let unknown = AIProviderID()
+        for until: Date? in [future, .distantPast, nil] {
+            let end = until == future ? suffix : ""
+            let error = AIError.rateLimited(configured.id, until: until)
+            #expect(error.localizedDescription == "The provider is limiting requests." + end)
+            #expect(store.message(for: error) == "Work subscription is limiting requests." + end)
+            #expect(store.message(for: AIError.rateLimited(unknown, until: until)) == error.localizedDescription)
+        }
+    }
+
     @Test func writesTheDocumentedShapeWithoutKeys() async throws {
         let directory = temporaryDirectory()
         let keys = InMemoryKeys()

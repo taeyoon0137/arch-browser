@@ -165,6 +165,22 @@ import Testing
         #expect(await collect(service.stream(textRequest(userFeature))).events == ["started:fallback", "text:ok", "finished:completed"])
     }
 
+    @Test func anUnspecifiedProviderResetAppliesBackoffWithoutAdvertisingIt() async {
+        let limited = provider("Limited", models: [AIModelConfiguration(name: "primary")])
+        let log = ProviderLog()
+        let service = scriptedService(providers: [limited], script: ["primary": [.fail(.rateLimited(limited.id, until: nil))]], log: log)
+        service.register(automaticFeature)
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: limited.id, model: "primary")]), for: automaticFeature.id)
+        let result = await collect(service.stream(textRequest(automaticFeature)))
+        guard case .rateLimited(let id, nil) = result.error else {
+            Issue.record("Expected the provider's rate limit without a reset date")
+            return
+        }
+        #expect(id == limited.id)
+        #expect(log.requests.count == 1)
+        #expect(await service.limiter(for: id).coolDownUntil ?? .distantPast > Date())
+    }
+
     @Test func aShortCoolDownRetriesTheSameModel() async {
         let log = ProviderLog()
         let first = provider("First", models: [AIModelConfiguration(name: "primary")])

@@ -423,7 +423,7 @@ public final class AIAgentSession {
         // Before `ready`, a provider in a cool-down longer than 10 seconds gives way to the next model at once, as for other requests.
         if model == nil, candidates.count > 1, let until = await limiter.coolDownUntil, until.timeIntervalSinceNow > 10 {
             self.turn = nil
-            return (.failed(.rateLimited(candidate.provider.id, until: until)), "")
+            return (.failed(.rateLimited(candidate.provider.id, until: await limiter.providerReset)), "")
         }
         // An automatic feature's turn waits behind the user's requests and gives up after the limiter's wait limit, as its other requests do.
         do {
@@ -431,7 +431,11 @@ public final class AIAgentSession {
         } catch {
             self.turn = nil
             // Stop and `end` cancel the wait for a slot.
-            return (turn.isStopping || hasEnded ? .finished(.stopped) : .failed(AIError(error)), "")
+            if turn.isStopping || hasEnded { return (.finished(.stopped), "") }
+            if case AIError.rateLimited(let provider, _) = error {
+                return (.failed(.rateLimited(provider, until: await limiter.providerReset)), "")
+            }
+            return (.failed(AIError(error)), "")
         }
         var outcome = await perform(message, on: candidate, tool: tool, kind: kind, turn: turn)
         if case .failed = outcome, !turn.didStartProcess, turn.isStopping || hasEnded { outcome = .finished(.stopped) }

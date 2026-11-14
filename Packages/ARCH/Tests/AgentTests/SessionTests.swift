@@ -1285,6 +1285,24 @@ import UserNotifications
         #expect(session.transcript.retryableErrorID == nil)
     }
 
+    @Test func aSubscriptionLimitUsesTheConfiguredProviderMessageAndKeepsRetry() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let provider = AIProviderID(rawValue: "work-cli")
+        let reset = Date().addingTimeInterval(3600)
+        let notice = "Work subscription is limiting requests. Try again after \(reset.formatted(date: .abbreviated, time: .standard))."
+        let service = try harness.makeService(providerMessage: { error in
+            guard case .rateLimited(let id, let until) = error, id == provider, until == reset else { return "Unknown provider" }
+            return notice
+        })
+        let (session, runner) = try start(service, harness)
+        runner.emit(.ready(AIModelRef(provider: provider, model: "fixture")))
+        runner.emit(.turnFailed(.rateLimited(provider, until: reset)))
+        try await waitUntil { session.state == .turnFailed }
+        #expect(session.items.last?.kind == .error(notice, .retry))
+        #expect(session.transcript.retryableErrorID == session.items.last?.id)
+    }
+
     @Test func aSessionFailedAfterAModelHeldItOffersNoRetry() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }

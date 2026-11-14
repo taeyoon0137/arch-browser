@@ -29,6 +29,8 @@ actor AIRateLimiter {
     private var waiters: [Waiter] = []
     private var recentStarts: [ContinuousClock.Instant] = []
     private(set) var coolDownUntil: Date?
+    /// Latest reset reported by the provider. The local backoff and per-minute bucket only schedule requests.
+    private(set) var providerReset: Date?
     private var backoff: Duration
 
     init(provider: AIProviderID, limits: AIProviderLimits, automaticWaitLimit: Duration = .seconds(15), initialBackoff: Duration = .seconds(20), maximumBackoff: Duration = .seconds(300)) {
@@ -96,6 +98,7 @@ actor AIRateLimiter {
     private func coolDown(retryAfter: Date?) -> Date {
         let until: Date
         if let retryAfter {
+            providerReset = max(providerReset ?? retryAfter, retryAfter)
             until = retryAfter
         } else if let current = coolDownUntil, current > Date() {
             until = current
