@@ -12,6 +12,8 @@ private struct CheckFailure: LocalizedError {
     init(_ message: String) { errorDescription = message }
 }
 
+private let committedTitle = "Pinned tab renamed during fallback"
+
 @MainActor private final class RestoreCheck: NSObject, NSApplicationDelegate {
     let root = Bundle.main.bundleURL.deletingLastPathComponent()
     var fixture: URL { root.appendingPathComponent("fixture.html") }
@@ -38,6 +40,7 @@ private struct CheckFailure: LocalizedError {
         }
         try checkIsolation()
         try checkHidden()
+        let interrupt = environment["ARCH_RESTORE_INTERRUPT"] == "1"
         let expected: EngineKind = phase == 2 ? .webKit : .chromium
         let registry = EngineRegistry()
         registry.register(WebKitEngine())
@@ -63,6 +66,9 @@ private struct CheckFailure: LocalizedError {
             guard let saved = session.tabs.first(where: { $0.id.uuidString == id }), saved.isPinned, !saved.isLoaded else {
                 throw CheckFailure("The saved pinned tab did not restore as an unloaded tab.")
             }
+            if interrupt, saved.customTitle != (phase == 3 ? committedTitle : nil) {
+                throw CheckFailure("The restored tab did not have the expected title before loading.")
+            }
             tab = saved
             session.loadPage(of: tab)
         }
@@ -77,17 +83,45 @@ private struct CheckFailure: LocalizedError {
             throw CheckFailure("Phase \(phase) used \(tab.engineKind.rawValue) and preferred \(tab.preferredEngine.rawValue).")
         }
 
-        try session.saveNow().get()
+        let checkpoint = interrupt && phase == 2
+        if checkpoint {
+            guard let spaceID = tab.spaceID else { throw CheckFailure("The pinned tab has no space.") }
+            let model = BrowserWindowModel(session: session, record: .init(id: UUID(), frame: nil, currentSpaceID: spaceID,
+                                                                          selectedTabID: tab.id, isSidebarVisible: true), kind: .main)
+            var saved = false
+            session.onSidebarSyncSave = { state in
+                saved = state.pinnedTabs.contains { $0.id == tab.id && $0.customTitle == committedTitle && $0.engine == .chromium }
+            }
+            model.renameTab(tab.id, to: committedTitle)
+            let deadline = ContinuousClock.now + .seconds(10)
+            while !saved && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+            session.onSidebarSyncSave = nil
+            guard saved else { throw CheckFailure("The edited pinned tab never reached a successful scheduled save.") }
+        } else {
+            try session.saveNow().get()
+        }
         let record = try Data(contentsOf: profile.appendingPathComponent("session.json"))
         let snapshot = try JSONSerialization.jsonObject(with: record) as? [String: Any]
         let rows = snapshot?["tabs"] as? [[String: Any]]
         guard let row = rows?.first(where: { ($0["id"] as? String)?.lowercased() == tab.id.uuidString.lowercased() }),
-              row["engine"] as? String == "chromium" else { throw CheckFailure("The saved tab lost its Chromium choice.") }
+              row["isPinned"] as? Bool == true, row["engine"] as? String == "chromium" else {
+            throw CheckFailure("The saved tab lost its pin or Chromium choice.")
+        }
+        let result = ["id": tab.id.uuidString, "active": tab.engineKind.rawValue]
+        let resultURL = root.appendingPathComponent("result-\(phase).json")
+        if checkpoint {
+            guard row["customTitle"] as? String == committedTitle else { throw CheckFailure("The committed rename is missing on disk.") }
+            try checkHidden()
+            var ready = result
+            ready["checkpoint"] = "rename-saved"
+            try JSONEncoder().encode(ready).write(to: resultURL, options: .atomic)
+            // The parent kills this process group here. Never enter quit cleanup after reporting the commit.
+            while true { pause() }
+        }
         session.finishWritesAtQuit()
         session.history.finishWrites()
         try checkHidden()
-        let result = ["id": tab.id.uuidString, "active": tab.engineKind.rawValue]
-        try JSONEncoder().encode(result).write(to: root.appendingPathComponent("result-\(phase).json"))
+        try JSONEncoder().encode(result).write(to: resultURL)
         print("Phase \(phase) · \(tab.id) · \(type(of: tab.webContents)) · persisted chromium")
         fflush(stdout)
     }
