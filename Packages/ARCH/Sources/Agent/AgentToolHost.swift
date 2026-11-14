@@ -104,7 +104,7 @@ import Foundation
 
     /// The answer of a call that the client's work ending cancelled: Stop, Deny and Stop, Stop All Agents, a revocation, expiry, or its connection's close. Such a call runs no further step and opens no card.
     static var ended: Outcome {
-        Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."))
+        Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."), decision: .denied)
     }
 
     /// The answer of a call that waits for the user, which names its approval as the protocol carries it, for `arch-mcp` and API-key sessions, which tell the agent to call `approval_wait`, and in `structured` for `arch-cli --json`.

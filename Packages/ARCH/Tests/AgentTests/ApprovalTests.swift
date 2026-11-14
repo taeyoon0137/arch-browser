@@ -389,6 +389,20 @@ import Testing
         #expect(replied.status == .ok && replied.structured?["decision"] == "instruction" && replied.structured?["reply"] == "Buy the red one")
     }
 
+    @Test func aWaitingApprovalRecordsADenialWhenItsCallerEndsFirst() async throws {
+        let fixture = Fixture()
+        let call = AgentToolCall(name: "request_approval", arguments: ["summary": "Send it", "kind": "send"])
+        var waiting: Task<AgentToolHost.Outcome, Never>?
+        fixture.toolHost.approvals.didAdd = { _ in waiting?.cancel() }
+        waiting = Task { await fixture.toolHost.run(call, for: fixture.grant, state: fixture.state) }
+
+        let task = try #require(waiting)
+        let outcome = await task.value
+        #expect(outcome.result.status == .denied && outcome.result.code == "ended")
+        #expect(outcome.decision == .denied)
+        try await waitUntil { fixture.toolHost.approvals.pending.isEmpty && fixture.state.runningCalls.isEmpty }
+    }
+
     // MARK: Through the service
 
     @Test func stopAllAgentsRevocationTheClientLeavingAndQuitDenyWaitingCards() async throws {
