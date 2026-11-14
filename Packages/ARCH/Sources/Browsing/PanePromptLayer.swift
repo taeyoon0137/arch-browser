@@ -55,11 +55,13 @@ struct PanePromptLayer: View {
                 .padding(.top, Self.edgeOverlap)
                 .animation(PromptMotion.scrim(reduceMotion: reduceMotion), value: isDimmed)
                 if let displayed {
-                    PromptCard(state: displayed, width: PromptLayout.cardWidth(inPaneWidth: proxy.size.width - leadingClearance),
+                    let cardWidth = PromptLayout.cardWidth(inPaneWidth: proxy.size.width - leadingClearance)
+                    PromptCard(state: displayed, width: cardWidth,
                                maxHeight: PromptLayout.maximumHeight(inPaneHeight: proxy.size.height), isFocusedPane: isFocusedPane,
                                isArriving: isArriving, takesFocusOnAppear: takesFocusOnShow, focusRequests: focusRequests,
                                onFocusChange: focusDidChange, onAnswer: { prompts.answer(displayed.id, with: $0) })
-                        .padding(.leading, leadingClearance)
+                        // Centered in the pane, as the page frame and the dimming are, and moved toward the trailing edge only as far as the leading room needs.
+                        .offset(x: max(0, leadingClearance - (proxy.size.width - cardWidth) / 2))
                         .simultaneousGesture(TapGesture().onEnded { if !isFocusedPane { activate() } })
                         .id(displayed.id)
                         .transition(PromptMotion.transition(reduceMotion: reduceMotion))

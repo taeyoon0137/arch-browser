@@ -97,6 +97,7 @@ private struct PagePaneView: View {
     let isSplit: Bool
     let isPageFullscreen: Bool
     @Environment(\.spaceTheme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isSelected: Bool { tab.id == windowModel.selectedTabID }
     private var cornerRadius: CGFloat { isPageFullscreen ? 0 : PageFrameShape.cornerRadius }
@@ -118,9 +119,10 @@ private struct PagePaneView: View {
                 }
             }
             .overlay(frameBorder.allowsHitTesting(false))
-            // The find bar and the question popover act on the selected tab, so they float over that pane's top trailing corner, the popover below the bar. In a narrow pane they keep clear of its leading edge and of a split view pane's close control. A region capture hides them without closing them, so that their fields do not take the focus again when it ends.
+            // The find bar and the question popover act on the selected tab, so they float over that pane's top trailing corner, the popover below the bar. In a narrow pane they keep clear of its leading edge and of a split view pane's close control. A region capture hides them without closing them, so that their fields do not take the focus again when it ends, and so does a prompt card, under which they wait, going and coming back with its dimming.
             .overlay(alignment: .topTrailing) {
                 if isSelected {
+                    let hidesPanels = isCapturingRegion || showsCard
                     VStack(alignment: .trailing, spacing: 8) {
                         if windowModel.isFindBarVisible {
                             FindBarView()
@@ -129,16 +131,17 @@ private struct PagePaneView: View {
                     }
                     .padding(.top, 12)
                     .padding(.trailing, 16)
-                    .padding(.leading, isSplit ? 32 : 16)
-                    .opacity(isCapturingRegion ? 0 : 1)
-                    .allowsHitTesting(!isCapturingRegion)
+                    .padding(.leading, isSplit ? PaneCloseButton.clearance : 16)
+                    .opacity(hidesPanels ? 0 : 1)
+                    .allowsHitTesting(!hidesPanels)
                     .disabled(isCapturingRegion)
-                    .accessibilityHidden(isCapturingRegion)
+                    .accessibilityHidden(hidesPanels)
+                    .animation(PromptMotion.scrim(reduceMotion: reduceMotion), value: showsCard)
                 }
             }
             .overlay {
                 PanePromptLayer(prompts: prompts, tab: tab, isOnScreen: isOnScreen, isFocusedPane: isSelected, isCovered: isCovered,
-                                cornerRadius: cornerRadius, leadingClearance: isSplit ? PaneCloseButton.reach : 0, selectPane: selectTab)
+                                cornerRadius: cornerRadius, leadingClearance: isSplit ? PaneCloseButton.clearance : 0, selectPane: selectTab)
             }
             .overlay(alignment: .topLeading) {
                 if isSplit, !isCapturingRegion {
@@ -216,8 +219,10 @@ private struct PaneCloseButton: View {
     /// The control's distance from the pane's top leading corner.
     static let inset: CGFloat = 6
     static let diameter: CGFloat = 20
-    /// How far the control reaches from the pane's leading edge, which a prompt card leaves free.
+    /// How far the control reaches from the pane's leading edge.
     static var reach: CGFloat { inset + diameter }
+    /// The room that a prompt card and the find bar leave at the pane's leading edge: the control's reach and, past it, the gap the control keeps from the edge, so that neither touches the control or its shadow.
+    static var clearance: CGFloat { reach + inset }
 
     let action: () -> Void
     @State private var isHovering = false
