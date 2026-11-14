@@ -1,4 +1,5 @@
 // A plugin's identity and manifest: what it declares before any of its code runs, where it came from and what its signatures prove, and what the user grants it. `docs/plugins.md` describes the whole plugin system.
+import Events
 import Foundation
 
 /// Identifies a Persona, which owns its installed plugins.
@@ -40,13 +41,15 @@ public struct PluginManifest: Hashable, Sendable {
     /// The API permissions of a web extension that no `PluginPermission` stands for, as its manifest names them, such as `storage`. They come with the install, as in other browsers, and the install sheet and Settings list them. Empty for other kinds.
     public var extensionPermissions: [String]
     public var contributions: PluginContributions
+    /// The browser events that reach the plugin's `handle(_:)` and start its code: none unless the manifest lists them.
+    public var events: Set<BrowserEventKind>
     /// A web extension's `author`, as text or as the `email` of an author object, lowercased, by which a package matches an installed plugin as a version of the same extension. Nil for other kinds and without the field.
     public var author: String?
     /// A web extension's `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, lowercased, so that two projects on one hosting site differ. Nil for other kinds and without the field.
     public var homepage: String?
 
     public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], sites: [MatchPattern] = [],
-                extensionPermissions: [String] = [], contributions: PluginContributions, author: String? = nil, homepage: String? = nil) {
+                extensionPermissions: [String] = [], contributions: PluginContributions, events: Set<BrowserEventKind> = [], author: String? = nil, homepage: String? = nil) {
         self.id = id
         self.name = name
         self.version = version
@@ -55,6 +58,7 @@ public struct PluginManifest: Hashable, Sendable {
         self.sites = sites
         self.extensionPermissions = extensionPermissions
         self.contributions = contributions
+        self.events = events
         self.author = author
         self.homepage = homepage
     }
@@ -111,8 +115,10 @@ public struct PluginComposition: Hashable, Codable, Sendable {
 
 /// A capability a plugin asks for. Each permission guards members of `PluginContext` or fields the plugin receives, and joins with them. A script plugin's manifest names it by its raw value.
 public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable {
-    /// Titles and addresses of tabs. Without it, a plugin sees a tab's identifier, space, engine, and pinned state only.
+    /// Titles and addresses of tabs. Without it, a plugin sees a tab's identifier, space, kind, engine, and pinned state only.
     case tabs
+    /// Suggested names for tabs, which the user's own names always outrank (`docs/hooks.md`, hook decision 13).
+    case renameTabs = "tabs.rename"
     /// Writing text to the clipboard.
     case clipboard
     /// Messages to native apps on the Mac that the plugin names. Web extensions only; granting it asks for Touch ID or the login password.
@@ -122,6 +128,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     public var summary: String {
         switch self {
         case .tabs: return "Read the titles and addresses of your tabs"
+        case .renameTabs: return "Suggest names for your tabs"
         case .clipboard: return "Write text to the clipboard"
         case .nativeMessaging: return "Exchange messages with apps on this Mac"
         }

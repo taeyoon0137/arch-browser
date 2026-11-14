@@ -1,7 +1,8 @@
-// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, or one of its page scripts sends it a value, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, keeps two web extension plugins that are versions of one extension as a pair with one engine each, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes.
+// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, one of its page scripts sends it a value, or an event its manifest lists arrives from the Persona's browser events, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, keeps two web extension plugins that are versions of one extension as a pair with one engine each, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes.
 import AppKit
 import ARCHEngine
 import Combine
+import Events
 import UniformTypeIdentifiers
 
 /// A plugin the manager knows, with its grant and whether it is enabled.
@@ -135,6 +136,12 @@ public final class PluginManager: ObservableObject {
     public private(set) var isClosed = false
     /// Set by the app: the proof gate on native apps, which staging asks to look for native apps before it checks a web extension that asks for `nativeMessaging`, the review shows in a package's Chromium line, and joins follow. Nil gates nothing.
     public var nativeAppGate: (any PluginNativeAppGate)?
+    /// Reaches the Persona's tabs for the plugins' tab calls; without one, plugins see no tabs.
+    private let browserHost: (any PluginBrowserHost)?
+    /// The Persona's events on the session's bus, which reach the plugins whose manifests list their kinds.
+    private var events: BrowserEventSubscription?
+    /// The events each plugin received in the last minute, which loop protection's rate caps (`docs/hooks.md`, Plugins).
+    private var eventLimiter = BrowserEventRateLimiter()
 
     /// A started plugin, its context, and its activation, which its commands, panels, and page script values wait for.
     private struct RunningPlugin {
@@ -146,13 +153,17 @@ public final class PluginManager: ObservableObject {
     }
 
     /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package, script plugins by the manager and other kinds by their `runtimes`; one whose package or `plugins.json` entry does not read, as one of a kind without a runtime, stays in the file but out of the list. A version whose identifier ends in an engine and that no record pairs, as a build before engine versions leaves it, is paired again with the other plugin of its package's identifier. The runtimes learn the enabled plugins of their kinds at once.
-    public convenience init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = []) {
-        self.init(persona: persona, directory: directory, builtIns: builtIns, runtimes: runtimes, secretStore: PluginKeychain())
+    /// `events` is the session's bus, whose events of the Persona reach the enabled plugins that list their kinds, and `browserHost` reaches its tabs.
+    public convenience init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [],
+                            events: BrowserEventBus? = nil, browserHost: (any PluginBrowserHost)? = nil) {
+        self.init(persona: persona, directory: directory, builtIns: builtIns, runtimes: runtimes, secretStore: PluginKeychain(), events: events, browserHost: browserHost)
     }
 
     init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], secretStore: any PluginSecretStore,
-         scriptLimits: ScriptPluginLimits = .standard, publisherKeyDigest: Data = CRXArchive.webStorePublisherKeyDigest) {
+         scriptLimits: ScriptPluginLimits = .standard, publisherKeyDigest: Data = CRXArchive.webStorePublisherKeyDigest,
+         events: BrowserEventBus? = nil, browserHost: (any PluginBrowserHost)? = nil) {
         self.persona = persona
+        self.browserHost = browserHost
         self.directory = Self.folder(ofPersona: persona, in: directory)
         self.runtimes = Dictionary(runtimes.map { ($0.kind, $0) }) { first, _ in first }
         self.secretStore = secretStore
@@ -199,6 +210,8 @@ public final class PluginManager: ObservableObject {
             runtime.onEnginesChange = { [weak self, kind = runtime.kind] in self?.readEngineChecks(of: kind) }
         }
         runEnabledPlugins()
+        // The filter's empty tab kinds leave agent tabs out.
+        self.events = events?.subscribe(BrowserEventFilter(scope: .places([.persona(persona)]))) { [weak self] event in self?.deliver(event) }
     }
 
     /// The installed package as the list shows it under its entry's identifier, with the entry's proof, with the part of the entry's grant that its manifest asks for, with why its runtime cannot run it, if it cannot, with the current answers of the engines that checked it, and with the engines whose note asking for a version the user dismissed.
@@ -869,6 +882,8 @@ public final class PluginManager: ObservableObject {
     /// Stops the plugins for good as the session deletes the Persona: they leave the list, so their contributions go and nothing starts them again, their running instances stop, and the storage changes that have not reached the files are dropped, since the Persona's folder goes at the next launch. From then on the manager stages, installs, and stores nothing.
     public func close() {
         isClosed = true
+        events?.cancel()
+        events = nil
         for id in Array(running.keys) { stop(id) }
         badges = [:]
         engineVersions = []
@@ -966,6 +981,20 @@ public final class PluginManager: ObservableObject {
         }
     }
 
+    // MARK: Events
+
+    /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. A plugin never receives the events its own calls caused, such as the title change of its rename, and receives at most 10 events for one subject and 60 in all within a minute, so a listener that reacts to another plugin's or a hook's changes cannot keep them going without end. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
+    private func deliver(_ event: BrowserEvent) {
+        guard !isClosed else { return }
+        for installed in plugins where installed.isEnabled && installed.unavailability == nil && installed.manifest.events.contains(event.kind) {
+            if event.cause?.origin == .plugin(id: installed.id.rawValue) { continue }
+            let grant = installed.grant
+            guard let view = event.view(.plugin(tabs: grant.permissions.contains(.tabs), downloads: false, covers: grant.covers)),
+                  eventLimiter.admit(installed.id.rawValue, subject: event.subject, at: Date()) == .allowed else { continue }
+            Task { try? await start(installed)?.handle(.browser(view)) }
+        }
+    }
+
     // MARK: Settings
 
     /// The value of a plugin's setting: the user's, or the default for one the user has not changed or whose stored value no longer suits the field. Nil for a secret setting, whose value stays in the Keychain.
@@ -1060,6 +1089,16 @@ public final class PluginManager: ObservableObject {
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
         ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant,
                             storage: ScopedPluginStorage(file: storage(for: installed.id)), secrets: secrets(for: installed.id))
+    }
+
+    /// The Persona's tabs before the grant applies.
+    fileprivate func personaTabs() -> [PluginTab] {
+        browserHost?.tabs(in: persona) ?? []
+    }
+
+    /// Renames a tab of the Persona for the document it shows now, with the plugin as the cause of the change.
+    fileprivate func renameTab(_ id: UUID, to name: String?, by plugin: PluginID) -> Bool {
+        browserHost?.renameTab(id, to: name, showing: nil, cause: BrowserEventCause(origin: .plugin(id: plugin.rawValue)), applying: true) ?? false
     }
 
     /// `<plugin id>/storage.json` in the Persona's folder.
@@ -1312,6 +1351,22 @@ final class ScopedPluginContext: PluginContext {
         try require(.clipboard)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    func tabs() throws -> [PluginTab] {
+        guard !hasEnded else { throw PluginError.stopped }
+        return (manager?.personaTabs() ?? []).map { $0.redacted(for: grant) }
+    }
+
+    func tab(_ id: PluginTab.ID) throws -> PluginTab? {
+        try tabs().first { $0.id == id }
+    }
+
+    func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.renameTabs)
+        guard let manager, manager.personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        return manager.renameTab(id, to: name, by: pluginID)
     }
 
     private func require(_ permission: PluginPermission) throws {

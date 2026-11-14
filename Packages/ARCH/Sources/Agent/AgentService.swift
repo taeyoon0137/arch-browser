@@ -216,7 +216,7 @@ import Foundation
 
     /// Settings' Allow Outside Clients. Writing needs the seal key, which the Keychain may first ask the user for; turning access off closes outside clients' connections and keeps their grants.
     public func setAllowsOutsideClients(_ isOn: Bool) async throws {
-        guard canChangeSettings else { throw AgentSettingsFileError.noKey }
+        guard canChangeSettings else { throw SealedSettingsFileError.noKey }
         try await file.prepareKey()
         var changed = settings
         changed.allowsOutsideClients = isOn

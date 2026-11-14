@@ -1,4 +1,4 @@
-// Agent sessions on the user's CLI (docs/agents.md, Tests ▸ AITests): the exact arguments and environments of Claude Code and Codex, the start check and the stream watcher, the feature derivation and the configuration probe, the probes that run again when the executable changes, the open input mode, Stop, the idle timer, fallbacks before `ready`, Codex's thread deletion, usage under `agent`, the derived `agent` capability, and the presets' ordinary requests. Shell scripts stand in for `claude` and `codex` and replay the recorded streams in `Fixtures/Agent`, so no test reaches a real tool or a model.
+// Agent sessions on the user's CLI (docs/agents.md, Tests ▸ AITests): the exact arguments and environments of Claude Code and Codex, the start check and the stream watcher, the feature derivation and the configuration probe, the probes that run again when the executable changes, the open input mode, Stop, the idle timer, fallbacks before `ready`, Codex's thread deletion, usage under `agent`, an automatic feature's turns under the daily limit and behind the user's requests, the derived `agent` capability, and the presets' ordinary requests. Shell scripts stand in for `claude` and `codex` and replay the recorded streams in `Fixtures/Agent`, so no test reaches a real tool or a model.
 import Darwin
 import Foundation
 import Testing
@@ -11,6 +11,9 @@ private let ticketServer = AIAgentToolServer(executable: URL(fileURLWithPath: "/
 /// The skill folder of the recorded `claude-skills` run.
 private let recordedSkills = AIAgentSkills(folder: URL(fileURLWithPath: "/private/var/folders/xx/fixture/T/arch-skills"), plugin: "arch", names: ["arch-browser"])
 private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", trigger: .user, data: AIDataScope(kinds: [.page, .selection, .file]), requirements: [.agent])
+/// An agent hook's feature, whose runs start sessions on a route of their own.
+private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHook.test"), name: "Hook Test", summary: "", trigger: .automatic, data: .textOnly,
+                                              requirements: [.agent], routing: .perRequest)
 
 // MARK: - Arguments and environment
 
@@ -684,6 +687,66 @@ private let agentFeature = AIFeature(id: .agent, name: "Agent", summary: "", tri
         #expect(cli.calls().isEmpty)
     }
 
+    /// An automatic feature's session, as an agent run on a CLI: each turn is one automatic request, and a turn at the daily limit fails before any model.
+    @Test func anAutomaticFeaturesTurnsCountTowardTheDailyLimit() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli, feature: automaticAgentFeature)
+        fixture.service.settings.limits.automaticRequestsPerDay = 1
+        let session = try fixture.start(route: fixture.firstModelRoute)
+        let log = AgentEventLog(session)
+        try session.send("Call the session_info tool.")
+        try await log.wait { $0.contains("finished:completed") }
+        #expect(fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1)
+        // The next turn is over the limit: it fails without reaching the tool or counting, and the session goes on.
+        try session.send("Now call list_tabs.")
+        try await log.wait { $0.contains { $0.hasPrefix("failed:") } }
+        #expect(fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1)
+        #expect(cli.text("stdin.log").split(separator: "\n").count == 1)
+        #expect(!session.hasEnded)
+        await session.end()
+        // A session at the limit ends at its first message without starting the tool.
+        let later = try fixture.start(route: fixture.firstModelRoute)
+        let laterLog = AgentEventLog(later)
+        try later.send("Hello")
+        try await laterLog.waitForEnd()
+        guard case .budgetReached(.automaticRequestsPerDay)? = laterLog.error else {
+            Issue.record("Expected the daily limit, got \(String(describing: laterLog.error))")
+            return
+        }
+        #expect(cli.calls().filter { $0.contains("--input-format") }.count == 1)
+        await later.end()
+    }
+
+    /// An automatic feature's turn takes a provider slot only after the user's requests that wait for one, though it asked first.
+    @Test func anAutomaticFeaturesTurnWaitsBehindTheUsersRequests() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli, feature: automaticAgentFeature)
+        let limiter = fixture.service.limiter(for: fixture.provider.id)
+        await limiter.update(fixture.provider.limits)
+        // Other sessions hold both of the preset's slots.
+        for _ in 0..<2 { try await limiter.acquire(isUser: true) { _ in } }
+        let session = try fixture.start(route: fixture.firstModelRoute)
+        let log = AgentEventLog(session)
+        try session.send("Call the session_info tool.")
+        try await Task.sleep(for: .milliseconds(200))
+        let user = Task { () -> Bool in
+            try await limiter.acquire(isUser: true) { _ in }
+            return true
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        await limiter.release()
+        try await Task.sleep(for: .milliseconds(300))
+        // The freed slot went to the user's request, so the turn has not reached the tool.
+        #expect(cli.calls().allSatisfy { !$0.contains("--input-format") })
+        user.cancel()
+        let userHasSlot = (try? await user.value) == true
+        #expect(userHasSlot)
+        if userHasSlot { await limiter.release() }
+        try await log.wait { $0.contains("finished:completed") }
+        await session.end()
+        await limiter.release()
+    }
+
     @Test func aCodexCommandEndsTheSession() async throws {
         let cli = try FakeCLI.codex(first: """
         {"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000140"}
@@ -1029,9 +1092,13 @@ private struct AgentFixture {
         folder = temporaryDirectory().appendingPathComponent("Arch-Agent-\(UUID().uuidString)", isDirectory: true)
     }
 
-    func start(effort: String? = nil, skills: AIAgentSkills? = nil) throws -> AIAgentSession {
+    /// The first provider's model as a route, which a `perRequest` feature's session needs.
+    var firstModelRoute: AIRouteChoice { .models([AIModelRef(provider: provider.id, model: provider.models[0].name)]) }
+
+    func start(effort: String? = nil, skills: AIAgentSkills? = nil, route: AIRouteChoice? = nil) throws -> AIAgentSession {
         try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
-        return try service.startAgentSession(AIAgentSessionRequest(instructions: harness, toolServer: ticketServer, folder: folder, effort: effort, skills: skills))
+        return try service.startAgentSession(AIAgentSessionRequest(feature: feature.id, route: route, instructions: harness, toolServer: ticketServer, folder: folder,
+                                                                   effort: effort, skills: skills))
     }
 }
 
