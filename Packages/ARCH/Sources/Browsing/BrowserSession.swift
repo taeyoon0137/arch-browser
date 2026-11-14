@@ -780,6 +780,7 @@ final class EngineRuntime {
         if let tab = favoriteTabs[favorite.id] { return tab }
         let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
         let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: saved?.id ?? UUID(), spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
+        tab.restoreEngine(saved?.engine ?? defaultEngine, state: saved?.state, at: saved?.url)
         if let saved {
             tab.isRestored = true
             // Loading a restored page does not count as a visit.
@@ -843,13 +844,16 @@ final class EngineRuntime {
     public func openTab(url: URL? = nil, in spaceID: UUID? = nil, pinned: Bool = false, select: Bool = true, engine: EngineKind? = nil, state: Data? = nil) -> Tab {
         let spaceID = spaceID ?? sidebarTarget().currentSpaceID
         let personaID = personaID(ofSpace: spaceID)
-        return adopt(makeWebContents(url: url, engine: engine, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select)
+        let preferred = engine ?? defaultEngine
+        return adopt(makeWebContents(url: url, engine: preferred, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select, preferredEngine: preferred)
     }
 
     /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:)`), which Chromium receives only with the browser it creates.
     func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
         let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts)
-        return runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state, pageScripts: pageScripts))
+        let requested = engine ?? defaultEngine
+        let runtime = runtime(for: requested, in: personaID)
+        return runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: runtime.kind == requested ? state : nil, pageScripts: pageScripts))
     }
 
     /// The Persona of the space `id`, or of the sidebar target's current space when no space has that ID.
@@ -864,12 +868,13 @@ final class EngineRuntime {
 
     /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it and `folderID` the folder that holds it, both set before the tab joins the list so that its `tabOpened` event names the opening tab and, for an agent folder, carries the kind `agent`.
     func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil,
-               folderID: UUID? = nil, researchLoad: ((URL) -> Bool)? = nil) -> Tab {
+               folderID: UUID? = nil, researchLoad: ((URL) -> Bool)? = nil, preferredEngine: EngineKind? = nil) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tab.opener = opener
         tab.folderID = folderID
         tab.researchLoad = researchLoad
+        if let preferredEngine { tab.preferredEngine = preferredEngine }
         tabs.append(tab)
         if select { sidebarTarget().selectTab(tab.id) }
         return tab
@@ -1012,8 +1017,15 @@ final class EngineRuntime {
     /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start, or for a tab without its page: only a tab that no window has shown since launch lacks one, and the site settings popover offers the switch for a shown tab only.
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
         tab.pendingSyncEngine = nil
-        guard tab.engineKind != kind, tab.isLoaded, allTabs.contains(where: { $0.id == tab.id }), let source = runtime(of: tab) else { return }
-        switchLoadedEngine(of: tab, to: kind, source: source, permits: { true })
+        guard tab.isLoaded, allTabs.contains(where: { $0 === tab }) else { return }
+        tab.requestedEngineSwitch = nil
+        if tab.engineKind == kind {
+            tab.preferredEngine = kind
+            return
+        }
+        guard let source = runtime(of: tab) else { return }
+        tab.requestedEngineSwitch = kind
+        switchLoadedEngine(of: tab, to: kind, source: source) { [weak tab] in tab?.requestedEngineSwitch == kind }
     }
 
     private func switchLoadedEngine(of tab: Tab, to kind: EngineKind, source: EngineRuntime, permits: @escaping () -> Bool) {
@@ -1023,7 +1035,11 @@ final class EngineRuntime {
         engines(of: tab.personaID).cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
             guard let self, let tab, permits(), tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
             if tab.pendingSyncEngine == kind { tab.pendingSyncEngine = nil }
-            self.replaceWebContents(of: tab, with: self.makeWebContents(url: tab.url, engine: kind, state: nil, in: tab.personaID))
+            if tab.requestedEngineSwitch == kind { tab.requestedEngineSwitch = nil }
+            let state = tab.preferredEngine == kind ? tab.restorableStateForPreferredEngine : nil
+            let replacement = self.makeWebContents(url: tab.url, engine: kind, state: state, in: tab.personaID)
+            self.replaceWebContents(of: tab, with: replacement)
+            tab.preferredEngine = kind
         }
     }
 
@@ -1218,7 +1234,7 @@ final class EngineRuntime {
             sidebarTarget().currentSpaceID
         }
         let personaID = personaID(ofSpace: spaceID)
-        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true)
+        let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: record.id ?? UUID(), spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true, preferredEngine: record.engine ?? defaultEngine)
         // Nothing else enters a live folder (live folder rule 4).
         let folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
         tab.reopen(record, folderID: folderTree.isLive(folderID) ? nil : folderID)
@@ -1227,7 +1243,8 @@ final class EngineRuntime {
     /// Duplicate: opens a copy of a space's tab right after it, in its list and folder, at its current address in its engine, and returns it for the window to select. A copy of an agent tab goes outside its agent folder as the user's own tab. A pinned copy keeps the original's saved page (bookmark rule 2). A favorite's tab and a small window's tab have no row to duplicate, and a live folder item's tab none whose copy could enter its folder.
     func duplicateTab(_ tab: Tab) -> Tab? {
         guard let spaceID = tab.spaceID, tab.isListedInSidebar, tab.liveItemID == nil, let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
-        let copy = makeTab(makeWebContents(url: tab.url, engine: tab.engineKind, state: nil, in: tab.personaID), id: UUID(), spaceID: spaceID, personaID: tab.personaID, pinned: tab.isPinned)
+        let copy = makeTab(makeWebContents(url: tab.url, engine: tab.preferredEngine, state: nil, in: tab.personaID), id: UUID(), spaceID: spaceID, personaID: tab.personaID, pinned: tab.isPinned)
+        copy.preferredEngine = tab.preferredEngine
         copy.folderID = tab.agentOwnerID == nil ? tab.folderID : nil
         copy.savedPage = tab.savedPage
         tabs.insert(copy, at: index + 1)
@@ -1973,7 +1990,7 @@ final class EngineRuntime {
     private var favoriteTabRecords: [SessionSnapshot.FavoriteTabRecord] {
         favorites.compactMap { favorite in
             guard let tab = favoriteTabs[favorite.id] else { return savedFavoriteTabs[favorite.id] }
-            return SessionSnapshot.FavoriteTabRecord(id: tab.id, favoriteID: favorite.id, url: tab.url, engine: tab.engineKind, state: tab.webContents.restorableState)
+            return SessionSnapshot.FavoriteTabRecord(id: tab.id, favoriteID: favorite.id, url: tab.url, engine: tab.preferredEngine, state: tab.restorableStateForPreferredEngine)
         }
     }
 }
@@ -2123,7 +2140,8 @@ extension BrowserSession {
                 let page = UnloadedWebContents(url: incoming.savedPage?.url, title: incoming.savedPage?.title ?? "", engine: incoming.engine, state: nil)
                 tab.replaceWebContents(with: page)
             }
-            tab.pendingSyncEngine = tab.engineKind == incoming.engine ? nil : incoming.engine
+            if tab.engineKind == incoming.engine { tab.preferredEngine = incoming.engine }
+            tab.pendingSyncEngine = tab.preferredEngine == incoming.engine ? nil : incoming.engine
             appliedTabs.insert(tab.id)
         }
         if let reordered = Self.orderedSynced(personas, by: state.personas.map(\.id)) { personas = reordered }

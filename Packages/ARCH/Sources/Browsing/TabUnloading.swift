@@ -35,7 +35,7 @@ enum TabCloseAction: Equatable {
     @MainActor func closedRecord(of tab: Tab) -> SessionSnapshot.TabRecord? {
         guard self == .close(remember: true), let spaceID = tab.spaceID else { return nil }
         return SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID,
-                                         engine: tab.engineKind, personaID: tab.personaID, savedPage: tab.savedPage)
+                                         engine: tab.preferredEngine, personaID: tab.personaID, savedPage: tab.savedPage)
     }
 }
 
@@ -189,7 +189,7 @@ final class MemoryPressureMonitor {
 extension Tab {
     /// Closing a pinned tab (bookmark rule 4): the tab takes a stand-in at its saved page, or at its address without one, in its engine and without page state, and returns its page for the session to close. Opening it again is the user's choice: its first load counts as a visit, and an address that turns out to be a file downloads it. The session has the stand-in load the site's icon, or, for a live folder item's tab, shows its folder's.
     func unloadToSavedPage() -> any EngineWebContents {
-        let standIn = UnloadedWebContents(url: savedPage?.url ?? url, title: savedPage?.title ?? title, engine: engineKind, state: nil, requestsSiteIcon: liveItemID == nil)
+        let standIn = UnloadedWebContents(url: savedPage?.url ?? url, title: savedPage?.title ?? title, engine: preferredEngine, state: nil, requestsSiteIcon: liveItemID == nil)
         isRestored = false
         recordedURL = nil
         return takeStandIn(standIn)
@@ -197,7 +197,7 @@ extension Tab {
 
     /// An automatic unload (bookmark rule 5): the tab takes a stand-in that keeps its address, title, icon, and its engine's page state, which a Chromium page lacks, and returns its page for the session to close. Loading it again resumes it, as after a relaunch, and the page takes its host's remembered zoom once it loads.
     func unloadKeepingPage() -> any EngineWebContents {
-        takeStandIn(UnloadedWebContents(url: url, title: title, engine: engineKind, state: webContents.restorableState, icon: favicon, requestsSiteIcon: liveItemID == nil))
+        takeStandIn(UnloadedWebContents(url: url, title: title, engine: preferredEngine, state: restorableStateForPreferredEngine, icon: favicon, requestsSiteIcon: liveItemID == nil))
     }
 
     /// Puts `standIn` in place of the tab's web contents, takes its title and icon, and returns the web contents it replaced.

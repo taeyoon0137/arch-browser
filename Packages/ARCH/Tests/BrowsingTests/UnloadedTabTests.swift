@@ -106,6 +106,110 @@ import Testing
         #expect(tab.isLoading)
     }
 
+    @Test func savingDuringAnEngineOutageKeepsTabAndFavoriteChoicesForTheNextLaunch() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
+        let store = SessionStore(directory: directory)
+        var snapshot = SessionSnapshot.empty.normalized()
+        let space = try #require(snapshot.spaces.first)
+        let url = URL(string: "about:blank#engine-restore")!
+        let id = UUID(), background = UUID()
+        snapshot.tabs = [id, background].map {
+            .init(id: $0, spaceID: space.id, url: url, title: "Example", isPinned: true, engine: .chromium)
+        }
+        let favorite = Favorite(url: url, title: "Favorite", personaID: space.resolvedPersonaID)
+        snapshot.favorites = [favorite]
+        snapshot.favoriteTabs = [.init(id: UUID(), favoriteID: favorite.id, url: url, engine: .chromium)]
+        try store.saveNow(snapshot).get()
+        func launch(_ engines: [EngineKind]) throws -> BrowserSession {
+            let registry = EngineRegistry()
+            for kind in engines { registry.register(SessionTestEngine(kind: kind)) }
+            return try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        }
+
+        let fallback = try launch([.webKit])
+        let selected = try #require(fallback.tabs.first { $0.id == id })
+        fallback.loadPage(of: selected)
+        #expect(selected.engineKind == .webKit && fallback.openTab(for: favorite).engineKind == .webKit)
+        #expect(fallback.tabs.first { $0.id == background }?.isLoaded == false)
+        #expect(fallback.sidebarSyncState.pinnedTabs.allSatisfy { $0.engine == .chromium })
+        try fallback.saveNow().get()
+        let saved = try #require(store.load())
+        #expect(saved.tabs.map(\.engine) == [.chromium, .chromium])
+        #expect(saved.favoriteTabs?.first?.engine == .chromium)
+        let recovered = try launch([.webKit, .chromium])
+        let restored = try #require(recovered.tabs.first { $0.id == id })
+        recovered.loadPage(of: restored)
+        #expect(restored.engineKind == .chromium && recovered.openTab(for: favorite).engineKind == .chromium)
+        let visiblePage = selected.webContents
+        fallback.switchEngine(of: selected, to: .webKit)
+        #expect(selected.webContents === visiblePage)
+        try fallback.saveNow().get()
+        #expect(try #require(store.load()).tabs.first { $0.id == id }?.engine == .webKit)
+    }
+
+    @Test func fallbackPageStateStaysWithItsRendererAndClosedTabsKeepTheirChoice() {
+        let saved = record(3)
+        let tab = restoredTab(saved)
+        let page = PageStub(engine: .webKit, url: saved.url)
+        page.restorableState = Data([0x57, 0x4B])
+        tab.loadPage { _, _, _ in page }
+        let current = SessionSnapshot.TabRecord(tab, spaceID: spaceID, lastActivatedAt: Date())
+        #expect(tab.preferredEngine == .chromium && tab.engineKind == .webKit)
+        #expect(current.engine == .chromium && current.state == nil)
+        #expect(TabCloseAction.close(remember: true).closedRecord(of: tab)?.engine == .chromium)
+        _ = tab.unloadKeepingPage()
+        #expect(!tab.isLoaded && tab.engineKind == .chromium && tab.webContents.restorableState == nil)
+        tab.loadPage { url, kind, state in
+            #expect(kind == .chromium && state == nil)
+            return PageStub(engine: kind, url: url)
+        }
+        #expect(tab.engineKind == .chromium && tab.preferredEngine == .chromium)
+    }
+
+    @Test func onlyTheOriginalPageKeepsItsUnavailableEnginesHistory() {
+        let saved = record(4)
+        let tab = restoredTab(saved)
+        let fallback = PageStub(engine: .chromium, url: saved.url)
+        tab.loadPage { _, _, _ in fallback }
+        #expect(tab.engineKind == .chromium && tab.preferredEngine == .webKit)
+        #expect(SessionSnapshot.TabRecord(tab, spaceID: spaceID, lastActivatedAt: Date()).state == saved.state)
+        fallback.report(url: URL(string: "about:blank#other"))
+        fallback.report(url: saved.url)
+        #expect(tab.restorableStateForPreferredEngine == nil)
+    }
+
+    @Test func choosingTheFallbackRendererCancelsAnEarlierRetryWaitingForCookies() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
+        let registry = EngineRegistry()
+        let webKit = SessionTestEngine()
+        var waiting: (([EngineCookie]) -> Void)?
+        var delay = false
+        webKit.readCookies = { completion in
+            if delay { waiting = completion } else { completion([]) }
+        }
+        registry.register(webKit)
+        let browser = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let space = try #require(browser.spaces.first)
+        let tab = browser.openTab(url: URL(string: "about:blank#retry"), in: space.id, select: false, engine: .chromium)
+        let page = tab.webContents
+        #expect(tab.engineKind == .webKit && tab.preferredEngine == .chromium)
+        registry.register(SessionTestEngine(kind: .chromium))
+        _ = browser.runtime(for: .chromium, in: space.resolvedPersonaID)
+        delay = true
+        browser.switchEngine(of: tab, to: .chromium)
+        let finish = try #require(waiting)
+        browser.switchEngine(of: tab, to: .webKit)
+        delay = false
+        finish([])
+        #expect(tab.webContents === page && tab.preferredEngine == .webKit)
+    }
+
     @Test func aLoadBeforeAWindowShowsTheTabReplacesTheSavedPage() {
         let tab = restoredTab(record(6))
         let next = URL(string: "https://other.example/start")!

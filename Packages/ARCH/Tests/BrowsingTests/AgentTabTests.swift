@@ -512,7 +512,8 @@ final class SessionTestEngine: Engine, EngineApplication {
             completion(.success(Context()))
         }
     }
-    func createBrowser(context: any EngineBrowserContext) -> any EngineBrowser { Browser(kind: kind) }
+    var readCookies: (@escaping ([EngineCookie]) -> Void) -> Void = { $0([]) }
+    func createBrowser(context: any EngineBrowserContext) -> any EngineBrowser { Browser(kind: kind, readCookies: readCookies) }
 
     private final class Context: EngineBrowserContext {
         let downloads: any EngineDownloads = Downloads()
@@ -527,13 +528,17 @@ final class SessionTestEngine: Engine, EngineApplication {
 
     private final class Browser: EngineBrowser {
         let kind: EngineKind
-        init(kind: EngineKind) { self.kind = kind }
+        let readCookies: (@escaping ([EngineCookie]) -> Void) -> Void
+        init(kind: EngineKind, readCookies: @escaping (@escaping ([EngineCookie]) -> Void) -> Void) {
+            self.kind = kind
+            self.readCookies = readCookies
+        }
         var cookiesDidChange: (() -> Void)?
         func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents { PageDouble(url: configuration.initialURL, engine: kind) }
         func takeOwnership(of webContents: any EngineWebContents) {}
         func closeWebContents(_ webContents: any EngineWebContents) {}
         func closeAllWebContents() {}
-        func allCookies(completion: @escaping ([EngineCookie]) -> Void) { completion([]) }
+        func allCookies(completion: @escaping ([EngineCookie]) -> Void) { readCookies(completion) }
         func setCookies(_ cookies: [EngineCookie], completion: @escaping () -> Void) { completion() }
         func removeCookies(where shouldRemove: @escaping (EngineCookie) -> Bool, completion: @escaping () -> Void) { completion() }
         func removeSiteData(for origins: [URL], completion: @escaping () -> Void) { completion() }

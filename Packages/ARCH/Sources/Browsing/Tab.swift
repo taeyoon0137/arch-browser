@@ -29,6 +29,8 @@ import LiveFolders
     }
     /// A synced engine choice waits while a window shows this page.
     var pendingSyncEngine: EngineKind?
+    /// A newer site-settings choice cancels an engine switch still copying cookies.
+    var requestedEngineSwitch: EngineKind?
     /// The page a pinned tab returns to (bookmark rule 2): set as the tab becomes pinned, from its record when it restores or reopens, and by Use Current Page as Saved Page and Edit Saved Address…. Nil for every other tab. `docs/bookmarks.md`, Saved pages, describes the rest.
     @Published public internal(set) var savedPage: SavedPage?
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
@@ -149,13 +151,43 @@ import LiveFolders
     /// The engine that renders the tab.
     public var engineKind: EngineKind { webContents.engineKind }
 
+    /// The engine to use again when the page is restored. During a temporary fallback the visible page still reports its actual engine.
+    public internal(set) var preferredEngine: EngineKind {
+        get { fallbackPreference ?? engineKind }
+        set {
+            let preference = newValue == engineKind ? nil : newValue
+            if fallbackPreference != preference {
+                originalEngineState = nil
+                fallbackPreference = preference
+            }
+        }
+    }
+    @Published private var fallbackPreference: EngineKind?
+    private var originalEngineState: (url: URL, data: Data)?
+
+    var restorableStateForPreferredEngine: Data? {
+        guard preferredEngine != engineKind else { return webContents.restorableState }
+        return originalEngineState?.url == url ? originalEngineState?.data : nil
+    }
+
+    /// A fallback may show the saved address but cannot interpret or update the original renderer's history.
+    func restoreEngine(_ kind: EngineKind, state: Data?, at savedURL: URL?) {
+        preferredEngine = kind
+        originalEngineState = nil
+        guard kind != engineKind, let state, let savedURL, url == nil || savedURL == url else { return }
+        originalEngineState = (savedURL, state)
+    }
+
     /// Whether the tab has its engine's page. A tab restored from `session.json` has an `UnloadedWebContents` in its place until a window first shows it, and so does a tab whose page unloaded until a window next shows it (`BrowserSession.loadPage(of:)`).
     var isLoaded: Bool { !(webContents is UnloadedWebContents) }
 
     /// Puts the engine's page in place of the stand-in of a tab without one: `make` creates it at the address, in the engine, and with the page state that the stand-in keeps. A tab that has its page keeps it.
     func loadPage(_ make: (_ url: URL?, _ engine: EngineKind, _ state: Data?) -> any EngineWebContents) {
         guard let unloaded = webContents as? UnloadedWebContents else { return }
-        replaceWebContents(with: make(unloaded.url, unloaded.engineKind, unloaded.restorableState))
+        let engine = preferredEngine
+        let state = restorableStateForPreferredEngine
+        replaceWebContents(with: make(unloaded.url, engine, state))
+        restoreEngine(engine, state: state, at: unloaded.url)
     }
 
     /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, its saved page, its folder, `folderID` being the record's folder while that folder exists, and its live folder item while it is in that folder. The tab counts as restored, and loading its saved page does not count as a visit, apart from an item's tab, which the user opens as a new page: its first load is a visit, and a file it points at downloads (`docs/bookmarks.md`, Items as tabs).
@@ -193,7 +225,7 @@ import LiveFolders
             publisher.dropFirst().map { _ in () }.eraseToAnyPublisher()
         }
         return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($savedPage), changes($folderID), changes($liveItemID), changes($url),
-                                    changes($title), changes($customTitle), changes($suggestedTitle))
+                                    changes($title), changes($customTitle), changes($suggestedTitle), changes($fallbackPreference))
             .eraseToAnyPublisher()
     }
 
@@ -266,6 +298,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// A pinned tab without a saved page, as one pinned before its page reported an address, takes the first address its page reports (bookmark rule 2), with an empty title: the tab's title is still the previous page's, and the new page's first title fills it.
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url?.withoutCredentials
+        if let originalEngineState, let url, originalEngineState.url != url { self.originalEngineState = nil }
         reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if !webContents.isLoading { commitURL() }

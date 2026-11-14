@@ -244,7 +244,7 @@ extension SessionSnapshot.TabRecord {
     /// An open tab as `session.json` keeps it, in the space `spaceID` and active last at `lastActivatedAt`. A tab without its page writes what its stand-in keeps of its saved record (`UnloadedWebContents`).
     @MainActor init(_ tab: Tab, spaceID: UUID, lastActivatedAt: Date) {
         self.init(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, lastActivatedAt: lastActivatedAt,
-                  engine: tab.engineKind, state: tab.webContents.restorableState, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle, savedPage: tab.savedPage,
+                  engine: tab.preferredEngine, state: tab.restorableStateForPreferredEngine, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle, savedPage: tab.savedPage,
                   liveItemID: tab.liveItemID)
         pendingSyncEngine = tab.pendingSyncEngine
     }
