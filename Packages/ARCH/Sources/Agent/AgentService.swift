@@ -112,6 +112,7 @@ import Foundation
     /// How long a session's call waits for the model's first output, and while the user has taken the session over; tests shorten them.
     var sessionReadyWait = AgentSession.readyWait
     var sessionTakeOverWait = AgentSession.takeOverWait
+    var sessionQuestionWindow = TimeInterval(AgentLimits.inAppApprovalMinutes * 60)
     /// Republish each session's turn starting and ending, which the bottom bar's indicator reads, and its waiting for the user starting and ending, which the bar's space symbols read.
     private var sessionObservers: [UUID: AnyCancellable] = [:]
     private var restartingSessions: Set<UUID> = []
@@ -560,8 +561,12 @@ import Foundation
 
     /// Shows a new card in the agent panel of the front main window, with its client's name, access, and place, and notifies while Arch is in the background, once while the client's cards wait.
     private func cardDidOpen(_ approval: AgentApproval) {
-        if let grant = grants.first(where: { $0.id == approval.ownerID }) { describeInPanel(grant) }
-        host.showAgentPanel(for: approval.ownerID)
+        if let session = session(withID: approval.ownerID) {
+            session.setWaitingForAnswer(true)
+        } else {
+            if let grant = grants.first(where: { $0.id == approval.ownerID }) { describeInPanel(grant) }
+            host.showAgentPanel(for: approval.ownerID)
+        }
         if approvals.pending.allSatisfy({ $0.ownerID != approval.ownerID || $0.id == approval.id }) { dependencies.attention() }
     }
 
@@ -779,6 +784,9 @@ import Foundation
     }
 
     private func configure(_ session: AgentSession) {
+        session.dismissQuestions = { [weak approvals, id = session.id] in
+            approvals?.end(owner: id, because: "The session stopped waiting for this answer.")
+        }
         session.closeOwnedTabs = { [weak host, id = session.id] in
             guard let host else { return }
             for tab in host.agentTabs(of: id) { host.closeAgentTab(tab.id) }
@@ -1048,7 +1056,7 @@ import Foundation
                 runner?.toolCallDidEnd()
             }
             // A call the client cancelled was answered then, and one cancelled before it ran ran nothing.
-            let result = await sessionResult(of: call, in: session, arrivedAt: epoch) {
+            let result = await sessionResult(of: call, in: session, arrivedAt: epoch, connectionID: connection.id) {
                 !running.isCancelled && self.connections[connection.id] != nil
             }
             guard !running.isCancelled, connections[connection.id] != nil else { return }
@@ -1061,9 +1069,17 @@ import Foundation
         let tool = AgentToolCatalog.tool(named: call.name)
         let tabHandle = call.arguments["tab"]?.stringValue
         session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
+        let decision: AgentActivityEntry.Decision
+        switch (call.name, result.status) {
+        case ("ask_user", .ok): decision = .approved
+        case ("ask_user", .denied): decision = .denied
+        case ("ask_user", .timeout): decision = .timedOut
+        case (_, .refused): decision = .refused
+        default: decision = .auto
+        }
         activity.record(AgentActivityEntry(date: dependencies.now(), event: .toolCall, grantID: session.grantID, sessionID: session.id, clientName: session.clientName,
                                            personaID: session.personaID, tool: tool?.name, toolClass: tool?.toolClass.rawValue,
-                                           decision: result.status == .refused ? .refused : .auto, rule: result.status == .refused ? result.code : nil, outcome: result.status.rawValue))
+                                           decision: decision, rule: result.status == .refused ? result.code : nil, outcome: result.status.rawValue))
     }
 
     /// Binds the HTTP tool loop to this session for its full lifetime, without a peer, a ticket, or a socket.
@@ -1152,7 +1168,7 @@ import Foundation
     }
 
     /// Shared permission, turn, and budget checks for CLI and HTTP sessions.
-    private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, isConnected: () -> Bool = { true }) async -> AgentToolResult {
+    private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, connectionID: UUID? = nil, isConnected: () -> Bool = { true }) async -> AgentToolResult {
         guard await session.ready.wait(timeout: sessionReadyWait) else {
             if Task.isCancelled { return AgentToolHost.ended.result }
             if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
@@ -1170,9 +1186,14 @@ import Foundation
             return AgentToolResult(status: .refused, code: "stopped", text: "The call was cancelled.")
         }
         if let refusal = session.countCall() { return refusal }
-        let toolHost = AgentToolHost(host: host, allowsAI: dependencies.allowsAI)
+        var toolHost = toolHost(connectionID: connectionID)
+        toolHost.clientKind = session.isFromOutsideClient ? .outside : .inApp
+        toolHost.approvalWindow = sessionQuestionWindow
         let generation = session.takeoverGeneration
         let result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
+        if call.name == "ask_user", !approvals.pending.contains(where: { $0.ownerID == session.id }) {
+            session.setWaitingForAnswer(false)
+        }
         if Task.isCancelled || !isConnected() { return AgentToolHost.ended.result }
         if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
         if session.isTakenOver || generation != session.takeoverGeneration {
@@ -1499,7 +1520,7 @@ private final class ClientConnection {
     var sessionID: UUID?
     var runningCalls = 0
     /// The calls that run on the connection by their request ID, which a client's `tools/cancel` names.
-    private var calls: [Int: ConnectionCall] = [:]
+    private var calls: [AgentRPCID: ConnectionCall] = [:]
 
     init(id: UUID, peer: AgentPeer) {
         self.id = id
@@ -1510,7 +1531,7 @@ private final class ClientConnection {
     func startCall(_ requestID: AgentRPCID) -> ConnectionCall {
         let call = ConnectionCall(requestID: requestID)
         runningCalls += 1
-        if let callID = call.callID { calls[callID] = call }
+        calls[requestID] = call
         return call
     }
 
@@ -1518,12 +1539,21 @@ private final class ClientConnection {
     func endCall(_ call: ConnectionCall) {
         guard !call.isCancelled else { return }
         runningCalls -= 1
-        if let callID = call.callID, calls[callID] === call { calls[callID] = nil }
+        if calls[call.requestID] === call { calls[call.requestID] = nil }
+    }
+
+    func cancelCalls() {
+        for call in calls.values {
+            call.isCancelled = true
+            call.task?.cancel()
+        }
+        calls.removeAll()
+        runningCalls = 0
     }
 
     /// The running call that `tools/cancel` names, marked cancelled with its slot freed, or nil once it has ended.
     func cancelCall(_ callID: Int) -> ConnectionCall? {
-        guard let call = calls.removeValue(forKey: callID), !call.isCancelled else { return nil }
+        guard let call = calls.removeValue(forKey: .number(callID)), !call.isCancelled else { return nil }
         call.isCancelled = true
         runningCalls -= 1
         return call
@@ -1533,6 +1563,7 @@ private final class ClientConnection {
 /// One `tools/call` on a connection, which its client may cancel.
 private final class ConnectionCall {
     /// The request ID, when it is a number, as `tools/cancel` names calls.
+    let requestID: AgentRPCID
     let callID: Int?
     var task: Task<Void, Never>?
     var isCancelled = false
@@ -1540,6 +1571,7 @@ private final class ConnectionCall {
     var waitsOn: String?
 
     init(requestID: AgentRPCID) {
+        self.requestID = requestID
         if case .number(let number) = requestID { callID = number } else { callID = nil }
     }
 }
@@ -1566,7 +1598,7 @@ extension AgentService: AgentEndpointDelegate {
         guard endpoint === self.endpoint else { return }
         for state in states.values { state.cancelCalls(onConnection: connection) }
         approvals.end(connection: connection, because: "The client left before the user answered.")
-        connections[connection] = nil
+        connections.removeValue(forKey: connection)?.cancelCalls()
         updateConnectedGrants()
     }
 

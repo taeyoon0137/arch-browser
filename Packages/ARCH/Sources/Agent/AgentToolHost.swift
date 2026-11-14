@@ -162,7 +162,7 @@ import Foundation
         case "screenshot": return await screenshot(arguments, grant, state: state)
         case "click", "type", "press", "select_option", "scroll", "hover": return await act(tool.name, arguments, grant, state: state, box: box)
         case "request_tab": return await requestTab(arguments, grant, state: state, box: box)
-        case "ask_user": return await askUser(arguments, grant, state: state, box: box)
+        case "ask_user": return await askUser(arguments, ownerID: grant.id, name: grant.client.displayName, box: box)
         case "request_approval": return await requestApproval(arguments, grant, state: state, box: box)
         case "hand_to_user": return await handToUser(arguments, grant, state: state, box: box)
         case "guide": return Outcome(result: AgentHarness.guideResult(arguments: arguments))
@@ -1014,7 +1014,7 @@ struct AgentToolClient {
 /// An in-app session's calls (docs/agents.md, In-app sessions), which run the tools that need no agent tab until plan task VII.17.1 runs them on the grant's path with the session as the agent folder's owner, its site scope (P13), and the cards in its panel.
 extension AgentToolHost {
     /// The tools an in-app session runs in this build; its `tools/list` lists only these, and the others answer that they are not available yet.
-    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "guide"]
+    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "ask_user", "guide"]
 
     /// The tools an in-app session in `mode` with `scopes` can call, in catalog order, for its `tools/list`.
     static func sessionTools(for mode: AgentAccessLevel, scopes: AgentGrantScopes) -> [AgentTool] {
@@ -1032,6 +1032,14 @@ extension AgentToolHost {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }
         switch tool.name {
+        case "ask_user":
+            guard session.isTurnRunning, !session.hasEnded, !session.isTakenOver, session.acceptsQuestions else {
+                return AgentToolResult(status: .refused, code: "stopped", text: "This session is not accepting questions for this turn.")
+            }
+            if case .outsideClient(_, _, true) = session.origin {
+                return AgentToolResult(status: .denied, text: "This task was started with user prompts disabled.")
+            }
+            return await askUser(call.arguments, ownerID: session.id, name: session.title).result
         case "session_info": return sessionInfo(ofSession: client, handles: &session.handles)
         case "list_spaces": return listSpaces(ofSession: client, handles: &session.handles)
         case "list_tabs":

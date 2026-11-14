@@ -153,7 +153,7 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
     @Test func inAppGuidanceOnlyNamesOfferedToolsAndKeepsTheOutsideGuide() {
         let guide = AgentHarness.guideResult(arguments: [:], inSession: true)
         #expect(guide.text == AgentHarness.sessionInstructions)
-        for name in ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "guide"] {
+        for name in ["session_info", "list_spaces", "list_tabs", "snapshot", "read_text", "ask_user", "guide"] {
             #expect(guide.text.contains(name))
         }
         for topic in AgentGuideTopic.allCases {
