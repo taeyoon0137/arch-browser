@@ -131,15 +131,22 @@ final class EngineRuntime {
     }
 
     /// Loads the saved session and the stores in `userDataDirectory`, removes deleted Personas' stored data, then starts the default engine, or the first registered engine that starts when the default cannot. The other engines start when a tab first needs them. Every Persona's plugin manager offers `builtInPlugins`, the plugins the app ships. `cefVersion` is the CEF version of Arch's Chromium engine, whose Chromium version `webStore` asks the Web Store with, or nil without that engine. `nativeMessagingHostFolders` are the folders where native app vendors install host manifests for other browsers, which `nativeMessagingHosts` reads without changing them, and `chromiumNativeMessagingHosts` is the system folder that Arch's Chromium engine reads host manifests from itself, which its gate counts, or nil without that engine. `agentOnlyPersonaID` is the Agents Persona that `agent.json` records, which is agent-only before any engine starts, so that a profile that a restored favorite's tab starts here takes no remembered answers.
-    public init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?, nativeMessagingHostFolders: [URL] = [],
-                chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil) throws {
+    public convenience init(registry: EngineRegistry = .shared, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?, nativeMessagingHostFolders: [URL] = [],
+                            chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil) throws {
+        try self.init(registry: registry, userDataDirectory: userDataDirectory, builtInPlugins: builtInPlugins, cefVersion: cefVersion,
+                      nativeMessagingHostFolders: nativeMessagingHostFolders, chromiumNativeMessagingHosts: chromiumNativeMessagingHosts, agentOnlyPersonaID: agentOnlyPersonaID,
+                      sessionSeal: .keychain, liveFolderAddresses: LiveFolderKeychain())
+    }
+
+    init(registry: EngineRegistry, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?, nativeMessagingHostFolders: [URL] = [],
+         chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil, sessionSeal: SessionStateSeal, liveFolderAddresses: any LiveFolderAddressStore) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
         self.builtInPlugins = builtInPlugins
         webStore = WebStoreInstaller(client: WebStoreClient(productVersion: cefVersion.flatMap(WebStoreClient.chromiumVersion(inCEFVersion:)) ?? ""))
         nativeMessagingHosts = NativeMessagingHostLinks(directory: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true), folders: nativeMessagingHostFolders,
                                      chromiumFolder: chromiumNativeMessagingHosts)
-        store = SessionStore(directory: userDataDirectory)
+        store = SessionStore(directory: userDataDirectory, seal: sessionSeal)
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
@@ -151,7 +158,8 @@ final class EngineRuntime {
         let snapshot = loaded ?? SessionSnapshot.empty.normalized()
         // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
         let keepsUnknownLiveFolders = store.keepsUnknownLiveFolders
-        liveFolderService = LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)), keepsUnknownFolders: keepsUnknownLiveFolders)
+        liveFolderService = LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)),
+                                              addresses: liveFolderAddresses, keepsUnknownFolders: keepsUnknownLiveFolders)
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {

@@ -126,7 +126,7 @@ let package = Package(
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences", "Browsing", "Sync"], path: "Packages/ARCH/Tests/PreferencesTests"),
         // The settings tests compare the synced keys and values with the constants of `ARCHEngine`, `Browsing`, and `Preferences`, which `Sync` does not use.
-        .testTarget(name: "SyncTests", dependencies: ["Sync", "ARCHEngine", "Browsing", "Preferences"], path: "Packages/ARCH/Tests/SyncTests"),
+        .testTarget(name: "SyncTests", dependencies: ["Sync", "ARCHEngine", "Browsing", "Preferences", "LiveFolders"], path: "Packages/ARCH/Tests/SyncTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],
     cxxLanguageStandard: .cxx20

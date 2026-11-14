@@ -267,7 +267,7 @@ final class SessionStore {
     /// Seals the page state in the file. The tests give one with a key of their own, so they never touch the Keychain.
     private let seal: SessionStateSeal
 
-    init(directory: URL, seal: SessionStateSeal = .keychain) {
+    init(directory: URL, seal: SessionStateSeal) {
         fileURL = directory.appendingPathComponent("session.json")
         self.seal = seal
     }

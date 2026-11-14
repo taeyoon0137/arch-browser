@@ -2,6 +2,7 @@ import ARCHEngine
 @testable import Browsing
 import CloudKit
 import Foundation
+import LiveFolders
 import Testing
 @testable import Sync
 
@@ -59,6 +60,7 @@ import Testing
     @MainActor private final class Mac {
         let name = UUID().uuidString
         let directory: URL
+        private let addresses = InMemoryLiveFolderKeychain()
         let defaults: UserDefaults
         let zone: Zone
         var session: BrowserSession!
@@ -71,8 +73,6 @@ import Testing
             directory = FileManager.default.temporaryDirectory.appendingPathComponent(name)
             defaults = UserDefaults(suiteName: name)!
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            // Suppress live-folder credential cleanup in this synthetic profile.
-            try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
             try launch()
         }
         var file: URL { directory.appendingPathComponent("session.json") }
@@ -83,7 +83,8 @@ import Testing
             session = nil
             let registry = EngineRegistry(defaults: defaults)
             registry.register(NoPages())
-            session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+            session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil,
+                                         sessionSeal: SessionStateSeal { nil }, liveFolderAddresses: addresses)
             let target = zone.database
             controller = SyncController(sidebar: session, directory: directory, defaults: defaults, check: { .available(target) },
                 factory: FakeSyncEngine.factory { [unowned self] engine in

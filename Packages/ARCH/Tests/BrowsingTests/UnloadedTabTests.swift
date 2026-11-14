@@ -110,8 +110,7 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
-        let store = SessionStore(directory: directory)
+        let store = SessionStore(directory: directory, seal: .fixture)
         var snapshot = SessionSnapshot.empty.normalized()
         let space = try #require(snapshot.spaces.first)
         let url = URL(string: "about:blank#engine-restore")!
@@ -126,7 +125,7 @@ import Testing
         func launch(_ engines: [EngineKind]) throws -> BrowserSession {
             let registry = EngineRegistry()
             for kind in engines { registry.register(SessionTestEngine(kind: kind)) }
-            return try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+            return try BrowserSession(testRegistry: registry, directory: directory)
         }
 
         let fallback = try launch([.webKit])
@@ -189,7 +188,6 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         let webKit = SessionTestEngine()
         var waiting: (([EngineCookie]) -> Void)?
@@ -198,7 +196,7 @@ import Testing
             if delay { waiting = completion } else { completion([]) }
         }
         registry.register(webKit)
-        let browser = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let browser = try BrowserSession(testRegistry: registry, directory: directory)
         let space = try #require(browser.spaces.first)
         let tab = browser.openTab(url: URL(string: "about:blank#retry"), in: space.id, select: false, engine: .chromium)
         let page = tab.webContents

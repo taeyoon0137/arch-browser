@@ -71,7 +71,7 @@ import Testing
         // The saved file has neither, and a relaunch reopens only the user's tabs.
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentTabTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let store = SessionStore(directory: directory)
+        let store = SessionStore(directory: directory, seal: .fixture)
         store.saveNow(SessionSnapshot(version: SessionSnapshot.currentVersion, personas: [Persona(id: Persona.defaultID, name: "Default")], spaces: [space], currentSpaceID: space.id, favorites: [],
                                       tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: space.id, lastActivatedAt: Date()) }, folders: kept.folders, windows: savedWindows))
         let file = try String(contentsOf: store.fileURL, encoding: .utf8)
@@ -152,10 +152,9 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchTabRequest-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
         let host = BrowserAgentHost(session: session)
         let home = try #require(session.spaces.first)
         let work = session.addPersona(named: "Work")
@@ -185,10 +184,9 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchResearchLifetime-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
         let host = BrowserAgentHost(session: session)
         let persona = session.addPersona(named: "Temporary")
         let space = try #require(session.spaces(in: persona.id).first)
@@ -230,11 +228,9 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentSessionTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        // The recovery marker tells the session to leave any private feed addresses in the user's Keychain alone.
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
         let host = BrowserAgentHost(session: session)
         let persona = session.addPersona(named: "Temporary")
         let space = try #require(session.spaces(in: persona.id).first)
@@ -305,7 +301,7 @@ import Testing
         #expect(session.tabs.isEmpty && session.folders.isEmpty)
         #expect(session.closeLog.entries.filter { $0.reason == .persona }.count == 3)
         session.saveNow()
-        let restored = try #require(SessionStore(directory: directory).load())
+        let restored = try #require(SessionStore(directory: directory, seal: .fixture).load())
         #expect(Set(restored.closedTabs?.compactMap(\.id) ?? []) == [moved.id, pinned.id, kept.id, released.id])
 
         await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }

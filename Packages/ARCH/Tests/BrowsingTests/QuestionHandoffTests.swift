@@ -10,10 +10,9 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchQuestionTests-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let browser = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let browser = try BrowserSession(testRegistry: registry, directory: directory)
         let space = try #require(browser.spaces.first)
         let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true)
         let window = BrowserWindowModel(session: browser, record: record, kind: .main)

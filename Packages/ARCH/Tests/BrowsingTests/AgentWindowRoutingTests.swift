@@ -11,10 +11,9 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentWindows-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
         let home = try #require(session.spaces.first)
         let work = session.addPersona(named: "Work")
         let research = try #require(session.spaces(in: work.id).first)
@@ -69,7 +68,6 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let suite = "ArchEngineFixture-" + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -79,7 +77,7 @@ import Testing
         registry.register(SessionTestEngine(kind: .webKit))
         registry.defaultKind = .chromium
         func launch() throws -> BrowserSession {
-            try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+            try BrowserSession(testRegistry: registry, directory: directory)
         }
         let browser = try launch()
         let persona = browser.addPersona(named: "Work")

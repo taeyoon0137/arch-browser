@@ -12,10 +12,9 @@ import Testing
 @MainActor @Suite(.serialized) struct SessionFolderControlsTests {
     private func fixture(in directory: URL, client: any AIClient) throws -> (BrowserSession, BrowserAgentHost, AgentService) {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let browser = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let browser = try BrowserSession(testRegistry: registry, directory: directory)
         let host = BrowserAgentHost(session: browser)
         let service = AgentService(directory: directory, host: host, version: "test", dependencies: .init(
             location: nil, keys: UnusedFolderKeys(), peerChecks: .init(read: { _ in throw CancellationError() }, verify: { _ in throw CancellationError() }),

@@ -9,12 +9,33 @@ import Testing
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
         registry.register(SessionTestEngine(kind: .chromium))
-        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
         try await body(session, directory)
+    }
+
+    @Test(arguments: [false, true])
+    func privateFeedCleanupUsesOnlyTheSessionStoreAndPreservesAnUnreadableSession(_ unreadable: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        if unreadable { try Data("unreadable".utf8).write(to: directory.appendingPathComponent("session.json")) }
+
+        let addresses = InMemoryLiveFolderKeychain(), otherAddresses = InMemoryLiveFolderKeychain()
+        let orphan = UUID(), feed = try #require(URL(string: "https://fixture.invalid/feed?key=fixture"))
+        try await addresses.setAddress(feed, for: orphan, folderName: "Local feed")
+        try await otherAddresses.setAddress(feed, for: orphan, folderName: "Other profile")
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory, addresses: addresses)
+        // This write is queued after the initial registration's cleanup.
+        try await session.liveFolderService.setPrivateAddress(feed, for: UUID(), folderName: "New feed")
+
+        #expect(try await addresses.address(for: orphan) == (unreadable ? feed : nil))
+        #expect(try await otherAddresses.address(for: orphan) == feed)
+        #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.unreadable.json").path) == unreadable)
     }
 
     @Test func anUnavailableChromiumProfileFallsBackOnlyForThatPersonaAndRecovers() throws {
@@ -29,7 +50,7 @@ import Testing
         registry.register(chromium)
         registry.register(SessionTestEngine(kind: .webKit))
         registry.defaultKind = .chromium
-        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
         let persona = session.addPersona(named: "Work")
         chromium.unavailableStorageID = persona.id
 

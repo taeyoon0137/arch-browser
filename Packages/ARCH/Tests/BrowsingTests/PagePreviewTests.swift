@@ -16,7 +16,7 @@ import Testing
         registry.register(chromium)
         registry.register(SessionTestEngine(kind: .webKit))
         registry.defaultKind = .chromium
-        let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
         let space = try #require(session.spaces.first)
         let window = BrowserWindowModel(session: session, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         try body(session, chromium, window)
@@ -68,7 +68,7 @@ import Testing
             #expect(tab.engineKind == (recovered ? .chromium : .webKit))
             #expect(tab.preferredEngine == .chromium)
             try session.saveNow().get()
-            #expect(SessionStore(directory: session.userDataDirectory).load()?.tabs.first?.engine == .chromium)
+            #expect(SessionStore(directory: session.userDataDirectory, seal: .fixture).load()?.tabs.first?.engine == .chromium)
         }
     }
 
