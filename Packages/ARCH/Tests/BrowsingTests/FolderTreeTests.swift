@@ -64,6 +64,17 @@ import Testing
         #expect(left && returned)
     }
 
+    @Test func eachFavoriteRowUsesItsOwnCapacityAndLaterRowsUseTheDefault() {
+        let sizes = FavoriteTileLayout.rowSizes(from: FavoriteTileLayout.encode(rowSizes: [3, 2]))
+        #expect(sizes == [3, 2])
+        #expect(FavoriteTileLayout.counts(for: 0, rowSizes: sizes, defaultColumns: 4) == [])
+        #expect(FavoriteTileLayout.counts(for: 5, rowSizes: sizes, defaultColumns: 4) == [3, 2])
+        #expect(FavoriteTileLayout.counts(for: 11, rowSizes: sizes, defaultColumns: 4) == [3, 2, 4, 2])
+        #expect(FavoriteTileLayout.counts(for: 4, rowSizes: [1, 4], defaultColumns: 4) == [1, 3])
+        #expect(FavoriteTileLayout.rowSizes(from: Data("[0,9]".utf8)) == [1, 4])
+        #expect(FavoriteTileLayout.rowSizes(from: Data("invalid".utf8)).isEmpty)
+    }
+
     @Test func anEmptyFavoritesBarAcceptsOnlyTheDraggedTabsOwnSpace() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

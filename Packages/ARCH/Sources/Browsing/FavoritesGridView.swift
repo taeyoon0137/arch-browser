@@ -6,6 +6,7 @@ import SwiftUI
 /// The number of shortcuts in a full row. The last row shares its available width among the remaining shortcuts.
 public enum FavoriteTileLayout {
     public static let columnsKey = "ARCHFavoriteColumns"
+    public static let rowSizesKey = "ARCHFavoriteRowSizes"
     public static let defaultColumns = 4
     public static let choices = 1...4
     static let spacing: CGFloat = 6
@@ -14,27 +15,52 @@ public enum FavoriteTileLayout {
     public static func columnCount(_ stored: Int) -> Int {
         min(max(stored, choices.lowerBound), choices.upperBound)
     }
+
+    public static func rowSizes(from data: Data) -> [Int] {
+        let stored = (try? JSONDecoder().decode([Int].self, from: data)) ?? []
+        return stored.map(columnCount)
+    }
+
+    public static func encode(rowSizes: [Int]) -> Data {
+        (try? JSONEncoder().encode(rowSizes.map(columnCount))) ?? Data()
+    }
+
+    static func counts(for favorites: Int, rowSizes: [Int], defaultColumns: Int) -> [Int] {
+        var remaining = favorites
+        var counts: [Int] = []
+        while remaining > 0 {
+            let row = counts.count
+            let capacity = row < rowSizes.count ? rowSizes[row] : defaultColumns
+            let count = min(remaining, columnCount(capacity))
+            counts.append(count)
+            remaining -= count
+        }
+        return counts
+    }
 }
 
 /// Keeps each favorite in the same view while it crosses rows during a drag.
 struct FavoriteRows: Layout {
-    let columns: Int
+    let rowSizes: [Int]
+    let defaultColumns: Int
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = (subviews.count + columns - 1) / columns
+        let rows = FavoriteTileLayout.counts(for: subviews.count, rowSizes: rowSizes, defaultColumns: defaultColumns).count
         return CGSize(width: proposal.width ?? SidebarView.defaultWidth,
                       height: CGFloat(rows) * FavoriteTileLayout.height + CGFloat(max(0, rows - 1)) * FavoriteTileLayout.spacing)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let spacing = FavoriteTileLayout.spacing
-        for (index, tile) in subviews.enumerated() {
-            let row = index / columns
-            let itemsInRow = min(columns, subviews.count - row * columns)
-            let width = max(0, bounds.width - CGFloat(itemsInRow - 1) * spacing) / CGFloat(itemsInRow)
-            let origin = CGPoint(x: bounds.minX + CGFloat(index % columns) * (width + spacing),
-                                 y: bounds.minY + CGFloat(row) * (FavoriteTileLayout.height + spacing))
-            tile.place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(width: width, height: FavoriteTileLayout.height))
+        var index = 0
+        for (row, count) in FavoriteTileLayout.counts(for: subviews.count, rowSizes: rowSizes, defaultColumns: defaultColumns).enumerated() {
+            let width = max(0, bounds.width - CGFloat(count - 1) * spacing) / CGFloat(count)
+            for column in 0..<count {
+                let origin = CGPoint(x: bounds.minX + CGFloat(column) * (width + spacing),
+                                     y: bounds.minY + CGFloat(row) * (FavoriteTileLayout.height + spacing))
+                subviews[index].place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(width: width, height: FavoriteTileLayout.height))
+                index += 1
+            }
         }
     }
 }
@@ -44,6 +70,7 @@ struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     let personaID: Persona.ID
     @AppStorage(FavoriteTileLayout.columnsKey) private var columns = FavoriteTileLayout.defaultColumns
+    @AppStorage(FavoriteTileLayout.rowSizesKey) private var rowSizes = Data()
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Each tile's frame in the window, used to find the tile under a dragged favorite.
@@ -52,7 +79,7 @@ struct FavoritesGridView: View {
 
     var body: some View {
         let favorites = session.favorites(in: personaID)
-        FavoriteRows(columns: FavoriteTileLayout.columnCount(columns)) {
+        FavoriteRows(rowSizes: FavoriteTileLayout.rowSizes(from: rowSizes), defaultColumns: columns) {
             ForEach(favorites) { favorite in
                 tile(favorite, selected: windowModel.selectedFavoriteID)
             }

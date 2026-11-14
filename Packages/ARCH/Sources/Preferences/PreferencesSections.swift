@@ -109,17 +109,44 @@ struct GeneralSection: View {
 /// How long an unpinned tab stays open without being selected, and how long pinned tabs and favorites keep their pages without being shown (bookmark rule 5).
 struct SidebarSection: View {
     @AppStorage(FavoriteTileLayout.columnsKey) private var favoriteColumns = FavoriteTileLayout.defaultColumns
+    @AppStorage(FavoriteTileLayout.rowSizesKey) private var favoriteRowData = Data()
+
+    private var favoriteRows: [Int] { FavoriteTileLayout.rowSizes(from: favoriteRowData) }
     @AppStorage(BrowserSession.archiveAfterHoursKey) private var archiveAfterHours = BrowserSession.archiveAfterHoursByDefault
     @AppStorage(TabUnloading.unloadAfterHoursKey) private var unloadAfterHours = TabUnloading.unloadAfterHoursByDefault
 
     var body: some View {
         Form {
-            Picker("Favorites per row", selection: Binding(get: { FavoriteTileLayout.columnCount(favoriteColumns) }, set: { favoriteColumns = $0 })) {
-                ForEach(FavoriteTileLayout.choices, id: \.self) { count in
-                    Text(String(count)).tag(count)
+            Section("Favorites per row") {
+                favoriteCountPicker("Default for other rows", selection: Binding(
+                    get: { FavoriteTileLayout.columnCount(favoriteColumns) },
+                    set: { favoriteColumns = $0 }))
+                ForEach(favoriteRows.indices, id: \.self) { index in
+                    HStack {
+                        favoriteCountPicker("Row \(index + 1)", selection: Binding(
+                            get: { favoriteRows.indices.contains(index) ? favoriteRows[index] : favoriteColumns },
+                            set: { count in
+                                var rows = favoriteRows
+                                guard rows.indices.contains(index) else { return }
+                                rows[index] = count
+                                favoriteRowData = FavoriteTileLayout.encode(rowSizes: rows)
+                            }))
+                        Button {
+                            var rows = favoriteRows
+                            guard rows.indices.contains(index) else { return }
+                            rows.remove(at: index)
+                            favoriteRowData = FavoriteTileLayout.encode(rowSizes: rows)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Remove row \(index + 1)")
+                    }
+                }
+                Button("Add Row") {
+                    favoriteRowData = FavoriteTileLayout.encode(rowSizes: favoriteRows + [favoriteColumns])
                 }
             }
-            .pickerStyle(.segmented)
 
             Section {
                 // A saved delay outside the choices, such as 5, stays listed and selected. The session archives nothing for 0 or less.
@@ -146,6 +173,15 @@ struct SidebarSection: View {
         }
         .formStyle(.grouped)
         .frame(width: sectionWidth)
+    }
+
+    private func favoriteCountPicker(_ title: String, selection: Binding<Int>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(FavoriteTileLayout.choices, id: \.self) { count in
+                Text(String(count)).tag(count)
+            }
+        }
+        .pickerStyle(.segmented)
     }
 
     /// "Never", "After 1 Hour", "After 1 Day", "After 1 Week", or "After 5 Hours".
