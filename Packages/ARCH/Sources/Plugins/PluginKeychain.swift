@@ -2,8 +2,8 @@
 import Foundation
 import Security
 
-/// Where plugin secrets live. The manager's tests use an in-memory store, so they never touch the Keychain.
-protocol PluginSecretStore: AnyObject {
+/// Where plugin secrets live. The manager's tests use an in-memory store, so they never touch the Keychain. `ScopedPluginSecrets` reads and writes secrets on a queue of its own.
+protocol PluginSecretStore: AnyObject, Sendable {
     func secret(service: String, account: String) throws -> String?
     /// nil deletes the item.
     func setSecret(_ secret: String?, service: String, account: String) throws
@@ -145,20 +145,32 @@ final class ScopedPluginSecrets: PluginSecrets {
         hasEnded = true
     }
 
-    func secret(forKey key: String) throws -> String? {
-        try store.secret(service: service, account: account(key))
+    /// Runs the Keychain calls that read or write a secret, one at a time, off the main thread: a call can wait while macOS asks for the login keychain password, as after an ad hoc signed build changed its signature, and the windows stay responsive meanwhile, as for the AI module's keys.
+    private nonisolated static let keychainQueue = DispatchQueue(label: "xyz.taeyoon.arch.plugin.keychain")
+
+    func secret(forKey key: String) async throws -> String? {
+        let (store, service, account) = (store, service, account(key))
+        return try await Self.onKeychainQueue { try store.secret(service: service, account: account) }
     }
 
     /// Throws `PluginError.quotaExceeded` for a secret longer than `sizeLimit`, and for a new key once the plugin keeps `countLimit` secrets in the Persona.
-    func setSecret(_ secret: String?, forKey key: String) throws {
+    func setSecret(_ secret: String?, forKey key: String) async throws {
         guard !hasEnded else { throw PluginError.stopped }
-        if let secret {
-            guard secret.utf8.count <= Self.sizeLimit else { throw PluginError.quotaExceeded }
-            if try !containsSecret(forKey: key), try store.secretCount(service: service, accountPrefix: Self.accountPrefix(of: personaID)) >= Self.countLimit {
+        if let secret, secret.utf8.count > Self.sizeLimit { throw PluginError.quotaExceeded }
+        let (store, service, account, accountPrefix, countLimit) = (store, service, account(key), Self.accountPrefix(of: personaID), Self.countLimit)
+        try await Self.onKeychainQueue {
+            if secret != nil, try !store.containsSecret(service: service, account: account),
+               try store.secretCount(service: service, accountPrefix: accountPrefix) >= countLimit {
                 throw PluginError.quotaExceeded
             }
+            try store.setSecret(secret, service: service, account: account)
         }
-        try store.setSecret(secret, service: service, account: account(key))
+    }
+
+    private nonisolated static func onKeychainQueue<Value: Sendable>(_ body: @escaping @Sendable () throws -> Value) async throws -> Value {
+        try await withCheckedThrowingContinuation { continuation in
+            keychainQueue.async { continuation.resume(with: Result(catching: body)) }
+        }
     }
 
     func containsSecret(forKey key: String) throws -> Bool {

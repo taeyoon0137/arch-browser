@@ -105,8 +105,9 @@ public struct PluginPackage: Identifiable, Sendable {
         defer { try? FileManager.default.removeItem(at: archive) }
         try crx.archive.write(to: archive)
         try extractArchive(archive, to: root, runtimes: runtimes, failure: "\(file.lastPathComponent) holds no .zip archive after its header.")
-        let manifest = root.appendingPathComponent("manifest.json")
-        if FileManager.default.fileExists(atPath: manifest.path) { try writeManifestKey(crx.publicKey, into: manifest, replacingKey: true) }
+        // The package's check, which refuses symbolic links, comes before the write, so that the key never goes into a manifest outside the package, as through an archive whose only entry links to another folder.
+        _ = try files(in: root)
+        if let manifest = Self.file("manifest.json", in: root) { try writeManifestKey(crx.publicKey, into: manifest, replacingKey: true) }
     }
 
     /// Writes the text of each file at its package path in `root`, which must not exist yet, and reads the package. Throws `PluginError.invalidPackage` for a path that breaks the rules of `file(_:in:)`. A failure leaves nothing at `root`.

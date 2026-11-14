@@ -1,4 +1,4 @@
-// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages, when an engine may stop what it kept from an earlier launch, and the popup sizes the presenter keeps.
+// What the web extension runtime does for the requests that Chromium's extension runtime makes, against recording engines: the tabs and windows it opens through the host, the engines' own prompts, allowing an extension on a site, the key it writes into a package without one so that Chromium names the extension as Arch does, `.crx` packages and the links they may hold, when an engine may stop what it kept from an earlier launch, and the popup sizes the presenter keeps.
 import AppKit
 import ARCHEngine
 import CryptoKit
@@ -89,6 +89,22 @@ struct EngineRequestsTests {
         old[4] = 2
         try old.write(to: crx)
         await #expect(throws: PluginError.invalidPackage("Packed.crx is a .crx file of format version 2, which Chromium no longer installs.")) { try await manager.stage(crx) }
+    }
+
+    /// A `.crx` file whose archive holds only a link to a package elsewhere is refused before its key is written, so the manifest the link leads to stays as it was.
+    @Test func refusesACRXFileThatLinksOutOfItsPackage() async throws {
+        let outside = try folder.package("outside", ["manifest.json": #"{"manifest_version": 3, "name": "Outside", "version": "1", "key": "b3V0c2lkZQ=="}"#])
+        let linkOnly = folder.url.appendingPathComponent("link only", isDirectory: true)
+        try FileManager.default.createDirectory(at: linkOnly, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linkOnly.appendingPathComponent("ext"), withDestinationURL: outside)
+        let archive = folder.url.appendingPathComponent("link.zip")
+        try zip(linkOnly, to: archive)
+        let crx = folder.url.appendingPathComponent("Link.crx")
+        try CRXFile.data(publicKey: Data("a developer's public key".utf8), archive: Data(contentsOf: archive)).write(to: crx)
+        let manifest = outside.appendingPathComponent("manifest.json")
+        let before = try Data(contentsOf: manifest)
+        await #expect(throws: PluginError.invalidPackage("The package is a symbolic link, which could lead to files outside Arch.")) { try await manager.stage(crx) }
+        #expect(try Data(contentsOf: manifest) == before)
     }
 
     private func zip(_ folder: URL, to archive: URL) throws {

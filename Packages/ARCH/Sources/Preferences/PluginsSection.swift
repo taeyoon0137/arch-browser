@@ -509,10 +509,12 @@ private struct PluginSecretRow<Title: View>: View {
     }
 
     private func write(_ secret: String?) {
-        do {
-            try plugins.setSecret(secret, of: setting, for: plugin)
-        } catch {
-            onFailure(error)
+        Task {
+            do {
+                try await plugins.setSecret(secret, of: setting, for: plugin)
+            } catch {
+                onFailure(error)
+            }
         }
     }
 }

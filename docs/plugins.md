@@ -164,7 +164,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
 - Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. Once site access modes exist, the user can also switch `siteAccess` to `whenInvoked`, and a manifest that asks for all sites starts with `whenInvoked`; until then an installed plugin's page scripts run in every page its granted sites cover. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for.
-- Granting access to all sites or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
+- Granting access to all sites, which a pattern for every host under a top-level domain such as `*://*.com/*` counts as, or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
 - A web extension's `tabs`, `clipboardWrite`, and `nativeMessaging` are Arch's `tabs`, `clipboard`, and `nativeMessaging`. Its other API permissions, such as `storage` or `cookies`, come with the install, as in other browsers: the install sheet and Settings list them in one sentence (`PluginManifest.extensionPermissions`), and only its sites can be left out.
 - Settings ▸ Plugins lists each grant. Revoking any part of it is not built yet; once it is, calls that need a revoked permission get `permissionDenied`, and contributions that need it are hidden.
 - An update shows the sheet again, with the permissions and sites that the installed version did not ask for marked New. A site that the installed version asked for starts as the user left it, and a new site starts on. The new grant keeps only what the new manifest asks for, so an update that asks for less narrows it.
@@ -438,7 +438,7 @@ public struct MatchPattern: Hashable, Codable, Sendable, CustomStringConvertible
     public init(_ pattern: String) throws
     public func matches(_ url: URL) -> Bool
     public var description: String { get }
-    /// The sites in words, such as `example.com and its subdomains` or `every website`.
+    /// The sites in words, such as `example.com and its subdomains`, `every .com website`, or `every website`.
     public var siteName: String { get }
 }
 

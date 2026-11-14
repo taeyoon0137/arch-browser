@@ -934,10 +934,11 @@ public final class PluginManager: ObservableObject {
     }
 
     /// nil deletes the Keychain item. Throws as `PluginSecrets.setSecret(_:forKey:)` does, and `PluginError.closed` once the manager is closed.
-    public func setSecret(_ secret: String?, of setting: PluginSetting, for id: PluginID) throws {
+    public func setSecret(_ secret: String?, of setting: PluginSetting, for id: PluginID) async throws {
         guard !isClosed else { throw PluginError.closed }
+        try await secrets(for: id).setSecret(secret, forKey: setting.key)
+        // Settings reads whether the item exists once the write is done.
         objectWillChange.send()
-        try secrets(for: id).setSecret(secret, forKey: setting.key)
     }
 
     /// The setting `key` of the plugin's manifest, as `PluginContext.setting(_:)` reads it.

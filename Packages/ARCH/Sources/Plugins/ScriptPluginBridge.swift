@@ -58,17 +58,40 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     static let deliveryCall = "return await window.__archDeliver(kind, payload);"
 
     private let context: any PluginContext
+    /// The latest secret call, which the next one waits for, so that the script's secret calls take effect in the order it made them.
+    private var secretCalls: Task<Void, Never>?
 
     init(context: any PluginContext) {
         self.context = context
     }
 
+    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it. The other calls reply before the handler returns.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
+        let call: Call
         do {
             guard let text = message.body as? String else { throw BridgeFailure.invalidCall }
-            let reply = try perform(try JSONDecoder().decode(Call.self, from: Data(text.utf8)))
-            replyHandler(try reply.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }, nil)
+            call = try JSONDecoder().decode(Call.self, from: Data(text.utf8))
+        } catch {
+            return replyHandler(nil, BridgeFailure.invalidCall.rawValue)
+        }
+        guard call.call.hasPrefix("secrets.") else { return Self.reply(Result { try perform(call) }, to: replyHandler) }
+        let previous = secretCalls
+        secretCalls = Task {
+            await previous?.value
+            let result: Result<PluginValue?, any Error>
+            do {
+                result = .success(try await performSecret(call))
+            } catch {
+                result = .failure(error)
+            }
+            Self.reply(result, to: replyHandler)
+        }
+    }
+
+    private static func reply(_ result: Result<PluginValue?, any Error>, to replyHandler: @MainActor @Sendable (Any?, String?) -> Void) {
+        do {
+            replyHandler(try result.get().map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }, nil)
         } catch let error as PluginError {
             replyHandler(nil, error.bridgeName)
         } catch {
@@ -85,10 +108,6 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             try context.storage.setValue(call.value(1), forKey: try call.text(0))
         case "storage.keys":
             return .array(context.storage.allKeys().map(PluginValue.string))
-        case "secrets.get":
-            return try context.secrets.secret(forKey: try call.text(0)).map(PluginValue.string)
-        case "secrets.set":
-            try context.secrets.setSecret(try call.optionalText(1), forKey: try call.text(0))
         case "settings.get":
             return context.setting(try call.text(0))
         case "ui.setBadge":
@@ -99,6 +118,19 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             throw BridgeFailure.invalidCall
         }
         return nil
+    }
+
+    /// A secret call's result, or nil for none.
+    private func performSecret(_ call: Call) async throws -> PluginValue? {
+        switch call.call {
+        case "secrets.get":
+            return try await context.secrets.secret(forKey: try call.text(0)).map(PluginValue.string)
+        case "secrets.set":
+            try await context.secrets.setSecret(try call.optionalText(1), forKey: try call.text(0))
+            return nil
+        default:
+            throw BridgeFailure.invalidCall
+        }
     }
 
     /// What the bridge script sends.
