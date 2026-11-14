@@ -40,8 +40,9 @@ import Terminal
     private var helpMenu: NSMenu?
     /// Keeps the Plugins menu's controller, which its items target.
     private var pluginsMenu: PluginsMenu?
-    /// URLs the app receives before the session exists. They open once the session is created.
+    /// Links received during launch open as main-window tabs, including any delivered while the queue is draining.
     private var pendingURLs: [URL] = []
+    private var acceptsRunningLinks = false
     // Held through quit-time writes and engine shutdown. Process exit releases the directory lock.
     private var profileOwnership: ProfileOwnership?
     private var isAbandoningLaunch = false
@@ -171,14 +172,19 @@ import Terminal
             NSApp.mainMenu.flatMap { Self.visibleItem(withAction: name, in: $0) }.flatMap(KeyShortcut.init(menuItem:))?.displayName
         }
         session.restoreWindows()
-        if !pendingURLs.isEmpty {
-            pendingURLs.forEach { session.openTab(url: $0) }
-            pendingURLs.removeAll()
-        } else if let startURL = ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)) {
-            session.openTab(url: startURL)
-        } else if session.allTabs.isEmpty {
-            session.openTab()
+        if pendingURLs.isEmpty {
+            if let startURL = ProcessInfo.processInfo.environment["ARCH_START_URL"].flatMap(URL.init(string:)) {
+                session.openTab(url: startURL)
+            } else if session.allTabs.isEmpty {
+                session.openTab()
+            }
         }
+        while !pendingURLs.isEmpty {
+            let batch = pendingURLs
+            pendingURLs.removeAll()
+            batch.forEach { session.openTab(url: $0) }
+        }
+        acceptsRunningLinks = true
         NSApp.activate(ignoringOtherApps: true)
         promptForDefaultBrowserIfNeeded()
     }
@@ -188,7 +194,7 @@ import Terminal
         guard !isAbandoningLaunch else { return }
         let urls = urls.compactMap(BrowserSession.webAddress(forOpened:))
         guard !urls.isEmpty else { return }
-        guard let session else {
+        guard acceptsRunningLinks, let session else {
             pendingURLs += urls
             return
         }
