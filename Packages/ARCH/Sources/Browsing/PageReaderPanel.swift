@@ -1,4 +1,5 @@
 // The page reader: a panel beside the page that summarizes the selected tab's page and answers follow-up questions about it, with Continue as Agent Task beside its Ask. Each tab keeps its own conversation, also while the panel is closed or another tab is selected.
+import Agent
 import AI
 import SwiftUI
 
@@ -110,7 +111,7 @@ private struct PageReaderTabView: View {
                 .lineLimit(1...5)
                 .onSubmit(send)
                 .padding(.vertical, 6)
-            ContinueAsAgentTaskButton { ContinueAsAgentTaskButton.task(draft: draft, exchanges: conversation.exchanges) }
+            ContinueAsAgentTaskButton(tab: tab, draft: draft, exchanges: conversation.exchanges)
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {
@@ -148,11 +149,17 @@ private struct PageReaderPlaceholder: View {
 /// Continue as Agent Task beside Ask in the page reader and the question popover (docs/agents.md, In the browser ▸ Starting a session), while a Claude Code or Codex model can run a session: the composer with the question and the selected tab, whose page the question is about.
 struct ContinueAsAgentTaskButton: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
-    let task: () -> String
+    let tab: Tab
+    let draft: String
+    let exchanges: [PageConversation.Exchange]
+    var selection: AISelection? = nil
 
     var body: some View {
         if windowModel.canStartAgentTask {
-            SidebarIconButton(symbol: "arrowshape.turn.up.right", label: "Continue as Agent Task") { windowModel.continueAsAgentTask(task()) }
+            SidebarIconButton(symbol: "arrowshape.turn.up.right", label: "Continue as Agent Task") {
+                let excerpt = Self.excerpt(tabID: tab.id, url: tab.url, exchange: exchanges.last, selection: selection)
+                windowModel.continueAsAgentTask(Self.task(draft: draft, exchanges: exchanges), excerpt: excerpt)
+            }
         }
     }
 
@@ -161,5 +168,18 @@ struct ContinueAsAgentTaskButton: View {
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard typed.isEmpty else { return typed }
         return exchanges.last { $0.title == $0.prompt }?.prompt ?? ""
+    }
+
+    /// Only the visible selection and a completed answer from this page are offered to the composer.
+    static func excerpt(tabID: UUID, url: URL?, exchange: PageConversation.Exchange?, selection: AISelection?) -> AgentReaderExcerpt? {
+        guard let url else { return nil }
+        let selected = selection ?? exchange?.selection
+        let reply: String?
+        if let exchange, exchange.replySourceURL == url, case .finished(.completed) = exchange.state {
+            reply = exchange.reply
+        } else {
+            reply = nil
+        }
+        return AgentReaderExcerpt(tabID: tabID, url: url, selection: selected?.pageURL == url ? selected?.text : nil, reply: reply)
     }
 }

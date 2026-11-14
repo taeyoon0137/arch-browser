@@ -72,7 +72,7 @@ private struct PageQuestionPopover: View {
                 .reportsFocus(of: .question, isFocused: isFieldFocused)
                 .onSubmit(send)
                 .onExitCommand(perform: windowModel.dismissPageQuestion)
-            ContinueAsAgentTaskButton { ContinueAsAgentTaskButton.task(draft: draft, exchanges: conversation.exchanges) }
+            ContinueAsAgentTaskButton(tab: tab, draft: draft, exchanges: conversation.exchanges, selection: question.selection)
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {

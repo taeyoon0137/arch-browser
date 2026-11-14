@@ -416,6 +416,7 @@ final class Shared<Value>: @unchecked Sendable {
     private(set) var runners: [FakeRunner] = []
     private(set) var requests: [AIAgentSessionRequest] = []
     var agentModels = [AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet"), AIModelRef(provider: AIProviderID(rawValue: "codex"), model: "gpt-6")]
+    let excludedHosts = Shared<Set<String>>(["excluded.example"])
     /// How long the services' calls wait for the user before they answer `approvalPending`, when not the default.
     var answerWait: TimeInterval?
     var services: [AgentService] = []
@@ -454,7 +455,7 @@ final class Shared<Value>: @unchecked Sendable {
             processStart: { starts.value[$0] },
             prompt: prompt,
             authenticator: authenticator,
-            allowsAI: { $0.host != "excluded.example" },
+            allowsAI: { [excludedHosts] url in url.host.map { !excludedHosts.value.contains($0) } ?? false },
             // A report that arrives after the test, such as a refused peer's, reads the clock of a harness that is gone.
             now: { [weak self] in self?.now ?? Date() },
             processRecord: { records.value[$0] },

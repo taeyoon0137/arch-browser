@@ -66,7 +66,7 @@ public final class Tab: ObservableObject, Identifiable {
     /// The session sets this callback to open an address from the page's context menu in a background tab.
     var openURLInNewTab: ((URL) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
-    var askAboutSelection: ((String) -> Void)?
+    var askAboutSelection: ((String, URL) -> Void)?
     /// The session's plugins set this callback to pass a value one of the page's scripts sent to the plugin it belongs to, with the reply. Without it, the script's promise settles with nothing.
     var receivePageScriptMessage: ((EnginePageScriptMessage, @escaping (String?) -> Void) -> Void)?
     /// The session's plugins set this callback to add their items for what the user clicked on to the end of the page's context menu.
@@ -379,8 +379,8 @@ extension Tab: EngineWebContentsUIDelegate {
         }
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
         if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable, element.isInMainFrame,
-           let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
-            sections.append([ActionMenuItem("Ask About Selection") { askAboutSelection(selection) }])
+           let sourceURL = url, let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
+            sections.append([ActionMenuItem("Ask About Selection") { askAboutSelection(selection, sourceURL) }])
         }
         sections.removeAll { $0.isEmpty }
         if sections.isEmpty {

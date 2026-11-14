@@ -1,5 +1,6 @@
 // The entry points that start an in-app agent session (docs/agents.md, In the browser ▸ Starting a session): the window's place, named "Persona / Space", with its selected tab unless a covered page hides it; the palette's Ask Agent row, offered for two or more words while a model can run a session and starting one with no tab on an excluded site attached; the question that Continue as Agent Task takes from the page reader and the question popover; and the column, where an outside client's card does not replace the composer or a session.
 import Agent
+import AI
 import ARCHEngine
 import Foundation
 import Testing
@@ -89,6 +90,28 @@ import Testing
         #expect(BrowserWindowModel.agentPanel(showingClient: client, over: composer) == composer)
         let session = UUID()
         #expect(BrowserWindowModel.agentPanel(showingClient: client, over: .session(session)) == .session(session))
+    }
+
+    @Test func theExcerptOffersOnlyWhatTheReaderShowsForTheSamePage() throws {
+        let id = UUID()
+        let selection = AISelection(pageURL: Self.page, pageTitle: "Plans", text: "A particular clause")
+        var exchange = PageConversation.Exchange(prompt: "Explain this", title: "Explain this", selectionSource: .current)
+        exchange.selection = selection
+        exchange.reply = "The reader’s explanation."
+        exchange.replySourceURL = Self.page
+        exchange.state = .finished(.completed)
+        let excerpt = try #require(ContinueAsAgentTaskButton.excerpt(tabID: id, url: Self.page, exchange: exchange, selection: nil))
+        #expect(excerpt.selection == selection.text)
+        #expect(excerpt.reply == exchange.reply)
+        #expect(ContinueAsAgentTaskButton.task(draft: "Check the older terms", exchanges: [exchange]) == "Check the older terms")
+        let changed = Self.page.appendingPathComponent("other")
+        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, url: changed, exchange: exchange, selection: nil) == nil)
+        exchange.state = .stopped
+        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, url: Self.page, exchange: exchange, selection: nil)?.reply == nil)
+        // The popover offers the chosen text even before its first question.
+        #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, url: Self.page, exchange: nil, selection: selection)?.selection == selection.text)
+        #expect(PageAssistant.matchesMenuSelection("One\nTwo", "One  \r\n  Two "))
+        #expect(!PageAssistant.matchesMenuSelection("One", "Other"))
     }
 
     private static func context(tab: AgentTabInfo?) -> AgentComposerContext {
