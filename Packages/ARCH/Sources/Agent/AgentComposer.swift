@@ -89,9 +89,9 @@ public struct AgentComposerContext: Equatable, Identifiable {
         self.problem = problem
     }
 
-    /// The tab a session started here attaches: the selected tab while it shows a web page on a site not excluded from AI.
+    /// The selected tab when it has a document the user can share with this session.
     public func attachableTab(allowsAI: (URL) -> Bool) -> AgentTabInfo? {
-        guard let tab, tab.agentOwnerID == nil, let url = tab.url, AgentSite.of(url) != nil, allowsAI(url) else { return nil }
+        guard let tab, tab.canAttachToSession(allowsAI: allowsAI) else { return nil }
         return tab
     }
 

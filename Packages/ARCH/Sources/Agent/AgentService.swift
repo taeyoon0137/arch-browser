@@ -646,7 +646,7 @@ import Foundation
     func shareableTabs(for session: AgentSession) -> [AgentTabInfo] {
         guard canEditAttachments(of: session) else { return [] }
         return host.userTabs(in: session.personaID).filter { tab in
-            tab.isLoaded && tab.agentOwnerID == nil && !session.handles.sharedTabIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
+            !session.handles.sharedTabIDs.contains(tab.id) && tab.canAttachToSession(allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -657,7 +657,7 @@ import Foundation
     /// The composer may offer its detached tab again only while the originally reviewed document is eligible.
     func canReattach(_ choice: AgentTabInfo, in personaID: UUID) -> Bool {
         host.userTabs(in: personaID).contains {
-            $0.isLoaded && $0.showsSameDocument(as: choice) && $0.agentOwnerID == nil && AgentPolicy.showsTitle(of: $0.url, allowsAI: dependencies.allowsAI)
+            $0.showsSameDocument(as: choice) && $0.canAttachToSession(allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -740,7 +740,7 @@ import Foundation
         var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
         let attachedIDs = Set(attached)
         let tabs = host.userTabs(in: personaID).filter { tab in
-            tab.agentOwnerID == nil && attachedIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
+            attachedIDs.contains(tab.id) && tab.canAttachToSession(allowsAI: dependencies.allowsAI)
         }
         if let reviewed = start.reviewedDocument, !tabs.contains(where: { $0.showsSameDocument(as: reviewed) }) {
             throw SessionError(message: "The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page.")
