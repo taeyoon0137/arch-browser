@@ -172,7 +172,10 @@ private struct AgentsIndicatorMenu: View {
         if agents.isAnyAgentActing {
             Menu {
                 ForEach(agents.sessions.filter(\.isTurnRunning)) { session in
-                    Button("\(session.title) \u{2014} \(agents.place(of: session))") { windowModel.showAgentSession(session.id) }
+                    let title = "\(session.title) \u{2014} \(agents.place(of: session))"
+                    Button(session.state == .waitingForUser ? "\(title) \u{2014} Waiting for You" : title) {
+                        windowModel.showAgentSession(session.id)
+                    }
                 }
                 ForEach(agents.connectedGrants) { grant in
                     let waits = approvals.pending.contains { $0.ownerID == grant.id }
