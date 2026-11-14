@@ -35,7 +35,7 @@ private struct PageQuestionPopover: View {
                 Text(question.selection == nil ? "Ask About This Page" : "Ask About Selection")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Close Question", action: windowModel.dismissPageQuestion)
+                SidebarIconButton(symbol: "xmark", label: "Close Question", action: dismiss)
             }
             if let selection = question.selection {
                 SelectionQuote(text: selection.text)
@@ -64,7 +64,7 @@ private struct PageQuestionPopover: View {
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         .onAppear { DispatchQueue.main.async { isFieldFocused = true } }
         .onChange(of: tab.documentID) { _, current in
-            if current != question.documentID { windowModel.dismissPageQuestion() }
+            if current != question.documentID { dismiss() }
         }
         // Allow AI on This Site puts the field in the notice's place, and the field takes the keys as on opening.
         .onChange(of: tab.url.map { settings.allowsAI(on: $0) }) { _, allows in
@@ -79,8 +79,9 @@ private struct PageQuestionPopover: View {
                 .focused($isFieldFocused)
                 .reportsFocus(of: .question, isFocused: isFieldFocused)
                 .onSubmit(send)
-                .onExitCommand(perform: windowModel.dismissPageQuestion)
-            ContinueAsAgentTaskButton(tab: tab, draft: draft, exchanges: conversation.exchanges, selection: question.documentID == tab.documentID ? question.selection : nil)
+                .onExitCommand(perform: dismiss)
+            ContinueAsAgentTaskButton(source: .init(tab: tab, documentID: question.documentID, questionID: question.id),
+                                      draft: draft, exchanges: conversation.exchanges, selection: question.selection)
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {
@@ -92,8 +93,10 @@ private struct PageQuestionPopover: View {
 
     private var text: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    private func dismiss() { windowModel.dismissPageQuestion(question.id) }
+
     private func send() {
-        guard !text.isEmpty, question.documentID == tab.documentID else { return }
+        guard !text.isEmpty, windowModel.pageQuestion?.id == question.id, question.documentID == tab.documentID else { return }
         question.ask(text)
         draft = ""
     }

@@ -808,9 +808,18 @@ public enum BrowserWindowKind {
     }
 
     /// Continue as Agent Task in the page reader and the question popover, whose questions are about the selected tab's page: the composer with the question and that tab.
-    func continueAsAgentTask(_ question: String, excerpt: AgentReaderExcerpt?) {
+    func continueAsAgentTask(_ question: String, from source: AgentHandoffSource, excerpt: AgentReaderExcerpt?) {
+        guard !isSelectedPageCovered, let tab = selectedTab, tab.id == source.tabID, tab.documentID == source.documentID,
+              let url = tab.url, url == source.url, AIService.shared.settings.allowsAI(on: url) else { return }
+        if let id = source.questionID {
+            guard pageQuestion?.id == id else { return }
+        } else if !isPageReaderVisible {
+            return
+        }
         var context = agentComposerContext(text: question)
-        context.readerExcerpt = excerpt
+        if let excerpt, let attached = context.attachableTab(allowsAI: AIService.shared.settings.allowsAI(on:)), excerpt.matches(attached) {
+            context.readerExcerpt = excerpt
+        }
         closePageQuestion()
         showAgentPanel(.composer(context))
     }
@@ -902,7 +911,8 @@ public enum BrowserWindowKind {
     }
 
     /// Closes the popover the user dismissed and gives the page keyboard focus again.
-    func dismissPageQuestion() {
+    func dismissPageQuestion(_ id: UUID) {
+        guard pageQuestion?.id == id else { return }
         closePageQuestion()
         focusPage()
     }
@@ -912,7 +922,7 @@ public enum BrowserWindowKind {
         if pageQuestion?.tabID == id { closePageQuestion() }
     }
 
-    private func openPageQuestion(in tab: Tab, selection: AISelection?) {
+    func openPageQuestion(in tab: Tab, selection: AISelection?) {
         pageQuestion?.conversation.cancel()
         pageQuestion = PageQuestion(tabID: tab.id, documentID: tab.documentID, selection: selection, conversation: session.pageAssistant.makeQuestionConversation(for: tab))
     }
