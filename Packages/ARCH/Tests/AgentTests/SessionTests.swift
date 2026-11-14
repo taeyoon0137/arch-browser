@@ -28,6 +28,23 @@ import Testing
 
     // MARK: Tickets
 
+    @Test func cancellingOneGatedCallReleasesOnlyItsWaitAndCannotRunItAfterHandBack() async throws {
+        let gate = AgentGate(isOpen: false)
+        var stopped: Bool?
+        var continued: Bool?
+        let cancelled = Task { stopped = await gate.wait(timeout: .seconds(30)) }
+        let remaining = Task { continued = await gate.wait(timeout: .seconds(30)) }
+        await Task.yield()
+        cancelled.cancel()
+        try await waitUntil { stopped != nil }
+        #expect(stopped == false)
+        #expect(continued == nil)
+        gate.open()
+        await remaining.value
+        #expect(continued == true)
+        #expect(stopped == false)
+    }
+
     @Test func aTicketBindsOnlyFromTheSessionsProcessTree() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -309,7 +326,6 @@ import Testing
             host.userTabIDs = [tab.id]
         }
         try await checkRead(after: { host.userTabIDs.remove(tab.id) }, code: "P17")
-        try await checkRead(after: { host.tabs[0].documentID = UUID() }, code: "pageChanged")
         try await checkRead(after: { host.tabs[0].url = URL(string: "https://excluded.example/private") }, code: "P16")
         try await checkRead(after: { host.tabs[0].documentID = UUID() }, code: "pageChanged")
         try await checkRead(after: { host.tabs[0].url = URL(string: "https://example.org/another") }, code: "pageChanged")

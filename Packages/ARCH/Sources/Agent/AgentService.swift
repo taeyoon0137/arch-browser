@@ -1009,12 +1009,14 @@ import Foundation
     /// Shared permission, turn, and budget checks for CLI and HTTP sessions.
     private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, isConnected: () -> Bool = { true }) async -> AgentToolResult {
         guard await session.ready.wait(timeout: sessionReadyWait) else {
+            if Task.isCancelled { return AgentToolHost.ended.result }
             if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
             return AgentToolResult(status: .refused, code: "notReady", text: "Arch did not see the session's tool start as it asked, so it runs none of this session's tool calls.")
         }
         // A call the turn's end or Stop cut off, or whose connection closed while it waited, runs nothing.
         if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
         guard await session.handedBack.wait(timeout: sessionTakeOverWait) else {
+            if Task.isCancelled { return AgentToolHost.ended.result }
             if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
             return AgentToolResult(status: .timeout, text: session.hasEnded ? "The session ended." : "The user took the session over and has not handed it back. Wait for the user's next message.")
         }
@@ -1025,6 +1027,7 @@ import Foundation
         if let refusal = session.countCall() { return refusal }
         let toolHost = AgentToolHost(host: host, allowsAI: dependencies.allowsAI)
         let result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
+        if Task.isCancelled || !isConnected() { return AgentToolHost.ended.result }
         if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
         if session.isTakenOver {
             return AgentToolResult(status: .refused, code: "stopped", text: "The user took over this session. Ask again after Hand Back.")
