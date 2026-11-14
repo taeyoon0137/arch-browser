@@ -41,11 +41,18 @@ extension AgentToolHost {
 
     /// After a script ran: the tab's page may have moved on to one agents do not read, and the user may have taken the tab over.
     private func stillReadable(_ tab: AgentTabInfo, handle: String, reportedURL: String, _ grant: AgentGrant, state: AgentGrantState) -> Outcome? {
-        if let current = host.tabs(withIDs: [tab.id]).first, !mayStillRead(current, grant, state: state) {
+        guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) is closed.") }
+        guard mayStillRead(current, grant, state: state) else {
             return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))
         }
-        if case .refused(let rule, let sentence) = AgentPolicy.mayRead(URL(string: reportedURL), allowsAI: allowsAI) {
-            return Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle))
+        let address = URL(string: reportedURL)
+        for url in [current.url, address] {
+            if case .refused(let rule, let sentence) = AgentPolicy.mayRead(url, allowsAI: allowsAI) {
+                return Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle))
+            }
+        }
+        guard tab.documentID == current.documentID, tab.url == current.url, tab.url == address else {
+            return Self.error("pageChanged", "\(handle) changed pages. Read the current page again.")
         }
         return nil
     }
@@ -272,6 +279,7 @@ extension AgentToolHost {
                                                        structured: ["tab": .string(handle)]), site: site)
             }
             guard case .value(let after) = await pageScript(.boxes(shared: shared), in: tab, as: AgentBoxesReply.self, handle: handle) else { break }
+            if let refusal = stillReadable(tab, handle: handle, reportedURL: after.url, grant, state: state) { return refusal }
             if after == before {
                 capture = AgentScreenshot.Capture(image: cgImage, boxes: before, fullPage: full)
                 break
