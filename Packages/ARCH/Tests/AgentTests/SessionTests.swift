@@ -4,6 +4,7 @@ import AI
 import Darwin
 import Foundation
 import Testing
+import UserNotifications
 @testable import Agent
 
 @MainActor @Suite(.serialized) struct SessionTests {
@@ -240,6 +241,58 @@ import Testing
         let client = try TestClient(harness.location)
         #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
         return client
+    }
+
+    @Test func anAttentionNotificationCarriesOnlyItsOwnerAndGenericTitle() throws {
+        let owner = UUID()
+        let request = AgentAttention.request(for: owner)
+        #expect(request.identifier == AgentAttention.identifier(for: owner))
+        #expect(AgentAttention.ownerID(in: request.identifier) == owner)
+        #expect(request.identifier != AgentAttention.identifier(for: UUID()))
+        #expect(request.content.title == "An agent is waiting for you in Arch")
+        #expect(request.content.subtitle.isEmpty && request.content.body.isEmpty && request.content.userInfo.isEmpty)
+        let foreign = ["", owner.uuidString, "download." + owner.uuidString, request.identifier + "tail", "other." + request.identifier,
+                       request.identifier.replacingOccurrences(of: owner.uuidString, with: "malformed")]
+        for identifier in foreign { #expect(AgentAttention.ownerID(in: identifier) == nil) }
+    }
+
+    @Test func aWaitingOwnerNotifiesOnceAndLateAttentionCannotSelectAnotherSession() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        let (first, _) = try start(service, harness, task: "Private first task")
+        let (other, _) = try start(service, harness, task: "Private second task")
+        #expect(!service.pendingAttention(for: first.id) && !service.pendingAttention(for: other.id))
+
+        func question(_ owner: UUID, _ text: String) -> AgentApproval {
+            AgentApproval(ownerID: owner, clientName: "Fixture", isOutsideClient: false, kind: .question([]), isSensitive: false,
+                          offers: [.cancel("")], action: "The agent asks you a question", agentSays: text,
+                          createdAt: Date(), deadline: Date().addingTimeInterval(30))
+        }
+        let firstQuestion = question(first.id, "Private first question")
+        let secondQuestion = question(first.id, "Private second question")
+        let otherQuestion = question(other.id, "Private other question")
+        service.approvals.open(firstQuestion) { _ in }
+        service.approvals.open(secondQuestion) { _ in }
+        service.approvals.open(otherQuestion) { _ in }
+        #expect(harness.attentionOwners == [first.id, other.id])
+        #expect(service.pendingAttention(for: first.id) && service.pendingAttention(for: other.id))
+        #expect(!service.pendingAttention(for: UUID()))
+        let deliveredOwner = try #require(AgentAttention.ownerID(in: AgentAttention.request(for: first.id).identifier))
+        #expect(await service.approvals.answer(firstQuestion.id, with: .answer("First answer")))
+        #expect(service.pendingAttention(for: deliveredOwner))
+        #expect(await service.approvals.answer(secondQuestion.id, with: .cancel("")))
+        #expect(!service.pendingAttention(for: deliveredOwner) && service.pendingAttention(for: other.id))
+        other.stop()
+        #expect(!service.pendingAttention(for: other.id))
+        #expect(await !service.approvals.answer(otherQuestion.id, with: .answer("late")))
+        #expect(harness.attentionOwners == [first.id, other.id])
+
+        let later = question(first.id, "New private question")
+        service.approvals.open(later) { _ in }
+        #expect(harness.attentionOwners == [first.id, other.id, first.id])
+        #expect(service.pendingAttention(for: first.id) && !service.pendingAttention(for: other.id))
+        #expect(await service.approvals.answer(later.id, with: .cancel("")))
     }
 
     @Test func cancellingOrDisconnectingOneQuestionPreservesTheOthers() async throws {

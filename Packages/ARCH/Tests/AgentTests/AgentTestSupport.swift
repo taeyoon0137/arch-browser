@@ -440,6 +440,7 @@ final class Shared<Value>: @unchecked Sendable {
     let excludedHosts = Shared<Set<String>>(["excluded.example"])
     /// How long the services' calls wait for the user before they answer `approvalPending`, when not the default.
     var answerWait: TimeInterval?
+    private(set) var attentionOwners: [UUID] = []
     var services: [AgentService] = []
 
     init(keys: MemoryKeys = MemoryKeys()) throws {
@@ -492,6 +493,7 @@ final class Shared<Value>: @unchecked Sendable {
             sessionFolder: { sessionsFolder.appendingPathComponent($0.uuidString, isDirectory: true) },
             agentModels: { [unowned self] in self.agentModels },
             subscriptionToolName: { ["codex": "Codex", "claude": "Claude Code"][$0.rawValue] })
+        dependencies.attention = { [weak self] ownerID in self?.attentionOwners.append(ownerID) }
         if let answerWait { dependencies.answerWait = answerWait }
         let service = AgentService(directory: folder, host: host, version: "9.9.9", dependencies: dependencies)
         services.append(service)
