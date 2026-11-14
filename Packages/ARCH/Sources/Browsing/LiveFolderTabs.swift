@@ -51,6 +51,19 @@ enum LiveFolderTabs {
         Dictionary(folders.compactMap { folder in folder.live.map { (folder.id, $0) } }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// The names of the private feeds' live folders, which their Keychain items' labels carry (`docs/bookmarks.md`, Storage).
+    static func privateFeedNames(in folders: [TabFolder]) -> [UUID: String] {
+        Dictionary(folders.compactMap { folder in
+            guard case .feed(_, isPrivate: true)? = folder.live?.source else { return nil }
+            return (folder.id, folder.name)
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The private feeds' folders in both `old` and `new` whose names changed, by Rename Folder or Edit Live Folder…, with their new names.
+    static func renamedPrivateFeeds(from old: [UUID: String], to new: [UUID: String]) -> [UUID: String] {
+        new.filter { id, name in old[id].map { $0 != name } ?? false }
+    }
+
     // MARK: Item tabs
 
     /// The item tabs of a live folder, in sidebar order.
@@ -215,6 +228,16 @@ extension BrowserSession {
         $folders.map(LiveFolderTabs.configurations).removeDuplicates().dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.registerLiveFolders() } }
+            .store(in: &liveFolderObservers)
+        // A private feed's Keychain item is labelled with its folder's name, so a rename relabels it.
+        $folders.map(LiveFolderTabs.privateFeedNames).removeDuplicates()
+            .scan(([UUID: String](), [UUID: String]())) { ($0.1, $1) }
+            .sink { [weak self] old, new in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    for (id, name) in LiveFolderTabs.renamedPrivateFeeds(from: old, to: new) { self.liveFolderService.setPrivateAddressFolderName(name, for: id) }
+                }
+            }
             .store(in: &liveFolderObservers)
         // Live folder rule 6: GitHub folders refresh when Arch becomes active and when a window shows their space, at most once every 5 minutes.
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)

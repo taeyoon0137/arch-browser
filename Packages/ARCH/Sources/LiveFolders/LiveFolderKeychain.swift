@@ -6,6 +6,8 @@ import Security
 public protocol LiveFolderAddressStore: AnyObject, Sendable {
     func address(for folder: UUID) async throws -> URL?
     func setAddress(_ address: URL, for folder: UUID, folderName: String) async throws
+    /// Gives a folder's item the label of the folder's new name; a folder without an item gets none.
+    func setFolderName(_ folderName: String, for folder: UUID) async throws
     func removeAddress(for folder: UUID) async throws
     /// Removes the address of every folder not in `kept`, so a folder, space, or Persona that goes, or a folder that stops being a private feed's, leaves no item behind.
     func removeAddresses(except kept: Set<UUID>) async throws
@@ -62,6 +64,15 @@ public final class LiveFolderKeychain: LiveFolderAddressStore, @unchecked Sendab
             }
             guard status == errSecSuccess else { throw LiveFolderError.keychain(Self.message(status)) }
             self.remember(address, for: folder)
+        }
+    }
+
+    /// Changes only the label, so the address is not read.
+    public func setFolderName(_ folderName: String, for folder: UUID) async throws {
+        try await onQueue {
+            let update = [kSecAttrLabel as String: Self.label(forFolderNamed: folderName)] as [String: Any]
+            let status = SecItemUpdate(Self.query(folder) as CFDictionary, update as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw LiveFolderError.keychain(Self.message(status)) }
         }
     }
 
@@ -147,6 +158,10 @@ public final class InMemoryLiveFolderKeychain: LiveFolderAddressStore, @unchecke
 
     public func setAddress(_ address: URL, for folder: UUID, folderName: String) async throws {
         locked { addresses[folder] = (address, LiveFolderKeychain.label(forFolderNamed: folderName)) }
+    }
+
+    public func setFolderName(_ folderName: String, for folder: UUID) async throws {
+        locked { addresses[folder]?.label = LiveFolderKeychain.label(forFolderNamed: folderName) }
     }
 
     public func removeAddress(for folder: UUID) async throws {

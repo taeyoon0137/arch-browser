@@ -116,6 +116,12 @@ public final class LiveFolderService {
         startOver(folder, configuration)
     }
 
+    /// A private feed's folder took a new name: its Keychain item takes the label of that name (Storage) once the Keychain work asked for before has ended. A failure keeps the old label, which holds no address.
+    public func setPrivateAddressFolderName(_ folderName: String, for folder: UUID) {
+        let addresses = addresses
+        afterEarlierAddressWork { try? await addresses.setFolderName(folderName, for: folder) }
+    }
+
     /// Refresh Now.
     public func refresh(_ folder: UUID) {
         trigger(.refreshNow, folders: [folder])

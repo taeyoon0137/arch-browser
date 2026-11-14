@@ -120,6 +120,10 @@ private final class GatedKeychain: LiveFolderAddressStore, @unchecked Sendable {
         try await stored.setAddress(address, for: folder, folderName: folderName)
     }
 
+    func setFolderName(_ folderName: String, for folder: UUID) async throws {
+        try await stored.setFolderName(folderName, for: folder)
+    }
+
     func removeAddress(for folder: UUID) async throws {
         try await stored.removeAddress(for: folder)
     }

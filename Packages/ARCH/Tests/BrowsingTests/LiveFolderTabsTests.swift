@@ -292,6 +292,35 @@ import Testing
         service.stop()
     }
 
+    @Test func aRenamedPrivateFeedRelabelsItsKeychainItem() async throws {
+        let (source, keychainAddress) = try LiveFolderSource.makeFeed(address: URL(string: "https://feeds.example.org/private.xml?token=secret")!)
+        var folder = TabFolder(spaceID: spaceID, name: "News", isPinned: true)
+        folder.live = LiveFolderConfiguration(source: source)
+        var publicFeed = liveFolder("Public")
+        let keychain = InMemoryLiveFolderKeychain()
+        let service = LiveFolderService(store: try store(), addresses: keychain, fetchers: OfflineFetchers(), isLowPowerMode: { false })
+        defer { service.stop() }
+        let address = try #require(keychainAddress)
+        try await service.setPrivateAddress(address, for: folder.id, folderName: folder.name)
+        service.register(LiveFolderTabs.configurations(in: [folder, publicFeed]))
+        let old = LiveFolderTabs.privateFeedNames(in: [folder, publicFeed])
+        #expect(old == [folder.id: "News"])
+
+        // Only a private feed that kept its place among them and changed its name is relabelled; a new one's label came with its address.
+        folder.name = "Reading"
+        publicFeed.name = "Other"
+        var added = TabFolder(spaceID: spaceID, name: "Added", isPinned: true)
+        added.live = LiveFolderConfiguration(source: source)
+        let renamed = LiveFolderTabs.renamedPrivateFeeds(from: old, to: LiveFolderTabs.privateFeedNames(in: [folder, publicFeed, added]))
+        #expect(renamed == [folder.id: "Reading"])
+        // A folder without an item gets none, and the label changes without the address.
+        service.setPrivateAddressFolderName("Nothing", for: added.id)
+        for (id, name) in renamed { service.setPrivateAddressFolderName(name, for: id) }
+        #expect(await waitUntil { keychain.label(for: folder.id) == "Arch Live Folder: Reading" })
+        #expect(keychain.folders == [folder.id])
+        #expect(try await keychain.address(for: folder.id) == address)
+    }
+
     @Test func deletingALiveFolderOrItsPersonaLeavesNoClosedRecordsForItemTabs() {
         let work = TabFolder(spaceID: spaceID, name: "Work", isPinned: true)
         let news = liveFolder(in: work)

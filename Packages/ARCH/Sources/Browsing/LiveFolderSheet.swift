@@ -107,8 +107,9 @@ final class LiveFolderSheetModel: ObservableObject {
     @Published private(set) var feedMessage: String?
 
     // GitHub
+    /// A change that leaves `gitHubHost` as it was, as a pasted address of the same host, keeps `gh`'s state, since the sheet checks again only when `gitHubHost` changes.
     @Published var host: String {
-        didSet { if host != oldValue { gitHubState = .checking } }
+        didSet { if Self.gitHubHost(fromInput: host) != Self.gitHubHost(fromInput: oldValue) { gitHubState = .checking } }
     }
     @Published var gitHubKind: GitHubSearch.Kind
     @Published var searchText: String
@@ -206,11 +207,12 @@ final class LiveFolderSheetModel: ObservableObject {
 
     // MARK: Feed
 
-    /// The typed text as a feed address, or nil while the field is empty. Text without a scheme counts as `https`. Throws `LiveFolderError.invalidAddress` for an address that is not `http` or `https` or that holds a user name or password.
+    /// The typed text as a feed address, or nil while the field is empty. Text without a scheme counts as `https`, also when its query holds an address. Throws `LiveFolderError.invalidAddress` for an address that is not `http` or `https` or that holds a user name or password.
     static func feedAddress(fromInput text: String) throws -> FeedAddress? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        guard !text.contains(where: \.isWhitespace), let url = URL(string: text.contains("://") ? text : "https://" + text) else {
+        let hasScheme = text.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
+        guard !text.contains(where: \.isWhitespace), let url = URL(string: hasScheme ? text : "https://" + text) else {
             throw LiveFolderError.invalidAddress("This is not a web address.")
         }
         return try feedAddress(url)
@@ -249,6 +251,10 @@ final class LiveFolderSheetModel: ObservableObject {
 
     /// The Host field's host: without surrounding spaces, in lowercase, and taken out of an address when the user pastes one.
     var gitHubHost: String {
+        Self.gitHubHost(fromInput: host)
+    }
+
+    static func gitHubHost(fromInput host: String) -> String {
         let text = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard text.contains("://"), let components = URLComponents(string: text), let name = components.host else { return text }
         return components.port.map { "\(name):\($0)" } ?? name
@@ -370,12 +376,12 @@ final class LiveFolderSheetModel: ObservableObject {
         dismiss()
     }
 
-    /// Works out the folder, loading a feed address first, and hands it to `commit`, then ends the sheet. A page that names several feeds lists them and waits for a choice; a failure stays in the sheet.
+    /// Works out the folder, loading a feed address first, and hands it to `commit`, then ends the sheet. A page that names several feeds lists them and waits for a choice; a failure stays in the sheet. It ends the work that `startAdding()` began also when a check of `gh` that ran first leaves the sheet describing no folder.
     func add() async {
-        guard describesFolder else { return }
         isWorking = true
-        saveError = nil
         defer { isWorking = false }
+        guard describesFolder else { return }
+        saveError = nil
         guard let submission = await submission(), !Task.isCancelled else { return }
         isSaving = true
         defer { isSaving = false }

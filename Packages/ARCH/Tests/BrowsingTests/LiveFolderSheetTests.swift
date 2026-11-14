@@ -1,4 +1,4 @@
-// The New Live Folder sheet's model (`docs/bookmarks.md`, Live folders ▸ Interface; live folder rules 2, 3, 7, and 8): accepted and refused feed addresses, an address with a query marked for the Keychain, default names, each discovery outcome, `gh`'s states from a stubbed lookup, Add at the limit of 20 live folders, edits that start a folder over or keep its items, and the title with one and two Personas. The lookups never reach the network or `gh`, and the service runs with fetchers that answer offline, so the sheet on a window, its fields, and the session's calls are regression check 72.
+// The New Live Folder sheet's model (`docs/bookmarks.md`, Live folders ▸ Interface; live folder rules 2, 3, 7, and 8): accepted and refused feed addresses, an address with a query marked for the Keychain, default names, each discovery outcome, `gh`'s states from a stubbed lookup, Add at the limit of 20 live folders, edits that start a folder over or keep its items, and the title with one and two Personas. The lookups never reach the network or `gh`, and the service runs with fetchers that answer offline, so the sheet on a window, its fields, and the session's calls are regression check 73.
 import Foundation
 import LiveFolders
 import Testing
@@ -31,6 +31,9 @@ import Testing
         // Plain HTTP is tried as HTTPS, and text without a scheme counts as HTTPS (live folder rule 2).
         #expect(try LiveFolderSheetModel.feedAddress(fromInput: "http://blog.example.org/feed.xml")?.url == blogFeed)
         #expect(try LiveFolderSheetModel.feedAddress(fromInput: "blog.example.org/feed.xml")?.url == blogFeed)
+        // An address in the query is no scheme of the text's own.
+        #expect(try LiveFolderSheetModel.feedAddress(fromInput: "blog.example.org/feed.xml?next=https://example.org")?.url
+            == URL(string: "https://blog.example.org/feed.xml?next=https://example.org"))
         #expect(try LiveFolderSheetModel.feedAddress(fromInput: "   ") == nil)
 
         let lookups = StubLookups()
@@ -232,6 +235,43 @@ import Testing
         sheet.host = "github.com"
         await sheet.checkGitHub(again: true)
         #expect(sheet.gitHubMessage == "Sign in with `gh auth login` in the built-in terminal.")
+    }
+
+    @Test func aHostFieldThatNamesTheSameHostKeepsGhsState() async throws {
+        let lookups = StubLookups()
+        lookups.statuses["github.com"] = .signedIn
+        let sheet = newSheet(lookups: lookups)
+        sheet.sourceKind = .gitHub
+        await sheet.checkGitHub()
+        #expect(sheet.isGitHubReady && sheet.canAdd)
+        // The sheet checks again only when the host changes, so a pasted address of the same host, other case, or spaces leave the state as it was.
+        for text in ["https://github.com/example/arch", "GitHub.com ", "github.com"] {
+            sheet.host = text
+            #expect(sheet.gitHubState == .checked(.signedIn, host: "github.com") && sheet.canAdd)
+        }
+        #expect(lookups.checks.count == 1)
+        sheet.host = ""
+        await sheet.checkGitHub()
+        sheet.host = " "
+        #expect(sheet.gitHubState == .invalidHost)
+    }
+
+    @Test func addEndsItsWorkWhenACheckBeforeItLeavesNoFolder() async throws {
+        let lookups = StubLookups()
+        lookups.statuses["github.com"] = .signedIn
+        let committed = Committed()
+        let sheet = newSheet(lookups: lookups, committed: committed)
+        sheet.sourceKind = .gitHub
+        await sheet.checkGitHub()
+        sheet.startAdding()
+        #expect(sheet.isWorking)
+        // Before Add's work runs, the host changes, as a check that runs first leaves `gh`'s state checking.
+        sheet.host = "git.example.com"
+        #expect(await waitUntil { !sheet.isWorking })
+        #expect(committed.submissions.isEmpty)
+        lookups.statuses["git.example.com"] = .signedIn
+        await sheet.checkGitHub()
+        #expect(sheet.canAdd)
     }
 
     @Test func onlyTheNewestGitHubCheckCounts() async throws {
