@@ -64,6 +64,35 @@ import Testing
         #expect(left && returned)
     }
 
+    @Test func anEmptyFavoritesBarAcceptsOnlyTheDraggedTabsOwnSpace() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let other = session.addPersona(named: "Other")
+        let otherSpace = try #require(session.spaces(in: other.id).first)
+        let tab = session.openTab(url: URL(string: "about:blank#drop")!, in: space.id, select: false)
+        let drag = SidebarDragState()
+        let frame = CGRect(x: 5, y: 10, width: 230, height: 44)
+        let point = CGPoint(x: frame.midX, y: frame.midY)
+        drag.favoriteBarFrames = [space.id: frame, otherSpace.id: frame]
+        let owner = UUID()
+        drag.begin(.tab(tab.id), frame: frame, grabbedAt: point, owner: owner)
+        #expect(drag.favoriteDestination(for: tab, in: space, at: point, session: session) == space.id)
+        #expect(drag.favoriteDestination(for: tab, in: otherSpace, at: point, session: session) == nil)
+        #expect(drag.favoriteDestination(for: tab, in: space, at: .zero, session: session) == nil)
+        let original = tab.webContents
+        session.addFavorite(tab)
+        #expect(session.favorites(in: space.resolvedPersonaID).map(\.url) == [tab.url])
+        #expect(tab.webContents === original && session.tabs.contains(where: { $0 === tab }))
+        #expect(drag.favoriteDestination(for: tab, in: space, at: point, session: session) == nil)
+        drag.end(ownedBy: owner)
+        #expect(drag.targetFavoriteSpaceID == nil)
+    }
+
     @Test func movingToAnEmptyPinnedListReportsOnlyAnActualChange() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

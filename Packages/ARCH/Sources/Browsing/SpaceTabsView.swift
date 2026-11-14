@@ -7,6 +7,7 @@ struct SpacePagesView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let translation: CGFloat
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
     @Environment(\.sidebarWidth) private var width
 
     var body: some View {
@@ -15,10 +16,7 @@ struct SpacePagesView: View {
             ForEach(session.spaces) { space in
                 let isCurrent = space.id == windowModel.currentSpaceID
                 VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
-                    if !session.favorites(in: space.resolvedPersonaID).isEmpty {
-                        FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
-                            .padding(.horizontal, SidebarView.inset)
-                    }
+                    favoritesBar(in: space, current: isCurrent)
                     if isCurrent {
                         PluginSidebarItemsView(plugins: windowModel.plugins)
                         if let agents = session.agents { ConnectedAgentRows(agents: agents) }
@@ -36,6 +34,41 @@ struct SpacePagesView: View {
         .frame(width: width, alignment: .leading)
         .clipped()
         .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
+    }
+
+    @ViewBuilder
+    private func favoritesBar(in space: Space, current: Bool) -> some View {
+        let favorites = session.favorites(in: space.resolvedPersonaID)
+        let draggingTab = current ? sidebarDrag.tabID.flatMap { id in session.tabs.first { $0.id == id } } : nil
+        let acceptsDrag = draggingTab.map { $0.spaceID == space.id && $0.agentOwnerID == nil && session.canAddFavorite($0) } ?? false
+        if !favorites.isEmpty || acceptsDrag {
+            Group {
+                if favorites.isEmpty {
+                    Label("Add to Favorites", systemImage: "star")
+                        .font(.callout)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: FavoriteTileLayout.height)
+                } else {
+                    FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
+                }
+            }
+            .overlay {
+                if acceptsDrag {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(sidebarDrag.targetFavoriteSpaceID == space.id ? Color.accentColor : .secondary.opacity(0.45),
+                                      style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .allowsHitTesting(false)
+                }
+            }
+            .background(GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
+                Color.clear
+                    .onAppear { sidebarDrag.favoriteBarFrames[space.id] = frame }
+                    .onChange(of: frame) { sidebarDrag.favoriteBarFrames[space.id] = $1 }
+                    .onDisappear { sidebarDrag.favoriteBarFrames.removeValue(forKey: space.id) }
+            })
+            .padding(.horizontal, SidebarView.inset)
+        }
     }
 }
 
@@ -234,6 +267,7 @@ struct SpaceTabsView: View {
     /// The lifted row follows the pointer anywhere in the window. Only a pointer over the visible list moves the tab.
     private func dragChanged(_ tab: Tab, _ value: DragGesture.Value) {
         guard tab.spaceID == space.id, continueDrag(of: .tab(tab.id), value) else { return }
+        setDropTarget(\.targetFavoriteSpaceID, to: sidebarDrag.favoriteDestination(for: tab, in: space, at: value.location, session: session))
         guard tabReorder.canMove(at: value.location) else { return }
         let isOverList = listFrame.contains(value.location)
         let tree = session.folderTree
@@ -304,6 +338,12 @@ struct SpaceTabsView: View {
     /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the row reappears in the list, unless a drop target under it takes it.
     private func dragEnded() {
         guard sidebarDrag.owner == dragOwner, let item = sidebarDrag.item, let slot = rowFrames[item.id] else { return sidebarDrag.end(ownedBy: dragOwner) }
+        if sidebarDrag.targetFavoriteSpaceID == space.id, windowModel.currentSpaceID == space.id, case .tab(let id) = item,
+           let tab = session.tabs.first(where: { $0.id == id && $0.spaceID == space.id && $0.agentOwnerID == nil }),
+           let bar = sidebarDrag.favoriteBarFrames[space.id], session.canAddFavorite(tab) {
+            session.addFavorite(tab)
+            return sidebarDrag.settle(shrinkingInto: bar, ownedBy: dragOwner)
+        }
         // Over another space's symbol, the tab goes after that space's own tabs, or the folder with what it holds after its folders, and the lifted row shrinks into the symbol.
         if let spaceID = sidebarDrag.targetSpaceID {
             withAnimation(.easeInOut(duration: 0.15)) {

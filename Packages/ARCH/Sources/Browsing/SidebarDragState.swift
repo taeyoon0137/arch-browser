@@ -62,6 +62,18 @@ final class SidebarDragState: ObservableObject {
     @Published var targetFolderID: UUID?
     /// Set while a row released over a space's symbol or a folder's row shrinks into it.
     @Published var isEntering = false
+    /// The current space's top shortcuts can accept a tab from this same page of the sidebar.
+    var favoriteBarFrames: [UUID: CGRect] = [:]
+    @Published var targetFavoriteSpaceID: UUID?
+
+    @MainActor
+    func favoriteDestination(for tab: Tab, in space: Space, at point: CGPoint, session: BrowserSession) -> UUID? {
+        guard tabID == tab.id, tab.spaceID == space.id, tab.personaID == space.resolvedPersonaID,
+              tab.agentOwnerID == nil, session.canAddFavorite(tab),
+              favoriteBarFrames[space.id]?.contains(point) == true else { return nil }
+        return space.id
+    }
+
     /// Where a tab released over the page area opens in split view.
     @Published var splitDrop: SplitDrop?
     /// Each space symbol's frame in the window and the strip's visible part, reported by the bottom bar on screen.
@@ -106,6 +118,7 @@ final class SidebarDragState: ObservableObject {
         isLifted = false
         targetSpaceID = nil
         targetFolderID = nil
+        targetFavoriteSpaceID = nil
         isEntering = false
         splitDrop = nil
     }
