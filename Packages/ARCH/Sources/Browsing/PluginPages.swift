@@ -82,6 +82,6 @@ extension BrowserSession {
     /// The tab as its Persona's plugins see it before the manager applies a plugin's grant. It is selected while any window selects it.
     func pluginTab(_ tab: Tab) -> PluginTab {
         PluginTab(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, engine: tab.engineKind, isPinned: tab.isPinned,
-                  isSelected: windows.contains { $0.selectedTabID == tab.id })
+                  isSelected: windows.contains { $0.selectedTabID == tab.id }, kind: BrowserEventSource.kind(of: tab))
     }
 }

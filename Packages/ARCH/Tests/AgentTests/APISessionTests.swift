@@ -237,6 +237,67 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
 
 @MainActor
 @Suite struct APISessionTurnTests {
+    @Test(arguments: [false, true]) func browserStartsAnAPISessionUsingItsRealToolGate(choosesModel: Bool) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let client = ScriptedClient { round in
+            switch round {
+            case 0: return roundSteps([toolCall("call1", "read_text", #"{"tab":"t1"}"#), toolCall("call2", "session_info")])
+            case 2: return roundSteps([toolCall("call3", "session_info")])
+            default: return roundSteps(text: "Article read.")
+            }
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { selection in .http(pinnedModel: selection) }
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let address = try #require(URL(string: "https://example.org/fixture?private=1"))
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Article", url: address, isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        harness.host.pages[address] = (title: tab.title, text: "Fixture body")
+        var start = AgentService.SessionStart(task: "Read this tab", personaID: persona, spaceID: space.id, attachedTabIDs: [tab.id], mode: .readOnly,
+                                              model: choosesModel ? model : nil, effort: nil)
+        let selection = "Reviewed selection."
+        let previousReply = "Reader's earlier answer."
+        if choosesModel {
+            start.readerExcerpt = try #require(AgentReaderExcerpt(tabID: tab.id, url: address, selection: selection, reply: previousReply))
+        }
+        let session = try service.startSession(start)
+        session.takeOver()
+        try await waitUntil { session.model != nil }
+        #expect(client.requests.count == 1)
+        #expect(session.callsThisSession == 0)
+        session.handBack()
+        try await waitUntil { session.state == .done }
+        let requests = client.requests
+        try #require(requests.count == 2)
+        #expect(requests.first?.pinnedModel == (choosesModel ? model : nil))
+        #expect(requests.last?.pinnedModel == model)
+        let firstMessage = requests[0].messages.description
+        #expect(!firstMessage.contains("Fixture body") && !firstMessage.contains(selection) && !firstMessage.contains(previousReply))
+        let pages = toolResults(in: requests[1].messages.last).flatMap(\.parts).compactMap { part -> AIPageContent? in
+            if case .page(let page) = part { return page }
+            return nil
+        }
+        #expect(pages.map(\.text) == (choosesModel ? ["Fixture body", selection, previousReply] : ["Fixture body"]))
+        #expect(pages.allSatisfy { $0.url.absoluteString == "https://example.org/fixture" })
+        #expect(session.callsThisSession == 2)
+        harness.excludedHosts.value.insert("example.org")
+        try session.send("Show the current reader excerpt.")
+        try await waitUntil { client.requests.count == 4 && session.state == .done }
+        let latest = toolResults(in: client.requests[3].messages.last).flatMap(\.parts)
+        #expect(!latest.contains { if case .page = $0 { return true }; return false })
+        #expect(session.items.contains { if case .step(let step) = $0.kind { return step.tool == "read_text" }; return false })
+        #expect(service.activity.entries.contains { $0.sessionID == session.id && $0.tool == "read_text" && $0.outcome == "ok" })
+        #expect(session.ticket == nil && !service.sessionsNeedChannel && harness.requests.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: harness.location.path))
+        #expect(!FileManager.default.fileExists(atPath: harness.folder.appendingPathComponent("sessions").path))
+        await service.deleteSession(session.id)
+        #expect(session.hasEnded && session.isCleanedUp)
+    }
+
     @Test func aMessageRunsItsCallsThroughTheSessionsToolsOnThePinnedModel() async throws {
         let client = ScriptedClient { number in
             switch number {

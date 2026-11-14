@@ -111,14 +111,16 @@ struct AIActivityPage: View {
                     if case .failed(let error) = entry.result {
                         Text(settings.message(for: error)).font(.callout).foregroundStyle(.red)
                     }
-                    // A form row's subtitle size. The link takes it too, so that it is not the row's smallest text.
                     Text(details(of: entry)).font(.subheadline).foregroundStyle(.secondary)
-                    Button(shownContent.contains(entry.id) ? "Hide Content" : "Show Content") {
-                        if shownContent.contains(entry.id) { shownContent.remove(entry.id) } else { shownContent.insert(entry.id) }
+                    // A request that records no content, as an agent hook's run at Keep Nothing, has nothing to show.
+                    if !entry.content.isEmpty {
+                        Button(shownContent.contains(entry.id) ? "Hide Content" : "Show Content") {
+                            if shownContent.contains(entry.id) { shownContent.remove(entry.id) } else { shownContent.insert(entry.id) }
+                        }
+                        .buttonStyle(.link)
+                        .font(.subheadline)
                     }
-                    .buttonStyle(.link)
-                    .font(.subheadline)
-                    if shownContent.contains(entry.id) {
+                    if shownContent.contains(entry.id), !entry.content.isEmpty {
                         ScrollView {
                             Text(entry.content)
                                 .font(.caption.monospaced())

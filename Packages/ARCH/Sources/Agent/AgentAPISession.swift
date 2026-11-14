@@ -3,7 +3,7 @@ import AgentControl
 import AI
 import Foundation
 
-/// The tool host as one in-app session sees it: bound to the session's Persona, space, mode, and site scope, and deciding each call by the session's rules. Plan task VII.17 bound sessions to a space (`AgentToolClient(session:)`), and VII.17.1 adopts this for API-key sessions; until then only tests make one.
+/// The tool host as one in-app session sees it: bound to the session's Persona, space, mode, and site scope, and deciding each call by the session's rules. `AgentService` runs these through the same checked call path as the session’s CLI tools.
 @MainActor public protocol AgentSessionTools: AnyObject {
     /// The catalog tools the session may call now, in catalog order, as `tools/list` would name them. The session reads them at the start of each message.
     var tools: [AgentTool] { get }

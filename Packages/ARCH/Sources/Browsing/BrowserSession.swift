@@ -4,6 +4,7 @@ import AI
 import AppKit
 import ARCHEngine
 import Combine
+import Events
 import Extensions
 import Foundation
 import History
@@ -196,6 +197,8 @@ public final class BrowserSession: ObservableObject {
             pluginPages.attach(to: self)
             hooks.attach(to: self)
             startLiveFolders()
+            pluginBrowserHost.attach(to: self)
+            eventSource.attach(to: self)
         }
     }
 
@@ -244,14 +247,20 @@ public final class BrowserSession: ObservableObject {
     /// Opens main windows as their records describe them, front to back, and returns them in that order. Each shows its saved tab, which a window in front of it then gives up when it shows the tab as a pane of its split view (window rule 2), or its space's first free tab when the tab has closed (window rule 3).
     @discardableResult
     private func reopenWindows(_ records: [SessionSnapshot.WindowRecord]) -> [BrowserWindowModel] {
-        // Created back to front, so that `windows` lists them front to back.
-        let reopened = Array(records.reversed().map { makeWindow(from: $0, kind: .main) }.reversed())
-        // Selecting before the windows show puts the pages in place when they first draw. Every window takes its own tab before any window falls back, so that no window falls back to a tab that another one had.
-        for (window, record) in zip(reopened, records) {
-            if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectTab(tab.id) }
-        }
-        for window in reopened where window.selectedTabID == nil {
-            window.selectTab(window.firstFreeTab(inSpace: window.currentSpaceID)?.id)
+        var reopened: [BrowserWindowModel] = []
+        // The windows' selections and spaces, and what other windows give up for them, post no events.
+        MainActor.assumeIsolated {
+            eventSource.restoringWindows {
+                // Created back to front, so that `windows` lists them front to back.
+                reopened = Array(records.reversed().map { makeWindow(from: $0, kind: .main) }.reversed())
+                // Selecting before the windows show puts the pages in place when they first draw. Every window takes its own tab before any window falls back, so that no window falls back to a tab that another one had.
+                for (window, record) in zip(reopened, records) {
+                    if let tab = allTabs.first(where: { $0.id == record.selectedTabID }) { window.selectTab(tab.id) }
+                }
+                for window in reopened where window.selectedTabID == nil {
+                    window.selectTab(window.firstFreeTab(inSpace: window.currentSpaceID)?.id)
+                }
+            }
         }
         // The front window comes forward last, so it becomes key.
         reopened.reversed().forEach { $0.nsWindow?.makeKeyAndOrderFront(nil) }
@@ -399,10 +408,11 @@ public final class BrowserSession: ObservableObject {
 
     /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab moves to the space `spaceID`, or to the Persona's preferred space when that space belongs to another Persona. It stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
     @discardableResult
-    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel {
+    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) -> BrowserWindowModel {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: UUID(), spaceID: spaceID, personaID: personaID, pinned: false)
         tab.isInSmallWindow = true
+        tab.opener = opener
         tabs.append(tab)
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: false), kind: .small)
         window.selectTab(tab.id)
@@ -840,10 +850,12 @@ public final class BrowserSession: ObservableObject {
         spaces.first { $0.id == id }?.resolvedPersonaID == personaID ? id : preferredSpace(in: personaID).id
     }
 
-    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target.
-    func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, folderID: UUID? = nil) -> Tab {
+    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it and `folderID` the folder that holds it, both set before the tab joins the list so that its `tabOpened` event names the opening tab and, for an agent folder, carries the kind `agent`.
+    func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil,
+               folderID: UUID? = nil) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
+        tab.opener = opener
         tab.folderID = folderID
         tabs.append(tab)
         if select { sidebarTarget().selectTab(tab.id) }
@@ -859,8 +871,7 @@ public final class BrowserSession: ObservableObject {
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
             if let window = self.window(showing: tab) { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
-            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false)
-            opened.opener = tab.webContents
+            let opened = self.adopt(popup, spaceID: tab.spaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents)
             opened.isUnread = true
         }
         // A page that the engine loads only in another web contents of the tab's profile, as WebKit loads a web extension's pages, takes the tab's place as on an engine switch. A tab that has closed drops it.
@@ -1063,9 +1074,15 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
+    /// Only an agent's own tab leaves as an agent close. A tab taken over in the meantime stays open.
+    func closeAgentTab(_ tab: Tab, reason: TabCloseReason) {
+        guard tab.agentOwnerID != nil else { return }
+        removeTab(tab, closedRecord: nil, reason: reason, eventReason: .agent)
+    }
+
     /// Takes a tab out of its space's list or its favorite and returns whether it was still there: a window that shows its page in fullscreen leaves it, its prompts end, it leaves the tab close log's `reason` and each window's switcher order, its page closes (`retire`), `closedRecord` joins the closed list, and each window that selected it selects another tab (`moveSelections(awayFrom:reason:)`).
     @discardableResult
-    func removeTab(_ tab: Tab, closedRecord: SessionSnapshot.TabRecord?, reason: TabCloseReason) -> Bool {
+    func removeTab(_ tab: Tab, closedRecord: SessionSnapshot.TabRecord?, reason: TabCloseReason, eventReason: BrowserTabCloseReason? = nil) -> Bool {
         guard tabs.contains(where: { $0.id == tab.id }) || favoriteTabs.values.contains(where: { $0 === tab }) else { return false }
         windows.forEach { $0.setPageFullscreen(false, of: tab) }
         // Ending the tab's prompts runs the code that asked for them before `dismiss` returns. The lists are read afterwards, and a tab that closed meanwhile is left alone.
@@ -1073,6 +1090,7 @@ public final class BrowserSession: ObservableObject {
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return false }
+        MainActor.assumeIsolated { eventSource.tabWillClose(tab, reason: eventReason ?? BrowserTabCloseReason(reason)) }
         let owner = tab.agentOwnerID
         let logs = owner == nil
         recordClose(of: tab, reason: reason, logs: logs)
@@ -1335,7 +1353,7 @@ public final class BrowserSession: ObservableObject {
         let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionHost, hostLinks: nativeMessagingHosts)
         // The host knows the session before the manager asks the runtime which engines run extensions.
         webExtensionHost.follow(webExtensions, of: personaID, in: self)
-        let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions])
+        let plugins = PluginManager(persona: personaID, directory: userDataDirectory, builtIns: builtInPlugins, runtimes: [webExtensions], events: events, browserHost: pluginBrowserHost)
         plugins.nativeAppGate = nativeMessagingHosts
         engines.plugins = plugins
         engines.webExtensions = webExtensions
@@ -1496,8 +1514,13 @@ public final class BrowserSession: ObservableObject {
 
     /// The conversations of the page reader and the question popover, which windows show. It follows the session's tabs once the session exists.
     public let pageAssistant = PageAssistant()
-    /// Posts the tabs' and downloads' events to the AI interface's hooks and applies their actions, once the session exists.
+    /// The browser event bus (`docs/hooks.md`, Browser events), which `eventSource` posts to and the app shell passes to the consumers it creates.
+    public let events = BrowserEventBus()
+    private lazy var eventSource = BrowserEventSource(bus: events)
+    /// Turns the bus's events into the AI interface's hook events and applies their actions, once the session exists.
     private let hooks = BrowserHooks()
+    /// Reaches the tabs for the plugins' and hook scripts' tab calls, once the session exists.
+    public let pluginBrowserHost = SessionPluginBrowserHost()
 
     // MARK: Drag and drop
 
@@ -1721,11 +1744,10 @@ public final class BrowserSession: ObservableObject {
     /// A page in an agent's tab opened `popup`, which joins the opener's agent folder behind it, in the opener's engine. One whose first address the agent monitor refuses closes again; the engine is still in its callback, so that happens on the next turn of the run loop, while the popup's own navigation check refuses the address meanwhile.
     private func adoptAgentPopup(_ popup: any EngineWebContents, targetURL: URL?, opener: Tab, owner: UUID) {
         guard let folder = folders.first(where: { $0.id == opener.folderID && $0.agentSessionID == owner }), let spaceID = opener.spaceID else { return retire(popup, of: opener.personaID) }
-        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, folderID: folder.id)
-        opened.opener = opener.webContents
+        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, opener: opener.webContents, folderID: folder.id)
         if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url) == false {
             DispatchQueue.main.async { [weak self, weak opened] in
-                if let self, let opened, opened.agentOwnerID == owner { self.closeTab(opened, reason: .page) }
+                if let self, let opened, opened.agentOwnerID == owner { self.closeAgentTab(opened, reason: .page) }
             }
             return
         }

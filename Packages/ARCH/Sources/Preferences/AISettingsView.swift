@@ -1,6 +1,7 @@
-// Settings ▸ AI: the providers the user connects, the models for each registered feature, the sites where AI is off, usage, recent requests, and agents' outside access, grants, and activity. Arch ships no model or provider account, so this section is the only place that mentions AI until a provider is connected.
+// Settings ▸ AI: the providers the user connects, the models for each registered feature and each model tier, the sites where AI is off, usage, recent requests, agents' outside access, grants, and activity, and the hooks. Arch ships no model or provider account, so this section is the only place that mentions AI until a provider is connected.
 import Agent
 import AI
+import Hooks
 import SwiftUI
 
 extension AIFeature {
@@ -15,14 +16,18 @@ struct AISettingsView: View {
     private enum Page: String, CaseIterable {
         case providers = "Providers"
         case features = "Features"
+        case modelTiers = "Model Tiers"
         case sites = "Sites"
         case usage = "Usage"
         case activity = "Activity"
         case agents = "Agents"
+        case agentHooks = "Agent Hooks"
     }
 
     /// The agents' service, whose page shows only when the app shell set one.
     let agents: AgentService?
+    /// The hook registry, whose page shows only when the app shell set one.
+    let hooks: HookRegistry?
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
     @State private var page = Page.providers
@@ -32,7 +37,7 @@ struct AISettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("Page", selection: $page) {
-                ForEach(Page.allCases.filter { $0 != .agents || agents != nil }, id: \.self) { Text($0.rawValue) }
+                ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || hooks != nil) }, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -48,11 +53,14 @@ struct AISettingsView: View {
                 switch page {
                 case .providers: AIProvidersPage(service: service, settings: settings)
                 case .features: AIFeaturesPage(service: service, settings: settings, hooks: service.hooks, testPromptTask: $testPromptTask)
+                case .modelTiers: AIModelTiersPage(settings: settings)
                 case .sites: AISitesPage(settings: settings)
                 case .usage: AIUsagePage(usage: service.usage, settings: settings)
                 case .activity: AIActivityPage(service: service, settings: settings)
                 case .agents:
                     if let agents { AgentSettingsPage(service: agents, activity: agents.activity) }
+                case .agentHooks:
+                    if let hooks { AgentHooksPage(registry: hooks, currentTab: { PreferencesWindowController.session?.lastMainWindow?.selectedTabID }) }
                 }
             }
             .formStyle(.grouped)
@@ -66,7 +74,7 @@ struct AISettingsView: View {
 
 // MARK: - Features
 
-/// The default route, then one section per registered feature with its switch, its models, what it sends, and its last error, and for a feature whose hooks paused, a way to resume them. The Test Prompt feature's section also holds the prompt.
+/// The default route, then one section per registered feature with a stored route, with its switch, its models, what it sends, and its last error, and for a feature whose hooks paused, a way to resume them. The Test Prompt feature's section also holds the prompt. A feature whose requests name their own routes has no models to choose here; Usage lists it by name.
 private struct AIFeaturesPage: View {
     @ObservedObject var service: AIService
     @ObservedObject var settings: AISettingsStore
@@ -81,7 +89,7 @@ private struct AIFeaturesPage: View {
         } footer: {
             formFootnote("Features you start, such as a question about a page, use these models unless they have their own. Features that run on their own never do.")
         }
-        ForEach(service.features) { feature in
+        ForEach(service.features.filter { $0.routing == .stored }) { feature in
             Section {
                 Toggle("Use \(feature.name)", isOn: Binding(
                     get: { settings.route(for: feature.id).isEnabled },
@@ -245,6 +253,37 @@ private struct AITestPromptRows: View {
                 isError = true
             }
             task = nil
+        }
+    }
+}
+
+// MARK: - Model tiers
+
+/// One section per tier with the Features rows' model menus and a sentence on what the tier is for. The sentences name no feature: a feature under Features uses the models chosen there, and only a request that names a tier uses one. A tier starts empty and lists every connected model; a request that names the tier drops the models that cannot serve it.
+private struct AIModelTiersPage: View {
+    @ObservedObject var settings: AISettingsStore
+
+    var body: some View {
+        Section {
+            Text("A request that names a tier, such as an agent hook's, uses the tier's first model and its fallbacks; the features under Features use the models chosen there. A tier without a model fails; it never uses another tier or the default model.")
+                .foregroundStyle(.secondary)
+        }
+        ForEach(AIModelTier.allCases, id: \.self) { tier in
+            Section {
+                AIRoutePickers(settings: settings, feature: .tier(tier), emptyChoice: "None")
+            } header: {
+                Text(tier.title)
+            } footer: {
+                formFootnote(Self.purpose(of: tier))
+            }
+        }
+    }
+
+    private static func purpose(of tier: AIModelTier) -> String {
+        switch tier {
+        case .fast: return "For small, frequent tasks, where a quick, inexpensive model serves best."
+        case .standard: return "For everyday tasks that need more care than a quick, inexpensive model gives."
+        case .deep: return "For hard tasks that need the most capable model, at a higher cost and with slower replies."
         }
     }
 }
