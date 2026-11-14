@@ -30,12 +30,18 @@ import Foundation
     /// In-app sessions in the order they started, until the user deletes them or Arch quits.
     @Published public private(set) var sessions: [AgentSession] = []
     public let activity: AgentActivityLog
+    private var hookCLIs: [UUID: AgentHookCLIRun] = [:]
     private var runObserver: AnyCancellable?
     private var runService: AgentRunner?
     public var runs: AgentRunner {
         if let runService { return runService }
         let runner = AgentRunner(host: host, ai: .shared)
         runObserver = runner.$isRunning.dropFirst().removeDuplicates().sink { [weak self] _ in self?.objectWillChange.send() }
+        runner.startCLI = { [weak self] binding, feature, models, turns, instructions in
+            guard let self else { throw AIError.cancelled }
+            return try self.startHookCLI(binding, feature: feature, models: models, turns: turns, instructions: instructions)
+        }
+        runner.finishCLI = { [weak self] in self?.finishHookCLI($0) }
         runService = runner
         return runner
     }
@@ -290,7 +296,7 @@ import Foundation
 
     /// Listens while outside clients may connect or a session needs the channel, and otherwise removes the socket, so that clients report that agent access is off.
     func updateListening() {
-        let isNeeded = acceptsOutsideClients || sessionsNeedChannel
+        let isNeeded = acceptsOutsideClients || sessionsNeedChannel || !hookCLIs.isEmpty
         if isNeeded, endpoint == nil {
             guard let location = dependencies.location else {
                 channelProblem = "The home folder's path is too long for the agent socket, and so is the temporary folder's."
@@ -339,6 +345,11 @@ import Foundation
     public func stop() {
         expiryTimer?.invalidate()
         dependencies.prompt.cancelAll()
+        runService?.cancelAll()
+        for binding in hookCLIs.values {
+            binding.ready.shut()
+            binding.runner?.endProcesses()
+        }
         for session in sessions where !session.isCleanedUp { session.endProcessesAtQuit() }
         approvals.end(because: "Arch quit.")
         if canChangeSettings, file.hasKey, !settings.grants.isEmpty { write() }
@@ -841,20 +852,52 @@ import Foundation
 
     // MARK: Session connections
 
+    func startHookCLI(_ binding: AgentHookCLIRun, feature: AIFeatureID, models: [AIModelRef], turns: Int, instructions: String) throws -> any AgentSessionRunning {
+        let server = AIAgentToolServer(executable: dependencies.mcpExecutable, arguments: ["--session"],
+                                      environment: [AgentMCPServer.ticketVariable: binding.ticket.text], tools: binding.tools.map(\.name))
+        let request = AIAgentSessionRequest(feature: feature, route: .models(models), instructions: instructions, toolServer: server, id: binding.id,
+                                            folder: dependencies.sessionFolder(binding.id), maxTurns: turns, ephemeral: true)
+        hookCLIs[binding.id] = binding
+        if endpoint == nil { updateListening() }
+        do {
+            guard endpoint != nil else { throw AIError.invalidRequest(channelProblem ?? "The hook could not open its local tool connection.") }
+            let runner = try dependencies.startRunner(request)
+            runner.processDidStart = { [weak binding, record = dependencies.processRecord] pid in
+                binding?.spawnedProcess = record(pid)
+                binding?.ready.close()
+            }
+            binding.runner = runner
+            return runner
+        } catch {
+            finishHookCLI(binding)
+            throw error
+        }
+    }
+
+    func finishHookCLI(_ binding: AgentHookCLIRun) {
+        binding.ready.shut()
+        hookCLIs.removeValue(forKey: binding.id)
+        for connection in connections.values where connection.sessionID == binding.id { endpoint?.close(connection.id) }
+        if !acceptsOutsideClients, !sessionsNeedChannel, hookCLIs.isEmpty { updateListening() }
+    }
+
     /// A ticket binds the connection to its session only when it matches one, compared with every session's in constant time, and the session's running CLI process is an ancestor of the peer by process ID and start time. A ticket used from outside that tree is refused, logged, and noted in the session.
     private func bind(_ connection: ClientConnection, _ requestID: AgentRPCID, hello: AgentHello, ticket: String) {
         var matched: AgentSession?
         for session in sessions where session.ticket?.matches(ticket) == true && matched == nil { matched = session }
-        // Only `arch-mcp --session` presents a ticket.
-        guard hello.client == .mcp, let session = matched, !session.hasEnded, let process = session.liveProcess,
+        var hookRun: AgentHookCLIRun?
+        for binding in hookCLIs.values where binding.ticket.matches(ticket) && hookRun == nil { hookRun = binding }
+        let process = hookRun?.liveProcess ?? matched.flatMap { $0.hasEnded ? nil : $0.liveProcess }
+        let id = hookRun?.id ?? matched?.id
+        guard hello.client == .mcp, let id, let process,
               AgentProcessAncestry.isProcess(connection.peer.processID, descendedFrom: process, records: dependencies.processRecord) else {
             if let session = matched, !session.hasEnded, hello.client == .mcp { session.noteForeignTicketUse() }
-            activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, sessionID: matched?.id, clientName: hello.client.rawValue,
-                                               outcome: matched == nil ? "the ticket names no session" : "the ticket's program is not the session's"))
+            activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, sessionID: id, clientName: hello.client.rawValue,
+                                               outcome: id == nil ? "the ticket names no session" : "the ticket's program is not the session's"))
             return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: "No agent session in Arch has this ticket for this program."))
         }
         connection.hello = hello
-        connection.sessionID = session.id
+        connection.sessionID = id
         connection.stage = .ready
         reply(connection, requestID, Self.json(AgentHelloAnswer(version: version, status: .bound)))
     }
@@ -884,6 +927,22 @@ import Foundation
     private func toolsDidChange(forSession id: UUID) {
         for connection in connections.values where connection.stage == .ready && connection.sessionID == id {
             endpoint?.send(.notification(method: AgentControlMethod.toolsChangedNotification, params: nil), to: connection.id)
+        }
+    }
+
+    private func callHook(_ hook: AgentHookCLIRun, params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "The connection has too many running calls."))
+        }
+        guard let call = try? params?.decode(as: AgentToolCall.self) else {
+            return replyError(connection, requestID, .invalidParams("tools/call needs a tool's name and its arguments."))
+        }
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            let result = await hook.call(call)
+            guard !running.isCancelled, connections[connection.id] != nil else { return }
+            reply(connection, requestID, Self.json(result))
         }
     }
 
@@ -1066,6 +1125,9 @@ import Foundation
             replyError(connection, requestID, .invalidRequest("hello comes once per connection."))
         case (.ready, AgentControlMethod.toolsList):
             if let sessionID = connection.sessionID {
+                if let hook = hookCLIs[sessionID] {
+                    return reply(connection, requestID, Self.json(AgentToolList(tools: hook.tools.map(\.name))))
+                }
                 guard let session = session(withID: sessionID) else { return closeConnection(connection) }
                 return reply(connection, requestID, Self.json(AgentToolList(tools: listTools(for: session))))
             }
@@ -1074,6 +1136,7 @@ import Foundation
             reply(connection, requestID, Self.json(AgentToolList(tools: tools.map(\.name))))
         case (.ready, AgentControlMethod.toolsCall):
             if let sessionID = connection.sessionID {
+                if let hook = hookCLIs[sessionID] { return callHook(hook, params: params, on: connection, requestID: requestID) }
                 guard let session = session(withID: sessionID) else { return closeConnection(connection) }
                 return sessionCall(params, of: session, on: connection, requestID: requestID)
             }

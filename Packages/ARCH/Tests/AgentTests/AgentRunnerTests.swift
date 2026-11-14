@@ -1,3 +1,4 @@
+import AgentControl
 import AI
 import Foundation
 import Testing
@@ -127,6 +128,53 @@ import Testing
         #expect(result.reply == nil && runner.keptRuns.first?.id == id && client.requests.first?.recordsContent == true)
         runner.deleteKeptRun(id)
         #expect(runner.keptRuns.isEmpty)
+    }
+
+    @Test func aCLIRunUsesItsOwnBoundConnectionAndLeavesNoTask() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        let preset = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/fixture/codex"))
+        let model = AIModelRef(provider: preset.id, model: "chosen")
+        var req = request()
+        req.knownProviders = [preset.id: AgentRunRequest.destination(of: preset)]
+        let client = ScriptedClient { _ in [] }
+        let runner = AgentRunner(host: host, client: client, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
+        runner.startCLI = { try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4) }
+        runner.finishCLI = { service.finishHookCLI($0) }
+        let task = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { id, suggestion, _, applies in
+            #expect(id == tab && suggestion == "Docs" && !applies)
+            return true
+        } }
+        try await waitUntil { !harness.runners.isEmpty }
+        let cli = try #require(harness.runners.first)
+        #expect(cli.request.ephemeral && cli.request.maxTurns == 1 && cli.request.route == .models([model]))
+        #expect(cli.request.toolServer.tools == ["rename_tab"] && cli.request.skills == nil)
+        #expect(cli.sent.first?.contains("?private") == false && cli.sent.first?.contains("<untrusted") == true)
+        let ticket = try #require(cli.request.toolServer.environment[AgentMCPServer.ticketVariable])
+        let pid: pid_t = 4_242
+        harness.addProcess(pid, parent: 1)
+        cli.startProcess(pid)
+        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: ticket) }
+        harness.addProcess(getpid(), parent: pid)
+        let peer = try TestClient(harness.location)
+        #expect(try await peer.hello(ticket: ticket).status == .bound)
+        let list = try await peer.call(AgentControlMethod.toolsList)
+        #expect(try list.decode(as: AgentToolList.self).tools == ["rename_tab"])
+        let call = Task { try await peer.call(AgentControlMethod.toolsCall, params: ["name": "rename_tab", "arguments": ["tab": "t1", "name": "Docs"]]) }
+        await Task.yield()
+        cli.emit(.ready(model))
+        #expect(try await call.value.decode(as: AgentToolResult.self).status == .ok)
+        let refused = try await peer.call(AgentControlMethod.toolsCall, params: ["name": "open_tab", "arguments": [:]])
+        #expect(try refused.decode(as: AgentToolResult.self).code == "notGranted")
+        cli.emit(.text("Done"))
+        cli.emit(.turnFinished(.completed))
+        let result = await task.value
+        #expect(result.status == .completed && result.reply == "Done" && result.actions == [.renamedTab(tab: tab, name: "Docs")])
+        #expect(client.requests.isEmpty && runner.keptRuns.isEmpty && service.sessions.isEmpty)
+        #expect(cli.endedKeepingThread == false && cli.processID == nil)
+        #expect(!FileManager.default.fileExists(atPath: harness.location.path))
     }
 
     @Test func stopAllCancelsBothRunsAndTheThirdIsRefusedAtCapacity() async throws {
