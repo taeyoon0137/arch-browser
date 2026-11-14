@@ -17,7 +17,7 @@ enum TabCloseAction: Equatable {
     case dismiss
 
     /// What a close for `reason` does to the tab: a pinned tab unloads, except that Delete Persona closes it into the closed list with the Persona's other tabs; a favorite's tab, the only tab outside a space's list, ends; and any other tab closes into the closed list, except one that only pointed at a file. Archiving reaches only unpinned tabs. A live folder item's tab is dismissed when the user, an extension, or the page closes it. It unloads and keeps its place, so that the next plan does not replace it, when it only pointed at a file or its page crashed, which the user did not choose, and it closes without a closed record when its Persona goes, so that the up to 1,000 item tabs of 20 live folders cannot push other records out of the closed list. An agent tab is forgotten on every path.
-    static func of(_ tab: Tab, reason: TabCloseReason) -> TabCloseAction {
+    @MainActor static func of(_ tab: Tab, reason: TabCloseReason) -> TabCloseAction {
         if tab.agentOwnerID != nil { return .forget }
         if tab.spaceID == nil { return .end }
         if tab.liveItemID != nil {
@@ -32,7 +32,7 @@ enum TabCloseAction: Equatable {
     }
 
     /// The record the closed list gains, without page state, activation date, or hook's name (`SessionSnapshot.TabRecord.closed`), or nil for an action that adds none. A pinned tab's record keeps its folder and saved page, so ⌘Z reopens it pinned with them.
-    func closedRecord(of tab: Tab) -> SessionSnapshot.TabRecord? {
+    @MainActor func closedRecord(of tab: Tab) -> SessionSnapshot.TabRecord? {
         guard self == .close(remember: true), let spaceID = tab.spaceID else { return nil }
         return SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID,
                                          engine: tab.engineKind, personaID: tab.personaID, savedPage: tab.savedPage)

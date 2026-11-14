@@ -444,7 +444,7 @@ extension SidebarImport {
 
 extension SidebarImport.Sidebar.TabState {
     /// A space's tab as the plan sees it, with its current address and, for a pinned tab, its saved page's. Nil for a favorite's tab, which belongs to no space, and for a live folder item's tab, which comes and goes with its source, so that its address does not keep an imported bookmark out.
-    init?(_ tab: Tab) {
+    @MainActor init?(_ tab: Tab) {
         guard let spaceID = tab.spaceID, tab.liveItemID == nil else { return nil }
         self.init(id: tab.id, spaceID: spaceID, isPinned: tab.isPinned, url: tab.url, savedURL: tab.savedPage?.url)
     }

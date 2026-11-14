@@ -219,7 +219,7 @@ extension SessionSnapshot {
     }
 
     /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch. A folder whose tabs the user kept is an ordinary folder.
-    static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
+    @MainActor static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
         let agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
         return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !$0.isAgentFolder })
     }
@@ -227,7 +227,7 @@ extension SessionSnapshot {
 
 extension SessionSnapshot.TabRecord {
     /// An open tab as `session.json` keeps it, in the space `spaceID` and active last at `lastActivatedAt`. A tab without its page writes what its stand-in keeps of its saved record (`UnloadedWebContents`).
-    init(_ tab: Tab, spaceID: UUID, lastActivatedAt: Date) {
+    @MainActor init(_ tab: Tab, spaceID: UUID, lastActivatedAt: Date) {
         self.init(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, lastActivatedAt: lastActivatedAt,
                   engine: tab.engineKind, state: tab.webContents.restorableState, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle, savedPage: tab.savedPage,
                   liveItemID: tab.liveItemID)

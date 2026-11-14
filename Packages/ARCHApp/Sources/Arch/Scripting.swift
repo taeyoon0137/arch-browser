@@ -22,15 +22,16 @@ extension ArchApplication {
 }
 
 /// A tab as scripts see it. Each request makes new ones, and scripts refer to a tab by its identifier.
-@objc(ArchScriptTab) final class ScriptTab: NSObject {
+@MainActor @objc(ArchScriptTab) final class ScriptTab: NSObject {
     private let tab: Tab
 
     init(_ tab: Tab) {
         self.tab = tab
+        uniqueID = tab.id.uuidString
         super.init()
     }
 
-    @objc var uniqueID: String { tab.id.uuidString }
+    @objc nonisolated let uniqueID: String
     /// The tab's name as the sidebar shows it: the user's, a hook's, or the page's title.
     @objc var name: String { tab.displayTitle }
     @objc var url: String { tab.url?.absoluteString ?? "" }

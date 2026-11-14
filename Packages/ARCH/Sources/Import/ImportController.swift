@@ -5,7 +5,7 @@ import History
 import SwiftUI
 
 /// Runs one import at a time on the browser window: an open panel sheet or the browser import sheet, reading the files off the main thread, then a summary sheet.
-public final class ImportController {
+@MainActor public final class ImportController {
     private let session: BrowserSession
     private let history: HistoryStore
     private let siteSearch: SiteSearchStore
@@ -107,7 +107,7 @@ public final class ImportController {
         browserSheet = sheet
         window.beginSheet(sheet)
         activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            model.browsersToReread.forEach { self?.read($0.source, into: model) }
+            MainActor.assumeIsolated { model.browsersToReread.forEach { self?.read($0.source, into: model) } }
         }
         DispatchQueue.global(qos: .userInitiated).async {
             DatabaseCopy.removeLeftovers()

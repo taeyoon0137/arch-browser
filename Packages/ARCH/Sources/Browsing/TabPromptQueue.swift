@@ -3,7 +3,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-final class TabPromptQueue: ObservableObject {
+@MainActor final class TabPromptQueue: ObservableObject {
     /// The prompts of each tab, oldest first. The first is the one a card shows.
     @Published private(set) var waiting: [UUID: [PromptState]] = [:]
     /// Each waiting prompt's completion, which runs once.

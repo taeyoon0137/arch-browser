@@ -25,7 +25,7 @@ final class EngineRuntime {
     }
 }
 
-public final class BrowserSession: ObservableObject {
+@MainActor public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
     /// The folder that holds every file the session keeps: `session.json`, Chromium's profiles in `Cache/Chromium`, the plugins, the browser import's record, and the files of `history`, `sitePermissions`, and `siteSearch`. WebKit keeps its website data where the system puts it for the app.
     public let userDataDirectory: URL
@@ -99,9 +99,9 @@ public final class BrowserSession: ObservableObject {
     private var memoryPressure: MemoryPressureMonitor?
 
     /// The results page of the search engine chosen in Settings.
-    public static var searchURL: URL { SearchEngine.current.resultsURL }
+    public nonisolated static var searchURL: URL { SearchEngine.current.resultsURL }
     /// The page a tab opens without an address: the home page of the search engine chosen in Settings.
-    public static var newTabURL: URL { SearchEngine.current.homeURL }
+    public nonisolated static var newTabURL: URL { SearchEngine.current.homeURL }
 
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
@@ -134,11 +134,8 @@ public final class BrowserSession: ObservableObject {
         self.userDataDirectory = userDataDirectory
         self.builtInPlugins = builtInPlugins
         webStore = WebStoreInstaller(client: WebStoreClient(productVersion: cefVersion.flatMap(WebStoreClient.chromiumVersion(inCEFVersion:)) ?? ""))
-        // The app makes the session on the main thread.
-        nativeMessagingHosts = MainActor.assumeIsolated {
-            NativeMessagingHostLinks(directory: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true), folders: nativeMessagingHostFolders,
+        nativeMessagingHosts = NativeMessagingHostLinks(directory: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true), folders: nativeMessagingHostFolders,
                                      chromiumFolder: chromiumNativeMessagingHosts)
-        }
         store = SessionStore(directory: userDataDirectory)
         history = HistoryStore(directory: userDataDirectory)
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
@@ -149,9 +146,7 @@ public final class BrowserSession: ObservableObject {
         let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
         // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
         let keepsUnknownLiveFolders = store.keepsUnknownLiveFolders
-        liveFolderService = MainActor.assumeIsolated {
-            LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)), keepsUnknownFolders: keepsUnknownLiveFolders)
-        }
+        liveFolderService = LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)), keepsUnknownFolders: keepsUnknownLiveFolders)
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
@@ -175,9 +170,7 @@ public final class BrowserSession: ObservableObject {
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot.closedTabs ?? []
         start(primary)
-        MainActor.assumeIsolated {
-            nativeMessagingHosts.gateWidens = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
-        }
+        nativeMessagingHosts.gateWidens = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
         // The default Persona's runtime of the primary engine starts with the session, so the other engine's runtime in that Persona, whenever it starts, takes its cookies from the primary engine.
         _ = runtime(for: primaryEngine, in: Persona.defaultID)
         restoreTabs(snapshot)
@@ -185,18 +178,18 @@ public final class BrowserSession: ObservableObject {
         observeChanges()
         personaDataRemoval.didRemove = { [weak self] in self?.scheduleSave() }
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
-            self?.archiveInactiveTabs()
-            self?.unloadInactiveTabs(pressure: nil)
+            MainActor.assumeIsolated {
+                self?.archiveInactiveTabs()
+                self?.unloadInactiveTabs(pressure: nil)
+            }
         }
         memoryPressure = MemoryPressureMonitor { [weak self] in self?.unloadInactiveTabs(pressure: $0) }
         nowPlaying = NowPlaying(session: self)
         // The session is created on the main thread, where the AI interface and the plugins run.
-        MainActor.assumeIsolated {
-            pageAssistant.attach(to: self)
-            pluginPages.attach(to: self)
-            hooks.attach(to: self)
-            startLiveFolders()
-        }
+        pageAssistant.attach(to: self)
+        pluginPages.attach(to: self)
+        hooks.attach(to: self)
+        startLiveFolders()
     }
 
     public enum SessionError: Error {
@@ -281,7 +274,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Window rule 5: a main window's tabs stay open, and a small window closes with its tab or once a main window takes it. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their prompts. A main window's record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
-    @MainActor func windowWillClose(_ window: BrowserWindowModel) {
+    func windowWillClose(_ window: BrowserWindowModel) {
         // The tabs the window showed were in view until now, as the archive timer and the saved session count the tabs of open windows, also when closing the last main window quits.
         window.paneTabs.forEach { $0.lastActivatedAt = Date() }
         window.prepareToClose()
@@ -340,7 +333,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Stops the page reader's replies after `window`'s reader hides or the window closes: those about the tabs the window shows while another window shows the reader, or every reply once no other window does.
-    @MainActor func pageReaderDidHide(in window: BrowserWindowModel) {
+    func pageReaderDidHide(in window: BrowserWindowModel) {
         if windows.contains(where: { $0 !== window && $0.isPageReaderVisible }) {
             pageAssistant.stopReaderReplies(ofTabs: window.shownTabIDs)
         } else {
@@ -349,7 +342,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Closes the question popovers that windows show about the tab's page, which the tab has left.
-    @MainActor func closePageQuestions(ofTab id: UUID) {
+    func closePageQuestions(ofTab id: UUID) {
         windows.forEach { $0.closePageQuestion(ofTab: id) }
     }
 
@@ -362,17 +355,17 @@ public final class BrowserSession: ObservableObject {
     public static let opensLinksInSmallWindowByDefault = true
 
     /// How long after Arch becomes active a link still counts as arriving while Arch was in the background, because the app that sends a link can activate Arch just before the link arrives. `docs/windows-personas.md` (Small window) says how the value was chosen.
-    static let smallWindowActivationGrace: TimeInterval = 0.5
+    nonisolated static let smallWindowActivationGrace: TimeInterval = 0.5
 
     /// Whether a link from another app opens in a small window, judged by timing alone, so the caller checks the preference under `opensLinksInSmallWindowKey` first: Arch was not active when the link arrived, or became active at `becameActiveAt`, less than `smallWindowActivationGrace` before `now`. A nil `becameActiveAt` means Arch has been active since it launched.
-    public static func opensLinkInSmallWindow(isAppActive: Bool, becameActiveAt: Date?, now: Date) -> Bool {
+    public nonisolated static func opensLinkInSmallWindow(isAppActive: Bool, becameActiveAt: Date?, now: Date) -> Bool {
         guard isAppActive else { return true }
         guard let becameActiveAt else { return false }
         return now.timeIntervalSince(becameActiveAt) < smallWindowActivationGrace
     }
 
     /// The web address that a link from another app or an `open location` script names, or `nil` when it names none: only an http or https address opens, so a file, `mailto:`, or other address is dropped. A script's text may lack a scheme, so it is read as the address field reads it. AppKit escapes that text, spaces among them, so it is read with its escapes decoded first, then as it came for escapes the script wrote itself, as in a query's `%20`; escapes in a host stand for text that is no address.
-    public static func webAddress(forOpened opened: URL) -> URL? {
+    public nonisolated static func webAddress(forOpened opened: URL) -> URL? {
         let address: URL?
         if opened.scheme != nil {
             address = opened
@@ -496,7 +489,7 @@ public final class BrowserSession: ObservableObject {
         let browser = application.createBrowser(context: context)
         let runtime = EngineRuntime(kind: kind, personaID: persona.id, context: context, browser: browser)
         engines.runtimes[kind] = runtime
-        if let extensions = context.extensions { MainActor.assumeIsolated { engines.webExtensions?.profileDidStart(with: extensions, of: kind) } }
+        if let extensions = context.extensions { engines.webExtensions?.profileDidStart(with: extensions, of: kind) }
         context.downloads.delegate = self
         context.delegate = self
         followDownloadSettings(of: context)
@@ -535,12 +528,12 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// The name of a new space without one: "Space" with the lowest number no space in `spaces` uses, so names do not repeat after a deletion.
-    static func newSpaceName(among spaces: [Space]) -> String {
+    nonisolated static func newSpaceName(among spaces: [Space]) -> String {
         (1...).lazy.map { "Space \($0)" }.first { name in !spaces.contains { $0.name == name } }!
     }
 
     /// The tint of a new space: the next of the rotation after `spaces`.
-    static func newSpaceTint(among spaces: [Space]) -> SpaceTint {
+    nonisolated static func newSpaceTint(among spaces: [Space]) -> SpaceTint {
         SpaceTint.colors[spaces.count % SpaceTint.colors.count]
     }
 
@@ -624,7 +617,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// `displayedPlace(ofPersona:space:)` among `personas`, also nil for a Persona that is no longer listed, for callers that hold the Personas, such as the sheets' texts, Settings ▸ Plugins' reviews, and tests.
-    public static func displayedPlace(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
+    nonisolated public static func displayedPlace(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard personas.count > 1, let persona = personas.first(where: { $0.id == id }) else { return nil }
         return space.map { "\(persona.name) / \($0.name)" } ?? persona.name
     }
@@ -642,7 +635,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// The name of the one space a new Persona starts with.
-    static let newPersonaSpaceName = "Personal"
+    nonisolated static let newPersonaSpaceName = "Personal"
 
     /// Appends a Persona with one space named Personal and returns it. Its profiles and plugins start when a window of it first needs them.
     func addPersona(named name: String) -> Persona {
@@ -692,12 +685,12 @@ public final class BrowserSession: ObservableObject {
         personas.removeAll { $0.id == id }
         // Its browsers close, and its plugins stop. Download items refer to their lists and profiles unowned, so its runtimes stay until quit.
         if let engines = personaEngines.removeValue(forKey: id) {
-            MainActor.assumeIsolated { closePlugins(of: engines) }
+            closePlugins(of: engines)
             engines.runtimes.values.forEach { $0.browser.closeAllWebContents() }
             retiredPersonaEngines.append(engines)
         }
         // The Web Store's update results for its plugins go with them.
-        MainActor.assumeIsolated { webStore.forget(id) }
+        webStore.forget(id)
         personaDataRemoval.removeAtNextLaunch(id)
         saveNow()
     }
@@ -826,7 +819,7 @@ public final class BrowserSession: ObservableObject {
 
     /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:)`), which Chromium receives only with the browser it creates.
     func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
-        let pageScripts = TabUnloading.pageScripts(withPluginScripts: MainActor.assumeIsolated { plugins(in: personaID).contributions.pageScripts })
+        let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts)
         return runtime(for: engine ?? defaultEngine, in: personaID).browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: state, pageScripts: pageScripts))
     }
 
@@ -1059,7 +1052,7 @@ public final class BrowserSession: ObservableObject {
         switch action {
         case .unload: return unloadToSavedPage(tab, reason: reason)
         case .end, .close, .forget: return removeTab(tab, closedRecord: action.closedRecord(of: tab), reason: reason)
-        case .dismiss: return MainActor.assumeIsolated { dismissItem(tab, reason: reason) }
+        case .dismiss: return dismissItem(tab, reason: reason)
         }
     }
 
@@ -1248,7 +1241,7 @@ public final class BrowserSession: ObservableObject {
     /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned.
     private func movingItemTabs(_ change: () -> Void) {
         let left = LiveFolderTabs.itemTabsLeaving(tabs, during: change)
-        if !left.isEmpty { MainActor.assumeIsolated { itemTabsDidLeave(left) } }
+        if !left.isEmpty { itemTabsDidLeave(left) }
         removeEmptyAgentFolders()
     }
 
@@ -1286,7 +1279,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or an address without spaces whose host is dotted, `localhost` or a name under it, or an IPv6 address in brackets. Adds `http://` to an address on this Mac, where development servers run without TLS, and `https://` to the others. `localhost:3000` is thus an address, though it parses as a URL whose scheme is `localhost`. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
-    public static func url(forInput input: String) -> URL? {
+    public nonisolated static func url(forInput input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if let parsed = URL(string: text), let scheme = parsed.scheme, parsed.host != nil || scheme.lowercased() == "file" { return parsed }
         guard !text.contains(" "), let parsed = URL(string: "https://\(text)"), let host = parsed.host?.lowercased(), !host.isEmpty else { return nil }
@@ -1295,7 +1288,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Whether `host`, in lowercase, names this Mac: `localhost`, a name under it, or a loopback address (127.0.0.0/8 or ::1).
-    private static func isOnThisMac(_ host: String) -> Bool {
+    nonisolated private static func isOnThisMac(_ host: String) -> Bool {
         if host == "localhost" || host.hasSuffix(".localhost") { return true }
         var ipv4 = in_addr()
         if inet_pton(AF_INET, host, &ipv4) == 1 { return withUnsafeBytes(of: &ipv4) { $0[0] } == 127 }
@@ -1304,7 +1297,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Returns a site's results page for text that starts with a site search keyword and a space, the input URL, a web search URL for other text, such as a keyword whose template makes no web address, or `nil` for empty text.
-    static func destination(forInput input: String, siteSearch: SiteSearchStore) -> URL? {
+    nonisolated static func destination(forInput input: String, siteSearch: SiteSearchStore) -> URL? {
         if let search = siteSearch.match(input), let url = search.shortcut.resultsURL(for: search.query) { return url }
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
@@ -1313,7 +1306,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// The results page of the search engine chosen in Settings for `text`.
-    static func searchResultsURL(for text: String) -> URL {
+    nonisolated static func searchResultsURL(for text: String) -> URL {
         var components = URLComponents(url: searchURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "q", value: text)]
         return components.url!
@@ -1329,7 +1322,7 @@ public final class BrowserSession: ObservableObject {
     private let webExtensionHost = SessionWebExtensionHost()
 
     /// The Persona's plugins, kept in its folder under the app's Application Support folder, created on first use, with the runtime of its web extensions, which reach the native apps that the host manifests in `nativeMessagingHosts` name, under the proof gate that staging and the review also follow.
-    @MainActor public func plugins(in personaID: Persona.ID) -> PluginManager {
+    public func plugins(in personaID: Persona.ID) -> PluginManager {
         let engines = engines(of: personaID)
         if let plugins = engines.plugins { return plugins }
         let webExtensions = WebExtensionRuntime(persona: personaID, host: webExtensionHost, hostLinks: nativeMessagingHosts)
@@ -1348,14 +1341,14 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Has every Persona's web extension runtime take out of Chromium the versions that the proof gate comes to refuse, as under the links a pass is about to make (`NativeMessagingHostLinks.gateWidens`). A Persona whose runtime the session has not made yet does so when it makes it, as its profiles' starts reach the runtime.
-    @MainActor private func takeGatedVersionsOutOfChromium() async {
+    private func takeGatedVersionsOutOfChromium() async {
         for runtime in personaEngines.values.compactMap(\.webExtensions) {
             await runtime.takeGatedVersionsOutOfChromium()
         }
     }
 
     /// The runtime of the Persona's web extensions, for their actions in the site settings popover.
-    @MainActor public func webExtensions(in personaID: Persona.ID) -> WebExtensionRuntime? {
+    public func webExtensions(in personaID: Persona.ID) -> WebExtensionRuntime? {
         _ = plugins(in: personaID)
         return engines(of: personaID).webExtensions
     }
@@ -1382,7 +1375,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Stops a deleted Persona's plugins for good and drops its manager, so that they write nothing more to the Persona's folder, which goes at the next launch. Its web extensions leave the engines with them.
-    @MainActor private func closePlugins(of engines: PersonaEngines) {
+    private func closePlugins(of engines: PersonaEngines) {
         pluginPages.stopFollowing(engines.personaID)
         webExtensionHost.stopFollowing(engines.personaID)
         engines.plugins?.close()
@@ -1391,7 +1384,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Reloads the Persona's tabs whose pages the plugin's page scripts cover, so that the scripts of a plugin the user just switched on run there.
-    @MainActor public func reloadTabs(coveredByPageScriptsOf id: PluginID, in personaID: Persona.ID) {
+    public func reloadTabs(coveredByPageScriptsOf id: PluginID, in personaID: Persona.ID) {
         let plugins = plugins(in: personaID)
         for tab in allTabs where tab.personaID == personaID && tab.url.map({ plugins.pageScriptsCover($0, of: id) }) == true {
             tab.webContents.navigationController.reload()
@@ -1638,7 +1631,7 @@ public final class BrowserSession: ObservableObject {
     /// Delete Folder: removes a folder and keeps what it holds. Its folders take its place in its parent, or at the top of its list, and its tabs go first among the tabs there. A live folder's item tabs close instead (`deleteLiveFolder(_:)`).
     public func deleteFolder(_ id: UUID) {
         guard let folder = folders.first(where: { $0.id == id }) else { return }
-        if folder.live != nil { return MainActor.assumeIsolated { deleteLiveFolder(id) } }
+        if folder.live != nil { return deleteLiveFolder(id) }
         changeFolderTree { $0.deleteFolder(id) }
         windows.forEach { $0.endRenamingFolder(id) }
     }
@@ -1862,7 +1855,7 @@ public final class BrowserSession: ObservableObject {
 
     /// The app saves the session before confirming quit. Stop live folders and flush each Persona's cookie record only once the app actually terminates.
     public func finishWritesAtQuit() {
-        MainActor.assumeIsolated { liveFolderService.stop() }
+        liveFolderService.stop()
         personaEngines.values.forEach { $0.cookieSync.saveAtQuit() }
         CookieSync.finishWrites()
     }
@@ -1974,11 +1967,11 @@ public enum CommandPaletteOrigin {
     case addressPill
 }
 
-extension BrowserSession: EngineApplicationDelegate {
+extension BrowserSession: @preconcurrency EngineApplicationDelegate {
     public func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int) { crashCounts[application.engineKind] = count }
 }
 
-extension BrowserSession: EngineBrowserContextDelegate {
+extension BrowserSession: @preconcurrency EngineBrowserContextDelegate {
     /// A service worker of a Persona's profile opens a page, as `clients.openWindow()` does after a click on its notification: in a new tab of that Persona in the profile's engine, in the current space of the Persona's front main window, or without one in the Persona's preferred space, selected, with its window and the app in front, as the page's own `focus()` brings its tab. A window of another Persona keeps its Persona / Space while one of the Persona is open. A quit opens none.
     public func browserContext(_ context: any EngineBrowserContext, openTabWith url: URL, completion: @escaping ((any EngineWebContents)?) -> Void) {
         guard !isQuitting,
@@ -2021,7 +2014,7 @@ extension BrowserSession {
     }
 
     /// Adds a counter to `filename` until the name is unused in `directory`.
-    static func uniqueDestination(for filename: String, in directory: URL) -> URL {
+    nonisolated static func uniqueDestination(for filename: String, in directory: URL) -> URL {
         let base = (filename as NSString).deletingPathExtension
         let ext = (filename as NSString).pathExtension
         var candidate = directory.appendingPathComponent(filename)
@@ -2069,7 +2062,7 @@ extension BrowserSession {
     }
 }
 
-extension BrowserSession: EngineDownloadsDelegate {
+extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
     /// The download's entry. Engines number downloads per profile, so the item, not its ID, names one download among every Persona's.
     private func entry(for item: any EngineDownloadItem) -> DownloadEntry? {
         downloads.first { $0.item === item }

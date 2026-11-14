@@ -24,7 +24,7 @@ public enum BookmarkMenu {
     }
 
     /// The menu for a window of `personaID`: the Persona's favorites in their order, headed by its name with two or more Personas; then, for each Persona in order, each of its spaces that has pinned tabs as a submenu titled with the space's name, or with two or more Personas as "Work / Research" (Persona rule 7), its Personas' groups apart. A space's submenu holds its pinned folders as nested submenus, each listing its folders before its tabs as the sidebar does, then the pinned tabs outside folders. A live folder's submenu carries its count from `unreadCounts`, and its unread items' tabs are marked (live folder rule 5). Folders and spaces whose pinned lists hold no tab at any depth are left out, since they offer nothing to choose. Without favorites and pinned tabs, the menu says so.
-    static func entries(for personaID: Persona.ID, personas: [Persona], spaces: [Space], favorites: [Favorite], tree: FolderTree, unreadCounts: [UUID: Int] = [:]) -> [Entry] {
+    @MainActor static func entries(for personaID: Persona.ID, personas: [Persona], spaces: [Space], favorites: [Favorite], tree: FolderTree, unreadCounts: [UUID: Int] = [:]) -> [Entry] {
         var sections: [[Entry]] = []
         let personaFavorites = favorites.filter { $0.resolvedPersonaID == personaID }
         if !personaFavorites.isEmpty {
@@ -43,7 +43,7 @@ public enum BookmarkMenu {
     }
 
     /// The folders that hold tabs at any depth, as submenus, then the tabs.
-    private static func entries(folders: [TabFolder], tabs: [Tab], tree: FolderTree, unreadCounts: [UUID: Int]) -> [Entry] {
+    @MainActor private static func entries(folders: [TabFolder], tabs: [Tab], tree: FolderTree, unreadCounts: [UUID: Int]) -> [Entry] {
         let submenus: [Entry] = folders.compactMap { folder in
             let contents = Self.entries(folders: tree.subfolders(of: folder.id), tabs: tree.tabs(inFolder: folder.id), tree: tree, unreadCounts: unreadCounts)
             return contents.isEmpty ? nil : .submenu(title: folder.name, entries: contents, unreadCount: folder.live == nil ? 0 : unreadCounts[folder.id] ?? 0)

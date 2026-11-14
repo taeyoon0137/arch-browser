@@ -6,7 +6,7 @@ import Testing
 @testable import Browsing
 @testable import Import
 
-@Suite struct BrowserImportModelTests {
+@MainActor @Suite struct BrowserImportModelTests {
     private static let work = Persona(name: "Work")
     private static let source = BrowserSource(name: "Test Browser", bundleIdentifier: "test.browser",
                                               layout: .chromium(userData: URL(fileURLWithPath: "/nonexistent"), sidebarFile: nil), privacySetting: .fullDiskAccess)
@@ -33,9 +33,10 @@ import Testing
         return profile
     }
 
-    private static func model(_ browsers: [ImportedBrowser], personas: CurrentValueSubject<[Persona], Never> = CurrentValueSubject([Persona(id: Persona.defaultID, name: "Default"), work]),
-                              record: SidebarImport.Record = emptyRecord()) -> BrowserImportModel {
-        let model = BrowserImportModel(personas: personas, currentPersonaID: Persona.defaultID, record: record)
+    private static func model(_ browsers: [ImportedBrowser], personas: CurrentValueSubject<[Persona], Never>? = nil,
+                              record: SidebarImport.Record? = nil) -> BrowserImportModel {
+        let personas = personas ?? CurrentValueSubject([Persona(id: Persona.defaultID, name: "Default"), work])
+        let model = BrowserImportModel(personas: personas, currentPersonaID: Persona.defaultID, record: record ?? emptyRecord())
         model.show(browsers)
         return model
     }

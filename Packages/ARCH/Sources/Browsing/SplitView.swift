@@ -271,7 +271,7 @@ private struct PaneFramesKey: PreferenceKey {
 
 extension SidebarDragState {
     /// Where `tab` released at `point` opens in split view: before the pane under the pointer over its leading half, after it over its trailing half. `nil` when the tab cannot join the panes on screen, or when a pane would stay where it is.
-    func splitDrop(of tab: Tab, at point: CGPoint, in windowModel: BrowserWindowModel) -> SplitDrop? {
+    @MainActor func splitDrop(of tab: Tab, at point: CGPoint, in windowModel: BrowserWindowModel) -> SplitDrop? {
         guard let paneIndex = paneFrames.firstIndex(where: { $0.frame.contains(point) }) else { return nil }
         let frame = paneFrames[paneIndex].frame
         let isLeading = point.x < frame.midX

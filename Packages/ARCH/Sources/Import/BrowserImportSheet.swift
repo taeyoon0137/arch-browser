@@ -6,7 +6,7 @@ import History
 import SwiftUI
 
 /// The sheet's state: the browsers read, each profile's choices, and the search engine choice.
-final class BrowserImportModel: ObservableObject {
+@MainActor final class BrowserImportModel: ObservableObject {
     /// Nil until the browsers are read.
     @Published private(set) var browsers: [ImportedBrowser]?
     /// The Personas, kept current while the sheet is open.

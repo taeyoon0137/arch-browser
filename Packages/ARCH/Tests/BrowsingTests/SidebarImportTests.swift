@@ -83,7 +83,7 @@ import Testing
         #expect(plan.pinnedTabs.map(\.title) == ["d.example", "e.example"])
     }
 
-    @Test func anImportedFolderNamedLikeALiveFolderIsMadeBesideIt() throws {
+    @MainActor @Test func anImportedFolderNamedLikeALiveFolderIsMadeBesideIt() throws {
         var sidebar = Self.sidebar()
         let work = Space(name: "Work", personaID: Persona.defaultID)
         var docs = TabFolder(spaceID: work.id, name: "Docs", isPinned: true)

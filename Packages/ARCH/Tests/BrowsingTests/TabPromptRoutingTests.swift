@@ -12,7 +12,7 @@ import Testing
     }
 
     /// Keeps the prompts the tab asked for and answers the oldest one still waiting.
-    private final class PromptRecorder {
+    @MainActor private final class PromptRecorder {
         private(set) var contents: [PromptContent] = []
         private var waiting: [(PromptResponse) -> Void] = []
 

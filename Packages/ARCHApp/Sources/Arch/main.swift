@@ -24,7 +24,7 @@ final class ArchApplication: ARCHCEFApplication {
 
 // CEF requires its NSApplication subclass, so create it before anything else touches NSApp.
 let application = ArchApplication.shared
-let delegate = AppDelegate()
+let delegate = MainActor.assumeIsolated { AppDelegate() }
 application.delegate = delegate
 application.setActivationPolicy(.regular)
 application.run()

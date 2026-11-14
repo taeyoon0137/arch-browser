@@ -344,7 +344,7 @@ private final class PageDouble: EngineWebContents {
     }
 
     /// Starts and finishes a load of `address`, as the engine reports one.
-    func load(_ address: URL, in tab: Tab) {
+    @MainActor func load(_ address: URL, in tab: Tab) {
         isLoading = true
         tab.webContentsDidChangeLoadingState(self)
         url = address

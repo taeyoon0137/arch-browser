@@ -6,7 +6,7 @@ import Combine
 import Foundation
 import LiveFolders
 
-public final class Tab: ObservableObject, Identifiable {
+@MainActor public final class Tab: ObservableObject, Identifiable {
     /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
     public let id: UUID
     /// Replaced when the tab switches engines, and when a tab restored without its page gets it (`isLoaded`).
@@ -240,7 +240,7 @@ protocol AgentTabMonitor: AnyObject {
     func agentTabDidClose(_ tab: Tab, owner: UUID)
 }
 
-extension Tab: EngineWebContentsUIDelegate {
+extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// A saved page taken before its page showed a title takes the first title the page shows at the saved address.
     public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) {
         title = webContents.title
@@ -423,7 +423,7 @@ extension Tab: EngineWebContentsUIDelegate {
         sections.append(handed.editing)
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
         if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable, element.isInMainFrame,
-           let sourceURL = url, let askAboutSelection, MainActor.assumeIsolated({ PageAssistant.isQuestionAvailable }) {
+           let sourceURL = url, let askAboutSelection, PageAssistant.isQuestionAvailable {
             let sourceDocument = documentID
             sections.append([EngineActionMenuItem("Ask About Selection\u{2026}") { [weak self] in
                 guard self?.documentID == sourceDocument else { return }
@@ -541,7 +541,7 @@ extension Tab: EngineWebContentsUIDelegate {
 
 // MARK: Page scripts
 
-extension Tab: EnginePageScriptDelegate {
+extension Tab: @preconcurrency EnginePageScriptDelegate {
     /// `TabUnloading.inputScript`'s reports set `hasTypedInput`; every other world's values go to the plugins.
     public func webContents(_ webContents: any EngineWebContents, didReceive message: EnginePageScriptMessage, reply: @escaping (String?) -> Void) {
         if message.world == TabUnloading.inputWorld {
@@ -555,7 +555,7 @@ extension Tab: EnginePageScriptDelegate {
 
 // MARK: Navigation checks and link previews
 
-extension Tab: EngineWebContentsNavigationDelegate {
+extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
     /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }

@@ -2,9 +2,9 @@
 import Foundation
 
 /// The session's folders and tabs as the sidebar nests them. A folder sits at the top of its space's pinned or open list or in another folder of that list, at most `maximumLevel` levels deep, and lists its folders before its tabs, as each list does. It is built from the session's lists for each use; its mutating methods change its copies of the lists and the moved tabs' folders, and the session takes the lists back.
-struct FolderTree {
+@MainActor struct FolderTree {
     /// The deepest level a folder can sit at; a folder at the top of its list is at level 1. Four levels at 12 points each leave the 240-point sidebar room for names.
-    static let maximumLevel = 4
+    nonisolated static let maximumLevel = 4
 
     /// The folders, in sidebar order among the folders of each parent and list.
     private(set) var folders: [TabFolder]
@@ -345,7 +345,7 @@ struct FolderTree {
     // MARK: Repairs
 
     /// `folders` with each parent that `session.json` cannot keep cleared, which puts the folder at the top of its list (`SessionSnapshot.normalized()`): a parent that is missing, in another space or list, or the folder itself; in each cycle, the parent of the cycle's first folder in the file; and the parent of a folder at the fifth level, which rises to the top of its list with everything it holds, until every folder is within the fourth level. Every other folder keeps its parent and its place.
-    static func repairingParents(of folders: [TabFolder]) -> [TabFolder] {
+    nonisolated static func repairingParents(of folders: [TabFolder]) -> [TabFolder] {
         let byID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var parents: [UUID: UUID] = [:]
         for folder in folders {

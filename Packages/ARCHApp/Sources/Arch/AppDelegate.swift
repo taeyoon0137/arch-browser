@@ -11,7 +11,7 @@ import Plugins
 import Preferences
 import Terminal
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     /// Scripting reads it through the application.
     private(set) var session: BrowserSession!
     /// The agents' control endpoint and grants, which Settings ▸ AI ▸ Agents shows.
@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.agents = agents
         session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.becameActiveAt = Date()
+            MainActor.assumeIsolated { self?.becameActiveAt = Date() }
         }
         // The sidebar takes the place of window tabs, so AppKit offers no tab bar or tab menu items.
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -869,7 +869,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         // The app receives no key events while inactive, so it cannot see Control's release in another app.
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.session?.windows.forEach { $0.cancelTabSwitcher() }
+            MainActor.assumeIsolated { self?.session?.windows.forEach { $0.cancelTabSwitcher() } }
         }
     }
 
