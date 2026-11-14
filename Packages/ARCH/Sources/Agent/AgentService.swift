@@ -30,6 +30,15 @@ import Foundation
     /// In-app sessions in the order they started, until the user deletes them or Arch quits.
     @Published public private(set) var sessions: [AgentSession] = []
     public let activity: AgentActivityLog
+    private var runObserver: AnyCancellable?
+    private var runService: AgentRunner?
+    public var runs: AgentRunner {
+        if let runService { return runService }
+        let runner = AgentRunner(host: host, ai: .shared)
+        runObserver = runner.$isRunning.dropFirst().removeDuplicates().sink { [weak self] _ in self?.objectWillChange.send() }
+        runService = runner
+        return runner
+    }
     public let host: any AgentBrowserHost
     /// The cards that wait for the user, and the agent panel that shows them with each client's steps.
     public let approvals = AgentApprovals()
@@ -735,6 +744,7 @@ import Foundation
 
     /// Stop All Agents: every session's turn stops and its queued messages go, every outside client's running call is cancelled, every card that waits for the user is denied, which ends the calls waiting on it, and every outside client is disconnected; the grants stay. Plan task VII.17.1 also cancels the sessions' running calls and denies their pending approvals.
     public func stopAllAgents() {
+        runService?.cancelAll()
         for session in sessions where !session.hasEnded { session.stop() }
         for state in states.values { state.cancelCalls() }
         approvals.end(because: "The user stopped all agents in Arch.")
@@ -743,7 +753,7 @@ import Foundation
 
     /// Whether any agent acts now: a session's turn runs or an outside client is connected, for the bottom bar's indicator.
     public var isAnyAgentActing: Bool {
-        sessions.contains { $0.isTurnRunning } || !connectedGrantIDs.isEmpty
+        runService?.isRunning == true || sessions.contains { $0.isTurnRunning } || !connectedGrantIDs.isEmpty
     }
 
     /// The spaces with a session that waits for the user, whose symbols in the bottom bar show a dot.

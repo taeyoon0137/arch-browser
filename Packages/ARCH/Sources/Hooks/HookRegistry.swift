@@ -170,17 +170,19 @@ public struct HookDayCount: Hashable, Sendable {
     public var failures: Int
 }
 
-public enum HookRegistryError: LocalizedError {
+public enum HookRegistryError: LocalizedError, Equatable {
     case duplicate
     case unknownHook
     /// Hooks never see agent tabs, so a filter may not name them.
     case namesAgentTabs
+    case invalidAgentOptions(String)
 
     public var errorDescription: String? {
         switch self {
         case .duplicate: return "A hook with this identifier exists already."
         case .unknownHook: return "Arch has no hook it can change with this identifier."
         case .namesAgentTabs: return "Hooks cannot run for agent tabs."
+        case .invalidAgentOptions(let reason): return reason
         }
     }
 }
@@ -490,6 +492,10 @@ public final class HookRegistry: ObservableObject {
     /// The hook as the registry keeps it: its filter's kinds are its trigger's, and its filter names no agent tabs.
     static func checked(_ hook: Hook) throws -> Hook {
         guard !hook.filter.tabKinds.contains(.agent) else { throw HookRegistryError.namesAgentTabs }
+        if let options = hook.agent {
+            guard hook.usesAgent, let grant = hook.grant.agent else { throw HookRegistryError.invalidAgentOptions("Agent options need an agent grant.") }
+            if let reason = grant.refusal(for: options) { throw HookRegistryError.invalidAgentOptions(reason) }
+        }
         var checked = hook
         checked.filter.kinds = [hook.trigger.kind]
         return checked

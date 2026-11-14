@@ -343,6 +343,20 @@ private final class ConversationLog: @unchecked Sendable {
         #expect(results(in: log.requests[1].messages.last) == ["call_1:error:text:\(AIService.refusal(.dataNotDeclared(.download)))"])
     }
 
+    @Test func aOneRoundRunCanApplyFinalCallsWithoutSendingAnotherRequest() async {
+        let log = ProviderLog()
+        let service = loopService([only], log: log) { _, _ in callSteps(call(1)) }
+        let calls = ConversationLog()
+        let read = handler { call in
+            calls.record([])
+            return AIToolResult(callID: call.id, parts: [.text("Done")])
+        }
+        let result = await collect(service.run(textRequest(loopFeature), tools: [read], maxRounds: 1, performsFinalCalls: true))
+        guard case .toolRoundLimit = result.error else { Issue.record("Expected the rounds limit"); return }
+        #expect(calls.count == 1)
+        #expect(log.requests.count == 1)
+    }
+
     @Test func theRoundLimitLeavesAConversationThatCanGoOn() async throws {
         let log = ProviderLog()
         let service = loopService([only], log: log) { _, request in [.event(.text("step \(request)"))] + callSteps(call(request)) }

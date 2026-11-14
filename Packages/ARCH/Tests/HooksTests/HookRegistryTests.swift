@@ -805,6 +805,16 @@ import Testing
         #expect(runner.invocations.count == 1)
     }
 
+    @Test func savingAgentOptionsChecksTheUsersGrant() throws {
+        var hook = agentHook("Short titles", .tabOpened)
+        #expect(try HookRegistry.checked(hook).agent == hook.agent)
+        hook.agent?.record = .session
+        #expect(throws: HookRegistryError.self) { try HookRegistry.checked(hook) }
+        hook.agent?.record = AgentRunRecord.none
+        hook.grant = HookGrant()
+        #expect(throws: HookRegistryError.self) { try HookRegistry.checked(hook) }
+    }
+
     // MARK: Helpers
 
     /// A hook whose script runs an agent on a tier, as the editor writes it.

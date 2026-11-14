@@ -291,15 +291,15 @@ public struct AIToolHandler: Sendable {
 }
 
 extension AIClient {
-    /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run. Calls run one at a time in the order the model made them; a call to a tool not offered, or one whose handler throws, becomes an error result for the model. Every round's events are passed on except its `finished(.toolUse)`.
+    /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run. Calls run one at a time in the order the model made them; a call to a tool not offered, or one whose handler throws, becomes an error result for the model. Every round's events are passed on except its `finished(.toolUse)`. One-shot callers can perform the last round's calls and set a total call limit. Reaching either limit ends the run without another model request.
     ///
     /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, and `AIService` sends older results as notes while a request is over its model's input limit, so a long conversation stays within it. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it.
-    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8,
+    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8, performsFinalCalls: Bool = false, maximumToolCalls: Int? = nil,
                     conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await runRounds(request, tools: tools, maxRounds: maxRounds, conversationDidChange: conversationDidChange, continuation: continuation)
+                    try await runRounds(request, tools: tools, maxRounds: maxRounds, performsFinalCalls: performsFinalCalls, maximumToolCalls: maximumToolCalls, conversationDidChange: conversationDidChange, continuation: continuation)
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: AIError.cancelled)
@@ -311,10 +311,11 @@ extension AIClient {
         }
     }
 
-    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
+    private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
                            continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
         var request = request
         request.tools = tools.map(\.tool)
+        var callCount = 0
         for round in 1...max(maxRounds, 1) {
             request.messages = AIToolHistory.prepared(request.messages)
             var text = ""
@@ -339,8 +340,8 @@ extension AIClient {
                 }
             }
             try Task.checkCancellation()
-            // The last round's calls do not run once the limit is reached, so its text stays without them.
-            guard !calls.isEmpty, round < maxRounds else {
+            // A bounded one-shot run can apply the final calls without paying for another model request.
+            guard !calls.isEmpty, round < maxRounds || performsFinalCalls else {
                 if !text.isEmpty { request.messages.append(AIMessage(role: .assistant, parts: [.text(text)])) }
                 await conversationDidChange?(request.messages)
                 guard calls.isEmpty else { break }
@@ -350,14 +351,17 @@ extension AIClient {
             var results: [AIPart] = []
             for call in calls {
                 try Task.checkCancellation()
+                if let maximumToolCalls, callCount >= maximumToolCalls { break }
+                callCount += 1
                 results.append(.toolResult(await Self.perform(call, with: tools)))
             }
             try Task.checkCancellation()
-            let reply: [AIPart] = (text.isEmpty ? [] : [.text(text)]) + calls.map { .toolCall($0) }
+            let reply: [AIPart] = (text.isEmpty ? [] : [.text(text)]) + calls.prefix(results.count).map { .toolCall($0) }
             request.messages.append(AIMessage(role: .assistant, parts: reply))
             request.messages.append(AIMessage(role: .user, parts: results))
             request.pinnedModel = request.pinnedModel ?? servingModel
             await conversationDidChange?(request.messages)
+            if let maximumToolCalls, callCount >= maximumToolCalls { throw AIError.toolCallLimit }
         }
         throw AIError.toolRoundLimit
     }

@@ -495,7 +495,7 @@ import Foundation
         return await readText(arguments, tab: tab, handle: handle) { mayStillRead($0, grant, state: state) }
     }
 
-    private func readText(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, mayReadTab: (AgentTabInfo) -> Bool) async -> Outcome {
+    func readText(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, mayReadTab: (AgentTabInfo) -> Bool) async -> Outcome {
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         let content: EngineReadableContent
         switch await read(tab, handle: handle, mayReadTab: mayReadTab) {

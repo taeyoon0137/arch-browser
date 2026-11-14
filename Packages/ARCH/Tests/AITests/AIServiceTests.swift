@@ -485,6 +485,29 @@ import Testing
         #expect(store.estimatedCost(in: "USD") == 10)
     }
 
+    @Test func dailyAgentRunsSurviveRestartAndCountOnceAcrossModelRounds() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("ai-usage.json")
+        var now = Self.date(month: 11, day: 15)
+        // A usage file from before agent runs already contains ordinary request counts.
+        try Data(#"{"months":[],"day":"2026-11-15","version":1,"automaticRequests":{"first":2}}"#.utf8).write(to: file)
+        let first = AIFeatureID(rawValue: "first")
+        let other = AIFeatureID(rawValue: "other")
+        var store = AIUsageStore(fileURL: file) { now }
+        #expect(store.reserveAgentRun(for: first, dailyLimit: 1))
+        store.countAutomaticRequest(for: first)
+        #expect(store.automaticRequestCount(for: first) == 3)
+        store.saveNow()
+        store = AIUsageStore(fileURL: file) { now }
+        #expect(!store.reserveAgentRun(for: first, dailyLimit: 1))
+        #expect(store.reserveAgentRun(for: other, dailyLimit: 1))
+        now = Self.date(month: 11, day: 16)
+        #expect(store.reserveAgentRun(for: first, dailyLimit: 1))
+        #expect(store.automaticRequestCount(for: first) == 0)
+        #expect(store.reserveAgentRun(for: other, dailyLimit: 1))
+    }
+
     private static func date(month: Int, day: Int) -> Date {
         Calendar.current.date(from: DateComponents(year: 2026, month: month, day: day, hour: 12))!
     }
