@@ -1,8 +1,10 @@
 // In-app sessions (docs/agents.md, In-app sessions: tickets; In the browser; Site scope and navigation): a ticket binds `arch-mcp` only from the session's own process tree and only while the session lives, compared in constant time; the first message carries the task and tab handles but no page text; the session's calls wait for the model's first output and are refused after the wait; a mode change sends `tools/changed` and reports the next list to the runner; a deleted space ends its sessions, whose place still reads "Persona / Space"; and `arch-cli task` starts a session capped at the grant's level and the Settings default, in the grant's Persona, with no scope from the client's text.
 import AgentControl
 import AI
+import AppKit
 import Darwin
 import Foundation
+import SwiftUI
 import Testing
 import UserNotifications
 @testable import Agent
@@ -25,6 +27,42 @@ import UserNotifications
         harness.addProcess(Self.cliProcess, parent: 1, start: start)
         harness.addProcess(getpid(), parent: Self.cliProcess)
         runner.startProcess(Self.cliProcess)
+    }
+
+    @Test func aFirstDraftKeepsItsTaskFieldUntilAModelIsAvailable() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        harness.agentModels = []
+        let service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let context = AgentComposerContext(personaID: persona, spaceID: space.id, place: space.name, tab: nil)
+        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+        let host = NSHostingController(rootView: AgentComposer(service: service, context: context, actions: actions) { _ in })
+        let window = NSWindow(contentViewController: host)
+        window.setContentSize(NSSize(width: 380, height: 560))
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        window.contentView?.layoutSubtreeIfNeeded()
+        try await waitUntil { descendants(host.view).contains { $0 is NSTextView } }
+        let field = try #require(descendants(host.view).compactMap { $0 as? NSTextField }.first)
+        let editor = try #require(descendants(host.view).compactMap { $0 as? NSTextView }.first)
+        let task = "Compare the reviewed sources."
+        editor.insertText(task, replacementRange: NSRange(location: 0, length: 0))
+        try await waitUntil { field.stringValue == task }
+        field.sendAction(field.action, to: field.target)
+        #expect(service.sessions.isEmpty)
+
+        harness.agentModels = [AIModelRef(provider: AIProviderID(), model: "fixture")]
+        service.objectWillChange.send()
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(!window.isVisible && service.sessions.isEmpty)
+        let recovered = try #require(descendants(host.view).compactMap { $0 as? NSTextField }.first)
+        #expect(recovered === field && recovered.stringValue == task)
+        recovered.sendAction(recovered.action, to: recovered.target)
+        try await waitUntil { service.sessions.count == 1 }
+        let session = try #require(service.sessions.first)
+        #expect(session.transcript.lastUserMessage == task)
+        await service.deleteSession(session.id)
     }
 
     @Test func draftEffortFollowsTheSelectedCLIPresetAndItsExecutable() throws {

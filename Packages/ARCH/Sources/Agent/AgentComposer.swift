@@ -138,67 +138,54 @@ public struct AgentComposer: View {
     }
 
     public var body: some View {
-        if models.isEmpty {
-            let isEnabled = settings.route(for: .agent).isEnabled
-            VStack(alignment: .leading, spacing: 8) {
-                Text(isEnabled ? "Connect an agent model in Settings ▸ AI" : "Agent Tasks is turned off")
-                    .font(.system(size: 13, weight: .medium))
-                Text(isEnabled ? "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Button(isEnabled ? "Open Providers" : "Open Features") {
-                    actions.openModelSettings(isEnabled ? .providers : .features)
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("What should the agent do?", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .lineLimit(3...10)
+                .focused($isTaskFocused)
+                .onAppear { isTaskFocused = true }
+                .onSubmit(start)
+            if let tab = attachableTab, attachesTab, !usesAgentsPersona {
+                AgentTabChip(tab: tab) {
+                    attachesTab = false
+                    sharesExcerpt = false
                 }
-                    .controlSize(.small)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                TextField("What should the agent do?", text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .lineLimit(3...10)
-                    .focused($isTaskFocused)
-                    .onAppear { isTaskFocused = true }
-                    .onSubmit(start)
-                if let tab = attachableTab, attachesTab, !usesAgentsPersona {
-                    AgentTabChip(tab: tab) {
-                        attachesTab = false
-                        sharesExcerpt = false
-                    }
-                    if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
-                        Toggle("Share reader excerpt", isOn: $sharesExcerpt)
-                            .toggleStyle(.checkbox)
-                        DisclosureGroup("Preview excerpt") {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    if let selection = excerpt.selection {
-                                        Text("Selected text").fontWeight(.medium)
-                                        Text(verbatim: selection)
-                                    }
-                                    if let reply = excerpt.reply {
-                                        Text("Reader answer").fontWeight(.medium)
-                                        Text(verbatim: reply)
-                                    }
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                            }.frame(maxHeight: 120)
-                        }.font(.system(size: 12))
-                    }
-                } else if !attachesTab, !usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
-                    HStack {
-                        Button("Reattach Reviewed Tab") {
-                            guard service.canReattach(tab, in: context.personaID) else {
-                                problem = "The reviewed page changed or is no longer available."
-                                return
-                            }
-                            attachesTab = true
+                if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
+                    Toggle("Share reader excerpt", isOn: $sharesExcerpt)
+                        .toggleStyle(.checkbox)
+                    DisclosureGroup("Preview excerpt") {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let selection = excerpt.selection {
+                                    Text("Selected text").fontWeight(.medium)
+                                    Text(verbatim: selection)
+                                }
+                                if let reply = excerpt.reply {
+                                    Text("Reader answer").fontWeight(.medium)
+                                    Text(verbatim: reply)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(maxHeight: 120)
+                    }.font(.system(size: 12))
+                }
+            } else if !attachesTab, !usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
+                HStack {
+                    Button("Reattach Reviewed Tab") {
+                        guard service.canReattach(tab, in: context.personaID) else {
+                            problem = "The reviewed page changed or is no longer available."
+                            return
                         }
-                        AgentAttachmentLabel(tab: tab)
+                        attachesTab = true
                     }
-                    .controlSize(.small)
+                    AgentAttachmentLabel(tab: tab)
                 }
-                Divider()
+                .controlSize(.small)
+            }
+            Divider()
+            if models.isEmpty {
+                modelSetup
+            } else {
                 options
                 if selectedModel == nil {
                     note("The selected model is no longer available. Choose another model to continue.")
@@ -219,9 +206,24 @@ public struct AgentComposer: View {
                         .disabled(selectedModel == nil || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .task(id: effortSource) { await loadEffortLevels() }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: effortSource) { await loadEffortLevels() }
+    }
+
+    private var modelSetup: some View {
+        let isEnabled = settings.route(for: .agent).isEnabled
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(isEnabled ? "Connect an agent model in Settings ▸ AI" : "Agent Tasks is turned off")
+                .font(.system(size: 13, weight: .medium))
+            Text(isEnabled ? "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Button(isEnabled ? "Open Providers" : "Open Features") {
+                actions.openModelSettings(isEnabled ? .providers : .features)
+            }
+            .controlSize(.small)
         }
     }
 

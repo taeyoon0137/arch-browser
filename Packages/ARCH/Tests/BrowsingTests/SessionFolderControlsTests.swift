@@ -27,6 +27,24 @@ import Testing
         return (browser, host, service)
     }
 
+    @Test func aSidebarTabCanOpenALocalDraftBeforeConnectingAModel() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchFirstDraft-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let space = try #require(browser.spaces.first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let selected = browser.openTab(url: URL(string: "https://fixture.invalid/selected"), in: space.id, select: false)
+        let requested = browser.openTab(url: URL(string: "https://fixture.invalid/background"), in: space.id, select: false)
+        window.selectTab(selected.id)
+        #expect(!window.canStartAgentTask && service.agentModels().isEmpty)
+        let reviewed = try #require(window.sidebarAgentDraft(for: requested))
+        window.askAgentAboutSidebarTab(requested, reviewed: reviewed)
+        guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a local task draft"); return }
+        #expect(draft.text.isEmpty && draft.tab?.id == requested.id && draft.tab?.documentID == reviewed.tab?.documentID)
+        #expect(window.selectedTab === selected && service.sessions.isEmpty)
+    }
+
     @Test func folderCommandsFollowOnlyTheReviewedSessionAndKeepUserTabs() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchFolderTests-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
