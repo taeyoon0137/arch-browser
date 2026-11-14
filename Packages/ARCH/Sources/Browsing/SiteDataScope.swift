@@ -13,9 +13,6 @@ struct SiteDataScope {
         self.host = host
     }
 
-    /// The host as the address pill shows it, without `www.`.
-    var displayName: String { host.hasPrefix("www.") ? String(host.dropFirst(4)) : host }
-
     /// The host's own origins, which are cleared even when no open tab shows them.
     var origins: [URL] { ["https", "http"].compactMap { URL(string: "\($0)://\(host)") } }
 

@@ -279,7 +279,7 @@ public final class BrowserWindowModel: ObservableObject {
         return ("Delete \(persona)?", "\(removed), and \(closed) into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
     }
 
-    /// How a sheet about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
+    /// How a sheet or a card about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
     static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: id, space: space, among: personas) else { return nil }
         return space == nil ? "the Persona \u{201C}\(place)\u{201D}" : "the Persona of \u{201C}\(place)\u{201D}"
@@ -1048,12 +1048,12 @@ public final class BrowserWindowModel: ObservableObject {
         return nsWindow?.attachedSheet == nil
     }
 
-    /// Asks with a card over the selected tab before clearing the data of its page's host. With several Personas, the card names the Persona of the tab's place with its space (Persona rule 7), as "Work / Research": the tab's space or, for a favorite's tab, the window's current one while it belongs to the tab's Persona (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`). Only Clear clears.
+    /// Asks with a card over the selected tab before clearing the data of its page's host. With several Personas, the card's message names the Persona whose data goes from the tab's place, as "the Persona of “Work / Research”" (Persona rule 7): with the tab's space or, for a favorite's tab, the window's current one while it belongs to the tab's Persona (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`). Only Clear clears.
     public func confirmClearSiteData() {
         guard canClearSiteData, let tab = selectedTab, let site = SiteDataScope(url: tab.url) else { return }
         let space = Self.sheetSpace(ofTabIn: tab.spaceID, personaID: tab.personaID, spaces: session.spaces, currentSpace: currentSpace)
-        let personaSpace = session.displayedPlace(ofPersona: tab.personaID, space: space)
-        let content = TabPromptContent.clearSiteData(siteName: site.displayName, personaSpace: personaSpace, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
+        let persona = Self.sheetName(ofPersona: tab.personaID, space: space, among: session.personas)
+        let content = TabPromptContent.clearSiteData(persona: persona, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
         let personaID = tab.personaID
         session.enqueuePrompt(content, for: tab) { [weak self] response in
             if response.buttonID == "clear" { self?.session.clearSiteData(of: site, in: personaID) }

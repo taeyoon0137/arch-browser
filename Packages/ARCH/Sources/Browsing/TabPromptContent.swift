@@ -106,15 +106,12 @@ enum TabPromptContent {
 
     // MARK: Site data
 
-    /// Clear Site Data for the site of the tab's page. With several Personas, `personaSpace` names the Persona and space of the tab's place, as "Work / Research", or the Persona alone for a tab shown outside every space of its Persona (Persona rule 7), and the message says the data goes for every space of that Persona. Clear is destructive, so Return and Escape both press Cancel.
-    static func clearSiteData(siteName: String, personaSpace: String?, identity: PromptIdentity) -> PromptContent {
-        var identity = identity
-        identity.name = siteName
-        identity.context = personaSpace
-        let scope = personaSpace == nil ? "" : " for every space of this Persona"
+    /// Clear Site Data for the site of the tab's page, which `identity` names by its host, as the tab's other cards do. With several Personas, the message names the Persona whose data goes as `BrowserWindowModel.sheetName(ofPersona:space:among:)` does, as "the Persona of “Work / Research”" (Persona rule 7). Clear is destructive, so Return and Escape both press Cancel.
+    static func clearSiteData(persona: String?, identity: PromptIdentity) -> PromptContent {
+        let inPersona = persona.map { " in \($0)" } ?? ""
         return PromptContent(kind: .clearSiteData, identity: identity, glyph: .symbol("trash.fill", tint: .red, label: "Clear Website Data"),
                              title: "Clear the data stored by this website?",
-                             message: "Its cookies and other website data are removed from both engines\(scope), which signs you out of the site. Its open tabs load again.",
+                             message: "Its cookies and other website data are removed from both engines\(inPersona), which signs you out of the site. Its open tabs load again.",
                              buttons: [PromptButton(id: "clear", title: "Clear", isDestructive: true), PromptButton(id: "cancel", title: "Cancel")],
                              defaultButtonID: "cancel", cancelButtonID: "cancel")
     }

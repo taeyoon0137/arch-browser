@@ -37,7 +37,7 @@ import Testing
     }
 
     @Test func clearSiteDataGivesBothKeysToCancel() {
-        let content = TabPromptContent.clearSiteData(siteName: "example.com", personaSpace: nil, identity: PromptIdentity(icon: .symbol("globe"), name: "", isSecure: true))
+        let content = TabPromptContent.clearSiteData(persona: nil, identity: PromptIdentity(icon: .symbol("globe"), name: "example.com", isSecure: true))
         #expect(PromptKeys.returnButton(in: content) == "cancel")
         #expect(PromptKeys.escapeButton(in: content) == "cancel")
         #expect(content.buttons.first { $0.id == "clear" }?.isDestructive == true)

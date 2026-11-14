@@ -93,13 +93,13 @@ import Testing
         #expect(TabPromptContent.openInAppResult(.dismissed) == .none)
     }
 
-    @Test func clearSiteDataNamesThePersonaAndSpaceOnlyWithSeveralPersonas() {
-        let alone = TabPromptContent.clearSiteData(siteName: "example.com", personaSpace: nil, identity: Self.site)
-        #expect(alone.identity.name == "example.com" && alone.identity.context == nil)
+    @Test func clearSiteDataNamesThePersonaOnlyWithSeveralPersonas() {
+        let alone = TabPromptContent.clearSiteData(persona: nil, identity: Self.site)
+        #expect(alone.identity == Self.site)
         #expect(alone.message == "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again.")
-        let several = TabPromptContent.clearSiteData(siteName: "example.com", personaSpace: "Work / Research", identity: Self.site)
-        #expect(several.identity.context == "Work / Research")
-        #expect(several.message == "Its cookies and other website data are removed from both engines for every space of this Persona, which signs you out of the site. Its open tabs load again.")
+        let several = TabPromptContent.clearSiteData(persona: "the Persona of \u{201C}Work / Research\u{201D}", identity: Self.site)
+        #expect(several.identity == Self.site)
+        #expect(several.message == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
         #expect(several.buttons.map(\.title) == ["Clear", "Cancel"])
         #expect(several.glyph == .symbol("trash.fill", tint: .red, label: "Clear Website Data"))
     }
