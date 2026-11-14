@@ -801,11 +801,13 @@ public final class BrowserSession: ObservableObject {
         spaces.first { $0.id == id }?.resolvedPersonaID == personaID ? id : preferredSpace(in: personaID).id
     }
 
-    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it, set before the tab joins the list so that its `tabOpened` event names the opening tab.
-    func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil) -> Tab {
+    /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it and `folderID` the folder that holds it, both set before the tab joins the list so that its `tabOpened` event names the opening tab and, for an agent folder, carries the kind `agent`.
+    func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil,
+               folderID: UUID? = nil) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tab.opener = opener
+        tab.folderID = folderID
         tabs.append(tab)
         if select { sidebarTarget().selectTab(tab.id) }
         return tab
@@ -1544,20 +1546,19 @@ public final class BrowserSession: ObservableObject {
             folder = TabFolder(spaceID: spaceID, name: folderName, isPinned: false, agentSessionID: owner)
             folders.append(folder)
         }
-        let tab = openTab(url: url, in: folder.spaceID, select: false, engine: engine)
-        putTab(tab.id, in: folder)
-        return tab
+        // The tab joins the list already in its folder, so that its `tabOpened` event carries the kind `agent` and user hooks never see it.
+        let personaID = personaID(ofSpace: folder.spaceID)
+        return adopt(makeWebContents(url: url, engine: engine, state: nil, in: personaID), spaceID: folder.spaceID, personaID: personaID, pinned: folder.isPinned, select: false,
+                     folderID: folder.id)
     }
 
     /// A page in an agent's tab opened `popup`, which joins the opener's agent folder behind it, in the opener's engine. One whose first address the agent monitor refuses closes again; the engine is still in its callback, so that happens on the next turn of the run loop, while the popup's own navigation check refuses the address meanwhile.
     private func adoptAgentPopup(_ popup: any EngineWebContents, targetURL: URL?, opener: Tab, owner: UUID) {
         guard let folder = folders.first(where: { $0.id == opener.folderID }), let spaceID = opener.spaceID else { return retire(popup, of: opener.personaID) }
-        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false)
-        opened.opener = opener.webContents
-        putTab(opened.id, in: folder)
+        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: folder.isPinned, select: false, opener: opener.webContents, folderID: folder.id)
         if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url) == false {
             DispatchQueue.main.async { [weak self, weak opened] in
-                if let self, let opened { self.closeTab(opened, remember: false) }
+                if let self, let opened { self.closeTab(opened, remember: false, eventReason: .agent) }
             }
             return
         }

@@ -210,8 +210,9 @@ final class BrowserEventSource {
         BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: Self.kind(of: tab), engine: tab.engineKind, url: url)
     }
 
-    /// Agent tabs take `agent` once agent folders exist (VII.12).
+    /// A tab that an agent folder holds (`Tab.agentOwnerID`) is an agent's, whatever else it is, and becomes the user's kind again once it leaves the folder.
     nonisolated static func kind(of tab: Tab) -> BrowserTabKind {
+        if tab.agentOwnerID != nil { return .agent }
         if tab.spaceID == nil { return .favorite }
         if tab.isInSmallWindow { return .smallWindow }
         return tab.isPinned ? .pinned : .open
