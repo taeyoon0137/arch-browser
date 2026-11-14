@@ -3,6 +3,7 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
+import LiveFolders
 
 public final class Tab: ObservableObject, Identifiable {
     /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
@@ -26,6 +27,10 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public internal(set) var savedPage: SavedPage?
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
     @Published public internal(set) var folderID: UUID?
+    /// The ID of the live folder item whose tab this is, in the live folder `folderID` (live folder rule 4), or nil for every other tab. The session sets it as it adds the item's tab and clears it when the tab leaves the folder, which makes it an ordinary tab.
+    @Published var liveItemID: String?
+    /// The item as its folder last listed it, for the row's state symbol and tooltip, or nil before the folder's stored items name it and once the source no longer lists it. The session sets it; `session.json` keeps only `liveItemID`.
+    @Published var liveItem: LiveItem?
     /// The window that selects the tab updates this, and so does a window that stops showing it. Archiving closes unpinned tabs whose dates are too old, and automatic unloading unloads tabs that no window shows (`TabUnloading.tabsToUnload`).
     var lastActivatedAt = Date()
     @Published public private(set) var title: String
@@ -46,7 +51,7 @@ public final class Tab: ObservableObject, Identifiable {
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a sheet, which keeps the page (bookmark rule 5).
     var answersBeforeUnloadWithStay = false
-    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets it, and the window that selects the tab clears it.
+    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets it, and the window that selects the tab clears it. A live folder item's tab follows its item's read state instead (live folder rule 5).
     @Published public internal(set) var isUnread = false
     /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
     @Published public private(set) var hasCrashed = false
@@ -130,15 +135,16 @@ public final class Tab: ObservableObject, Identifiable {
         replaceWebContents(with: make(unloaded.url, unloaded.engineKind, unloaded.restorableState))
     }
 
-    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, its saved page, and its folder, `folderID` being the record's folder while that folder exists. The tab counts as restored, and loading its saved page does not count as a visit.
+    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, its saved page, its folder, `folderID` being the record's folder while that folder exists, and its live folder item while it is in that folder. The tab counts as restored, and loading its saved page does not count as a visit, apart from an item's tab, which the user opens as a new page: its first load is a visit, and a file it points at downloads (`docs/bookmarks.md`, Items as tabs).
     func restore(_ record: SessionSnapshot.TabRecord, folderID: UUID?) {
         lastActivatedAt = record.lastActivatedAt ?? Date()
         customTitle = record.customTitle
         suggestedTitle = record.suggestedTitle
         savedPage = record.savedPage
         self.folderID = folderID
-        isRestored = true
-        recordedURL = record.url
+        liveItemID = folderID == nil ? nil : record.liveItemID
+        isRestored = liveItemID == nil
+        recordedURL = isRestored ? record.url : nil
     }
 
     /// Takes what a closed tab's record keeps besides its page and place, as ⌘Z reopens the tab: the user's name for it, its saved page, and its folder, `folderID` being the record's folder while that folder exists.
@@ -157,22 +163,27 @@ public final class Tab: ObservableObject, Identifiable {
         recordedURL = pinned.url
     }
 
-    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
+    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
     var persistedChanges: AnyPublisher<Void, Never> {
         func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {
             // A published value also sends its current value to each new subscriber, which is no change.
             publisher.dropFirst().map { _ in () }.eraseToAnyPublisher()
         }
-        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($savedPage), changes($folderID), changes($url), changes($title),
-                                    changes($customTitle), changes($suggestedTitle))
+        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($savedPage), changes($folderID), changes($liveItemID), changes($url),
+                                    changes($title), changes($customTitle), changes($suggestedTitle))
             .eraseToAnyPublisher()
     }
 
     /// Whether its space's list shows the tab. Everything that lists, picks, or closes a space's tabs, such as the sidebar, ⌘-numbers, the tab switcher, the palette, Close Other Tabs, the selection after a tab closes, and archiving, passes over a tab it does not show.
     var isListedInSidebar: Bool { !isInSmallWindow }
 
-    /// The user's name for the tab, a hook's name for its page, or the page's title.
-    public var displayTitle: String { customTitle ?? suggestedTitle?.title ?? pageTitle }
+    /// The user's name for the tab, a hook's name for its page, or the page's title. A live folder item's tab shows its item's title, which its saved page keeps, while it is on the saved page, and takes no hook's name.
+    public var displayTitle: String {
+        if let customTitle { return customTitle }
+        guard liveItemID != nil else { return suggestedTitle?.title ?? pageTitle }
+        if let saved = savedPage, !saved.title.isEmpty, url.map({ $0.isSamePage(as: saved.url) }) ?? true { return saved.title }
+        return pageTitle
+    }
 
     /// The page's title, or its host if it has no title.
     public var pageTitle: String {

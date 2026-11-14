@@ -451,12 +451,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 menu.addItem(.sectionHeader(title: title))
             case .favorite(let id, let title, let url):
                 menu.addItem(bookmarkItem(title: title, url: url, choice: .favorite(id)))
-            case .tab(let id, let title, let url):
-                menu.addItem(bookmarkItem(title: title, url: url, choice: .tab(id)))
-            case .submenu(let title, let entries):
+            case .tab(let id, let title, let url, let isUnread):
+                let item = bookmarkItem(title: title, url: url, choice: .tab(id))
+                // A live folder's unread item shows a dot where a checkmark would.
+                if isUnread {
+                    item.onStateImage = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Unread")?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular))
+                    item.state = .on
+                }
+                menu.addItem(item)
+            case .submenu(let title, let entries, let unreadCount):
                 let folderMenu = NSMenu(title: title)
                 fillBookmarks(folderMenu, with: entries)
-                menu.addItem(submenu(folderMenu, title: title))
+                let item = submenu(folderMenu, title: title)
+                if unreadCount > 0 { item.badge = NSMenuItemBadge(count: unreadCount) }
+                menu.addItem(item)
             case .divider:
                 menu.addItem(.separator())
             case .noBookmarks:

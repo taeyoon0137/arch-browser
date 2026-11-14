@@ -11,10 +11,19 @@ enum TabCloseAction: Equatable {
     case end
     /// The tab leaves its space's list, into the closed list when `remember` is set.
     case close(remember: Bool)
+    /// A live folder item's tab leaves its folder without a closed record, and the item stays out of the folder while the source lists it, until Show Dismissed Items (live folder rule 4).
+    case dismiss
 
-    /// What a close for `reason` does to the tab: a pinned tab unloads, except that Delete Persona closes it into the closed list with the Persona's other tabs; a favorite's tab, the only tab outside a space's list, ends; and any other tab closes into the closed list, except one that only pointed at a file. Archiving reaches only unpinned tabs. Live folder items (dismiss, III.22) and agent tabs (forget, VII.12) join with their tasks.
+    /// What a close for `reason` does to the tab: a pinned tab unloads, except that Delete Persona closes it into the closed list with the Persona's other tabs; a favorite's tab, the only tab outside a space's list, ends; and any other tab closes into the closed list, except one that only pointed at a file. Archiving reaches only unpinned tabs. A live folder item's tab is dismissed when the user, an extension, or the page closes it. It unloads and keeps its place, so that the next plan does not replace it, when it only pointed at a file or its page crashed, which the user did not choose, and it closes without a closed record when its Persona goes, so that the up to 1,000 item tabs of 20 live folders cannot push other records out of the closed list. Agent tabs (forget, VII.12) join with their task.
     static func of(_ tab: Tab, reason: TabCloseReason) -> TabCloseAction {
         if tab.spaceID == nil { return .end }
+        if tab.liveItemID != nil {
+            switch reason {
+            case .user, .page, .webExtension: return .dismiss
+            case .persona: return .close(remember: false)
+            case .crash, .download, .archive: return .unload
+            }
+        }
         if tab.isPinned { return reason == .persona ? .close(remember: true) : .unload }
         return .close(remember: reason != .download)
     }
@@ -173,9 +182,9 @@ final class MemoryPressureMonitor {
 // MARK: Stand-ins
 
 extension Tab {
-    /// Closing a pinned tab (bookmark rule 4): the tab takes a stand-in at its saved page, or at its address without one, in its engine and without page state, and returns its page for the session to close. Opening it again is the user's choice: its first load counts as a visit, and an address that turns out to be a file downloads it. The session has the stand-in load the site's icon.
+    /// Closing a pinned tab (bookmark rule 4): the tab takes a stand-in at its saved page, or at its address without one, in its engine and without page state, and returns its page for the session to close. Opening it again is the user's choice: its first load counts as a visit, and an address that turns out to be a file downloads it. The session has the stand-in load the site's icon, or, for a live folder item's tab, shows its folder's.
     func unloadToSavedPage() -> any EngineWebContents {
-        let standIn = UnloadedWebContents(url: savedPage?.url ?? url, title: savedPage?.title ?? title, engine: engineKind, state: nil)
+        let standIn = UnloadedWebContents(url: savedPage?.url ?? url, title: savedPage?.title ?? title, engine: engineKind, state: nil, requestsSiteIcon: liveItemID == nil)
         isRestored = false
         recordedURL = nil
         return takeStandIn(standIn)
@@ -183,7 +192,7 @@ extension Tab {
 
     /// An automatic unload (bookmark rule 5): the tab takes a stand-in that keeps its address, title, icon, and its engine's page state, which a Chromium page lacks, and returns its page for the session to close. Loading it again resumes it, as after a relaunch, and the page takes its host's remembered zoom once it loads.
     func unloadKeepingPage() -> any EngineWebContents {
-        takeStandIn(UnloadedWebContents(url: url, title: title, engine: engineKind, state: webContents.restorableState, icon: favicon))
+        takeStandIn(UnloadedWebContents(url: url, title: title, engine: engineKind, state: webContents.restorableState, icon: favicon, requestsSiteIcon: liveItemID == nil))
     }
 
     /// Puts `standIn` in place of the tab's web contents, takes its title and icon, and returns the web contents it replaced.

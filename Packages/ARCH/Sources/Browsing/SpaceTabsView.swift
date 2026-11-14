@@ -192,10 +192,10 @@ struct SpaceTabsView: View {
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { rowFrames[$0.id]?.contains(value.location) == true }.flatMap { tree.canMoveTab(tab, into: $0.id) ? $0.id : nil } : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && value.location.x > listFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: value.location, in: windowModel) : nil)
-        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead.
+        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. Nor does a live folder's tab, since nothing else enters a live folder and its tabs keep their source's order (live folder rule 4).
         guard isOverList else { return }
         let tabs = tree.tabs(in: space.id, pinned: true) + tree.tabs(in: space.id, pinned: false)
-        if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && rowFrames[$0.id]?.contains(value.location) == true }) {
+        if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(value.location) == true }) {
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, to: target) }
         } else if let pinned = listEnd(at: value.location), session.tabsOutsideFolders(in: space.id, pinned: pinned).last?.id != tab.id {
             // The divider or the new tab row puts the tab last in the list it ends, outside folders, so that it can leave a folder in a list with no other tab outside folders.

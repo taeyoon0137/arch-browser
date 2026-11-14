@@ -1,6 +1,7 @@
-// The Bookmarks menu (`docs/bookmarks.md`, Bookmarks menu; bookmark rule 7): the window's Persona's favorites, then each space's pinned folders and tabs as one submenu per space, with spaces titled "Persona / Space" and the favorites headed by the Persona's name once there are two Personas (Persona rule 7). Tabs run on `PageStub`, without a session or an engine, so the menu bar and choosing an entry are regression check 71.
+// The Bookmarks menu (`docs/bookmarks.md`, Bookmarks menu; bookmark rule 7): the window's Persona's favorites, then each space's pinned folders and tabs as one submenu per space, with spaces titled "Persona / Space" and the favorites headed by the Persona's name once there are two Personas (Persona rule 7), and live folders with their unread counts and unread items. Tabs run on `PageStub`, without a session or an engine, so the menu bar and choosing an entry are regression check 71.
 import ARCHEngine
 import Foundation
+import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -36,8 +37,8 @@ import Testing
             switch entry {
             case .heading(let title): return [indent + "# " + title]
             case .favorite(_, let title, _): return [indent + "* " + title]
-            case .tab(_, let title, _): return [indent + title]
-            case .submenu(let title, let entries): return [indent + title + " >"] + outline(entries, depth: depth + 1)
+            case .tab(_, let title, _, _): return [indent + title]
+            case .submenu(let title, let entries, _): return [indent + title + " >"] + outline(entries, depth: depth + 1)
             case .divider: return [indent + "---"]
             case .noBookmarks: return [indent + "No Bookmarks"]
             }
@@ -152,5 +153,28 @@ import Testing
         let workEntries = BookmarkMenu.entries(for: work.id, personas: [defaultPersona, work], spaces: [defaultPersonal, workSpace],
                                                favorites: [favorite("Calendar", of: defaultPersona)], tree: FolderTree(folders: [], tabs: []))
         #expect(workEntries == [.noBookmarks])
+    }
+
+    // MARK: Live folders
+
+    @Test func liveFoldersShowTheirUnreadCountsAndMarkTheirUnreadItems() {
+        let personal = Space(name: "Personal", personaID: Persona.defaultID)
+        var news = folder("News", in: personal)
+        news.live = LiveFolderConfiguration(source: .feed(address: URL(string: "https://blog.example.org/feed.xml")!, isPrivate: false))
+        let plain = folder("Plain", in: personal)
+        let unread = tab("Unread Post", in: personal, folder: news)
+        unread.liveItemID = "1"
+        unread.isUnread = true
+        let read = tab("Read Post", in: personal, folder: news)
+        read.liveItemID = "2"
+        // A tab that a page opened in the background has a dot in the sidebar, but it is no live folder's item, and an ordinary folder has no count.
+        let opened = tab("Opened", in: personal, folder: plain)
+        opened.isUnread = true
+        let entries = BookmarkMenu.entries(for: Persona.defaultID, personas: [defaultPersona], spaces: [personal], favorites: [],
+                                           tree: FolderTree(folders: [news, plain], tabs: [unread, read, opened]), unreadCounts: [news.id: 1, plain.id: 3])
+        #expect(entries == [.submenu(title: "Personal", entries: [
+            .submenu(title: "News", entries: [.tab(id: unread.id, title: "Unread Post", url: unread.url, isUnread: true), .tab(id: read.id, title: "Read Post", url: read.url)], unreadCount: 1),
+            .submenu(title: "Plain", entries: [.tab(id: opened.id, title: "Opened", url: opened.url)]),
+        ])])
     }
 }

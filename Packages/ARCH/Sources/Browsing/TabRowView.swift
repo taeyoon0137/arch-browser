@@ -1,5 +1,6 @@
-// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close or, for a pinned tab, unload, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
+// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close or, for a pinned tab, unload, for a live folder item's tab, dismiss, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
 import AppKit
+import LiveFolders
 import SwiftUI
 
 struct TabRowView: View {
@@ -47,7 +48,10 @@ struct TabRowView: View {
                     if tab.isOffSavedSite, let saved = tab.savedPage {
                         TabRowButton(symbol: "arrow.uturn.backward", label: "Go Back to Saved Page", help: "Go Back to \(saved.url.absoluteString)") { session.goBackToSavedPage(tab) }
                     }
-                    if !tab.isPinned {
+                    if tab.liveItemID != nil {
+                        // Closing an item's tab dismisses the item (live folder rule 4).
+                        TabRowButton(symbol: "xmark", label: "Dismiss", help: "Dismiss") { session.requestCloseTab(tab) }
+                    } else if !tab.isPinned {
                         TabRowButton(symbol: "xmark", label: "Close Tab", help: "Close Tab") { session.requestCloseTab(tab) }
                     } else if tab.isLoaded {
                         TabRowButton(symbol: "minus", label: "Unload Tab", help: "Unload") { session.requestCloseTab(tab) }
@@ -67,45 +71,102 @@ struct TabRowView: View {
         // Only the light appearance lifts the selected row; in the dark one its lighter fill is enough.
         .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
-        // The row truncates long titles, so the tooltip has the whole title and the address.
-        .help([tab.displayTitle, tab.url?.absoluteString].compactMap { $0 }.joined(separator: "\n"))
+        // The row truncates long titles, so the tooltip has the whole title and the address, and for a GitHub item what its row cannot show.
+        .help(([tab.displayTitle] + (tab.liveItem?.gitHub.map(Self.details) ?? []) + [tab.url?.absoluteString].compactMap { $0 }).joined(separator: "\n"))
         .onTapGesture { windowModel.selectTab(tab.id) }
         // The first click selects the tab at once; the second starts renaming it.
         .simultaneousGesture(TapGesture(count: 2).onEnded { windowModel.renamingTabID = tab.id })
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button("Rename Tab") {
-                windowModel.selectTab(tab.id)
-                windowModel.renamingTabID = tab.id
+            if tab.liveItemID != nil {
+                LiveItemTabItems(session: session, windowModel: windowModel, tab: tab)
+            } else {
+                menuItems
             }
-            Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
-            Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
-            Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
-            Divider()
-            // A pinned tab's saved page (bookmark rules 2 and 3). Go Back shows only while the tab is off it.
-            if tab.isPinned {
-                if session.isOffSavedPage(tab) {
-                    Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
-                }
-                Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
-                Button("Edit Saved Address\u{2026}") { windowModel.promptToEditSavedAddress(of: tab) }
-            }
-            Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
-            Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
-            Divider()
-            TabFolderItems(session: session, windowModel: windowModel, tab: tab)
-            Divider()
-            // Closing a pinned tab unloads it; Delete Tab takes it out of the sidebar into the closed list (bookmark rule 4).
-            Button("Close Tab") { session.requestCloseTab(tab) }
-            if tab.isPinned {
-                Button("Delete Tab") { session.requestDeleteTab(tab) }
-            }
-            PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
         .accessibilityAction { windowModel.selectTab(tab.id) }
+    }
+
+    /// A GitHub item's detail line ("owner/repo #123 · author"), its review decision, the state of its checks, and a conflict, for its row's tooltip.
+    static func details(of item: GitHubItem) -> [String] {
+        var lines = [item.detail]
+        switch item.reviewDecision {
+        case .approved?: lines.append("Approved")
+        case .changesRequested?: lines.append("Changes requested")
+        case .reviewRequired?: lines.append("Review required")
+        case nil: break
+        }
+        switch item.checks {
+        case .success?: lines.append("Checks passed")
+        case .failure?, .error?: lines.append("Checks failed")
+        case .pending?, .expected?: lines.append("Checks running")
+        case nil: break
+        }
+        if item.mergeable == .conflicting { lines.append("Has conflicts") }
+        return lines
+    }
+
+    /// The menu of a tab that is no live folder item's.
+    @ViewBuilder private var menuItems: some View {
+        Button("Rename Tab") {
+            windowModel.selectTab(tab.id)
+            windowModel.renamingTabID = tab.id
+        }
+        Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
+        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
+        Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
+        Divider()
+        // A pinned tab's saved page (bookmark rules 2 and 3). Go Back shows only while the tab is off it.
+        if tab.isPinned {
+            if session.isOffSavedPage(tab) {
+                Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+            }
+            Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
+            Button("Edit Saved Address\u{2026}") { windowModel.promptToEditSavedAddress(of: tab) }
+        }
+        Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
+        Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
+        Divider()
+        TabFolderItems(session: session, windowModel: windowModel, tab: tab)
+        Divider()
+        // Closing a pinned tab unloads it; Delete Tab takes it out of the sidebar into the closed list (bookmark rule 4).
+        Button("Close Tab") { session.requestCloseTab(tab) }
+        if tab.isPinned {
+            Button("Delete Tab") { session.requestDeleteTab(tab) }
+        }
+        PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
+    }
+}
+
+/// A live folder item's tab's menu (`docs/bookmarks.md`, Live folders ▸ Interface): Mark as Read or Mark as Unread, Dismiss, Rename Tab, Copy Address, Go Back to Saved Page while off it, Open in Split View, Add to Favorites, and Move to Folder, which takes the tab out of its folder. The source owns the saved page, so the saved page items that change it are left out, and the tab never joins the closed list, so it has no Delete Tab.
+private struct LiveItemTabItems: View {
+    @ObservedObject var session: BrowserSession
+    let windowModel: BrowserWindowModel
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        Button(tab.isUnread ? "Mark as Read" : "Mark as Unread") { session.setRead(tab.isUnread, ofItemTab: tab) }
+        Button("Dismiss") { session.requestCloseTab(tab) }
+        Divider()
+        Button("Rename Tab") {
+            windowModel.selectTab(tab.id)
+            windowModel.renamingTabID = tab.id
+        }
+        Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
+        if session.isOffSavedPage(tab) {
+            Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+        }
+        Divider()
+        Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
+        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(tab.url == nil)
+        let tree = session.folderTree
+        MoveToFolderMenu(lists: [tree.moveTargets(forTab: tab, pinned: true), tree.moveTargets(forTab: tab, pinned: false)]) { folderID in
+            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folderID) }
+        }
+        PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
     }
 }
 
@@ -290,6 +351,7 @@ struct TabRowButton: View {
     }
 }
 
+/// A tab's icon: a spinner while it loads, its page's icon, or a globe without one. A live folder item's tab without its page shows its GitHub item's state, or its feed folder's icon, or the feed symbol until that loads, since it requests no icon from the item's site.
 struct TabIconView: View {
     @ObservedObject var tab: Tab
 
@@ -298,15 +360,37 @@ struct TabIconView: View {
             ProgressView()
                 .controlSize(.small)
                 .scaleEffect(0.7)
+        } else if !tab.isLoaded, let item = tab.liveItem?.gitHub {
+            let state = Self.symbol(for: item)
+            Image(systemName: state.name)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(state.color)
+                .accessibilityLabel(state.label)
         } else if let favicon = tab.favicon {
             Image(nsImage: favicon)
                 .resizable()
                 .interpolation(.high)
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        } else if !tab.isLoaded, tab.liveItem != nil {
+            Image(systemName: "dot.radiowaves.up.forward")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
         } else {
             Image(systemName: "globe")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The symbol, color, and spoken name of a GitHub item's state (`docs/bookmarks.md`, Items as tabs).
+    static func symbol(for item: GitHubItem) -> (name: String, color: Color, label: String) {
+        switch (item.kind, item.state) {
+        case (.pullRequest, .open): return ("arrow.triangle.pull", .green, "Open Pull Request")
+        case (.pullRequest, .draft): return ("arrow.triangle.pull", .gray, "Draft Pull Request")
+        case (.pullRequest, .merged): return ("arrow.triangle.merge", .purple, "Merged Pull Request")
+        case (.pullRequest, .closed): return ("xmark.circle", .red, "Closed Pull Request")
+        case (.issue, .closed), (.issue, .merged): return ("checkmark.circle", .purple, "Closed Issue")
+        case (.issue, .open), (.issue, .draft): return ("circle.circle", .green, "Open Issue")
         }
     }
 }

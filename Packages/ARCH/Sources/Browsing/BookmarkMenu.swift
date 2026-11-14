@@ -1,4 +1,4 @@
-// The Bookmarks menu in the menu bar (bookmark rule 7, `docs/bookmarks.md`, Bookmarks menu): the favorites of the sidebar target's Persona, then every space's pinned folders and tabs, one submenu per space. `BookmarkMenu.entries(for:personas:spaces:favorites:tree:)` gives its contents as values without AppKit, which the app turns into menu items each time the menu opens; the session selects what the user chooses.
+// The Bookmarks menu in the menu bar (bookmark rule 7, `docs/bookmarks.md`, Bookmarks menu): the favorites of the sidebar target's Persona, then every space's pinned folders and tabs, one submenu per space, with live folders' unread counts and unread items. `BookmarkMenu.entries(for:personas:spaces:favorites:tree:)` gives its contents as values without AppKit, which the app turns into menu items each time the menu opens; the session selects what the user chooses.
 import AppKit
 
 public enum BookmarkMenu {
@@ -8,10 +8,10 @@ public enum BookmarkMenu {
         case heading(String)
         /// A favorite, named by its title, or by its host when it has none, with its address for the tooltip.
         case favorite(id: UUID, title: String, url: URL)
-        /// A pinned tab, named as its row names it, with its address for the tooltip.
-        case tab(id: UUID, title: String, url: URL?)
-        /// A space, titled with its label, or a folder, titled with its name, and what it holds.
-        case submenu(title: String, entries: [Entry])
+        /// A pinned tab, named as its row names it, with its address for the tooltip, and whether it is a live folder's unread item, which the menu marks.
+        case tab(id: UUID, title: String, url: URL?, isUnread: Bool = false)
+        /// A space, titled with its label, or a folder, titled with its name, and what it holds, with a live folder's unread items' count for its badge.
+        case submenu(title: String, entries: [Entry], unreadCount: Int = 0)
         case divider
         /// The disabled item of a menu without bookmarks.
         case noBookmarks
@@ -23,8 +23,8 @@ public enum BookmarkMenu {
         case tab(UUID)
     }
 
-    /// The menu for a window of `personaID`: the Persona's favorites in their order, headed by its name with two or more Personas; then, for each Persona in order, each of its spaces that has pinned tabs as a submenu titled with the space's label (Persona rule 7), its Personas' groups apart. A space's submenu holds its pinned folders as nested submenus, each listing its folders before its tabs as the sidebar does, then the pinned tabs outside folders. Folders and spaces whose pinned lists hold no tab at any depth are left out, since they offer nothing to choose. Without favorites and pinned tabs, the menu says so.
-    static func entries(for personaID: Persona.ID, personas: [Persona], spaces: [Space], favorites: [Favorite], tree: FolderTree) -> [Entry] {
+    /// The menu for a window of `personaID`: the Persona's favorites in their order, headed by its name with two or more Personas; then, for each Persona in order, each of its spaces that has pinned tabs as a submenu titled with the space's label (Persona rule 7), its Personas' groups apart. A space's submenu holds its pinned folders as nested submenus, each listing its folders before its tabs as the sidebar does, then the pinned tabs outside folders. A live folder's submenu carries its count from `unreadCounts`, and its unread items' tabs are marked (live folder rule 5). Folders and spaces whose pinned lists hold no tab at any depth are left out, since they offer nothing to choose. Without favorites and pinned tabs, the menu says so.
+    static func entries(for personaID: Persona.ID, personas: [Persona], spaces: [Space], favorites: [Favorite], tree: FolderTree, unreadCounts: [UUID: Int] = [:]) -> [Entry] {
         var sections: [[Entry]] = []
         let personaFavorites = favorites.filter { $0.resolvedPersonaID == personaID }
         if !personaFavorites.isEmpty {
@@ -33,7 +33,7 @@ public enum BookmarkMenu {
         }
         for persona in personas {
             let submenus: [Entry] = spaces.filter { $0.resolvedPersonaID == persona.id }.compactMap { space in
-                let contents = Self.entries(folders: tree.topFolders(in: space.id, pinned: true), tabs: tree.tabsOutsideFolders(in: space.id, pinned: true), tree: tree)
+                let contents = Self.entries(folders: tree.topFolders(in: space.id, pinned: true), tabs: tree.tabsOutsideFolders(in: space.id, pinned: true), tree: tree, unreadCounts: unreadCounts)
                 return contents.isEmpty ? nil : .submenu(title: BrowserSession.label(ofSpace: space, among: personas), entries: contents)
             }
             if !submenus.isEmpty { sections.append(submenus) }
@@ -42,19 +42,19 @@ public enum BookmarkMenu {
     }
 
     /// The folders that hold tabs at any depth, as submenus, then the tabs.
-    private static func entries(folders: [TabFolder], tabs: [Tab], tree: FolderTree) -> [Entry] {
+    private static func entries(folders: [TabFolder], tabs: [Tab], tree: FolderTree, unreadCounts: [UUID: Int]) -> [Entry] {
         let submenus: [Entry] = folders.compactMap { folder in
-            let contents = Self.entries(folders: tree.subfolders(of: folder.id), tabs: tree.tabs(inFolder: folder.id), tree: tree)
-            return contents.isEmpty ? nil : .submenu(title: folder.name, entries: contents)
+            let contents = Self.entries(folders: tree.subfolders(of: folder.id), tabs: tree.tabs(inFolder: folder.id), tree: tree, unreadCounts: unreadCounts)
+            return contents.isEmpty ? nil : .submenu(title: folder.name, entries: contents, unreadCount: folder.live == nil ? 0 : unreadCounts[folder.id] ?? 0)
         }
-        return submenus + tabs.map { .tab(id: $0.id, title: $0.displayTitle, url: $0.url) }
+        return submenus + tabs.map { .tab(id: $0.id, title: $0.displayTitle, url: $0.url, isUnread: $0.liveItemID != nil && $0.isUnread) }
     }
 }
 
 extension BrowserSession {
     /// The Bookmarks menu for the window that choosing an entry selects in, the sidebar target, read without opening one.
     public var bookmarkMenuEntries: [BookmarkMenu.Entry] {
-        BookmarkMenu.entries(for: sidebarTargetPersonaID, personas: personas, spaces: spaces, favorites: favorites, tree: folderTree)
+        BookmarkMenu.entries(for: sidebarTargetPersonaID, personas: personas, spaces: spaces, favorites: favorites, tree: folderTree, unreadCounts: liveFolderStatuses.byFolder.mapValues(\.unreadCount))
     }
 
     /// A Bookmarks menu entry: the sidebar target selects the pinned tab, or opens the favorite as a click on its tile does, and comes forward, also from behind a small window or Settings. Selecting the tab follows window rule 2, as a click on its row does, and takes the window to the tab's space, of any Persona. A tab or favorite that went away while the menu showed, or a favorite of another Persona than the window's, selects nothing.

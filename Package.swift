@@ -72,7 +72,7 @@ let package = Package(
         .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
         .target(name: "Plugins", dependencies: ["ARCHEngine", "AI"], path: "Packages/ARCH/Sources/Plugins"),
         .target(name: "Extensions", dependencies: ["ARCHEngine", "Plugins"], path: "Packages/ARCH/Sources/Extensions"),
-        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI"], path: "Packages/ARCH/Sources/Browsing"),
+        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI", "LiveFolders"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
         .target(name: "LiveFolders", dependencies: ["AI"], path: "Packages/ARCH/Sources/LiveFolders"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
@@ -87,7 +87,7 @@ let package = Package(
         .testTarget(name: "ARCHEngineTests", dependencies: ["ARCHEngine"], path: "Packages/ARCHKit/Tests/ARCHEngineTests"),
         .testTarget(name: "ARCHEngineWebKitTests", dependencies: ["ARCHEngineWebKit"], path: "Packages/ARCHKit/Tests/ARCHEngineWebKitTests"),
         .testTarget(name: "ARCHPrivateAPITests", dependencies: ["ARCHPrivateAPI"], path: "Packages/ARCHKit/Tests/ARCHPrivateAPITests"),
-        .testTarget(name: "BrowsingTests", dependencies: ["Browsing"], path: "Packages/ARCH/Tests/BrowsingTests"),
+        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "LiveFolders"], path: "Packages/ARCH/Tests/BrowsingTests"),
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "HistoryTests", dependencies: ["History"], path: "Packages/ARCH/Tests/HistoryTests"),

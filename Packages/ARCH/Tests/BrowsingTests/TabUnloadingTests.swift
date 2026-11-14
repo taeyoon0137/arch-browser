@@ -72,6 +72,27 @@ import Testing
         #expect(record == SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: elsewhere, title: "Other", isPinned: false, engine: .webKit, personaID: personaID))
     }
 
+    @Test func closingALiveFolderItemsTabDismissesItUnlessItOnlyPointedAtAFileItsPageCrashedOrItsPersonaGoes() {
+        let (tab, _) = tab(at: home, title: "Post", pinned: true)
+        tab.folderID = folderID
+        tab.liveItemID = "post"
+        for reason in reasons {
+            let expected: TabCloseAction = switch reason {
+            case .user, .page, .webExtension: .dismiss
+            case .persona: .close(remember: false)
+            case .crash, .download, .archive: .unload
+            }
+            #expect(TabCloseAction.of(tab, reason: reason) == expected, "\(reason)")
+        }
+        // Close and an extension's `tabs.remove` dismiss the item, and no action leaves a closed record for it.
+        #expect(TabCloseAction.of(tab, reason: .user) == .dismiss && TabCloseAction.of(tab, reason: .webExtension) == .dismiss)
+        for action in [TabCloseAction.dismiss, .close(remember: false), .unload] {
+            #expect(action.closedRecord(of: tab) == nil)
+        }
+        // Even a record that the closed list took would carry no item.
+        #expect(TabCloseAction.close(remember: true).closedRecord(of: tab)?.closed.liveItemID == nil)
+    }
+
     // MARK: The pinned tab's side of Close
 
     /// `Tab.unloadToSavedPage()`, which the session's Close on a pinned tab calls once the tab's windows have selected other tabs.

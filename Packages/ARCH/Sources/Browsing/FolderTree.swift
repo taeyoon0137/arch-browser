@@ -85,6 +85,11 @@ struct FolderTree {
         1 + (subfolders(of: id).map { height(of: $0.id) }.max() ?? 0)
     }
 
+    /// Whether `id` names a live folder, which holds only its items' tabs, in its source's order (live folder rule 4): nothing else enters it, and nothing inside it moves.
+    func isLive(_ id: UUID?) -> Bool {
+        folder(id)?.live != nil
+    }
+
     /// Whether a tab sits in a collapsed folder or in a folder that a collapsed folder holds, which shows it in the sidebar only while it is selected.
     func isInCollapsedFolder(_ tab: Tab) -> Bool {
         guard let folder = folder(tab.folderID) else { return false }
@@ -131,30 +136,30 @@ struct FolderTree {
 
     // MARK: Moves
 
-    /// Whether a new folder can go inside `id`, as New Folder Inside and Add to New Folder put it: in a folder below the fourth level, or at the top of a list for nil. III.22 refuses live folders here, and III.18.1 agent folders.
+    /// Whether a new folder can go inside `id`, as New Folder Inside and Add to New Folder put it: in an ordinary folder below the fourth level, or at the top of a list for nil. Live folders hold no folders (bookmark rule 6); III.18.1 refuses agent folders.
     func canAddFolder(inside id: UUID?) -> Bool {
         guard let id else { return true }
-        return folder(id) != nil && level(of: id) < Self.maximumLevel
+        return folder(id) != nil && !isLive(id) && level(of: id) < Self.maximumLevel
     }
 
-    /// Whether Move to Folder can move a folder into `parentID`: another folder of its space and list that is not its parent, itself, or a folder inside it, where the folder and the folders it holds stay within the fourth level. III.22 adds live folders to the refused targets, and III.18.1 agent folders, as targets and as the moved folder.
+    /// Whether Move to Folder can move a folder into `parentID`: another ordinary folder of its space and list that is not its parent, itself, or a folder inside it, where the folder and the folders it holds stay within the fourth level. III.18.1 adds agent folders to the refused targets, and as the moved folder.
     func canMoveFolder(_ id: UUID, into parentID: UUID) -> Bool {
         guard let moved = folder(id), moved.parentID != parentID else { return false }
         return canHold(id, in: parentID)
     }
 
-    /// Whether a folder can sit in `parentID`, or at the top of its list for nil: in a folder of its space and list that is not the folder itself or a folder inside it, where the folder and the folders it holds stay within the fourth level. Move to Folder and a folder's drag both ask it.
+    /// Whether a folder can sit in `parentID`, or at the top of its list for nil: in an ordinary folder of its space and list that is not the folder itself or a folder inside it, where the folder and the folders it holds stay within the fourth level. Move to Folder and a folder's drag both ask it.
     private func canHold(_ id: UUID, in parentID: UUID?) -> Bool {
         guard let moved = folder(id) else { return false }
         guard let parentID else { return true }
-        guard let parent = folder(parentID), parentID != id, parent.spaceID == moved.spaceID, parent.isPinned == moved.isPinned,
+        guard let parent = folder(parentID), parent.live == nil, parentID != id, parent.spaceID == moved.spaceID, parent.isPinned == moved.isPinned,
               !ancestors(of: parentID).contains(where: { $0.id == id }) else { return false }
         return level(of: parentID) + height(of: id) <= Self.maximumLevel
     }
 
-    /// Whether Move to Folder can move a tab into a folder: one of the tab's space, in either list, other than its own. The tab takes the folder's list. III.18.1 refuses agent folders.
+    /// Whether Move to Folder or a drop on a folder's row can move a tab into a folder: an ordinary folder of the tab's space, in either list, other than its own. The tab takes the folder's list. Nothing enters a live folder (live folder rule 4); III.18.1 refuses agent folders.
     func canMoveTab(_ tab: Tab, into folderID: UUID) -> Bool {
-        guard let target = folder(folderID) else { return false }
+        guard let target = folder(folderID), target.live == nil else { return false }
         return target.spaceID == tab.spaceID && tab.folderID != folderID
     }
 
@@ -210,7 +215,7 @@ struct FolderTree {
         case between(parentID: UUID?, beforeID: UUID?)
     }
 
-    /// Where a folder dragged to `position` goes, or nil where the drop is refused or would leave the folder where it is, so that nothing moves and its row returns to its slot on release. Above a folder's row, it goes before that folder, at that folder's level; on a folder's row, into that folder; on a tab's row, last among the folders of the tab's folder, or at the top of the list for a tab outside folders, since a folder lists its folders before its tabs; on the row that ends its list, last at the top of the list. A folder stays in its space's list (another space takes it through its symbol, which the session decides), never goes into itself or a folder inside it, never takes the folders it holds past the fourth level, and never goes where a collapsed folder would hide its row. III.22 adds live folders to the refused targets, and III.18.1 agent folders, as targets and as the dragged folder.
+    /// Where a folder dragged to `position` goes, or nil where the drop is refused or would leave the folder where it is, so that nothing moves and its row returns to its slot on release. Above a folder's row, it goes before that folder, at that folder's level; on a folder's row, into that folder; on a tab's row, last among the folders of the tab's folder, or at the top of the list for a tab outside folders, since a folder lists its folders before its tabs; on the row that ends its list, last at the top of the list. A folder stays in its space's list (another space takes it through its symbol, which the session decides), never goes into itself or a folder inside it, never takes the folders it holds past the fourth level, never goes into a live folder, and never goes where a collapsed folder would hide its row. III.18.1 adds agent folders to the refused targets, and as the dragged folder.
     func dropTarget(for id: UUID, at position: DropPosition) -> DropTarget? {
         guard let moved = folder(id) else { return nil }
         let target: DropTarget

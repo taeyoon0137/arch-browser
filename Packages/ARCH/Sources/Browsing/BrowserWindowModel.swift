@@ -36,8 +36,10 @@ public final class BrowserWindowModel: ObservableObject {
     @Published public private(set) var selectedTabID: UUID?
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
     private var selectedTabObserver: AnyCancellable?
-    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes.
-    @Published private(set) var shownTabIDs: [UUID] = []
+    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes. Each change marks the live folder items whose tabs start or stop showing as viewed (live folder rule 5).
+    @Published private(set) var shownTabIDs: [UUID] = [] {
+        didSet { session.windowDidChangeShownTabs(from: oldValue, to: shownTabIDs) }
+    }
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window.
@@ -359,9 +361,9 @@ public final class BrowserWindowModel: ObservableObject {
         selectedTab.map(session.useCurrentPageAsSavedPage)
     }
 
-    /// Tab ▸ Edit Saved Address…: the selected tab is pinned, and the window shows no other sheet, which this one would wait behind. A favorite's tile has Edit Favorite… instead.
+    /// Tab ▸ Edit Saved Address…: the selected tab is pinned and not a live folder item's tab, whose source owns its saved page, and the window shows no other sheet, which this one would wait behind. A favorite's tile has Edit Favorite… instead.
     public var canEditSavedAddress: Bool {
-        selectedTab?.isPinned == true && nsWindow?.attachedSheet == nil
+        selectedTab?.isPinned == true && selectedTab?.liveItemID == nil && nsWindow?.attachedSheet == nil
     }
 
     public func promptToEditSavedAddress() {
@@ -371,7 +373,7 @@ public final class BrowserWindowModel: ObservableObject {
 
     /// Edit Saved Address…: asks for a pinned tab's saved address in a sheet on the window, prefilled with it. Text that is no address beeps and changes nothing.
     func promptToEditSavedAddress(of tab: Tab) {
-        guard tab.isPinned else { return }
+        guard tab.isPinned, tab.liveItemID == nil else { return }
         let address = (tab.savedPage?.url ?? tab.url)?.absoluteString ?? ""
         askForText(title: "Edit Saved Address", message: "Go Back to Saved Page returns \u{201C}\(tab.displayTitle)\u{201D} to this address.", fields: [("Address", address)], button: "Save") { [weak tab] texts in
             if tab?.setSavedAddress(fromInput: texts[0]) != true { NSSound.beep() }

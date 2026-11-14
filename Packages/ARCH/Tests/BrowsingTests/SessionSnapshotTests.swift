@@ -1,5 +1,6 @@
 // Loading and saving `session.json`: files of each version gain what they lack through `normalized()`, files this build cannot read or fully understand stay on disk, and a scheduled save writes the snapshot taken last, or nothing without one.
 import Foundation
+import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -260,6 +261,57 @@ import Testing
         #expect(loaded.folders?.map(\.parentID) == [nil, workFolder, nil, nil])
         folder.store.saveNow(loaded)
         #expect(try #require(folder.store.load()).folders?.map(\.parentID) == loaded.folders?.map(\.parentID))
+    }
+
+    @Test func liveFoldersAndItemTabsLoadAndSaveAndWhatTheFileCannotKeepIsRepaired() throws {
+        let folder = try SessionFolder()
+        let feed = LiveFolderConfiguration(source: .feed(address: URL(string: "https://blog.example.org/feed.xml")!, isPrivate: false), itemLimit: 10, refreshMinutes: 60)
+        let pulls = LiveFolderConfiguration(source: .gitHub(search: GitHubSearch(kind: .myPullRequests)))
+        let work = TabFolder(id: workFolder, spaceID: spaceA, name: "Work", isPinned: true)
+        // News sits in Work; Pulls among the open tabs moves to the pinned list; Docs, inside a live folder, moves to the top.
+        let news = TabFolder(id: docsFolder, spaceID: spaceA, name: "News", isPinned: true, parentID: workFolder, live: feed)
+        let pullsFolder = TabFolder(id: looseFolder, spaceID: spaceA, name: "Pulls", isPinned: false, live: pulls)
+        let inside = TabFolder(id: mixedFolder, spaceID: spaceA, name: "Docs", isPinned: true, parentID: docsFolder)
+        func record(_ id: UUID, space: UUID = spaceA, pinned: Bool = true, folder: UUID?, item: String?) -> SessionSnapshot.TabRecord {
+            SessionSnapshot.TabRecord(id: id, spaceID: space, url: URL(string: "https://blog.example.org/\(id)")!, title: "Post", isPinned: pinned, folderID: folder, liveItemID: item)
+        }
+        let records = [
+            record(tab1, folder: docsFolder, item: "a"),
+            record(tab2, pinned: false, folder: looseFolder, item: "b"),
+            // Not an item: it leaves News for Work, which holds News.
+            record(tab3, folder: docsFolder, item: nil),
+            // An item outside live folders, and one of another space, lose their items.
+            record(favoriteTab, folder: workFolder, item: "c"),
+            record(closedTab, space: spaceB, folder: docsFolder, item: "d"),
+        ]
+        let closed = record(UUID(), folder: docsFolder, item: "e")
+        let snapshot = SessionSnapshot(version: 15, spaces: [Space(id: spaceA, name: "A"), Space(id: spaceB, name: "B")], currentSpaceID: spaceA, favorites: [], tabs: records,
+                                       folders: [work, news, pullsFolder, inside], closedTabs: [closed])
+        folder.store.saveNow(snapshot)
+        let loaded = try #require(folder.store.load())
+        let folders = try #require(loaded.folders)
+        #expect(folders.map(\.live) == [nil, feed, pulls, nil])
+        #expect(folders.map(\.isPinned) == [true, true, true, true])
+        #expect(folders.map(\.parentID) == [nil, workFolder, nil, nil])
+        #expect(loaded.tabs.map(\.liveItemID) == ["a", "b", nil, nil, nil])
+        #expect(loaded.tabs.map(\.folderID) == [docsFolder, looseFolder, workFolder, workFolder, nil])
+        #expect(loaded.tabs[1].isPinned)
+        // A pinned item record gets the saved page that bookmark rule 2 gives it.
+        #expect(loaded.tabs[1].savedPage?.url == records[1].url)
+        #expect(loaded.closedTabs?.map(\.liveItemID) == [nil])
+        // A round trip keeps them.
+        folder.store.saveNow(loaded)
+        let again = try #require(folder.store.load())
+        #expect(again.folders == loaded.folders)
+        #expect(again.tabs == loaded.tabs)
+    }
+
+    @Test func version14FilesLoadWithoutLiveFolders() throws {
+        let folder = try SessionFolder()
+        try folder.write(version14File)
+        let loaded = try #require(folder.store.load())
+        #expect(loaded.folders?.allSatisfy { $0.live == nil } == true)
+        #expect(loaded.tabs.allSatisfy { $0.liveItemID == nil })
     }
 
     @Test func newerFilesLeaveACopyAndStillLoad() throws {

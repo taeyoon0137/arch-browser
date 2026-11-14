@@ -263,7 +263,7 @@ extension SidebarImport {
 
     /// What a row adds to the session: its Persona, and the spaces, folders, favorites, and pinned tabs that are not there yet, resolved against the sidebar and the row's record entry without changing either.
     ///
-    /// A recorded item counts while it is in the Persona, wherever the user moved it, and keeps out the source item it came from. Without a recorded item, names and addresses decide: a space merges into one of the Persona's with its name, a folder into a pinned folder of the space with its name, and favorites and pinned tabs come once per address in the Persona's favorites or in the space's pinned tabs, inside or outside folders, where a pinned tab's saved page counts as well as its current address.
+    /// A recorded item counts while it is in the Persona, wherever the user moved it, and keeps out the source item it came from. Without a recorded item, names and addresses decide: a space merges into one of the Persona's with its name, a folder into an ordinary pinned folder of the space with its name, never a live folder, and favorites and pinned tabs come once per address in the Persona's favorites or in the space's pinned tabs other than live folder items' tabs, inside or outside folders, where a pinned tab's saved page counts as well as its current address.
     struct Plan {
         /// The Persona to add, for a new destination or for one deleted since the user picked it.
         let newPersona: Persona?
@@ -341,7 +341,8 @@ extension SidebarImport {
                 allSpaces = sidebar.spaces
                 let personaSpaces = sidebar.spaces.filter { $0.resolvedPersonaID == personaID }
                 self.personaSpaces = personaSpaces
-                pinnedFolders = sidebar.folders.filter { folder in folder.isPinned && personaSpaces.contains { $0.id == folder.spaceID } }
+                // Nothing else enters a live folder (live folder rule 4), so an imported folder of a live folder's name becomes an ordinary folder beside it.
+                pinnedFolders = sidebar.folders.filter { folder in folder.isPinned && folder.live == nil && personaSpaces.contains { $0.id == folder.spaceID } }
                 favoriteAddresses = Set(sidebar.favorites.filter { $0.resolvedPersonaID == personaID }.map(\.url))
                 for tab in sidebar.tabs where tab.isPinned {
                     pinnedAddresses[tab.spaceID, default: []].formUnion([tab.url, tab.savedURL].compactMap { $0 })
@@ -402,7 +403,7 @@ extension SidebarImport {
                 spaces.append(space)
             }
 
-            /// Pins the folder's items in its recorded folder, wherever in the Persona the user moved it, or else in a pinned folder of the space with its name, or else in a new one when any are left to add, making the space for it if need be.
+            /// Pins the folder's items in its recorded folder, wherever in the Persona the user moved it, or else in an ordinary pinned folder of the space with its name, or else in a new one when any are left to add, making the space for it if need be.
             private mutating func add(_ source: Folder, to space: Space) {
                 let recordedID = source.sourceID.flatMap { made.folders[$0] }
                 var folder = pinnedFolders.first { $0.id == recordedID } ?? pinnedFolders.first { $0.spaceID == space.id && $0.name == source.name }
@@ -442,9 +443,9 @@ extension SidebarImport {
 }
 
 extension SidebarImport.Sidebar.TabState {
-    /// A space's tab as the plan sees it, with its current address and, for a pinned tab, its saved page's. Nil for a favorite's tab, which belongs to no space.
+    /// A space's tab as the plan sees it, with its current address and, for a pinned tab, its saved page's. Nil for a favorite's tab, which belongs to no space, and for a live folder item's tab, which comes and goes with its source, so that its address does not keep an imported bookmark out.
     init?(_ tab: Tab) {
-        guard let spaceID = tab.spaceID else { return nil }
+        guard let spaceID = tab.spaceID, tab.liveItemID == nil else { return nil }
         self.init(id: tab.id, spaceID: spaceID, isPinned: tab.isPinned, url: tab.url, savedURL: tab.savedPage?.url)
     }
 }
