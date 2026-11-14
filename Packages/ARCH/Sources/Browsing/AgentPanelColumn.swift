@@ -36,7 +36,7 @@ struct AgentPanelColumn: View {
         AgentPanelActions(formatReply: PageReply.text,
                           openLink: { [windowModel] url in
                               guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
-                              windowModel.openAgentPanelLink(url)
+                              windowModel.openReplyLink(url, in: windowModel.personaID)
                           },
                           showTab: { [windowModel] id in windowModel.showAgentTab(id) },
                           openAISettings: { [session] in session.pageAssistant.showAISettings?() },

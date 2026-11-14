@@ -878,11 +878,13 @@ public enum BrowserWindowKind {
         target.nsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    /// A link in the agent panel opens as a page the window opened: a selected tab of the window's current space, or beside a small window a small window of its own.
-    func openAgentPanelLink(_ url: URL) {
+    /// A reply link opens in the invoking Persona, in the current space or a small window of its own.
+    func openReplyLink(_ url: URL, in personaID: Persona.ID) {
         switch kind {
-        case .main: openTab(url: url)
-        case .small: showOpenedPage(session.makeWebContents(url: url, engine: nil, state: nil, in: personaID), personaID: personaID)
+        case .main:
+            let space = self.personaID == personaID ? currentSpaceID : session.preferredSpace(in: personaID).id
+            selectTab(session.openTab(url: url, in: space, select: false).id)
+        case .small: _ = session.openSmallWindow(url: url, engine: session.defaultEngine, spaceID: currentSpaceID, personaID: personaID)
         }
     }
 

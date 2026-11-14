@@ -162,7 +162,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
         guard let session, session.personas.contains(where: { $0.id == persona }), urls.count <= 1 else { return completion(nil) }
         let space = focusedSpace(of: persona, in: session) ?? session.preferredSpace(in: persona)
         let keyWindow = NSApp.keyWindow
-        let window = session.openSmallWindow(session.makeWebContents(url: urls.first, engine: engine, state: nil, in: persona), spaceID: space.id, personaID: persona)
+        let window = session.openSmallWindow(url: urls.first, engine: engine, spaceID: space.id, personaID: persona)
         if !focused { keyWindow?.makeKeyAndOrderFront(nil) }
         reportToEveryPersona()
         completion(window.id)

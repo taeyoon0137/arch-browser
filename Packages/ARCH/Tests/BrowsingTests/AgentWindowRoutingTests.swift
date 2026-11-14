@@ -65,6 +65,69 @@ import Testing
         }
     }
 
+    @Test func tabsCreatedDuringAPersonaEngineOutageRecoverTheirRequestedEngine() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data().write(to: directory.appendingPathComponent("session.unreadable.json"))
+        let suite = "ArchEngineFixture-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let registry = EngineRegistry(defaults: defaults)
+        let chromium = SessionTestEngine(kind: .chromium)
+        registry.register(chromium)
+        registry.register(SessionTestEngine(kind: .webKit))
+        registry.defaultKind = .chromium
+        func launch() throws -> BrowserSession {
+            try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil)
+        }
+        let browser = try launch()
+        let persona = browser.addPersona(named: "Work")
+        let space = try #require(browser.spaces(in: persona.id).first)
+        chromium.unavailableStorageID = persona.id
+        let address = URL(string: "https://fixture.invalid/pin")!
+        let imported = SidebarImport(profile: .init(source: "fixture", folder: "work"), profileName: "Work", favorites: [],
+                                     spaces: [.init(origin: .bookmarks, name: nil, tint: nil, pinnedItems: [.init(sourceID: "pin", url: address, title: "Pin")], folders: [])])
+        var record = SidebarImport.Record(directory: directory)
+        _ = browser.addImport(imported, to: .persona(persona.id), record: &record)
+        let pin = try #require(browser.tabs.first { $0.url == address })
+        let main = browser.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        defer { for window in browser.windows { browser.windowWillClose(window) } }
+        // Small URL windows request key status after selection. Keep their native windows hidden.
+        let offscreen = WindowSpy()
+        let observation = browser.$focusedTabID.sink { id in
+            guard let id, let window = browser.activeWindow, window.kind == .small, window.selectedTabID == id else { return }
+            window.nsWindow = offscreen
+        }
+        defer { observation.cancel() }
+        let external = browser.openSmallWindow(url: URL(string: "about:blank#external")!)
+        let externalTab = try #require(external.selectedTab)
+        external.openReplyLink(URL(string: "about:blank#agent")!, in: external.personaID)
+        let agentLink = try #require(browser.activeWindow?.selectedTab)
+        main.selectTab(pin.id)
+        _ = browser.pageAssistant.openLink(URL(string: "https://fixture.invalid/reader")!, from: pin)
+        let readerLink = try #require(main.selectedTab)
+        let research = try #require(browser.openAgentTab(url: address, engine: nil, owner: UUID(), folderName: "Research", in: space.id, researchLoad: { _ in true }))
+        browser.keepTabs(ofFolder: try #require(research.folderID))
+        // An actual popup belongs to the renderer that created it, including during a fallback.
+        let popupContents = browser.makeWebContents(url: address, engine: .webKit, state: nil, in: persona.id)
+        main.showOpenedPage(popupContents, personaID: persona.id, opener: pin.webContents)
+        let popup = try #require(main.selectedTab)
+        let requested = [pin, externalTab, agentLink, readerLink, research]
+        #expect(Set(requested.map(\.id)).count == requested.count)
+        #expect(requested.allSatisfy { $0.personaID == persona.id && $0.engineKind == .webKit && $0.preferredEngine == .chromium })
+        #expect(popup.preferredEngine == .webKit && popup.opener === pin.webContents)
+        #expect(offscreen.raises == 2 && !offscreen.isVisible)
+        try browser.saveNow().get()
+        chromium.unavailableStorageID = nil
+        let reopened = try launch()
+        for tab in requested + [popup] {
+            let restored = try #require(reopened.tabs.first { $0.id == tab.id })
+            reopened.loadPage(of: restored)
+            #expect(restored.engineKind == (tab === popup ? .webKit : .chromium))
+        }
+    }
+
     enum Reply: CaseIterable { case agent, page }
 
     @Test(arguments: Reply.allCases) func replyLinksFollowTheirWindowAndPersona(reply: Reply) throws {
@@ -78,7 +141,7 @@ import Testing
                 switch reply {
                 case .agent:
                     window.showAgentSession(conversation)
-                    window.openAgentPanelLink(address)
+                    window.openReplyLink(address, in: window.personaID)
                 case .page:
                     _ = session.pageAssistant.openLink(address, from: source)
                 }

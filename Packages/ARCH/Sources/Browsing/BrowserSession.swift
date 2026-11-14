@@ -412,14 +412,21 @@ final class EngineRuntime {
         let lastSpaceID = lastMainWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
         let spaceID = spaces.contains { $0.id == lastSpaceID } ? lastSpaceID : spaces[0].id
         let personaID = personaID(ofSpace: spaceID)
-        return openSmallWindow(makeWebContents(url: url, engine: nil, state: nil, in: personaID), spaceID: spaceID, personaID: personaID)
+        return openSmallWindow(url: url, engine: defaultEngine, spaceID: spaceID, personaID: personaID)
+    }
+
+    /// An address Arch opens keeps its requested engine if this Persona temporarily needs a fallback.
+    func openSmallWindow(url: URL?, engine: EngineKind, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel {
+        let contents = makeWebContents(url: url, engine: engine, state: nil, in: personaID)
+        return openSmallWindow(contents, spaceID: spaceID, personaID: personaID, preferredEngine: engine)
     }
 
     /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab moves to the space `spaceID`, or to the Persona's preferred space when that space belongs to another Persona. It stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
     @discardableResult
-    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID, opener: (any EngineWebContents)? = nil) -> BrowserWindowModel {
+    func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID, opener: (any EngineWebContents)? = nil, preferredEngine: EngineKind? = nil) -> BrowserWindowModel {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: UUID(), spaceID: spaceID, personaID: personaID, pinned: false)
+        if let preferredEngine { tab.preferredEngine = preferredEngine }
         tab.isInSmallWindow = true
         tab.opener = opener
         tabs.append(tab)
@@ -1772,15 +1779,16 @@ final class EngineRuntime {
             folders.append(folder)
         }
         guard let space = spaces.first(where: { $0.id == folder.spaceID }) else { return nil }
+        let preferred = engine ?? defaultEngine
         if let researchLoad {
             guard space.id == spaceID else { return nil }
-            let page = makeWebContents(url: URL(string: "about:blank"), engine: engine, state: nil, in: space.resolvedPersonaID)
-            let tab = adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, researchLoad: researchLoad)
+            let page = makeWebContents(url: URL(string: "about:blank"), engine: preferred, state: nil, in: space.resolvedPersonaID)
+            let tab = adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, researchLoad: researchLoad, preferredEngine: preferred)
             page.navigationController.load(URLRequest(url: url))
             return tab
         }
-        let page = makeWebContents(url: url, engine: engine, state: nil, in: space.resolvedPersonaID)
-        return adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id)
+        let page = makeWebContents(url: url, engine: preferred, state: nil, in: space.resolvedPersonaID)
+        return adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, preferredEngine: preferred)
     }
 
     /// A page in an agent's tab opened `popup`, which joins the opener's agent folder behind it, in the opener's engine. One whose first address the agent monitor refuses closes again; the engine is still in its callback, so that happens on the next turn of the run loop, while the popup's own navigation check refuses the address meanwhile.
@@ -1810,6 +1818,7 @@ final class EngineRuntime {
         addFavorites(plan.favorites, in: plan.personaID)
         for pinned in plan.pinnedTabs {
             let tab = makeTab(makeWebContents(url: pinned.url, engine: nil, state: nil, in: plan.personaID), id: pinned.id, spaceID: spaceID(pinned.spaceID, orPreferredIn: plan.personaID), personaID: plan.personaID, pinned: true)
+            tab.preferredEngine = defaultEngine
             // It opens as a restored tab does, so it is marked before it joins the list that the hooks follow.
             tab.takeImport(pinned)
             tabs.append(tab)
