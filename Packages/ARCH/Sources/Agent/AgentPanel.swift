@@ -1,4 +1,4 @@
-// The agent panel's conversation (docs/agents.md, In the browser ▸ The agent panel): a header with the session's title, its tool and model, the mode menu that lowers the mode at once and raises it only after a confirmation, the site scope, and Stop; the transcript, with the agent's replies rendered as the page reader renders them, thinking collapsed, one row per tool step from Arch's host with a button that shows its tab, errors with one action, and the model and tokens under each turn; the queued messages with Remove; Take Over and Hand Back; and the field for the next message, whose Send becomes Stop while a turn runs. The browser places it in the trailing column.
+// The agent panel's conversation (docs/agents.md, In the browser ▸ The agent panel): a header with the session's title, its tool and model, the mode menu that lowers the mode at once and raises it only after a confirmation, the site scope, and Stop; the transcript, with the agent's replies rendered as the page reader renders them, thinking collapsed, one row per tool step from Arch's host with a button that shows its tab, questions for the user, errors with one action, and the model and tokens under each turn; the queued messages with Remove; Take Over and Hand Back; and the field for the next message, whose Send becomes Stop while a turn runs. The browser places it in the trailing column.
 import AgentControl
 import AI
 import SwiftUI
@@ -6,6 +6,7 @@ import SwiftUI
 public struct AgentSessionPanel: View {
     @ObservedObject var service: AgentService
     @ObservedObject var session: AgentSession
+    @ObservedObject private var approvals: AgentApprovals
     @ObservedObject private var settings = AIService.shared.settings
     let actions: AgentPanelActions
     @State private var problem: String?
@@ -20,6 +21,7 @@ public struct AgentSessionPanel: View {
     public init(service: AgentService, session: AgentSession, actions: AgentPanelActions) {
         self.service = service
         self.session = session
+        approvals = service.approvals
         self.actions = actions
     }
 
@@ -219,7 +221,11 @@ public struct AgentSessionPanel: View {
     // MARK: Transcript
 
     private var transcript: some View {
-        ScrollViewReader { proxy in
+        let questions = approvals.pending.filter {
+            guard $0.ownerID == session.id, case .question = $0.kind else { return false }
+            return true
+        }
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(session.items) { item in
@@ -230,11 +236,20 @@ public struct AgentSessionPanel: View {
                     if session.isTakenOver {
                         note("You took over. The agent waits until you hand the session back.")
                     }
+                    ForEach(questions) { question in
+                        AgentApprovalCard(approval: question, approvals: approvals) {
+                            if let tabID = question.tabID { actions.showTab(tabID) }
+                        }
+                        .id(question.id)
+                    }
                 }
                 .padding(14)
             }
+            .onChange(of: questions.first?.id, initial: true) {
+                if let question = questions.first { proxy.scrollTo(question.id, anchor: .top) }
+            }
             .onChange(of: session.items.last) {
-                if let last = session.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                if questions.isEmpty, let last = session.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
         }
     }
