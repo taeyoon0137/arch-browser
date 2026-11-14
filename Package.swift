@@ -49,6 +49,7 @@ let package = Package(
         .library(name: "Terminal", targets: ["Terminal"]),
         .library(name: "AgentControl", targets: ["AgentControl"]),
         .library(name: "Agent", targets: ["Agent"]),
+        .library(name: "Sync", targets: ["Sync"]),
         .executable(name: "Arch", targets: ["Arch"]),
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
         .executable(name: "arch-cli", targets: ["ArchCLI"]),
@@ -79,6 +80,7 @@ let package = Package(
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
         .target(name: "LiveFolders", dependencies: ["AI"], path: "Packages/ARCH/Sources/LiveFolders"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
+        .target(name: "Sync", path: "Packages/ARCH/Sources/Sync"),
         // libbsm reads process IDs from audit tokens.
         .target(name: "AgentControl", path: "Packages/ARCH/Sources/AgentControl", linkerSettings: [.linkedFramework("Security"), .linkedLibrary("bsm")]),
         .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Agent"),
@@ -113,6 +115,8 @@ let package = Package(
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences", "Browsing"], path: "Packages/ARCH/Tests/PreferencesTests"),
+        // The settings tests compare the synced keys and values with the constants of `ARCHEngine`, `Browsing`, and `Preferences`, which `Sync` does not use.
+        .testTarget(name: "SyncTests", dependencies: ["Sync", "ARCHEngine", "Browsing", "Preferences"], path: "Packages/ARCH/Tests/SyncTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],
     cxxLanguageStandard: .cxx20

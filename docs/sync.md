@@ -2,40 +2,99 @@
 
 ## Purpose and principles
 
-- This note designs sidebar and settings sync between the user's Macs, row 35 of `docs/features.md`. Queue task V.9 in `docs/plan.md` implements it behind a toggle.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the check whether this Mac can sync, and the sync engine. Queue tasks V.9.7 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
-- Sync is off by default. While off, the `Sync` module creates no CloudKit object and makes no network request.
-- `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. A Mac without a network or an iCloud account works as it does without sync.
+- Sync is off by default. While off, it creates no sync engine and sends or fetches no records. Only in a build whose own entitlements name a container does it create that container's `CKContainer`, to ask for the account's status (`accountStatus()`) and hear of account changes, so that Settings ▸ Sync can say whether sync can run (Accounts and removed data). Whether that question reaches Apple's servers is Not verified 6.
+- `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
 - Sync uses `CKSyncEngine` to schedule sends and fetches, keep pending changes, retry, and follow account changes. It does not use Core Data or SwiftData mirroring because they would replace `session.json` with their own store.
+- Sync labels follow Persona rule 7 of `docs/windows-personas.md`: a space named with its Persona shows as "Persona / Space" (`BrowserSession.label(ofSpace:)`, III.15).
+
+## Facts this design relies on
+
+### Arch today
+
+- `session.json` is at snapshot version 16. Version 14 added saved pages (III.16), version 15 added folder parents (III.18), and version 16 added live folder configurations. Every tab record has had an ID since version 8. Restoring a tab keeps it as `Tab.id`, so tab IDs serve as record names.
+- Folders (`TabFolder`, version 6) group a space's pinned or open tabs. From III.18 they nest through `parentID`, up to four levels (bookmark rule 6 of `docs/bookmarks.md`). Each space has a home page (`Space.homeURL`, version 4).
+- From III.16 a pinned tab keeps a saved page: an address and a title (bookmark rule 2). Pinning sets it. Use Current Page as Saved Page and Edit Saved Address… change it. For a tab pinned without an address, the first address its page reports also changes it. The tab's current address changes with every page. A favorite's `url` and `title` are its saved page. From III.17, closing a pinned tab unloads it and keeps it pinned; Delete Tab removes it.
+- A tab keeps its Persona for life (`Tab.personaID`), and every move between spaces stays within the Persona (risk R11 of `docs/windows-personas.md`).
+- `deleteSpace` moves a space's pinned and open tabs and its folders to the space's neighbor in the same Persona. It refuses a Persona's last space. `deletePersona` closes the Persona's tabs into the closed list and removes its site data at the next launch.
+- Settings stores its choices in `UserDefaults`. Download settings apply to every engine context through `UserDefaults.didChangeNotification`. Appearance applies only at launch and in Settings' `onChange`.
+- The Settings window lists General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. `Preferences` depends on `Browsing`. The Delete Persona sheet's text is in `BrowserWindowModel.swift`.
+- `scripts/bundle_app.sh` embeds the newest profile that suits the signing identity as `Contents/embedded.provisionprofile` and signs the app with entitlements written to `build/Arch.entitlements` from those the profile grants: the application and team identifiers; `com.apple.developer.icloud-services` (`CloudKit`), `com.apple.developer.icloud-container-identifiers`, and `com.apple.developer.icloud-container-environment` (when the profile lists environments) when the profile grants the container and CloudKit; and `com.apple.developer.aps-environment` when it grants push. The script names the container, the CloudKit environment, and the push environment that the app got, and warns when the profile grants no container, so a bundle without iCloud does not pass for one with it. Working Rule 8 keeps the team identifier out of the repository, so the script reads these values from the profile at bundle time (`security cms -D`). It signs the helper apps and the framework first without these entitlements, which `codesign --deep` would give to every helper. Without a suitable profile it signs the app without entitlements. IV.14 adds its passkey entitlement to the ones the script copies.
+- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, `SyncDiff`, `SyncCloudKitRecords`, `SyncMirror`, `SyncedSettings`, `SyncDatabase`, `SyncAvailability`, `SyncEngineClient`, and `CloudKitSyncEngine`. No other target depends on it yet, and nothing creates the engine, so nothing sends or fetches records. `SyncTests` also depends on `ARCHEngine`, `Browsing`, and `Preferences` to compare the synced keys and values with the app's constants and enums.
+
+### CloudKit
+
+Checked in the CloudKit Swift interface of the macOS 27.2 SDK:
+
+- `CKSyncEngine` needs macOS 14. `CKSyncEngine.Configuration` takes a database, an optional `CKSyncEngine.State.Serialization`, which is `Codable`, and a delegate. It has `automaticallySync`.
+- `CKSyncEngine.RecordZoneChangeBatch` has `atomicByZone`, `init(recordsToSave:recordIDsToDelete:atomicByZone:)`, and `init?(pendingChanges:recordProvider:)`.
+- Account changes arrive as `signIn(currentUser:)`, `signOut(previousUser:)`, and `switchAccounts(previousUser:currentUser:)`. A deleted zone's reason is `deleted`, `purged`, or `encryptedDataReset`.
+- `CKSyncEngine.FetchChangesOptions` has a `scope` of `.all`, `.allExcluding(_:)`, or `.zoneIDs(_:)`, and `.all` is the default, for `fetchChanges(_:)` too. The delegate's `nextFetchChangesOptions(_:syncEngine:)` gives the options of each fetch the engine schedules.
+- A record's system parent, which CloudKit uses for sharing, has the key `___parent` (`CKRecord.SystemFieldKey.parent`). Setting a custom field `parent` leaves `CKRecord.parent` nil.
+- `CKContainer.h` documents that a container posts `CKAccountChanged` (`Notification.Name.CKAccountChanged`) on an arbitrary queue when the account's status changes, that an app creates a `CKContainer` to receive it, and that after `temporarilyUnavailable` an app waits for that notification instead of starting operations.
+- `CKSyncEngine.h`, `CKSyncEngineState.h`, `CKSyncEngineConfiguration.h`, and `CKSyncEngineRecordZoneChangeBatch.h` document that the engine:
+  - delivers events serially, each after the delegate returns from the one before, and that a delegate does not call `fetchChanges` or `sendChanges` while it handles an event. Their completion comes after the delegate has handled the events they caused.
+  - holds its delegate weakly.
+  - sends at most 250 records per request, saves and deletions together. `init?(pendingChanges:recordProvider:)` stops once a batch is full, and the rest stay pending for the next batch. A batch with a change outside the send's scope fails with `invalidArguments`, and a record provider's nil skips that change.
+  - keeps no duplicate pending changes, and a record's later save or deletion replaces its earlier opposite, as a zone's does.
+  - removes each change it sends from the pending changes and keeps those that fail for a recoverable error. It retries `notAuthenticated`, `accountTemporarilyUnavailable`, `networkFailure`, `networkUnavailable`, `requestRateLimited`, `serviceUnavailable`, and `zoneBusy` itself, and leaves every other error, such as `serverRecordChanged`, to the app.
+
+Checked on macOS 27.2 by `SyncTests`, whose test runner has no iCloud entitlements, and by an ad hoc signed program without entitlements:
+
+- A process without iCloud entitlements creates `CKRecord` values in a custom zone, sets their `encryptedValues`, and archives and unarchives them with secure coding, encrypted values included. It reaches no server.
+- `allKeys()` lists the encrypted keys too. A plain read of an encrypted key returns nil, and an encrypted read of a plain key does too. Setting a key in one of the two, even to nil, while the other holds it raises an exception.
+- An array of records unarchives with `unarchivedObject(ofClasses:from:)` given `NSArray` and `CKRecord`. `unarchivedArrayOfObjects(ofClass:from:)` refuses it because of the dictionaries inside a record.
+- `SecTaskCopyValueForEntitlement` on the test runner's own task returns nil for `com.apple.developer.icloud-services` and `com.apple.developer.icloud-container-identifiers`.
+- The same process builds `CKSyncEngine.FetchChangesOptions` values and their scopes, `CKSyncEngine`'s pending changes, and `CKError` values that carry a server record, without creating a `CKSyncEngine`. The options keep a copy of the operation group they are given.
+
+## Decisions
+
+Code comments and documents cite these as "sync decision 4".
+
+1. Only pinned tabs outside live folders sync. Open tabs, a live folder's item tabs, and agent folders' tabs stay on each Mac. Open tabs archive after the archive delay and change with every page. Syncing them would open and close tabs on one Mac while the user browses on another. Pinned tabs are bookmarks (bookmark rule 1). A live folder's items come from its source on each Mac.
+2. A pinned tab syncs its saved page, not its current address, as `docs/bookmarks.md` states under Interactions with other features ▸ Sync. The current address changes with every page. Syncing it would reload the tab on other Macs as the user browses. The bookmark returns to its saved page.
+3. Conflicts merge field by field. The mirror's copy is the common base. Each record keeps an edit time for each field (`fieldModifiedAt`). For a field changed on both sides, the later edit wins. Incoming changes follow the same rule. Two Macs that rename a space and change its tint keep both edits. A merge per record would lose one. A single time per record would let an old rename win because a later edit changed the tint. Fields that only make sense together merge as one unit: a pinned tab's space, folder, and order, a folder's space, parent, and order, and a saved page's address and title. Merged apart, they could put a tab in another space's folder or give an address another page's title.
+4. The first sync on a Mac joins matching items: spaces by name within a Persona, pinned folders by name under the matched parent, pinned tabs by saved page (bookmark rule 3) in the matched space and folder, and favorites by address within a Persona. Personas match only by record name. Otherwise a second Mac's first-launch Personal space and the same favorites would appear twice. Browser import already merges folders by name and counts addresses already pinned (`SidebarImport`). A Persona owns site data stored under its UUID. Two Personas of the same name stay apart to avoid signing one out. A local item with the record name of a server record, such as the default Persona or a setting, takes the server's values wherever the server has any. This Mac's edit times are when sync found its values, not when the user made them, so a later time would let a stale sidebar undo the other Macs' edits.
+5. Signing out of iCloud or switching accounts turns sync off and keeps the local sidebar. Turning sync on again merges this Mac's sidebar into the current account as a first sync. `session.json` stays the local source of truth, and only the user's action copies one account's sidebar into another.
+6. The bundle uses the CloudKit environment granted by its provisioning profile. Developer ID uses Production and development signing uses Development when available. See Requirements.
+7. macOS 13 is not supported. The package targets macOS 14, decided with open decision 1 of `docs/windows-personas.md`.
+8. A Persona deleted on another Mac is deleted here as Delete Persona does: its tabs close into the closed list, and its cookies, website data, and plugin data are removed at the next launch. While sync is on, the Delete Persona sheet says that every Mac that syncs deletes it. The interface cannot reach a Persona's data once its record is gone. The deletion must win on every Mac for the sidebars to agree.
+9. Browsing history never syncs. It is the most private data Arch keeps, it grows without bound, and nothing in the sidebar needs it.
+10. Pinned folders sync as `Folder` records with their parent. Open folders and every folder's collapsed state stay on each Mac. Pinned folders hold bookmarks (bookmark rule 1). Collapsing is a view choice, like the current space.
+11. Orphans keep their Persona. A pinned tab or folder whose space is gone moves to the first space of its Persona. A space, folder, favorite, or pinned tab whose Persona is gone is deleted, as decision 8 requires. A Persona left without spaces gets a space named Personal whose record name derives from the Persona's. Macs that repair it at the same time write one record. A tab keeps its Persona for life (R11). A deleted Persona's items cannot move to another Persona without leaving their site data behind.
+12. Settings: the keys in the Settings list sync, and every other key stays on each Mac.
+13. Sync opens `CKContainer(identifier:)` with the first entry of its own `com.apple.developer.icloud-container-identifiers` entitlement. The bundle script copies that entry from the provisioning profile. The provisioning script names the project container. The Sync module reads it from the signed bundle. Reading the entitlement avoids depending on how `CKContainer.default()` chooses a container.
 
 ## What syncs
 
 | Item | Synced values | Stays on each Mac |
 |---|---|---|
 | Personas | Name, order | Cookies, site data, installed plugins |
-| Spaces | Name, symbol, tint, order, Persona | Which space is current |
-| Favorites | Address, title, order, Persona | The favorite's live tab (III.13) |
-| Pinned tabs | Saved page (address and title, `docs/bookmarks.md`), the user's tab name, engine, order, space, folder | The current page, restorable page state, the live page; live folders' item tabs |
+| Spaces | Name, symbol, tint, home page, order, Persona | Which space is current |
+| Pinned folders | Name, parent folder, order, space | Whether the folder is collapsed |
+| Favorites | Address, title, order, Persona | The favorite's tab (III.13) |
+| Pinned tabs | Saved page (address and title), the user's tab name, engine, order, space, folder | The current page, restorable page state, the live page |
 | Live folders | Source, item limit, and refresh interval with their folder | Items, read state, dismissed items, fetch state (`live-folders.json`); a feed folder whose address has a query, which the Keychain keeps (`docs/bookmarks.md`, live folder rule 8) |
-| Settings | The keys in the settings list below | Every other key |
-
-Open (unpinned) tabs stay on each Mac. They archive after the archive delay and change with every page. Syncing them would open and close tabs on one Mac while the user browses on another.
+| Settings | The keys in the Settings list | Every other key |
 
 ## What never syncs
 
 - Cookies, site storage, caches, and HTTP authentication credentials. They stay separate for each engine and Mac. A Persona that arrives from another Mac starts signed out of every site.
 - Passwords, passkeys, cards, and addresses. Arch does not store them. Apple Passwords and 1Password sync their own data.
-- Keychain items.
-- The engines' restorable page state (`TabRecord.state`). It is engine-specific, can be large, and holds the address of every page in the tab's back-forward list.
-- Open tabs, the closed-tab list, the selected tab, the current space, window frames, and the sidebar width.
+- Keychain items. A live folder whose feed address is in the Keychain stays on its Mac with its items (live folder rule 8 of `docs/bookmarks.md`).
+- A pinned tab's current address and title, and the engines' restorable page state (`TabRecord.state`). Page state is engine-specific, can be large, and holds the address of every page in the tab's back-forward list.
+- Open tabs and open folders, the closed-tab list, the selected tab, the current space, folders' collapsed state, window frames, small windows, and the sidebar width.
+- A live folder's items, read state, and fetch state (`live-folders.json`). Each Mac fetches its own items.
 - Browsing history (`history.sqlite`), downloads, captures, and favicons.
-- Private API flags (`ARCHPrivateAPIs`, `ARCHPrivateAPI.*`, `ARCHPrivateAPIFeature.*`), whose availability depends on each Mac's macOS version, and per-Mac prompts such as `ARCHAskedDefaultBrowser`.
+- Private API flags (`ARCHPrivateAPIs`, `ARCHPrivateAPI.*`, `ARCHPrivateAPIFeature.*`), whose availability depends on each Mac's macOS version, per-Mac prompts such as `ARCHAskedDefaultBrowser`, and the sync toggle itself (`ARCHSyncEnabled`).
 - Installed plugins and extensions and their storage (rows 44 and 50).
 
 ## Container, database, and zone
 
-- One iCloud container, reached through `CKContainer.default()`, which is the first container in the app's entitlements. No container name appears in the code.
-- The private database holds one custom zone, `ArchSync1`. A custom zone gives change tokens for fetching only what changed and atomic saves across records. The number in the name is the major schema version (see Schema versions).
+- One iCloud container, named by the app's own entitlements (decision 13). The Sync module does not hard-code a container name. Development and Production are separate databases (decision 6), so `sync.json` belongs to one container and environment (`SyncDatabase`; Mapping the session store to records).
+- The private database holds one custom zone, `ArchSync1`. A custom zone provides change tokens to fetch only what changed and atomic saves across records. The number in the name is the major schema version (see Schema versions).
+- Sync reads only its own zone. `CKSyncEngine` fetches every zone of the database by default, and a later build's zone, such as `ArchSync2`, holds records of the same names whose values mean something else. `CloudKitSyncEngine` therefore fetches with the scope `.zoneIDs([SyncCloudKitRecords.zoneID])`, in `nextFetchChangesOptions` and in each `fetchChanges(_:)`. The controller also drops every fetched record, record deletion, and zone deletion of another zone before it converts, mirrors, or applies it (`SyncCloudKitRecords.isInZone(_:)`), and `sync.json` skips records of other zones. The mirror keys its records by record name, which is unique only within a zone.
 
 ## Record types
 
@@ -43,88 +102,136 @@ Record names are unique within the zone, regardless of type.
 
 | Record type | Record name | Fields | Local source |
 |---|---|---|---|
-| `Persona` | The Persona's UUID; `default` for the default Persona | `name`, `order` | The Persona list (III.12) |
-| `Space` | `Space.id` | `persona`, `name`, `symbol`, `tint`, `order` | `SessionSnapshot.spaces` |
+| `Persona` | The Persona's UUID; `default` for the default Persona | `name`, `order` | `SessionSnapshot.personas` |
+| `Space` | `Space.id` | `persona`, `name`, `symbol`, `tint`, `homeURL`, `order` | `SessionSnapshot.spaces` |
+| `Folder` | `TabFolder.id` | `persona`, `space`, `parent`, `name`, `order` | `SessionSnapshot.folders` with `isPinned` |
 | `Favorite` | `Favorite.id` | `persona`, `url`, `title`, `order` | `SessionSnapshot.favorites` |
-| `Tab` | The tab record's ID (added below) | `space`, `url`, `title`, `customTitle`, `engine`, `order` | `SessionSnapshot.tabs` with `isPinned` |
+| `Tab` | `TabRecord.id` | `persona`, `space`, `folder`, `url`, `title`, `customTitle`, `engine`, `order` | `SessionSnapshot.tabs` with `isPinned` |
 | `Setting` | The `UserDefaults` key, such as `ARCHAppearance` | `value` | `UserDefaults.standard` |
 
-Every record also has `modifiedAt` and `schemaVersion`.
+Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
-- `persona` and `space` are `CKRecord.Reference` values with no delete action. The Mac that deletes a parent also deletes or moves its children in the same batch.
-- `order` is a `Double` sort key among the record's siblings: spaces and favorites within their Persona, pinned tabs within their space. A move writes only the moved record. Its key becomes the midpoint of its new neighbors' keys. When no `Double` fits between two neighbors, the Mac renumbers that parent's children in one batch. Equal keys sort by record name.
-- `modifiedAt` is the record's latest local edit time on the Mac that wrote it. Conflicts compare this time.
+- `persona`, `space`, `folder`, and `parent` are `CKRecord.Reference` values with no delete action. The Mac that deletes a parent also deletes or moves its children in the same batch. A folder at the top of its space's pinned list has no `parent`, and a tab outside folders has no `folder`. A tab's and a folder's `persona` never changes (decision 11).
+- A `Tab` record's `url` and `title` are the tab's saved page (decision 2). `customTitle` is the user's name for the tab.
+- `order` is a `Double` sort key among the record's siblings: spaces and favorites within their Persona, folders within their parent folder or among their space's top-level pinned folders, and pinned tabs within their folder or among their space's pinned tabs outside folders. Folders and tabs keep separate keys because a list shows folders before tabs. A move writes only the moved record. Its key becomes the midpoint of its new neighbors' keys. Several records placed between the same two neighbors take evenly spaced keys, a record past either end of the list takes a key 1 beyond the end's, and a new list numbers from 1. When no `Double` fits between two neighbors, the Mac renumbers that sibling list 1, 2, 3, and so on in one batch. Equal keys sort by record name, and a record without a usable key sorts after the others.
+- `fieldModifiedAt` gives each field's edit time: when a Mac found that field's latest edit. It also keeps the times of fields the record has lost, such as `folder` on a tab that left its folder, and of fields this build does not know. A field keeps its time until its value changes. Conflicts compare these times (decision 3). It is one encrypted string holding a JSON object from raw field name to seconds since 2001-01-01 (`Date.timeIntervalSinceReferenceDate`).
+- `modifiedAt` is the time a Mac found the record's latest edit. A merge unit whose fields have no time in `fieldModifiedAt` counts as edited then.
+- Edits made while sync was off count as made when sync turns on again, because `session.json` keeps no edit times. A first sync therefore keeps the server's values for records that both sides have (decision 4).
 - `schemaVersion` is the record format version that wrote the record, starting at 1.
-- `url` is the absolute address string; `engine` is the raw value of `EngineKind`; `tint` is the raw value of `SpaceTint`; `value` is the setting's value as a string.
-- Sync stores every field except the references, `order`, `modifiedAt`, and `schemaVersion` in `encryptedValues`. CloudKit encrypts those fields end to end with keys in the user's iCloud Keychain. The server cannot read addresses, titles, or names. Encrypted fields cannot be queried, and sync never queries: it reads zone changes. CloudKit cannot encrypt references.
-- The default Persona, `Persona.defaultID` (`D59DAF4B-E372-4AF9-890E-455B8B3860F3`), has the record name `default` on every Mac, and every other Persona its UUID string. Two Macs that converted older `session.json` files to the default Persona therefore share one record instead of creating two.
+- `url` and `homeURL` are absolute address strings. `engine` is the raw value of `EngineKind`. `tint` is the raw value of `SpaceTint`. `value` is the setting's value as a string in the Settings list's form.
+- Sync stores every field except the references, `order`, `modifiedAt`, and `schemaVersion` in `encryptedValues`, `fieldModifiedAt` included. CloudKit encrypts those fields end to end with keys in the user's iCloud Keychain. The server cannot read addresses, titles, or names. Encrypted fields cannot be queried, and sync never queries: it reads zone changes. CloudKit cannot encrypt references. `SyncCloudKitRecords` places each value by its kind: text in `encryptedValues`, and numbers and references as plain values. `modifiedAt` is a plain date and `schemaVersion` a plain integer.
+- The default Persona, `Persona.defaultID` (`D59DAF4B-E372-4AF9-890E-455B8B3860F3`), has the record name `default` on every Mac. Every other Persona uses its UUID string. Two Macs that converted older `session.json` files to the default Persona therefore share one record.
 
 ### Settings list
 
-| Key | Applied on the receiving Mac |
-|---|---|
-| `ARCHAppearance` | `Preferences` sets `NSApp.appearance` at once |
-| `ARCHDefaultEngine` | `EngineRegistry` reads it for the next new tab |
-| `ARCHArchiveAfterHours` | The session reads it at its next archive pass |
+| Key | Values | Applied on the receiving Mac |
+|---|---|---|
+| `ARCHAppearance` | `system`, `light`, or `dark` | The app shell sets `NSApp.appearance` at once |
+| `ARCHTintStrength` | `subtle`, `medium`, or `strong` | Windows redraw their wash, which reads the key through `@AppStorage` |
+| `ARCHDefaultEngine` | A raw value of `EngineKind` | `EngineRegistry` reads it for the next new tab and uses its usual fallback if that engine is missing on this Mac |
+| `ARCHSearchEngine` | A raw value of `SearchEngine` | The palette reads it for the next search |
+| `ARCHArchiveAfterHours` | A whole number from 0 to 168 | The session reads it at its next archive pass |
+| `ARCHUnloadAfterHours` | A whole number from 0 to 168, from III.17; `SyncedSettings.list` adds it after `ARCHArchiveAfterHours` once III.17 is on `main` | The session reads it at its next unload pass |
+| `ARCHOpensLinksInSmallWindow` | `true` or `false` | The app shell reads it for the next link from another app |
+| `ARCHAskWhereToSaveDownloads` | `true` or `false` | Every engine context follows it at once |
 
-A new setting syncs only after it joins this list. V.8 decides which of its settings sync. A search engine choice can sync; a downloads folder cannot because paths differ between Macs.
+- A record's `value` is text: a raw value as listed, a whole number in decimal digits without a sign or leading zeros, or `true` or `false`. A received value is saved with the type the app's settings write: a string, an integer, or a Boolean. A saved value outside the key's allowed values, or of another type, which only a hand edit writes, counts as no value and is never sent.
+- A value outside the key's allowed values does not apply. The key keeps its local value, and its record keeps the other Mac's value: the settings comparison leaves the key out, saving nothing over the record and never deleting it, until the setting changes on this Mac. A `value` of another kind than text, or none, counts as not allowed. A change that `SyncedSettings` has not yet found brings the key back too. The key's pending save then keeps it in after a relaunch until the save is sent, since the mirror still holds the refused value, as long as the save's edit is later than that value's. Another refused value that the merge chose as the later edit holds the key out again: a local change made before it stays on this Mac, and Sync drops the key's pending save, which the settings comparison lists as held out (`SyncedSettings.Comparison.heldOut`), so the earlier change is not sent over that value.
+- The settings comparison covers only the keys in this build's list that have a value on this Mac, so it never deletes a `Setting` record. A key that only a newer build lists keeps its record. A listed key without a saved value stays unchanged here, and a fetched `Setting` deletion, which no build writes today, changes no setting.
+- A value applied from a record is no edit on this Mac: `SyncedSettings` counts it as found before `UserDefaults` posts its change notification, so the value is not sent back. Its `onApplied` closure then lets the app shell apply what reads the key only at launch, the appearance.
+- A new setting syncs only after it joins this list. A choice that means the same on every Mac can join. A path, such as the downloads folder (`ARCHDownloadsFolder`), cannot. Shortcuts (`ARCHShortcuts`) stay on each Mac because plugin commands differ between Macs and a global shortcut can collide with another app's. Zoom per host (`ARCHZoomFactorsByHost`) stays because displays differ.
 
 ## Mapping the session store to records
 
-- `session.json` holds no sync fields. `sync.json`, beside it in Application Support, holds the sync engine's state serialization and the last known server record for each synced item (the mirror), archived with secure coding. Deleting `sync.json` makes the next sync a first sync.
-- Tabs need stable IDs. `Tab.id` is created at each launch, and `SessionSnapshot.TabRecord` has no ID. The next snapshot version adds `id` to `TabRecord` and uses it to restore tabs. Tabs from a file without IDs get new ones at load.
-- Outgoing changes: session saves already combine changes within 0.5 seconds. After each save, Sync maps syncable snapshot items from record names to field values and compares them with the mirror. Each difference adds a `.saveRecord` or `.deleteRecord` pending change to `CKSyncEngine.State`. A record that changes again before sending remains one pending change. Sync finds settings changes the same way on `UserDefaults.didChangeNotification`. This comparison includes edits made while sync was off, so they upload when it turns on again.
-- The record provider builds outgoing records from the mirror's copy and sets the known fields. Fields written by newer builds survive.
-- Pinning a tab creates its `Tab` record. Unpinning or closing it deletes the record. The record's address and title change when the tab's page finishes loading, as `session.json` does.
-- Incoming changes: Sync applies fetched records to `BrowserSession` on the main actor through a few methods to insert, update, or delete a Persona, space, favorite, or pinned tab, or apply a setting. It then updates the mirror so applied changes are not sent back. Within a fetch, parents apply before children. A child whose parent has not arrived waits until the fetch ends.
+- `session.json` holds no sync fields. `sync.json`, beside it in Application Support, holds the sync engine's state serialization, each synced item's last known server record (the mirror) archived with secure coding, and each pending save as the last comparison of its scope returned it, with its field values and edit times. The next comparison needs those values to tell whether a field still holds the value it found. Deleting `sync.json` makes the next sync a first sync.
+- `SyncMirror` writes `sync.json` atomically as JSON: a format version, the digest of the database it belongs to (`SyncDatabase.digest`, the SHA-256 of the container identifier and the CloudKit environment, so the file never names the container), the engine's state serialization as Base64 data that only the engine reads, the mirror's records sorted by record name in one archive made with secure coding, and each pending save's fields, edit times, `modifiedAt`, and `schemaVersion`. The mirror keeps every `CKRecord` whole, with its change tag, records of unknown types, and fields that `SyncValue` cannot hold. A missing file reads as empty. So does one of a newer format, which first leaves a copy, `sync-v<version>.json`, and one that does not decode or whose records do not unarchive, which moves to `sync.unreadable.json`, since a partial mirror would disagree with the engine's change token. So does one written for another database, which moves to `sync.other-database.json`: a Mac bundled for Development to create the schema and then for Production (User steps 4 and 5), or for another container, would otherwise hand that database's change token to the engine, and its mirror would count this Mac's items as already on the server, so they would never upload and the next Mac's first sync would find an empty zone. As with `session.json` (`SessionStore`), the copy keeps the other build's file from this build's next write and replaces an older copy. In each case the next sync is a first sync. A pending save that this build cannot read, of a record type or with a kind of value that only a newer build writes, is skipped, and the rest of the file reads: the mirror, the change token, and the other pending saves. The skipped save's record keeps its mirror copy, so the next comparison that covers its type finds the change again in the local state. Otherwise one such save would make the next sync a first sync, where the server's values win and this Mac's unsent edits are lost.
+- Outgoing changes: session saves already combine changes within 0.5 seconds. After each save, `Browsing` hands Sync the sidebar's syncable state: the Personas, spaces, pinned folders, favorites, and pinned tabs in sidebar order, without open tabs and folders, a live folder's item tabs, or a feed folder whose address is in the Keychain. Sync turns the state into records and compares them with the mirror (`SyncDiff`). Sync finds settings changes the same way on `UserDefaults.didChangeNotification` (`SyncedSettings.changedKeys()`). The sidebar and the settings compare apart, each with its own scope: the mirror's records of the sidebar's types, and the `Setting` records of the listed keys that have a value here and whose mirror values apply here (Settings list). Each comparison takes every pending save not yet sent, from either scope. Its result lists every change in its scope still to send and replaces only the pending changes of its scope in `CKSyncEngine.State`, leaving the other scope's: a `.saveRecord` for each record that differs from its mirror copy, and a `.deleteRecord` for each mirror record in scope that the state lacks. The settings comparison also drops the pending saves of the keys it holds out (Settings list). A record that changes again before sending remains one pending change, and one changed back needs none. A field with the mirror's value keeps the mirror's time. Any other field takes the time when Sync finds its new value and keeps it while the value stays and the time is later than the mirror's time for the field. A pending time no later than the mirror's, as after a fetch replaced the field, predates the mirror's value, so the value counts as found again. This comparison includes edits made while sync was off, so they upload when it turns on again.
+- The comparison treats a mirror record that the state lacks as deleted on this Mac, and a field whose value differs from the mirror's as edited here, so it runs only once the session has applied every change the mirror holds. Sync holds both comparisons while a first sync's plan or a fetch's changes are being applied, including children that wait for their parents and the orphan repairs, and runs them once those are applied. A session save or settings change in that time waits for that run. A settings change found in that time counts as this Mac's edit, at the time Sync found it, when a fetched record of its key merges, so the fetched value does not replace a later change.
+- Each change to the mirror, from a fetch or a sent batch, makes Sync run both comparisons again before the engine builds its next batch, so no pending save holds a value that the mirror has replaced since the save was found.
+- The record provider builds each outgoing record from the mirror's copy and sets the known fields from the pending save, which the comparisons brought up to date after the mirror's last change, so it never sends a value older than the mirror's. Fields written by newer builds survive with their edit times.
+- Pinning a tab creates its `Tab` record. Unpinning it or Delete Tab deletes the record. Closing a pinned tab unloads it (III.17) and changes nothing. The record's `url` and `title` change only when the saved page changes (decision 2).
+- Incoming changes: Sync merges each fetched record with the local values field by field, using the mirror's copy as the base (decision 3). It applies the result to `BrowserSession` on the main actor through methods that insert, update, move, or delete a Persona, space, pinned folder, favorite, or pinned tab, or apply a setting. These methods select nothing and keep every tab in its Persona. Sync then updates the mirror so applied changes are not sent back. Within a fetch, parents apply before children: Personas, spaces, folders from the top level down, favorites, then tabs. A child whose parent has not arrived waits until a fetch ends without a zone fetch failure.
+- `sync.json` never holds a change that `session.json` lacks. After applying a fetch's changes or a first sync's plan to the session, Sync saves the session at once (`BrowserSession.saveNow()`) before `sync.json` takes the mirror and the engine's change token that hold those changes. A session save otherwise waits up to 0.5 seconds. A quit or crash in that time would leave a mirror ahead of the session, with nothing left to fetch, and the next launch's comparisons would delete the fetched items and send their old values as new edits. A `session.json` ahead of `sync.json` is safe: the next launch fetches the same changes again, and a value that both sides hold needs no send.
 - Applying a change:
-  - A new or changed Persona, space, or favorite updates the sidebar at once.
-  - A new pinned tab opens in its space without becoming selected. A changed address or engine reloads an unselected tab at once. The selected tab keeps its page and applies the change when the user leaves it. A changed tab name or order applies at once.
-  - A deleted pinned tab closes into this Mac's closed list, so ⌘Z and Reopen Last Closed Tab can bring it back.
-  - A deleted space moves this Mac's open tabs to its neighbor, as `deleteSpace` does.
-  - A deleted Persona closes its tabs into the closed list and removes its local site data, as a local deletion does (III.12).
-- Orphans: after a fetch, a tab whose space is missing moves to the first space of the first Persona. A space or favorite whose Persona is missing moves to the first Persona. Every Mac picks the same destination. The Mac that finds the orphan writes the move. A Persona left without spaces gets a new space named Personal, as at first launch.
-- Order keys: the local arrays keep the order. The `order` keys live only in the mirror. When the comparison finds siblings out of order, moved items get new keys. The others keep theirs.
+  - A new or changed Persona, space, folder, or favorite updates the sidebar at once.
+  - A new pinned tab joins its space and folder without a page, at its saved page. No window selects it.
+  - A changed saved page moves the stand-in of a tab without its page to the new address, as Edit Saved Address… does. A tab with its page keeps it, and its row offers Go Back to Saved Page while it is off the saved site (bookmark rule 3).
+  - A changed engine applies at once to a tab without its page or one that no window shows. A tab that a window shows switches once no window shows it.
+  - A changed tab name, order, folder, or space applies at once.
+  - A deleted pinned tab closes into this Mac's closed list, so ⌘Z and Reopen Closed Tab can bring it back.
+  - A deleted folder's remaining folders and tabs move up a level, as Delete Folder does.
+  - A deleted space moves this Mac's open tabs and open folders to its neighbor, as `deleteSpace` does.
+  - A deleted Persona is removed as Delete Persona does (decision 8).
+- Orphans: records that each merge cleanly can still disagree with each other, as when one Mac moves a folder to another space while another Mac moves a tab into it. After a successful fetch, Sync repairs them in this order, folders from the top level down. Every repair keeps the record's order key, and equal keys sort by record name, so every Mac picks the same destination. The Mac that finds the orphan writes the change. Two Macs that write the same change merge without a difference.
+  1. A space, folder, favorite, or tab whose Persona is missing is deleted. A Persona left without spaces gets a space named Personal, as at first launch. Its record name is a name-based UUID made from the Persona's record name (decision 11).
+  2. A pinned tab or folder whose space is missing moves to the first space of its Persona.
+  3. A folder whose parent is missing or belongs to another Persona moves to the top of its space's pinned list. A pinned tab whose folder is missing or belongs to another Persona moves out of folders in its space.
+  4. Folders whose parents form a cycle, as when two Macs each move one folder under the other, are cut at the folder whose record name sorts first. It moves to the top of its space's pinned list, and the others stay under it.
+  5. A folder whose parent is in another space takes the parent's space, and so does a pinned tab whose folder is in another space. Each stays in its folder, and the folder's contents follow it.
+  6. A folder below the fourth level (bookmark rule 6 of `docs/bookmarks.md`) moves up to its ancestor at the third level. Applied from the top level down, a deeper subtree flattens into the fourth level.
+- Order keys: the local arrays keep the order. The `order` keys live only in the records: the mirror's copies and the pending saves. The comparison keeps the mirror keys of the largest set of siblings whose mirror copies are in the same sibling list and already in order (the longest increasing subsequence) and gives the others new keys, so one move writes one record. Between two siblings that keep their mirror keys, the siblings whose pending saves are in the same list keep those saves' keys while they still fit there in order. A sibling moved again before sending therefore stays one save, with the later move's key and time, and a pending move that another move leaves in place keeps its key and time.
 
 ## First sync on a Mac
 
 - Turning sync on fetches the zone before sending anything.
-- An empty zone receives every syncable item from this Mac.
-- Otherwise the server's records apply as incoming changes. Local items without a match upload. A local item matches a server record with the same record name. A local space also matches a server space with the same name in the same Persona. The local space's tabs move to the server space, and the local space is removed. A local favorite matches a server favorite with the same address in the same Persona, and the local one is removed. For settings, the server's value wins for the keys it has.
-- The merge goes out in one batch.
+- An empty zone receives every syncable item from this Mac, with every listed setting that has a saved value.
+- Otherwise the server's records apply as incoming changes, and local items without a match upload. A local item matches a server record with the same record name. It takes the server's values wherever the server has any, and its own values fill only the fields or merge units that the server lacks (`SyncMerge`'s first-sync base, decision 4). Other matches follow decision 4:
+  - A local space matches a server space with the same name in the same Persona. The local space's tabs and folders move to the server space, and the local space is removed.
+  - A local pinned folder matches a server folder with the same name under the matched parent in the matched space. Its folders and tabs move into the server folder, and the local folder is removed.
+  - A local pinned tab matches a server tab whose saved page is the same page (bookmark rule 3) in the matched space and folder. The local tab unloads and is removed without joining the closed list. The server's tab takes its place in the list. A window that showed the local tab selects the server's tab.
+  - A local favorite matches a server favorite with the same address in the same Persona. The local favorite is removed, and its open tab becomes the server favorite's tab.
+  - Personas match only by record name. A local Persona keeps its record and site data even when a server Persona has the same name.
+  - For settings, the server's value wins for the keys it has.
+- Sync sends the merge atomically. A merge of more than 250 records, the most one request holds, goes in several batches, each atomic, so another Mac can fetch it in parts.
 
 ## Conflicts
 
 - Sync sends each record with the change tag of its mirror copy. If another Mac saved the record first, CloudKit refuses the save with `serverRecordChanged` and returns the server's record.
-- Sync merges that record field by field, with the mirror's copy as the common base. A field changed only on this Mac takes the local value. A field changed only on the server keeps the server's value. A field changed on both sides takes the value from the side with the later `modifiedAt`. On a tie, the server's value stays. Sync applies the merged record locally and sends it with the server's change tag. For fields changed on both sides, the last writer wins, as V.9 asks. Fields changed on only one side survive.
-- A `Setting` record has a fixed name. Two Macs that first write the same setting therefore conflict without a base. Both sides count as changed, and the later `modifiedAt` wins.
-- Deletion wins. If a save fails with `unknownItem`, meaning the server record was deleted, Sync applies the deletion locally instead of recreating the record. An incoming deletion drops this Mac's pending save for that record.
-- Changes to several records go in one batch that CloudKit saves atomically within the zone (`atomicByZone` on `CKSyncEngine.RecordZoneChangeBatch`, needs verification). Examples include deleting a space and moving its tabs, renumbering order keys, and first-sync merges. Other Macs never fetch half of a change.
-- `modifiedAt` comes from each Mac's clock. A Mac whose clock is far ahead can win conflicts it should lose. Network time keeps this rare.
+- Sync merges that record field by field, using the mirror's copy as the common base (decision 3). A field changed only on this Mac takes the local value. A field changed only on the server keeps the server's value. A field changed on both sides takes the value from the side that edited it later, by `fieldModifiedAt`. The server wins ties. Sync applies the merged record locally and sends it with the server's change tag. A field changed to the same value on both sides needs no send.
+- Merge units: a pinned tab's `space`, `folder`, and `order`, a folder's `space`, `parent`, and `order`, and the `url` and `title` of a `Tab` or `Favorite` each merge as one unit (`SyncRecordType.fieldGroups`). A change to any field of a unit takes the whole unit from that side. A unit changed on both sides takes the side with the later of the unit's edit times. Every other field is a unit of its own. Disagreements between records, such as two folders each moved under the other, are left to the orphan repairs (Mapping the session store to records ▸ Orphans).
+- A `Setting` record has a fixed name. Two Macs that first write the same setting while sync runs therefore conflict without a base. Both sides count as changed, and the later edit wins. At a first sync the server's value wins instead (First sync on a Mac).
+- A field that a record lacks has no value. Removing a field, as when a tab leaves its folder and loses `folder`, is a change like any other.
+- Without a base, a field that only one side has keeps its value, since nothing shows that the other side removed it.
+- A field that this build does not know for the record type (`SyncRecordType.fields`) counts as unchanged on this Mac, which cannot edit it, so the merge keeps the server's value. Fields from newer builds survive this way.
+- Each unit of a merged record keeps the edit times of the side whose values it takes. A merged record that must be sent takes the later `modifiedAt` of the two sides and the higher `schemaVersion`, since it can hold fields of the newer format. A merge that leaves the server's fields unchanged needs no send and keeps the server's record.
+- Deletion wins. A save that fails with `unknownItem` found no record with the change tag of its mirror copy: another Mac deleted the record, or the zone was created again after the copy was fetched. The failure by itself deletes nothing. Sync fetches and acts on what the fetch brings. The record's deletion applies locally, as every incoming deletion does, instead of recreating the record. The zone's deletion follows its reason (Accounts and removed data). If the fetch brings neither, the mirror's copy came from an earlier zone: Sync drops it, and the comparisons save the record again without a base. An incoming deletion drops this Mac's pending save for that record.
+- Every mirror copy comes from the zone as it now is. Before Sync creates the zone again, it drops the mirror's records and keeps the pending saves (Offline behavior, and Accounts and removed data). The comparisons then save every item in scope without a base, so no outgoing record carries a change tag from the old zone. A save built on such a tag would fail with `unknownItem` for every record.
+- Changes to several records go in one batch with `atomicByZone`, which CloudKit saves atomically within the zone. Examples include deleting a space and moving its tabs and folders, renumbering order keys, and first-sync merges. Other Macs never fetch half of a change of up to 250 records. A larger change goes in several batches, each atomic (Facts ▸ CloudKit).
+- When one save of such a batch fails, CloudKit refuses the batch's other changes with `batchRequestFailed` (Not verified 8). `CKSyncEngine` keeps only the changes that fail for a reason it retries, so `CloudKitSyncEngine` adds these back to the pending changes and reports only the failure that refused the batch.
+- Edit times come from each Mac's clock. A Mac whose clock is far ahead can win conflicts it should lose. Network time keeps this rare.
 
 ## Offline behavior
 
-- Edits go into `session.json` at once. Pending changes live in the sync engine's state, which Sync writes to `sync.json` at every `stateUpdate` event. They survive quitting. Sync sends them after a later launch.
-- `CKSyncEngine` retries network failures, rate limits, and service unavailability using CloudKit's requested delays. Sync handles the failures it can fix: `zoneNotFound` creates the zone and sends again, `serverRecordChanged` merges, and `unknownItem` applies the deletion.
+- Edits go into `session.json` at once. Pending changes live in the sync engine's state, which Sync writes to `sync.json` at every `stateUpdate` event, with each pending save's field values and edit times, once `session.json` holds every change applied from the mirror it writes (Mapping the session store to records). They survive quitting. Sync sends them after a later launch.
+- `CKSyncEngine` retries network failures, a missing network, rate limits, an unavailable service, a busy zone, and a missing authentication or a temporarily unavailable account, using CloudKit's requested delays, and keeps those changes pending. `CloudKitSyncEngine` reports no failure for them. Sync handles the failures it can fix: `serverRecordChanged` merges, and `unknownItem` fetches and acts on what the fetch brings (Conflicts).
+- `zoneNotFound` creates the zone and sends again only while the mirror is empty, which means this Mac has neither fetched nor sent a record of the zone, as at a first sync before any Mac created the zone. With records in the mirror, the zone existed and is gone: Sync fetches and follows the zone deletion's reason (Accounts and removed data), and a fetch that reports no deletion of the zone counts as `.deleted`. A zone that another Mac deleted with Delete iCloud Data therefore does not come back holding this Mac's pending saves.
 - `CKSyncEngine` fetches when CloudKit sends a change notification and at launch. Sync also calls `fetchChanges()` when the app becomes active to cover missed notifications.
-- A Mac that was offline for weeks sends its pending changes when it reconnects. Conflicts compare `modifiedAt`, so its old edits do not overwrite newer ones from other Macs.
+- A Mac that was offline for weeks sends its pending changes when it reconnects. Conflicts compare each field's edit time, so its old edits do not overwrite newer ones from other Macs, even after it edited another field of the same record.
+
+## Sync engine
+
+- The controller uses the engine through `SyncEngineClient` on the main actor, so its tests run on `FakeSyncEngine` and no `CKSyncEngine` type reaches it. An engine starts when it is created (`SyncEngineFactory`), on the database that the availability check returns, from the state serialization that `sync.json` kept for that database, or from none for a first sync. `CloudKitSyncEngine` creates one `CKSyncEngine` on the private database of that container, which syncs on its own. A state serialization that does not decode counts as none: the engine fetches the zone from its start, and every record merges with its mirror copy.
+- Pending changes go by record name (`SyncPendingChange`): a record's save or deletion in `ArchSync1`, or the zone's save or deletion. The controller adds and removes them, and the engine keeps them in its state, which reaches `sync.json` with each state update.
+- The engine reports Arch's own events (`SyncEvent`) one at a time to its delegate, which it holds weakly, and waits for each before its next event or batch: a state update, an account change, each page of a fetch, a zone deletion with its reason, the fetch’s end with the last failure code from the zone fetch, if any, the outcome of saving or deleting the zone itself, and each sent record batch with its saved records, its deleted record names, and its refused saves. A refused save comes as server record changed with the server's record, unknown item, zone not found, or other with CloudKit's code. Fetched records, record deletions, and zone deletions keep their zone, so the controller drops those of other zones. An account change that this build does not know counts as a switch, and a zone deletion reason it does not know counts as `deleted`. Both turn sync off and keep local data.
+- For each batch, the engine asks the delegate for each pending save's record (`SyncEngineDelegate.record(toSave:)`), and nil drops the save. The send continues through the next batch with any changes added while the delegate handles the previous one. A delegate that needs another fetch or send while it handles an event starts it in a task.
+- `stop()` clears the engine’s pending changes and cancels its operations. The last state update kept for a future engine still holds its queue. Operations already in flight can finish, and CloudKit can fetch in the background until the engine is released. The stopped adapter ignores late events and refuses further changes, requests, and batches. A late state update cannot recreate `sync.json` after the controller deletes it.
 
 ## Accounts and removed data
 
-- Before it creates the sync engine, Sync calls `CKContainer.accountStatus()`. Without an available account, sync stays off and the toggle explains why.
-- Signing out of iCloud (`accountChange`, `.signOut`) stops sync, keeps the local sidebar, and deletes `sync.json`. Switching accounts does the same. Turning sync on again runs a first sync with the new account and merges this Mac's sidebar into it. Signing in starts a first sync if the toggle is on.
+- Before creating the sync engine, Sync reads its own entitlements and then calls `accountStatus()` on the container (Requirements). Without the entitlement or an available account, sync stays off and the toggle explains why. `SyncAvailability` makes this check, and the controller makes it again when the app becomes active and when the container posts `CKAccountChanged`, so an account that becomes available while Arch stays in front enables the toggle without another activation. The controller keeps the container that it observes only while the entitlements name one, and it applies only the result of the check it started last, so an earlier check that ends later never replaces a newer result. `couldNotDetermine` and a status this build does not know count as temporarily unavailable. A check that fails with `missingEntitlement` or `badContainer` counts as not signed for iCloud, since only another build fixes it, and one that fails otherwise counts as temporarily unavailable. An available account comes with the database (`SyncDatabase`): the container identifier, which the engine opens and nothing logs, shows, or writes to a file, and the `com.apple.developer.icloud-container-environment` entitlement's value. The controller reads and writes `sync.json` for that database, so a file of another container or environment moves aside and the next sync is a first sync.
+- Signing out of iCloud (`accountChange`, `.signOut`) or switching accounts (`.switchAccounts`) turns sync off, keeps the local sidebar, and deletes `sync.json`. Settings says why once the check finds an available account; until then it shows the check's reason (User interface). Turning sync on again runs a first sync with the current account and merges this Mac's sidebar into it (decision 5). A `.signIn` while the toggle is on starts or resumes sync.
 - When the zone disappears (`fetchedDatabaseChanges` deletions), Sync acts on the reason:
-  - `.deleted`: another Mac chose Delete iCloud Data. Sync turns off here and keeps local data.
+  - `.deleted`: another Mac chose Delete iCloud Data. Sync turns off here, deletes `sync.json`, and keeps local data.
   - `.purged`: the user removed Arch's data in the system's iCloud settings. Same as `.deleted`.
-  - `.encryptedDataReset`: the user reset the end-to-end encryption keys, so the encrypted fields are gone. Sync creates the zone again and uploads this Mac's items, as in a first sync with an empty zone.
+  - `.encryptedDataReset`: the user reset the end-to-end encryption keys, so the encrypted fields are gone. Sync drops the mirror's records, keeps the pending saves, creates the zone again, and uploads this Mac's items, as in a first sync with an empty zone. Without mirror copies, the comparisons save every item without a base, and no local item is deleted.
 
 ## Schema versions
 
-- In the CloudKit Development environment, CloudKit creates record types and fields when a record first uses them. The Production environment needs the schema deployed from CloudKit Console. Deployed record types and fields can never be removed or change type. Schema changes are therefore additive in both environments.
+- In the CloudKit Development environment, CloudKit creates record types and fields when a record first uses them. The Production environment needs the schema deployed from CloudKit Console. A save that uses an undeployed type or field fails there. Deployed record types and fields can never be removed or change type. Schema changes are additive in both environments. Each is deployed before a Production build writes it (decision 6).
 - Within one zone, a new version adds optional fields or record types and raises `schemaVersion`. A missing field means its default: for example, a tab without `engine` uses the default engine. A reader keeps unknown fields because it builds outgoing records from the mirror's full copy. Records of unknown types stay in the mirror untouched. A later build applies them without fetching the zone again.
-- A breaking change, such as a field that changes meaning, moves to a new zone (`ArchSync2`). The first Mac with the new build copies the old zone's records into the new zone in the new format. It then stops reading the old zone. Older builds keep syncing among themselves in the old zone until they are updated.
+- A breaking change, such as a field that changes meaning, moves to a new zone (`ArchSync2`). The first Mac with the new build copies the old zone's records into the new zone in the new format. It then stops reading the old zone. Older builds keep syncing in the old zone until updated. Apart from that copy, each build fetches and keeps only its own zone's records (Container, database, and zone), so neither applies or writes the other's format.
 - `session.json` versions and `schemaVersion` are independent. The snapshot version describes the local file; `schemaVersion` describes the records. Only the record mapping translates between them.
-- Planned additions: folders (III.3) add a `Folder` record type and an optional `folder` reference on `Tab`; nested folders (III.18) add an optional `parent` reference on `Folder`, and live folders (III.22) add optional source fields on it; saved pages (III.16) add `savedURL` and `savedTitle` on `Tab`; per-space home pages (III.10) and themes (III.9) add optional fields on `Space`. Multiple windows (III.6) and split view layouts (III.5) add nothing, because windows and layouts stay on each Mac.
+- Planned additions: live folders' sidebar (III.22) adds an optional encrypted `live` field on `Folder` with the folder's source, item limit, and refresh interval. A feed folder whose address is in the Keychain never syncs (live folder rule 8). Themes (III.9) add optional fields on `Space`. Multiple windows (III.6) and split view layouts (III.5) add nothing because windows and layouts stay on each Mac.
 
 ## Requirements
 
@@ -137,31 +244,72 @@ A new setting syncs only after it joins this list. V.8 decides which of its sett
 
 ## User interface
 
-- A Sync section in Settings (V.8) has a Sync with iCloud toggle, the account state, the time of the last completed sync, and the last error in plain words. Sync reports nothing anywhere else and sends no usage data.
+- A Sync section after General in Settings has a Sync with iCloud toggle, a line saying what syncs ("Personas, spaces, favorites, pinned tabs and their folders, and some settings. Open tabs, history, and website data stay on this Mac."), the account state, the time of the last completed sync, and the last error in plain words. Sync reports nothing elsewhere and sends no usage data.
+- The toggle stays off and disabled while sync cannot run, with the reason below it:
+  - Without the iCloud entitlement: "This copy of Arch isn't signed for iCloud, so it can't sync."
+  - Without an account: "Sign in to iCloud in System Settings to sync."
+  - With a restricted account: "iCloud is restricted on this Mac."
+  - With a temporarily unavailable account or an unknown status: "iCloud isn't available right now. Arch checks again when it becomes active."
+- After a sign-out, an account switch, or a deleted zone, the toggle is off. While the availability check finds that sync cannot run, its reason and the disabled toggle above win: after a sign-out, Settings shows "Sign in to iCloud in System Settings to sync." Once the check finds an available account, as after an account switch, signing in again, or a deleted zone, the toggle is enabled, and the reason says what happened: "Sync turned off because the iCloud account changed. Turn it on to merge this Mac's sidebar into the current account." or "Sync turned off because Arch's iCloud data was deleted. Turn it on to upload this Mac's sidebar again."
 - Turning sync off stops the engine and keeps local data, iCloud data, and `sync.json`. Turning it on again resumes from the saved change token.
-- After a confirmation sheet, Delete iCloud Data deletes the zone and turns sync off. This removes iCloud data for every Mac. Local data stays. Other Macs turn sync off at their next fetch.
+- After a confirmation sheet, Delete iCloud Data deletes the zone, turns sync off, and deletes `sync.json`. This removes iCloud data for every Mac. Local data stays. Other Macs turn sync off at their next fetch.
+- While sync is on, the Delete Persona sheet adds: "It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too." (decision 8).
+- The section names no Persona. Any label that names a space with its Persona uses `BrowserSession.label(ofSpace:)`.
 
 ## Module layout
 
-| File | Role |
-|---|---|
-| `Packages/ARCH/Sources/Sync/SyncController.swift` | Owns the toggle, the entitlement and account checks, and the `CKSyncEngine`; handles its events |
-| `Packages/ARCH/Sources/Sync/SyncRecords.swift` | Maps Personas, spaces, favorites, pinned tabs, and settings to `CKRecord` values and back |
-| `Packages/ARCH/Sources/Sync/SyncMirror.swift` | Reads and writes `sync.json`: the state serialization and the last known records |
+| File | Role | Task |
+|---|---|---|
+| `Sync/SyncRecord.swift` | Record types, names, field values, merge units, field edit times, `modifiedAt`, and `schemaVersion`, without CloudKit types | Built |
+| `Sync/SyncMerge.swift` | Merge by field and merge unit against the mirror's copy, a first write, or a first sync | Built |
+| `Sync/SyncOrderKeys.swift` | Order keys: midpoints, renumbering, and sorting | Built |
+| `Sync/SyncDiff.swift` | Pending saves and deletions from the current records and the mirror | Built |
+| `Sync/SyncCloudKitRecords.swift` | `SyncRecord` values to `CKRecord` values and back | Built |
+| `Sync/SyncMirror.swift` | Reads and writes `sync.json` | Built |
+| `Sync/SyncedSettings.swift` | The Settings list: reading, validating, and applying values, the keys changed here, and the settings comparison's records and scope | Built |
+| `Sync/SyncDatabase.swift` | The container and environment that sync uses, and the digest that `sync.json` keeps | Built |
+| `Sync/SyncAvailability.swift` | Entitlement and account checks | Built |
+| `Sync/SyncEngineClient.swift` | The protocol the controller uses and Arch's own events | Built |
+| `Sync/CloudKitSyncEngine.swift` | Implements the protocol with `CKSyncEngine` | Built |
+| `Sync/FirstSyncMerge.swift` | The first sync's matches and moves | V.9.7 |
+| `Browsing/SidebarSync.swift` | The sidebar's syncable state and the methods that apply incoming changes | V.9.8, V.9.9 |
+| `Sync/SidebarRecords.swift` | Converts syncable state to records and fetched records to session changes and orphan repairs | V.9.8, V.9.9 |
+| `Sync/SyncController.swift` | The toggle, engine lifetime, and events | V.9.10, V.9.11 |
+| `Preferences/SyncSection.swift` | Settings ▸ Sync | V.9.12 |
 
-- `Sync` depends on `Browsing`, `Preferences`, `ARCHEngine`, and CloudKit. `Package.swift` adds one target.
-- `Browsing` does not import CloudKit. It provides stable tab IDs, a callback after each save, and the methods that apply incoming changes.
-- `AppDelegate` creates the controller after the session and registers for remote notifications while sync is on.
-- Verification needs two Macs signed in to the same Apple Account, or one Mac and the record browser in CloudKit Console.
+- Paths are under `Packages/ARCH/Sources/`. `SyncTests` holds `FakeSyncEngine`, which keeps pending changes in memory and replays scripted events, and a fake sidebar. No test reaches CloudKit's servers.
+- `Sync` depends on `Browsing`, `ARCHEngine`, and CloudKit. `Preferences` and the `Arch` app target depend on `Sync`. `Package.swift` adds the `Sync` and `SyncTests` targets. `Browsing` does not import CloudKit. It provides the syncable state, a callback after each save, methods to apply incoming changes, and `isSyncing` for the Delete Persona sheet. `Sync` needs no `Preferences` type: the app shell applies appearance through `SyncedSettings.onApplied`, on the controller's settings.
+- `AppDelegate` creates the controller after the session, hands it to Settings, registers for remote notifications while sync is on, and calls `fetchChanges()` when the app becomes active.
+- Verification needs two Macs signed in to the same Apple Account, or one Mac and the record browser in CloudKit Console, and a second Apple Account for the account checks (User steps).
 
-## Open decisions
+## User steps
 
-1. Tabs: only pinned tabs sync (this note), or open tabs too.
-2. A pinned tab's address: decided by `docs/bookmarks.md`. A pinned tab syncs its saved page, which stays at the pinned address until the user changes it. Its current page stays on each Mac.
-3. Conflicts merge field by field with last writer wins per field (this note), or strictly per record as V.9 states.
-4. The first sync merges spaces by name and favorites by address (this note), or keeps every item from both Macs.
-5. Switching iCloud accounts merges the local sidebar into the new account (this note), or starts the Mac from the new account's data only.
-6. CloudKit environment: Production with the schema deployed from CloudKit Console, or Development, which an Apple Development signed build uses by default (needs verification for selecting Production with `com.apple.developer.icloud-container-environment`). Until this is decided, `scripts/bundle_app.sh` writes Production for a Developer ID identity, as Xcode's export does, and Development for an Apple Development identity; `ARCH_SIGN_IDENTITY` chooses the identity.
-7. macOS 13: not supported, because the package targets macOS 14 (decided with open decision 1 of `docs/windows-personas.md`).
-8. A Persona deleted on another Mac removes this Mac's site data for it (this note), or keeps that data until the user removes it.
-9. Browsing history: never syncs (this note), or a later `Visit` record type.
+The two-Mac check is queue task V.9.14. Provisioning can happen before the controller and Settings are built. Steps 4 to 7 require the working sync toggle from V.9.12.
+
+1. In Certificates, Identifiers & Profiles, verify that the explicit App ID for `xyz.taeyoon.arch` has iCloud with CloudKit and Push Notifications.
+2. Assign the iCloud container named in Requirements to that App ID. Create it if it does not already exist.
+3. Run `./scripts/provision_app.sh` on the signing Mac to obtain the development and Developer ID profiles as described in Requirements. The bundle script selects the newest suitable installed profile. To use a specific matching profile, set `ARCH_PROVISIONING_PROFILE` to its local path.
+4. For schema creation, run `./scripts/bundle_app.sh` with `ARCH_SIGN_IDENTITY` set to the Apple Development signing identity. Confirm the script reports an iCloud container, the Development CloudKit environment, and development push. Turn on Settings ▸ Sync on a Mac whose sidebar has a second Persona, a pinned folder holding a pinned tab, and a favorite. Change one listed setting. Once Last synced shows a time, check in CloudKit Console that the Development environment lists `Persona`, `Space`, `Folder`, `Favorite`, `Tab`, and `Setting`, and that `Folder` has the field `parent` (Not verified 3). Add a queryable index on `recordName` for each type so the record browser can list them. Deploy the schema changes to Production. Repeat this step before a build that writes a new field reaches Production (Schema versions).
+5. Build with a Developer ID Application identity and its matching profile. Confirm the bundle script reports an iCloud container, the Production CloudKit environment, and production push, and install the build on both Macs. On the Mac of step 4, `sync.json` of the Development database moves to `sync.other-database.json`, and sync starts with a first sync in Production.
+6. Check with two Macs signed in to the same Apple Account:
+   1. A build without the profile shows the toggle off and disabled with the reason for an unsigned build.
+   2. Turning sync on uploads Mac A's sidebar. Mac B's first sync joins its Personal space with A's and shows A's Personas, spaces, pinned folders and tabs, favorites, and listed settings without duplicates. A's name for the default Persona and A's settings stay.
+   3. Renaming a space, pinning a tab, moving a favorite, editing a saved page, and deleting a folder on A take effect on B within a minute while B is in the background (Not verified 1), and at once when B becomes active.
+   4. With B offline, a space renamed on B and its tint changed on A both survive after B reconnects. The same space renamed on both keeps the later name, also when B changed the space's tint after its own rename.
+   5. Offline edits on B survive quitting B and reach A after B relaunches online.
+   6. Deleting a Persona on A closes its tabs on B into the closed list, and B removes its site data at its next launch. A's Delete Persona sheet says so.
+   7. Signing out of iCloud on B turns sync off and shows the toggle disabled with "Sign in to iCloud in System Settings to sync." B keeps its sidebar. Signing in to a second Apple Account enables the toggle with the reason that the account changed, without another activation of Arch. Turning it on merges B's sidebar into that account.
+   8. Delete iCloud Data on A turns sync off on B at its next fetch, and both Macs keep their sidebars.
+   9. CloudKit Console's Production record browser shows the records, with names, addresses, and titles only as encrypted fields (Not verified 2).
+7. Record the results in Facts and resolve the Not verified items they settle.
+
+## Not verified
+
+1. Whether `CKSyncEngine` on macOS needs more than the `com.apple.developer.aps-environment` entitlement and `registerForRemoteNotifications()` to receive change notifications. Until verified, fetching when the app becomes active covers missed notifications.
+2. Whether the first sync in a Developer ID build reaches the deployed Production schema on both Macs (User step 6). The Production entitlement itself was checked (Requirements).
+3. Whether CloudKit's servers accept a custom field named `parent` beside the record's system parent (`___parent`). Apple's documentation advises against keys that match a `CKRecord` property name, and `CKRecord` has a `parent` property. Creating the schema in the Development environment (User step 4) shows it. If the server refuses the field, rename it before the schema reaches Production. A Development schema can be reset, and a Production schema cannot.
+4. Whether a free personal team can use the iCloud capability. The User steps assume a paid membership.
+5. Whether `CKSyncEngine` sends `.signIn` when it starts without a state serialization. The controller starts a first sync either way.
+6. Whether `accountStatus()` reaches Apple's servers or only asks the system's CloudKit service. Sync asks it while off in a build signed for iCloud (Purpose and principles), at launch, when the app becomes active, and after `CKAccountChanged`.
+7. Whether `CKSyncEngine` reports `didFetchChanges`, which becomes `SyncEvent.fetchEnded`, after a fetch that fails partway, such as when the network drops between pages. If the end event arrives, it includes the failure code from the last fetch of this zone. A waiting child remains deferred until a later successful fetch.
+8. Whether CloudKit refuses the other changes of an atomic batch with `batchRequestFailed` when one change fails, and whether `CKSyncEngine` then drops them from its pending changes. `CloudKitSyncEngine` adds them back either way, and the engine keeps no duplicate pending change.

@@ -126,8 +126,8 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Extensions, History, Import, LiveFolders, Plugins, Preferences, Terminal
-│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AgentTests, AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, LiveFoldersTests, PluginsTests, PreferencesTests, TerminalTests
+│   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Extensions, History, Import, LiveFolders, Plugins, Preferences, Sync, Terminal
+│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AgentTests, AITests, BrowsingTests, ExtensionsTests, HistoryTests, ImportTests, LiveFoldersTests, PluginsTests, PreferencesTests, SyncTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target, CEF helper executable, and arch-cli
 │   ├── ARCHKit/Sources/
 │   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers
