@@ -1054,8 +1054,8 @@ extension AgentToolHost {
             defer { session.finishedReading(reading) }
             if call.name == "read_text" { return await readText(call.arguments, tab: tab, handle: handle, mayReadTab: mayRead).result }
             let snapshots = session.snapshots
-            let shared = tab.agentOwnerID == nil || session.researchPages[tab.id] != nil
-            return await snapshot(call.arguments, tab: tab, handle: handle, shared: shared, store: snapshots, pages: 0) { current in
+            let access: OutlineAccess = session.researchPages[tab.id] != nil ? .research : (tab.agentOwnerID == nil ? .shared : .owned)
+            return await snapshot(call.arguments, tab: tab, handle: handle, access: access, store: snapshots, pages: 0) { current in
                 session.snapshots === snapshots && mayRead(current)
             }.result
         default: return AgentToolResult(status: .error, code: "notAvailable", text: "In-app sessions do not run \(tool.name) in this build of Arch yet.")

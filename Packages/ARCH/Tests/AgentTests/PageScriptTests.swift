@@ -28,6 +28,7 @@ import Testing
         let call = AgentToolCall(name: "snapshot", arguments: ["tab": .string(handle)])
         let result = await fixture.toolHost.run(call, in: session, searchesHistory: false)
         #expect(result.status == .ok && result.text.contains("Place order"))
+        #expect(result.text.contains("read-only research tab") && !result.text.contains("shared by the user") && !result.text.contains("(asks the user)"))
         for value in ["Alex Kim", "Leave at the door", "SAVE10", "Standard"] { #expect(!result.text.contains(value)) }
     }
 

@@ -98,12 +98,24 @@ extension AgentToolHost {
         }
         let shared = isShared(tab, grant, state: state)
         let pages = state.activity(of: tab.id).pages
-        return await snapshot(arguments, tab: tab, handle: handle, shared: shared, store: state.snapshots, pages: pages) { current in
+        return await snapshot(arguments, tab: tab, handle: handle, access: shared ? .shared : .owned, store: state.snapshots, pages: pages) { current in
             state.activity(of: tab.id).pages == pages && isShared(current, grant, state: state) == shared && mayStillRead(current, grant, state: state)
         }
     }
 
-    func snapshot(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, shared: Bool, store: AgentSnapshotStore, pages: Int,
+    enum OutlineAccess {
+        case owned, shared, research
+
+        var description: String {
+            switch self {
+            case .owned: return ""
+            case .shared: return " \u{00B7} shared by the user: every action here asks"
+            case .research: return " \u{00B7} read-only research tab"
+            }
+        }
+    }
+
+    func snapshot(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, access: OutlineAccess, store: AgentSnapshotStore, pages: Int,
                   mayRead: (AgentTabInfo) -> Bool) async -> Outcome {
         guard !Task.isCancelled else { return Self.ended }
         guard mayRead(tab) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle)) }
@@ -120,7 +132,7 @@ extension AgentToolHost {
             target = resolved
         }
         let reply: AgentSnapshotReply
-        switch await pageScript(.snapshot(full: full, ref: target, shared: shared), in: tab, as: AgentSnapshotReply.self, handle: handle) {
+        switch await pageScript(.snapshot(full: full, ref: target, shared: access != .owned), in: tab, as: AgentSnapshotReply.self, handle: handle) {
         case .value(let value): reply = value
         case .outcome(var failure):
             failure.site = site
@@ -130,7 +142,7 @@ extension AgentToolHost {
         if let refusal = stillReadable(tab, handle: handle, reportedURL: reply.url, mayRead: mayRead) { return refusal }
         if reply.stale == true { return Self.stale(handle) }
         guard let url = URL(string: reply.url) else { return Self.error("unreadable", "\(handle) has no document Arch can read.") }
-        let lines = outline(reply.nodes, full: full, shared: shared, pageURL: url)
+        let lines = outline(reply.nodes, full: full, access: access, pageURL: url)
         // A new page's snapshot starts the record again; a subtree's adds its refs to the record of the same page.
         let prior = store.current(tab, pages: pages)
         var record = prior ?? AgentSnapshotRecord(url: url, documentID: tab.documentID, ownerID: tab.agentOwnerID, document: pages, refs: [:], lines: [])
@@ -169,7 +181,7 @@ extension AgentToolHost {
         }
         let header = "page \u{201C}\(Self.quoted(reply.title))\u{201D} \(Self.shortAddress(url))"
         let block = AgentUntrusted.wrap(([header] + kept).joined(separator: "\n"), url: url)
-        var text = ["\(handle) \u{00B7} \(tab.engine.rawValue) \u{00B7} snapshot \(number)\(full ? " \u{00B7} full" : "")\(target.map { " \u{00B7} \($0.ref)" } ?? "")\(shared ? " \u{00B7} shared by the user: every action here asks" : "")", block]
+        var text = ["\(handle) \u{00B7} \(tab.engine.rawValue) \u{00B7} snapshot \(number)\(full ? " \u{00B7} full" : "")\(target.map { " \u{00B7} \($0.ref)" } ?? "")\(access.description)", block]
         var structured: [String: AgentJSON] = ["tab": .string(handle), "url": .string(AgentAddress.reduced(url).absoluteString), "snapshot": .number(Double(number)),
                                                "mode": .string(full ? "full" : "interactive"), "refs": .number(Double(record.refs.count)), "outline": .string(block)]
         if let note { text.append(note) }
@@ -184,7 +196,7 @@ extension AgentToolHost {
     }
 
     /// The outline's lines from the script's nodes, with the policy's annotations. Interactive mode leaves out landmarks that hold nothing; a subtree starts at depth 0.
-    func outline(_ nodes: [AgentOutlineNode], full: Bool, shared: Bool, pageURL: URL) -> [String] {
+    func outline(_ nodes: [AgentOutlineNode], full: Bool, access: OutlineAccess, pageURL: URL) -> [String] {
         let base = nodes.first?.depth ?? 0
         var lines: [String] = []
         for (index, node) in nodes.enumerated() {
@@ -193,12 +205,12 @@ extension AgentToolHost {
                 let next = nodes.dropFirst(index + 1).first
                 if next == nil || next!.depth <= node.depth { continue }
             }
-            lines.append(String(repeating: "  ", count: max(0, node.depth - base)) + "- " + line(for: node, shared: shared, pageURL: pageURL))
+            lines.append(String(repeating: "  ", count: max(0, node.depth - base)) + "- " + line(for: node, access: access, pageURL: pageURL))
         }
         return lines
     }
 
-    private func line(for node: AgentOutlineNode, shared: Bool, pageURL: URL) -> String {
+    private func line(for node: AgentOutlineNode, access: OutlineAccess, pageURL: URL) -> String {
         if node.role == "text" { return "text \u{201C}\(Self.quoted(node.text ?? ""))\u{201D}" }
         var line = node.role
         if let name = node.name, !name.isEmpty { line += " \u{201C}\(Self.quoted(name))\u{201D}" }
@@ -217,19 +229,20 @@ extension AgentToolHost {
             if let frame = node.frameURL.flatMap(URL.init(string:)), AgentPolicy.isChallengeFrame(frame) { return line + " (CAPTCHA: hand to the user)" }
             if node.otherSite == true { line += " (another site; not read)" }
         }
-        if let annotation = annotation(for: node, shared: shared) { line += " " + annotation }
+        if let annotation = annotation(for: node, access: access) { line += " " + annotation }
         return line
     }
 
     /// What the policy says of an element before the agent tries: P1's fields, file inputs, CAPTCHAs, and the elements a rule asks about. The mode's own cards are named once in `session_info`.
-    private func annotation(for node: AgentOutlineNode, shared: Bool) -> String? {
+    private func annotation(for node: AgentOutlineNode, access: OutlineAccess) -> String? {
         guard node.ref != nil else { return nil }
         let facts = AgentElementFacts(tag: "", role: node.role, name: node.name ?? "", inputType: node.inputType, valueClass: node.valueClass, isEditable: node.isEditable ?? false,
                                       isFileInput: node.isFileInput ?? false, submitsForm: node.submits ?? false, formFields: node.formFields ?? [])
         if facts.isFileInput { return "(agents do not choose files)" }
         if AgentPolicy.isChallenge(facts) { return "(CAPTCHA: hand to the user)" }
         if facts.isEditable, facts.valueClass == .hidden { return "(agents do not type here)" }
-        if shared { return "(asks the user)" }
+        if access == .research { return nil }
+        if access == .shared { return "(asks the user)" }
         let asks = (facts.isEditable && facts.valueClass == .personal)
             || (facts.submitsForm && !Set(facts.formFields).isDisjoint(with: [.password, .oneTimeCode, .payment, .personal]))
             || ((node.role == "button" || node.role == "link") && AgentPolicy.readsAsIrreversible(facts.name))
