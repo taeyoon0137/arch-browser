@@ -94,7 +94,7 @@ import UserNotifications
         let stopped = try #require(host.agentTabs(of: session.id).last)
         session.stop()
         #expect(host.researchLoads[stopped.id]?(address) == false)
-        #expect(!session.reportedTools.contains("open_tab"))
+        #expect(session.reportedTools.contains("open_tab"))
     }
 
     @Test func researchCopiesRequireTheSameAttachmentDocumentAndSharingOnBothSidesOfARead() async throws {
