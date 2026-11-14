@@ -638,7 +638,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         guard let word = sender.representedObject as? String else { return }
         browser?.replaceMisspelling(withWord: word)
     }
-    /// CEF gives the asking frame's origin as an address, empty when it has none.
+    /// CEF names the asking frame by the address it last committed (`GetLastCommittedURL()`), so a frame at an address without a host, as an `about:blank` one that another frame added, gets no origin here.
     public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, origin: String, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
         guard let uiDelegate else { return completion(kind == .alert, nil) }
         let frameOrigin = URL(string: origin).flatMap { $0.host?.isEmpty == false ? $0 : nil }

@@ -58,9 +58,12 @@ final class TabPromptQueue: ObservableObject {
         return true
     }
 
-    /// Quitting: ends every tab's prompts without the user, each tab's oldest first, and the ones asked for until `reopen()`. Their cards go at once, without their motion.
+    /// Quitting: ends every tab's prompts without the user, each tab's oldest first, and the ones asked for until `reopen()`. Their cards go at once, without their motion. A file chooser's panel that shows as a sheet ends first with Cancel, which answers its prompt (`PanePromptLayer`), before AppKit decides whether to quit, since AppKit stops a quit for a sheet with more than one button and the card's view would end the panel only at its next update.
     func close() {
         isAccepting = false
+        for panel in waiting.values.flatMap({ $0 }).compactMap(\.panel) {
+            panel.sheetParent?.endSheet(panel, returnCode: .cancel)
+        }
         let ending = waiting
         var transaction = Transaction()
         transaction.disablesAnimations = true

@@ -7,21 +7,21 @@ import Foundation
 enum TabPromptContent {
     // MARK: Page dialogs
 
-    /// A page's `alert`: its words under the page's site, with OK. Words from a frame on another host, `embeddedHost`, are captioned with that host (`pageText(_:embeddedHost:)`).
-    static func alert(message: String, embeddedHost: String? = nil, identity: PromptIdentity) -> PromptContent {
-        PromptContent(kind: .pageAlert, identity: identity, pageText: pageText(message, embeddedHost: embeddedHost),
+    /// A page's `alert`: its words under the page's site, with OK. Words from a frame inside the page, `embeddedFrame`, are captioned as an embedded page's (`pageText(_:embeddedFrame:)`).
+    static func alert(message: String, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil, identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .pageAlert, identity: identity, pageText: pageText(message, embeddedFrame: embeddedFrame),
                       buttons: [PromptButton(id: "ok", title: "OK")], defaultButtonID: "ok", cancelButtonID: "ok")
     }
 
     /// A page's `confirm`: OK answers true, anything else false.
-    static func confirm(message: String, embeddedHost: String? = nil, identity: PromptIdentity) -> PromptContent {
-        PromptContent(kind: .pageConfirm, identity: identity, pageText: pageText(message, embeddedHost: embeddedHost),
+    static func confirm(message: String, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil, identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .pageConfirm, identity: identity, pageText: pageText(message, embeddedFrame: embeddedFrame),
                       buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "ok", title: "OK")], defaultButtonID: "ok", cancelButtonID: "cancel")
     }
 
     /// A page's `prompt`: a field that starts with the page's default text, which OK returns. The text is selected as the field takes the focus.
-    static func textInput(message: String, defaultText: String?, embeddedHost: String? = nil, identity: PromptIdentity) -> PromptContent {
-        var content = confirm(message: message, embeddedHost: embeddedHost, identity: identity)
+    static func textInput(message: String, defaultText: String?, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil, identity: PromptIdentity) -> PromptContent {
+        var content = confirm(message: message, embeddedFrame: embeddedFrame, identity: identity)
         content.kind = .pageTextInput
         content.fields = [PromptField(id: "text", kind: .text, label: "Answer", initialValue: defaultText ?? "")]
         content.focusedFieldID = "text"
@@ -187,10 +187,13 @@ enum TabPromptContent {
 
     // MARK: Helpers
 
-    /// A page's words, or nothing for an empty message. Words from a frame on another host than the page's say so in their caption, "An embedded page on “example.com” says", and VoiceOver names that host as their author.
-    private static func pageText(_ message: String, embeddedHost: String? = nil) -> PageAuthoredText? {
+    /// A page's words, or nothing for an empty message. Words from a frame inside the page say so in their caption, "An embedded page on “example.com” says" for a frame on another host, which VoiceOver names as their author, and "An embedded page says" for one without a host.
+    private static func pageText(_ message: String, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil) -> PageAuthoredText? {
         guard !message.isEmpty else { return nil }
-        guard let embeddedHost else { return PageAuthoredText(text: message) }
-        return PageAuthoredText(caption: "An embedded page on \u{201C}\(embeddedHost)\u{201D} says", text: message, author: embeddedHost)
+        switch embeddedFrame {
+        case nil: return PageAuthoredText(text: message)
+        case .host(let host): return PageAuthoredText(caption: "An embedded page on \u{201C}\(host)\u{201D} says", text: message, author: host)
+        case .unnamed: return PageAuthoredText(caption: "An embedded page says", text: message, author: "an embedded page")
+        }
     }
 }

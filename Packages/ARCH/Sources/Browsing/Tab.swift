@@ -91,6 +91,8 @@ public final class Tab: ObservableObject, Identifiable {
     private(set) var isDownloadOnly = false
     /// Whether the page may start downloads without asking (`BrowserSession`'s download delegate).
     var pageDownloads = PageDownloadGate()
+    /// The address of the document the main frame last committed, or nil before the web contents commits one. A page's dialogs name it as their page: `url` can already be the address of a navigation the page started and has not committed, as WebKit gives it.
+    private var committedURL: URL?
     /// The session sets this to name the agent whose agent folder has the given ID, or nil for a folder of the user's.
     var agentOwnerOfFolder: ((UUID) -> UUID?)?
     /// Where an agent tab asks about its navigations and reports what its rules did. The session sets it.
@@ -222,6 +224,7 @@ extension Tab: EngineWebContentsUIDelegate {
         }
     }
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
+        committedURL = url
         pageDownloads.documentDidCommit(site: Self.site(of: url))
     }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
@@ -283,6 +286,7 @@ extension Tab: EngineWebContentsUIDelegate {
         isAudible = replacement.isAudible
         hasCrashed = false
         isDownloadOnly = false
+        committedURL = nil
     }
 
     /// Loads the crashed page's address again, which starts a new page process.
@@ -294,7 +298,7 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: JavaScript dialogs
 
-    // A page's own dialogs show its words under its site, which a page cannot choose, so that a page cannot pass its dialog off as one from the app. Words from a frame on another host say which, so that an embedded page cannot pass its words off as the page's (`PromptSiteIdentity.embeddedHost`).
+    // A page's own dialogs show its words under its site, which a page cannot choose, so that a page cannot pass its dialog off as one from the app. The site is that of the document the main frame last committed, so that a page cannot show its dialog under the site of an address it starts to load. Words from a frame on another host, or from one without a host while the page has one, say so, so that an embedded page cannot pass its words off as the page's (`PromptSiteIdentity.embeddedFrame`).
 
     /// An agent's tab dismisses its page's alert at once and reports its text with the frame's origin (rule P10).
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, frameOrigin: URL?, completion: @escaping () -> Void) {
@@ -302,18 +306,18 @@ extension Tab: EngineWebContentsUIDelegate {
             reportToAgent(.alertDismissed(message: message, frame: frameOrigin))
             return completion()
         }
-        showPrompt(TabPromptContent.alert(message: message, embeddedHost: embeddedHost(of: frameOrigin), identity: pageIdentity)) { _ in completion() }
+        showPrompt(TabPromptContent.alert(message: message, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) { _ in completion() }
     }
 
     /// In an agent's tab, as for `prompt`, the user answers on this card and the agent hears that it waits (rule P9).
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, frameOrigin: URL?, completion: @escaping (Bool) -> Void) {
         reportToAgent(.dialogWaiting(.confirm, message: message, frame: frameOrigin))
-        showPrompt(TabPromptContent.confirm(message: message, embeddedHost: embeddedHost(of: frameOrigin), identity: pageIdentity)) { completion(TabPromptContent.confirmResult($0)) }
+        showPrompt(TabPromptContent.confirm(message: message, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) { completion(TabPromptContent.confirmResult($0)) }
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void) {
         reportToAgent(.dialogWaiting(.prompt, message: message, frame: frameOrigin))
-        showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, embeddedHost: embeddedHost(of: frameOrigin), identity: pageIdentity)) {
+        showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) {
             completion(TabPromptContent.textInputResult($0))
         }
     }
@@ -466,9 +470,20 @@ extension Tab: EngineWebContentsUIDelegate {
         PromptSiteIdentity.make(for: url, in: self)
     }
 
-    /// The host of the frame that shows a page dialog when it is not the page's own (`PromptSiteIdentity.embeddedHost`).
-    private func embeddedHost(of frameOrigin: URL?) -> String? {
-        PromptSiteIdentity.embeddedHost(of: frameOrigin, tabURL: url)
+    /// The page that shows a dialog of the frame at `frameOrigin`: the document the main frame last committed, or before the first one, the frame's own, as for the empty page of a new tab whose opener's script runs it.
+    private func dialogPage(of frameOrigin: URL?) -> URL? {
+        committedURL ?? frameOrigin
+    }
+
+    /// The page of a dialog as its asker.
+    private func dialogIdentity(_ frameOrigin: URL?) -> PromptIdentity {
+        let page = dialogPage(of: frameOrigin)
+        return PromptSiteIdentity.make(for: page, tabURL: page, favicon: favicon)
+    }
+
+    /// The frame that shows a page dialog when it is not the page's own (`PromptSiteIdentity.embeddedFrame`).
+    private func embeddedFrame(of frameOrigin: URL?) -> PromptSiteIdentity.EmbeddedFrame? {
+        PromptSiteIdentity.embeddedFrame(of: frameOrigin, pageURL: dialogPage(of: frameOrigin))
     }
 
     private func showPrompt(_ content: PromptContent, completion: @escaping (PromptResponse) -> Void) {

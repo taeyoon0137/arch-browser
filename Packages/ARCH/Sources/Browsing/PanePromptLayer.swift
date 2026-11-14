@@ -171,10 +171,12 @@ struct PanePromptLayer: View {
                                              isFocusedPane: isFocusedPane, isPageFieldFocused: isPageFieldFocused)
     }
 
+    /// Page words that the announcement reads are said to come from their author when that is not the asker, as for an embedded page, as the card's box of page words says.
     private func announce(_ state: PromptState) {
         let content = state.content
-        let subject = content.title ?? content.pageText.map { String($0.text.prefix(200)) } ?? content.kind.accessibilityName
-        AccessibilityNotification.Announcement("\(content.identity.name) asks: \(subject)").post()
+        let words = content.title == nil ? content.pageText : nil
+        let subject = content.title ?? words.map { String($0.text.prefix(200)) } ?? content.kind.accessibilityName
+        AccessibilityNotification.Announcement("\(words?.author ?? content.identity.name) asks: \(subject)").post()
     }
 
     // MARK: File choosers

@@ -1834,10 +1834,10 @@ extension BrowserSession: EngineDownloadsDelegate {
         closeDownloadPagesIfIdle()
     }
 
-    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a card over the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows; a tab that only pointed at the file, or a page without a tab, has nothing to ask about. The others go on as `chooseDestination` says.
+    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a card over the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows; a tab that only pointed at the file, or a page without a tab, has nothing to ask about, and an agent tab's download has had the user's answer on the agent's card (rule P6), so no card over a tab that the user may not be looking at holds it. The others go on as `chooseDestination` says.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
         let choose = { [weak self] in self?.chooseDestination(in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
-        guard let tab = allTabs.first(where: { $0.webContents === item.webContents }), !tab.isDownloadOnly, !admittedDownloads.contains(item) else { return choose() }
+        guard let tab = allTabs.first(where: { $0.webContents === item.webContents }), !tab.isDownloadOnly, tab.agentOwnerID == nil, !admittedDownloads.contains(item) else { return choose() }
         let decide = { [weak self] (allowed: Bool) in
             guard allowed else {
                 completion(nil)
