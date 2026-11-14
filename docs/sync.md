@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model and merge. Queue tasks V.9.3 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, and CloudKit records. Queue tasks V.9.4 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, the `Sync` module creates no CloudKit object and makes no network request.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -21,7 +21,7 @@
 - Settings stores its choices in `UserDefaults`. Download settings apply to every engine context through `UserDefaults.didChangeNotification`. Appearance applies only at launch and in Settings' `onChange`.
 - The Settings window lists General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. `Preferences` depends on `Browsing`. The Delete Persona sheet's text is in `BrowserWindowModel.swift`.
 - `scripts/bundle_app.sh` signs the app with `codesign --deep`, without entitlements or a provisioning profile.
-- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, and `SyncDiff`, without CloudKit code. No other target depends on it yet.
+- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, `SyncDiff`, `SyncCloudKitRecords`, and `SyncMirror`. No other target depends on it yet, and nothing in it reaches CloudKit's servers.
 
 ### CloudKit
 
@@ -30,6 +30,13 @@ Checked in the CloudKit Swift interface of the macOS 27.2 SDK:
 - `CKSyncEngine` needs macOS 14. `CKSyncEngine.Configuration` takes a database, an optional `CKSyncEngine.State.Serialization`, which is `Codable`, and a delegate. It has `automaticallySync`.
 - `CKSyncEngine.RecordZoneChangeBatch` has `atomicByZone`, `init(recordsToSave:recordIDsToDelete:atomicByZone:)`, and `init?(pendingChanges:recordProvider:)`.
 - Account changes arrive as `signIn(currentUser:)`, `signOut(previousUser:)`, and `switchAccounts(previousUser:currentUser:)`. A deleted zone's reason is `deleted`, `purged`, or `encryptedDataReset`.
+- A record's system parent, which CloudKit uses for sharing, has the key `___parent` (`CKRecord.SystemFieldKey.parent`). Setting a custom field `parent` leaves `CKRecord.parent` nil.
+
+Checked on macOS 27.2 by `SyncTests`, whose test runner has no iCloud entitlements, and by an ad hoc signed program without entitlements:
+
+- A process without iCloud entitlements creates `CKRecord` values in a custom zone, sets their `encryptedValues`, and archives and unarchives them with secure coding, encrypted values included. It reaches no server.
+- `allKeys()` lists the encrypted keys too. A plain read of an encrypted key returns nil, and an encrypted read of a plain key does too. Setting a key in one of the two, even to nil, while the other holds it raises an exception.
+- An array of records unarchives with `unarchivedObject(ofClasses:from:)` given `NSArray` and `CKRecord`. `unarchivedArrayOfObjects(ofClass:from:)` refuses it because of the dictionaries inside a record.
 
 ## Decisions
 
@@ -100,7 +107,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 - Edits made while sync was off count as made when sync turns on again, because `session.json` keeps no edit times. A first sync therefore keeps the server's values for records that both sides have (decision 4).
 - `schemaVersion` is the record format version that wrote the record, starting at 1.
 - `url` and `homeURL` are absolute address strings. `engine` is the raw value of `EngineKind`. `tint` is the raw value of `SpaceTint`. `value` is the setting's value as a string in the Settings list's form.
-- Sync stores every field except the references, `order`, `modifiedAt`, and `schemaVersion` in `encryptedValues`. CloudKit encrypts those fields end to end with keys in the user's iCloud Keychain. The server cannot read addresses, titles, or names. Encrypted fields cannot be queried, and sync never queries: it reads zone changes. CloudKit cannot encrypt references.
+- Sync stores every field except the references, `order`, `modifiedAt`, and `schemaVersion` in `encryptedValues`, `fieldModifiedAt` included. CloudKit encrypts those fields end to end with keys in the user's iCloud Keychain. The server cannot read addresses, titles, or names. Encrypted fields cannot be queried, and sync never queries: it reads zone changes. CloudKit cannot encrypt references. `SyncCloudKitRecords` places each value by its kind: text in `encryptedValues`, and numbers and references as plain values. `modifiedAt` is a plain date and `schemaVersion` a plain integer.
 - The default Persona, `Persona.defaultID` (`D59DAF4B-E372-4AF9-890E-455B8B3860F3`), has the record name `default` on every Mac. Every other Persona uses its UUID string. Two Macs that converted older `session.json` files to the default Persona therefore share one record.
 
 ### Settings list
@@ -123,6 +130,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 ## Mapping the session store to records
 
 - `session.json` holds no sync fields. `sync.json`, beside it in Application Support, holds the sync engine's state serialization, each synced item's last known server record (the mirror) archived with secure coding, and each pending save as the last comparison of its scope returned it, with its field values and edit times. The next comparison needs those values to tell whether a field still holds the value it found. Deleting `sync.json` makes the next sync a first sync.
+- `SyncMirror` writes `sync.json` atomically as JSON: a format version, the engine's state serialization as Base64 data that only the engine reads, the mirror's records sorted by record name in one archive made with secure coding, and each pending save's fields, edit times, `modifiedAt`, and `schemaVersion`. The mirror keeps every `CKRecord` whole, with its change tag, records of unknown types, and fields that `SyncValue` cannot hold. A missing file reads as empty. So does one that does not decode, one of a newer format, and one whose records do not unarchive or whose pending saves name an unknown record type, since a partial mirror would disagree with the engine's change token. Either way the next sync is a first sync.
 - Outgoing changes: session saves already combine changes within 0.5 seconds. After each save, `Browsing` hands Sync the sidebar's syncable state: the Personas, spaces, pinned folders, favorites, and pinned tabs in sidebar order, without open tabs and folders, a live folder's item tabs, or a feed folder whose address is in the Keychain. Sync turns the state into records and compares them with the mirror (`SyncDiff`). Sync finds settings changes the same way on `UserDefaults.didChangeNotification`. The sidebar and the settings compare apart, each with its own scope: the mirror's records of the sidebar's types, and the `Setting` records of the listed keys whose mirror values apply here (Settings list). Each comparison takes every pending save not yet sent, from either scope. Its result lists every change in its scope still to send and replaces only the pending changes of its scope in `CKSyncEngine.State`, leaving the other scope's: a `.saveRecord` for each record that differs from its mirror copy, and a `.deleteRecord` for each mirror record in scope that the state lacks. A record that changes again before sending remains one pending change, and one changed back needs none. A field with the mirror's value keeps the mirror's time. Any other field takes the time when Sync finds its new value and keeps it while the value stays and the time is later than the mirror's time for the field. A pending time no later than the mirror's, as after a fetch replaced the field, predates the mirror's value, so the value counts as found again. This comparison includes edits made while sync was off, so they upload when it turns on again.
 - The comparison treats a mirror record that the state lacks as deleted on this Mac, and a field whose value differs from the mirror's as edited here, so it runs only once the session has applied every change the mirror holds. Sync holds both comparisons while a first sync's plan or a fetch's changes are being applied, including children that wait for their parents and the orphan repairs, and runs them once those are applied. A session save or settings change in that time waits for that run.
 - Each change to the mirror, from a fetch or a sent batch, makes Sync run both comparisons again before the engine builds its next batch, so no pending save holds a value that the mirror has replaced since the save was found.
@@ -229,8 +237,8 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 | `Sync/SyncMerge.swift` | Merge by field and merge unit against the mirror's copy, a first write, or a first sync | Built |
 | `Sync/SyncOrderKeys.swift` | Order keys: midpoints, renumbering, and sorting | Built |
 | `Sync/SyncDiff.swift` | Pending saves and deletions from the current records and the mirror | Built |
-| `Sync/SyncCloudKitRecords.swift` | `SyncRecord` values to `CKRecord` values and back | V.9.3 |
-| `Sync/SyncMirror.swift` | Reads and writes `sync.json` | V.9.3 |
+| `Sync/SyncCloudKitRecords.swift` | `SyncRecord` values to `CKRecord` values and back | Built |
+| `Sync/SyncMirror.swift` | Reads and writes `sync.json` | Built |
 | `Sync/SyncedSettings.swift` | The Settings list: reading, validating, and applying values | V.9.4 |
 | `Sync/SyncAvailability.swift` | Entitlement and account checks | V.9.5 |
 | `Sync/SyncEngineClient.swift` | The protocol the controller uses and Arch's own events | V.9.6 |
@@ -248,12 +256,12 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 ## User steps
 
-Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.3 to V.9.13.
+Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.4 to V.9.13.
 
 1. In the Apple Developer account, make an explicit App ID for the app's bundle identifier (`CFBundleIdentifier` in `scripts/bundle_app.sh`) with the iCloud capability, CloudKit selected, and Push Notifications.
 2. Create an iCloud container and assign it to the App ID. Its identifier stays out of the repository.
 3. Create a provisioning profile for the App ID: macOS App Development with each Mac's device and the Apple Development certificate that `bundle_app.sh` signs with, or Developer ID with the Developer ID Application certificate. Keep it outside the repository and set `ARCH_PROVISIONING_PROFILE` to its path when running `scripts/bundle_app.sh`.
-4. Create the schema: bundle once with `ARCH_CLOUDKIT_ENVIRONMENT=Development`. Turn on Settings ▸ Sync on a Mac whose sidebar has a second Persona, a pinned folder holding a pinned tab, and a favorite. Change one listed setting. Once Last synced shows a time, check in CloudKit Console that the Development environment lists `Persona`, `Space`, `Folder`, `Favorite`, `Tab`, and `Setting`. Add a queryable index on `recordName` for each type so the record browser can list them. Deploy the schema changes to Production. Repeat this step before a build that writes a new field reaches Production (Schema versions).
+4. Create the schema: bundle once with `ARCH_CLOUDKIT_ENVIRONMENT=Development`. Turn on Settings ▸ Sync on a Mac whose sidebar has a second Persona, a pinned folder holding a pinned tab, and a favorite. Change one listed setting. Once Last synced shows a time, check in CloudKit Console that the Development environment lists `Persona`, `Space`, `Folder`, `Favorite`, `Tab`, and `Setting`, and that `Folder` has the field `parent` (Not verified 3). Add a queryable index on `recordName` for each type so the record browser can list them. Deploy the schema changes to Production. Repeat this step before a build that writes a new field reaches Production (Schema versions).
 5. Bundle on each Mac without `ARCH_CLOUDKIT_ENVIRONMENT`, so the build uses Production.
 6. Check with two Macs signed in to the same Apple Account:
    1. A build without the profile shows the toggle off and disabled with the reason for an unsigned build.
@@ -271,6 +279,6 @@ Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at
 
 1. Whether `CKSyncEngine` on macOS needs more than the `com.apple.developer.aps-environment` entitlement and `registerForRemoteNotifications()` to receive change notifications. Until verified, fetching when the app becomes active covers missed notifications.
 2. Whether an Apple Development build with `com.apple.developer.icloud-container-environment` set to `Production` reaches the Production environment.
-3. Whether a test process can create `CKRecord` values and their `encryptedValues` without iCloud entitlements. V.9.3 checks this first. If it cannot, its tests compare the field values the conversion writes.
+3. Whether CloudKit's servers accept a custom field named `parent` beside the record's system parent (`___parent`). Apple's documentation advises against keys that match a `CKRecord` property name, and `CKRecord` has a `parent` property. Creating the schema in the Development environment (User step 4) shows it. If the server refuses the field, rename it before the schema reaches Production. A Development schema can be reset, and a Production schema cannot.
 4. Whether a free personal team can use the iCloud capability. The User steps assume a paid membership.
 5. Whether `CKSyncEngine` sends `.signIn` when it starts without a state serialization. The controller starts a first sync either way.
