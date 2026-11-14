@@ -539,11 +539,21 @@ import Foundation
         }
         let host = host
         let wait = scriptWait
-        let answer: Result<EngineReadableContent, any Error>? = await withCheckedContinuation { continuation in
-            let once = AgentOnce(continuation)
-            host.readableContent(of: tab.id, limit: AgentLimits.readTextMaximumCharacters) { once.resume(with: $0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { once.resume(with: nil) }
+        let reply = AgentOnce<Result<EngineReadableContent, any Error>>()
+        let timeout = Task {
+            try await Task.sleep(for: .seconds(wait))
+            reply.resume(with: nil)
         }
+        defer { timeout.cancel() }
+        let answer = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard reply.begin(continuation) else { return }
+                host.readableContent(of: tab.id, limit: AgentLimits.readTextMaximumCharacters) { reply.resume(with: $0) }
+            }
+        } onCancel: {
+            reply.resume(with: nil)
+        }
+        guard !Task.isCancelled else { return .outcome(Self.ended) }
         switch answer {
         case nil:
             return .outcome(Outcome(result: AgentToolResult(status: .timeout, code: "notResponding", text: "\(handle) shows a dialog or does not respond. It waits for the user.")))

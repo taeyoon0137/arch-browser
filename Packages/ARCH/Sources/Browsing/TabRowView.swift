@@ -132,6 +132,9 @@ struct TabRowView: View {
             Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
             Button("Edit Saved Address\u{2026}") { windowModel.promptToEditSavedAddress(of: tab) }
         }
+        if let context = windowModel.sidebarAgentDraft(for: tab) {
+            Button("Ask Agent About This Tab…") { windowModel.askAgentAboutSidebarTab(tab, reviewed: context) }
+        }
         Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
         Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
         Divider()

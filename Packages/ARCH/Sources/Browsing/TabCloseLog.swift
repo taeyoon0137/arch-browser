@@ -19,6 +19,7 @@ public enum TabCloseReason: String {
     case webExtension
     /// Delete Persona closed it with the rest of its Persona.
     case persona
+    case sync
 
     var title: String {
         switch self {
@@ -29,6 +30,7 @@ public enum TabCloseReason: String {
         case .download: return "Download"
         case .webExtension: return "Extension"
         case .persona: return "Persona"
+        case .sync: return "Sync"
         }
     }
 
@@ -41,6 +43,7 @@ public enum TabCloseReason: String {
         case .download: return "Closed because it only pointed at a file"
         case .webExtension: return "Closed by a web extension"
         case .persona: return "Closed because its Persona was deleted"
+        case .sync: return "Removed by sidebar sync"
         }
     }
 }

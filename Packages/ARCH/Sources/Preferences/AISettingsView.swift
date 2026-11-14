@@ -58,7 +58,9 @@ struct AISettingsView: View {
                 case .usage: AIUsagePage(usage: service.usage, settings: settings)
                 case .activity: AIActivityPage(service: service, settings: settings)
                 case .agents:
-                    if let agents { AgentSettingsPage(service: agents, activity: agents.activity) }
+                    if let agents {
+                        AgentSettingsPage(service: agents, activity: agents.activity, hookName: { id in hooks?.hooks.first { $0.id == id }?.name })
+                    }
                 case .agentHooks:
                     if let hooks { AgentHooksPage(registry: hooks, currentTab: { PreferencesWindowController.session?.lastMainWindow?.selectedTabID }) }
                 }

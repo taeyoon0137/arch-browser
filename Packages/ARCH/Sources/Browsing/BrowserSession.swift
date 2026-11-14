@@ -271,7 +271,7 @@ public final class BrowserSession: ObservableObject {
     }
 
     /// Creates a hidden window of `kind` as `record` describes it, on the first space when the record's space is gone. A window without a frame cascades from the window of its kind that last became main. It goes first in `windows`, as it is about to come to the front, before its views exist.
-    private func makeWindow(from record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) -> BrowserWindowModel {
+    func makeWindow(from record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) -> BrowserWindowModel {
         let source = windows.first { $0.kind == kind }?.nsWindow
         var record = record
         if !spaces.contains(where: { $0.id == record.currentSpaceID }) { record.currentSpaceID = spaces[0].id }
@@ -299,6 +299,7 @@ public final class BrowserSession: ObservableObject {
         window.prepareToClose()
         if window.kind == .main { windowsToReopen = [window.record] }
         windows.removeAll { $0 === window }
+        applyPendingSyncEngines()
         windows.forEach { $0.updateShownTabs() }
         updateFocusedTab()
         // AppKit goes on closing the window after this, so its controller, which owns it, goes on the next turn of the run loop.
@@ -1002,12 +1003,18 @@ public final class BrowserSession: ObservableObject {
 
     /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start, or for a tab without its page: only a tab that no window has shown since launch lacks one, and the site settings popover offers the switch for a shown tab only.
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
+        tab.pendingSyncEngine = nil
         guard tab.engineKind != kind, tab.isLoaded, allTabs.contains(where: { $0.id == tab.id }), let source = runtime(of: tab) else { return }
+        switchLoadedEngine(of: tab, to: kind, source: source, permits: { true })
+    }
+
+    private func switchLoadedEngine(of tab: Tab, to kind: EngineKind, source: EngineRuntime, permits: @escaping () -> Bool) {
         let target = runtime(for: kind, in: tab.personaID)
         guard target.kind == kind else { return }
         // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
         engines(of: tab.personaID).cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
-            guard let self, let tab, tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
+            guard let self, let tab, permits(), tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
+            if tab.pendingSyncEngine == kind { tab.pendingSyncEngine = nil }
             self.replaceWebContents(of: tab, with: self.makeWebContents(url: tab.url, engine: kind, state: nil, in: tab.personaID))
         }
     }
@@ -1841,7 +1848,12 @@ public final class BrowserSession: ObservableObject {
                 continue
             }
             let personaID = personaID(ofSpace: record.spaceID)
-            let page = UnloadedWebContents(record: record, defaultEngine: defaultEngine)
+            let page: UnloadedWebContents
+            if let target = record.pendingSyncEngine, target != record.engine {
+                page = UnloadedWebContents(url: record.url, title: record.title, engine: target, state: nil)
+            } else {
+                page = UnloadedWebContents(record: record, defaultEngine: defaultEngine)
+            }
             page.loadSiteIcon()
             let tab = adopt(page, id: record.id ?? UUID(), spaceID: record.spaceID, personaID: personaID, pinned: record.isPinned, select: false)
             tab.restore(record, folderID: existingFolderID(record.folderID, spaceID: record.spaceID, pinned: record.isPinned))
@@ -1939,6 +1951,132 @@ public final class BrowserSession: ObservableObject {
         favorites.compactMap { favorite in
             guard let tab = favoriteTabs[favorite.id] else { return savedFavoriteTabs[favorite.id] }
             return SessionSnapshot.FavoriteTabRecord(id: tab.id, favoriteID: favorite.id, url: tab.url, engine: tab.engineKind, state: tab.webContents.restorableState)
+        }
+    }
+}
+
+// MARK: Incoming sidebar sync
+
+extension BrowserSession {
+    /// Applies a complete, repaired sidebar and its explicit tombstones. Items kept on this Mac
+    /// retain their slots among the synced rows. A replay makes no additional closed records.
+    @MainActor public func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) {
+        let current = sidebarSyncState
+        guard state != current || !deletions.personas.isDisjoint(with: personas.map(\.id))
+                || !deletions.spaces.isDisjoint(with: current.spaces.map(\.id))
+                || !deletions.folders.isDisjoint(with: current.folders.map(\.id))
+                || !deletions.favorites.isDisjoint(with: current.favorites.map(\.id))
+                || !deletions.tabs.isDisjoint(with: current.pinnedTabs.map(\.id)) else { return }
+        let eligibleFolders = Set(current.folders.map(\.id))
+        let eligibleTabs = Set(current.pinnedTabs.map(\.id))
+        for persona in state.personas {
+            if let existing = self.persona(withID: persona.id) {
+                if existing.name != persona.name { renamePersona(persona.id, to: persona.name) }
+            } else { personas.append(persona) }
+        }
+        for space in state.spaces where persona(withID: space.resolvedPersonaID) != nil {
+            if let existing = spaces.first(where: { $0.id == space.id }) {
+                guard existing.resolvedPersonaID == space.resolvedPersonaID else { continue }
+                if existing != space { updateSpace(space.id) { $0 = space } }
+            } else { insert(space) }
+        }
+        for id in deletions.personas.sorted(by: { $0.uuidString < $1.uuidString }) { deletePersona(id) }
+        for tab in tabs where eligibleTabs.contains(tab.id) && deletions.tabs.contains(tab.id) {
+            if perform(.close(remember: true), on: tab, reason: .sync) { undoableCloseCount += 1 }
+        }
+        for favorite in favorites where deletions.favorites.contains(favorite.id) {
+            if let tab = favoriteTabs[favorite.id] { _ = removeTab(tab, closedRecord: nil, reason: .sync) }
+            savedFavoriteTabs[favorite.id] = nil
+            favorites.removeAll { $0.id == favorite.id }
+        }
+        for folder in folders.reversed() where eligibleFolders.contains(folder.id) && deletions.folders.contains(folder.id) {
+            deleteFolder(folder.id)
+        }
+        for space in spaces.reversed() where deletions.spaces.contains(space.id) { deleteSpace(space.id) }
+
+        var appliedFolders = Set<UUID>()
+        for incoming in state.folders {
+            guard spaces.contains(where: { $0.id == incoming.spaceID && $0.resolvedPersonaID == incoming.personaID }),
+                  incoming.parentID.map(appliedFolders.contains) ?? true, SidebarSyncState.canShare(incoming.live) else { continue }
+            if let old = folders.first(where: { $0.id == incoming.id }) {
+                guard eligibleFolders.contains(old.id), spaces.first(where: { $0.id == old.spaceID })?.resolvedPersonaID == incoming.personaID else { continue }
+                var updated = old
+                updated.name = incoming.name
+                updated.spaceID = incoming.spaceID
+                updated.parentID = incoming.parentID
+                updated.live = incoming.live
+                if old != updated { updateFolder(old.id) { $0 = updated } }
+            } else {
+                appendFolder(TabFolder(id: incoming.id, spaceID: incoming.spaceID, name: incoming.name, isPinned: true,
+                                       parentID: incoming.parentID, live: incoming.live))
+            }
+            appliedFolders.insert(incoming.id)
+        }
+        var appliedFavorites = Set<UUID>()
+        for favorite in state.favorites where persona(withID: favorite.resolvedPersonaID) != nil {
+            if let index = favorites.firstIndex(where: { $0.id == favorite.id }) {
+                guard favorites[index].resolvedPersonaID == favorite.resolvedPersonaID else { continue }
+                if favorites[index] != favorite { favorites[index] = favorite }
+            } else { favorites.append(favorite) }
+            appliedFavorites.insert(favorite.id)
+        }
+        var appliedTabs = Set<UUID>()
+        for incoming in state.pinnedTabs {
+            guard spaces.contains(where: { $0.id == incoming.spaceID && $0.resolvedPersonaID == incoming.personaID }),
+                  incoming.folderID.map(appliedFolders.contains) ?? true else { continue }
+            let tab: Tab
+            if let old = allTabs.first(where: { $0.id == incoming.id }) {
+                guard eligibleTabs.contains(old.id), old.personaID == incoming.personaID else { continue }
+                tab = old
+            } else {
+                let page = UnloadedWebContents(url: incoming.savedPage?.url, title: incoming.savedPage?.title ?? "", engine: incoming.engine, state: nil)
+                tab = adopt(page, id: incoming.id, spaceID: incoming.spaceID, personaID: incoming.personaID, pinned: true, select: false)
+            }
+            if tab.spaceID != incoming.spaceID {
+                _ = leaveSplitView(tab)
+                tab.spaceID = incoming.spaceID
+                for window in windows where window.selectedTabID == tab.id { window.currentSpaceID = incoming.spaceID }
+            }
+            if tab.folderID != incoming.folderID { tab.folderID = incoming.folderID }
+            if tab.customTitle != incoming.customTitle { tab.customTitle = incoming.customTitle }
+            let changedPage = tab.savedPage != incoming.savedPage
+            if changedPage { tab.savedPage = incoming.savedPage }
+            if !tab.isLoaded, changedPage || tab.engineKind != incoming.engine {
+                let page = UnloadedWebContents(url: incoming.savedPage?.url, title: incoming.savedPage?.title ?? "", engine: incoming.engine, state: nil)
+                tab.replaceWebContents(with: page)
+            }
+            tab.pendingSyncEngine = tab.engineKind == incoming.engine ? nil : incoming.engine
+            appliedTabs.insert(tab.id)
+        }
+        if let reordered = Self.orderedSynced(personas, by: state.personas.map(\.id)) { personas = reordered }
+        if let reordered = Self.orderedSynced(spaces, by: state.spaces.map(\.id)) { spaces = reordered }
+        if let reordered = Self.orderedSynced(folders, by: state.folders.map(\.id).filter(appliedFolders.contains)) { folders = reordered }
+        if let reordered = Self.orderedSynced(favorites, by: state.favorites.map(\.id).filter(appliedFavorites.contains)) { favorites = reordered }
+        if let reordered = Self.orderedSynced(tabs, by: state.pinnedTabs.map(\.id).filter(appliedTabs.contains)) { tabs = reordered }
+        applyPendingSyncEngines()
+    }
+
+    private static func orderedSynced<Item: Identifiable>(_ items: [Item], by ids: [Item.ID]) -> [Item]? {
+        let target = Set(ids)
+        let slots = items.indices.filter { target.contains(items[$0].id) }
+        let old = slots.map { items[$0].id }
+        guard old != ids else { return nil }
+        let byID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let ordered = ids.compactMap { byID[$0] }
+        guard old != ordered.map(\.id) else { return nil }
+        var result = items
+        for (slot, item) in zip(slots, ordered) { result[slot] = item }
+        return result
+    }
+
+    func applyPendingSyncEngines() {
+        for tab in tabs {
+            guard let target = tab.pendingSyncEngine, target != tab.engineKind, window(showing: tab) == nil,
+                  let source = runtime(of: tab) else { continue }
+            switchLoadedEngine(of: tab, to: target, source: source) { [weak self, weak tab] in
+                guard let self, let tab else { return false }
+                return tab.pendingSyncEngine == target && self.window(showing: tab) == nil
+            }
         }
     }
 }

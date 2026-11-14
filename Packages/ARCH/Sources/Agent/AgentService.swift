@@ -35,7 +35,7 @@ import Foundation
     private var runService: AgentRunner?
     public var runs: AgentRunner {
         if let runService { return runService }
-        let runner = AgentRunner(host: host, ai: .shared)
+        let runner = AgentRunner(host: host, ai: .shared, activity: activity)
         runObserver = runner.$isRunning.dropFirst().removeDuplicates().sink { [weak self] _ in self?.objectWillChange.send() }
         runner.startCLI = { [weak self] binding, feature, models, turns, instructions in
             guard let self else { throw AIError.cancelled }
@@ -347,7 +347,7 @@ import Foundation
         dependencies.prompt.cancelAll()
         runService?.cancelAll()
         for binding in hookCLIs.values {
-            binding.ready.shut()
+            binding.finish()
             binding.runner?.endProcesses()
         }
         for session in sessions where !session.isCleanedUp { session.endProcessesAtQuit() }
@@ -604,6 +604,8 @@ import Foundation
         public var spaceID: UUID
         /// Tabs shared with the session from the start, such as the selected tab; one on a site excluded from AI is left out.
         public var attachedTabIDs: [UUID]
+        /// When a composer showed a specific document, refuse a changed page until the user reviews or removes the chip.
+        var reviewedDocument: AgentTabInfo?
         var readerExcerpt: AgentReaderExcerpt?
         public var mode: AgentAccessLevel
         /// Nil uses the `agent` route, or the first preset model when the route has none (`AIService.startAgentSession(_:)`).
@@ -684,6 +686,9 @@ import Foundation
         let attachedIDs = Set(attached)
         let tabs = host.userTabs(in: personaID).filter { tab in
             tab.agentOwnerID == nil && attachedIDs.contains(tab.id) && AgentPolicy.showsTitle(of: tab.url, allowsAI: dependencies.allowsAI)
+        }
+        if let reviewed = start.reviewedDocument, !tabs.contains(where: { $0.id == reviewed.id && $0.documentID == reviewed.documentID && $0.url == reviewed.url }) {
+            throw SessionError(message: "The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page.")
         }
         if let excerpt = start.readerExcerpt, !tabs.contains(where: excerpt.matches) {
             throw SessionError(message: "The source page changed or is no longer shared. Turn off Share reader excerpt to continue.")
@@ -901,7 +906,7 @@ import Foundation
     }
 
     func finishHookCLI(_ binding: AgentHookCLIRun) {
-        binding.ready.shut()
+        binding.finish()
         hookCLIs.removeValue(forKey: binding.id)
         for connection in connections.values where connection.sessionID == binding.id { endpoint?.close(connection.id) }
         if !acceptsOutsideClients, !sessionsNeedChannel, hookCLIs.isEmpty { updateListening() }

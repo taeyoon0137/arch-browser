@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the availability check, the sync engine, the first-sync merge plan, and the outgoing sidebar mapping. Queue tasks V.9.9 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the availability check, the sync engine, the first-sync merge plan, and both directions of the sidebar mapping. Queue tasks V.9.10 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, it creates no sync engine and sends or fetches no records. Only in a build whose own entitlements name a container does it create that container's `CKContainer`, to ask for the account's status (`accountStatus()`) and hear of account changes, so that Settings ▸ Sync can say whether sync can run (Accounts and removed data). Whether that question reaches Apple's servers is Not verified 6.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -164,7 +164,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
   - A deleted space moves this Mac's open tabs and open folders to its neighbor, as `deleteSpace` does.
   - A deleted Persona is removed as Delete Persona does (decision 8).
 - Orphans: records that each merge cleanly can still disagree with each other, as when one Mac moves a folder to another space while another Mac moves a tab into it. After a successful fetch, Sync repairs them in this order, folders from the top level down. Every repair keeps the record's order key, and equal keys sort by record name, so every Mac picks the same destination. The Mac that finds the orphan writes the change. Two Macs that write the same change merge without a difference.
-  1. A space, folder, favorite, or tab whose Persona is missing is deleted. A Persona left without spaces gets a space named Personal, as at first launch. Its record name is a name-based UUID made from the Persona's record name (decision 11).
+  1. A space, folder, favorite, or tab whose Persona is missing is deleted. A Persona left without spaces gets a space named Personal, as at first launch. Its record name is a UUIDv5 using the Persona UUID as namespace (the fixed default Persona UUID for `default`) and the UTF-8 name `Arch Personal space` (decision 11).
   2. A pinned tab or folder whose space is missing moves to the first space of its Persona.
   3. A folder whose parent is missing or belongs to another Persona moves to the top of its space's pinned list. A pinned tab whose folder is missing or belongs to another Persona moves out of folders in its space.
   4. Folders whose parents form a cycle, as when two Macs each move one folder under the other, are cut at the folder whose record name sorts first. It moves to the top of its space's pinned list, and the others stay under it.
@@ -274,13 +274,14 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 | `Sync/SyncEngineClient.swift` | The protocol the controller uses and Arch's own events | Built |
 | `Sync/CloudKitSyncEngine.swift` | Implements the protocol with `CKSyncEngine` | Built |
 | `Sync/FirstSyncMerge.swift` | The first sync's matches and moves | Built |
-| `Browsing/SidebarSync.swift` | The sidebar's syncable state (built) and incoming session changes | V.9.9 |
-| `Sync/SidebarRecords.swift` | Converts syncable state to records (built), and fetched records to session changes and orphan repairs | V.9.9 |
+| `Browsing/SidebarSync.swift` | The syncable sidebar state and deletion IDs consumed by `BrowserSession.applySidebarSync` | Built |
+| `Sync/SidebarRecords.swift` | Converts syncable state to records | Built |
+| `Sync/IncomingSidebarRecords.swift` | Merges a completed fetch, repairs the sidebar graph, and prepares session changes and explicit deletions | Built |
 | `Sync/SyncController.swift` | The toggle, engine lifetime, and events | V.9.10, V.9.11 |
 | `Preferences/SyncSection.swift` | Settings ▸ Sync | V.9.12 |
 
 - Paths are under `Packages/ARCH/Sources/`. `SyncTests` holds `FakeSyncEngine`, which keeps pending changes in memory and replays scripted events for the controller tests. No test reaches CloudKit's servers.
-- `Sync` depends on `Browsing`, `ARCHEngine`, and CloudKit. `Package.swift` declares the `Sync` and `SyncTests` targets. `Browsing` provides the outgoing sidebar state and its save callback. V.9.9 adds incoming changes. V.9.12 connects `Preferences` and the `Arch` app to the controller and the Delete Persona sheet. `Sync` needs no `Preferences` type: the app shell applies appearance through `SyncedSettings.onApplied`, on the controller's settings.
+- `Sync` depends on `Browsing`, `ARCHEngine`, and CloudKit. `Package.swift` declares the `Sync` and `SyncTests` targets. `Browsing` provides the outgoing sidebar state and its save callback. `BrowserSession.applySidebarSync` applies incoming changes to the session. V.9.12 connects `Preferences` and the `Arch` app to the controller and the Delete Persona sheet. `Sync` needs no `Preferences` type: the app shell applies appearance through `SyncedSettings.onApplied`, on the controller's settings.
 - In V.9.12, `AppDelegate` creates the controller after the session, hands it to Settings, registers for remote notifications while sync is on, and calls `fetchChanges()` when the app becomes active.
 - Verification needs two Macs signed in to the same Apple Account, or one Mac and the record browser in CloudKit Console, and a second Apple Account for the account checks (User steps).
 

@@ -48,6 +48,7 @@ import Testing
     var failingAddresses: Set<URL> = []
     /// Tabs whose page never answers a read, as while it shows a dialog.
     var silentTabIDs: Set<UUID> = []
+    var pendingReads: [UUID: (Result<EngineReadableContent, any Error>) -> Void] = [:]
     /// Lets a test change the tab or turn after extraction, before the engine answers.
     var beforeReturningContent: (() -> Void)?
     var onPageScript: (() -> Void)?
@@ -101,7 +102,7 @@ import Testing
     }
 
     func readableContent(of tabID: UUID, limit: Int, completion: @escaping (Result<EngineReadableContent, any Error>) -> Void) {
-        guard !silentTabIDs.contains(tabID) else { return }
+        if silentTabIDs.contains(tabID) { pendingReads[tabID] = completion; return }
         guard let tab = tabs.first(where: { $0.id == tabID }), let url = tab.url else { return completion(.failure(EngineReadableContentError.unreadable)) }
         let text = pages[url]?.text ?? ""
         beforeReturningContent?()
