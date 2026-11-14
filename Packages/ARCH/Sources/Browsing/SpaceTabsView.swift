@@ -246,7 +246,7 @@ private struct TabRowFramesKey: PreferenceKey {
     }
 }
 
-/// The space's symbol and name above its tabs, with a button for the space menu. With several Personas, the name follows the space's Persona on one line, as "Work / Research" (Persona rule 7), with "Work /" in small secondary text, which truncates first in a narrow sidebar. Double-clicking the name renames the space in place; the Persona's name is not part of the field.
+/// The space's symbol and name above its tabs, with a button for the space menu. With several Personas, the name follows the space's Persona on one line, as "Work / Research" (Persona rule 7), at one size: the Persona's name in regular secondary text, the slash in tertiary, and the space's name in semibold primary, with the Persona's name truncating first in a narrow sidebar. With one Persona, the space's name stays semibold secondary. Double-clicking the name renames the space in place; the Persona's name is not part of the field.
 struct SpaceHeaderView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -270,10 +270,14 @@ struct SpaceHeaderView: View {
                 .foregroundStyle(theme.symbolColor(for: space.tint))
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
-                    Text("\(personaName) /")
-                        .font(.system(size: 10))
+                    Text(personaName)
+                        .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    Text("/")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize()
                 }
                 spaceName
             }
@@ -320,7 +324,7 @@ struct SpaceHeaderView: View {
         } else {
             Text(space.name)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(session.displayedName(ofPersona: space.resolvedPersonaID) == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                 .lineLimit(1)
                 // The space's name keeps its width, so the Persona's name truncates before it.
                 .layoutPriority(1)
