@@ -389,6 +389,8 @@ It answers AppleScript through `Arch.sdef`: the standard suite, `open location`,
 
 ### Build
 
+A signed fixture killed the Chromium renderer of one pinned tab while another tab used WebKit. The tab automatically reloaded after the first crash. When the replacement renderer crashed within a minute, the tab showed its crash state until Reload ran. Both reloads retained the pinned tab’s ID and preferred engine. The adjacent WebKit page kept its in-memory marker and made one request throughout. This checks a renderer crash separately from killing the whole browser.
+
 A signed offscreen renderer check verified PDF viewing on both engines with a local file and a loopback response served as `application/pdf` with an inline disposition. Captures of each engine showed the colored pages and both text markers. Sending the same bytes as an attachment called each adapter’s download delegate once. One run cancelled before any panel. Another supplied a temporary destination. Both adapters reported completion and saved the same bytes as the source. Separately, both exported two pages from HTML, with the expected page break and print-only text. The native save and print panels require an interactive check.
 
 `./scripts/check_engine_restore/run.py` uses separate processes and a disposable profile to check a pinned tab across Chromium, temporary WebKit and restored Chromium. Add `--interrupt` to kill the fallback process after its normal scheduled write commits a rename, then check the next launch.
