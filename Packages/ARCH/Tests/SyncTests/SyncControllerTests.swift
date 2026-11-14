@@ -365,6 +365,111 @@ import Testing
         #expect(f.sidebar.sidebarSyncState.favorites.isEmpty && engine.pendingChanges.contains(.deleteRecord(id)))
     }
 
+    @Test(arguments: [SyncAccountChange.signOut, .switchAccounts]) func accountLossKeepsTheSidebarAndPersistsTheExplanation(change: SyncAccountChange) async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        let local = f.sidebar.sidebarSyncState
+        f.answer = { .unavailable(.noAccount) }
+        engine.deliver([.accountChange(change)])
+        await f.controller.refresh()
+        #expect(f.controller.availability == .unavailable(.noAccount))
+        #expect(f.controller.statusExplanation == SyncAvailability.Reason.noAccount.message)
+        #expect(!f.controller.isEnabled && f.sidebar.sidebarSyncState == local && !FileManager.default.fileExists(atPath: f.file.path))
+        f.newController()
+        f.answer = { .available(f.database) }
+        await f.controller.refresh()
+        #expect(f.controller.offReason == .accountChanged && f.controller.statusExplanation == SyncOffReason.accountChanged.message)
+        await f.controller.setEnabled(true)
+        #expect(f.controller.offReason == nil && f.controller.statusExplanation == nil && f.engines.last?.startedFrom == nil)
+    }
+
+    @Test func accountStatusCanReportSignOutBeforeTheEngineEvent() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        _ = try await f.startAndSend()
+        let local = f.sidebar.sidebarSyncState
+        f.answer = { .unavailable(.noAccount) }
+        await f.controller.refresh()
+        #expect(!f.controller.isEnabled && f.controller.offReason == .accountChanged)
+        #expect(!FileManager.default.fileExists(atPath: f.file.path) && f.sidebar.sidebarSyncState == local)
+        f.answer = { .available(f.database) }
+        await f.controller.refresh()
+        #expect(f.engines.count == 1 && f.controller.statusExplanation == SyncOffReason.accountChanged.message)
+    }
+
+    @Test(arguments: [SyncZoneDeletionReason.deleted, .purged]) func aDeletedZoneKeepsLocalDataAndExplainsItsReset(reason: SyncZoneDeletionReason) async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        let local = f.sidebar.sidebarSyncState
+        engine.deliver([.zoneDeleted(SyncCloudKitRecords.zoneID, reason)])
+        #expect(!f.controller.isEnabled && f.controller.offReason == .zoneDeleted && f.sidebar.sidebarSyncState == local)
+        #expect(!FileManager.default.fileExists(atPath: f.file.path))
+        f.newController()
+        await f.controller.refresh()
+        #expect(f.controller.statusExplanation == SyncOffReason.zoneDeleted.message && f.engines.count == 1)
+    }
+
+    @Test func togglingOffPreservesTheFileAndEditsMadeWhileOffUploadOnResume() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        let state = try Data(contentsOf: f.file)
+        let token = f.copy.engineState
+        let id = f.space.id.uuidString
+        await f.controller.setEnabled(false)
+        #expect(engine.isStopped && f.controller.offReason == nil)
+        f.sidebar.renameSpace("Edited while off")
+        try f.sidebar.saveNow().get()
+        f.setAppearance("dark")
+        #expect(try Data(contentsOf: f.file) == state)
+        await f.controller.setEnabled(true)
+        let resumed = try #require(f.engines.last)
+        #expect(resumed.startedFrom == token && Set(resumed.pendingChanges) == [.saveRecord(id), .saveRecord("ARCHAppearance")])
+        try await resumed.sendChanges()
+        let n = resumed.fetchCount
+        resumed.deliver([.accountChange(.signIn)])
+        let deadline = ContinuousClock.now + .seconds(3)
+        while resumed.fetchCount == n && ContinuousClock.now < deadline { await Task.yield() }
+        #expect(resumed.fetchCount == n + 1 && f.engines.count == 2 && resumed.pendingChanges.isEmpty)
+    }
+
+    @Test func confirmedDeletionSendsOnlyTheZoneAndTurnsOffOnceTheServerAccepts() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        f.sidebar.renameSpace("Keep my tabs")
+        try f.sidebar.saveNow().get()
+        let before = engine.batches.count
+        engine.zoneFailure = .networkUnavailable
+        await f.controller.deleteCloudData()
+        #expect(f.controller.isEnabled && f.controller.isDeletingCloudData)
+        #expect(engine.pendingChanges.contains(.deleteZone) && FileManager.default.fileExists(atPath: f.file.path))
+        #expect(engine.batches.count == before)
+        await f.controller.refresh()
+        #expect(engine.sentZoneChanges.last == .deleteZone && engine.batches.count == before)
+        #expect(!f.controller.isEnabled && !f.controller.isDeletingCloudData && f.space.name == "Keep my tabs")
+        #expect(f.controller.offReason == .zoneDeleted && !FileManager.default.fileExists(atPath: f.file.path))
+    }
+
+    @Test func permanentDeletionRefusalResumesSyncAndAllowsAnExplicitRetry() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        f.sidebar.renameSpace("Local")
+        try f.sidebar.saveNow().get()
+        engine.zoneFailure = .permissionFailure
+        await f.controller.deleteCloudData()
+        #expect(f.controller.isEnabled && !f.controller.isDeletingCloudData && f.controller.lastError != nil)
+        #expect(!engine.pendingChanges.contains(.deleteZone) && FileManager.default.fileExists(atPath: f.file.path))
+        #expect(engine.pendingChanges == [.saveRecord(f.space.id.uuidString)])
+        engine.zoneFailure = .zoneNotFound
+        await f.controller.deleteCloudData()
+        #expect(!f.controller.isEnabled && f.controller.offReason == .zoneDeleted && f.space.name == "Local")
+        #expect(!FileManager.default.fileExists(atPath: f.file.path))
+    }
+
     @Test func anAccountNotificationRechecksWhileOffAndALateResultCannotRestartAnotherEngine() async throws {
         let f = Fixture()
         defer { f.clean() }

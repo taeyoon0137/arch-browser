@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the availability check, the sync engine, the first-sync merge plan, both directions of the sidebar mapping, and the controller that applies fetches and builds outgoing batches. Queue tasks V.9.11, V.9.12 and V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the availability check, the sync engine, the first-sync merge plan, both directions of the sidebar mapping, and the controller that applies fetches and builds outgoing batches. Queue tasks V.9.12 and V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, it creates no sync engine and sends or fetches no records. Only in a build whose own entitlements name a container does it create that container's `CKContainer`, to ask for the account's status (`accountStatus()`) and hear of account changes, so that Settings ▸ Sync can say whether sync can run (Accounts and removed data). Whether that question reaches Apple's servers is Not verified 6.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -254,7 +254,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
   - With a temporarily unavailable account or an unknown status: "iCloud isn't available right now. Arch checks again when it becomes active."
 - After a sign-out, an account switch, or a deleted zone, the toggle is off. While the availability check finds that sync cannot run, its reason and the disabled toggle above win: after a sign-out, Settings shows "Sign in to iCloud in System Settings to sync." Once the check finds an available account, as after an account switch, signing in again, or a deleted zone, the toggle is enabled, and the reason says what happened: "Sync turned off because the iCloud account changed. Turn it on to merge this Mac's sidebar into the current account." or "Sync turned off because Arch's iCloud data was deleted. Turn it on to upload this Mac's sidebar again."
 - Turning sync off stops the engine and keeps local data, iCloud data, and `sync.json`. Turning it on again resumes from the saved change token.
-- After a confirmation sheet, Delete iCloud Data deletes the zone, turns sync off, and deletes `sync.json`. This removes iCloud data for every Mac. Local data stays. Other Macs turn sync off at their next fetch.
+- After a confirmation sheet, Delete iCloud Data deletes the zone, turns sync off, and deletes `sync.json`. The controller holds record uploads while the confirmed request is pending. Temporary failures retry on the live engine. A refusal keeps the mirror and resumes syncing, and the user can retry. A relaunch uses the pre-deletion file and fetches the zone’s current state. Success or an already missing zone ends sync. This removes iCloud data for every Mac. Local data stays. Other Macs turn sync off at their next fetch.
 - While sync is on, the Delete Persona sheet adds: "It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too." (decision 8).
 - The section names no Persona. Any label that names a space with its Persona uses `BrowserSession.label(ofSpace:)`.
 
@@ -278,7 +278,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 | `Browsing/SidebarSync.swift` | The syncable sidebar state and deletion IDs consumed by `BrowserSession.applySidebarSync` | Built |
 | `Sync/SidebarRecords.swift` | Converts syncable state to records | Built |
 | `Sync/IncomingSidebarRecords.swift` | Merges a completed fetch, repairs the sidebar graph, and prepares session changes and explicit deletions | Built |
-| `Sync/SyncController.swift` | The toggle, engine lifetime, ordered fetch and send events, and durable checkpoints | Built. Account and deletion controls follow in V.9.11 |
+| `Sync/SyncController.swift` | The toggle, engine lifetime, ordered fetch and send events, durable checkpoints, account changes and confirmed zone deletion | Built |
 | `Preferences/SyncSection.swift` | Settings ▸ Sync | V.9.12 |
 
 - Paths are under `Packages/ARCH/Sources/`. `SyncTests` holds `FakeSyncEngine`, which keeps pending changes in memory and replays scripted events for the controller tests. No test reaches CloudKit's servers.
