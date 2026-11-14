@@ -1,4 +1,4 @@
-// Answers websites' permission requests for the session: from the answers that Settings ▸ Websites remembers, or with a card on the tab, whose answer it then remembers. It also keeps the answers that each engine profile keeps itself in line with the remembered ones. A website's notifications also need Arch's own notification permission from macOS, which the card asks for after Allow and names while it is off.
+// Answers websites' permission requests for the session: from the answers that Settings ▸ Websites remembers, or with a card on the tab, whose answer it then remembers. It also keeps the answers that each engine profile keeps itself in line with the remembered ones. A website's notifications also need Arch's own notification permission from macOS, which the card asks for after Allow and names while it is off. The agent-only Persona denies requests without storing an answer.
 import ARCHEngine
 import Combine
 import Foundation
@@ -11,17 +11,38 @@ final class SitePermissionAnswers {
     /// The answers waiting for each permission card, keyed by tab, origin, and types, so that a page that asks again before the user answers gets the same card's answer.
     private var waiters: [String: [(Bool) -> Void]] = [:]
     private var cancellables: Set<AnyCancellable> = []
+    /// The agent-only Persona's profiles, which follow the remembered answers only once their Persona becomes ordinary again.
+    private var unfollowed: [(personaID: UUID, context: any EngineBrowserContext)] = []
 
-    init(store: SitePermissionStore, notifications: NotificationAuthorization) {
+    /// The Agents Persona while `agent.json` names it, which the session sets when it creates the answers, before any engine starts, and the agents' service keeps in line with the checked seal. A Persona that stops being agent-only, as after `agent.json` lost its seal, has its running profiles follow the remembered answers from then on; a profile that followed them before its Persona became agent-only keeps them until quit.
+    var agentOnlyPersonaID: UUID? {
+        didSet {
+            guard agentOnlyPersonaID != oldValue else { return }
+            let released = unfollowed.filter { $0.personaID != agentOnlyPersonaID }
+            unfollowed.removeAll { $0.personaID != agentOnlyPersonaID }
+            for profile in released { follow(profile.context, of: profile.personaID) }
+        }
+    }
+
+    init(store: SitePermissionStore, notifications: NotificationAuthorization, agentOnlyPersonaID: UUID? = nil) {
         self.store = store
         self.notifications = notifications
+        self.agentOnlyPersonaID = agentOnlyPersonaID
     }
 
     /// Answers a request of the tab `tabID` from the remembered answers, or asks with the card whose maker it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
     ///
     /// The card can wait in its tab's queue while Arch's notification permission changes, as when macOS's question for another tab's card is answered, so `ask` makes the card with the maker each time a card shows it, which reads the permission then, and again when the permission changes while a card shows it, and the answer acts on the permission the card showed last.
-    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity,
+    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, personaID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity,
                 ask: (@escaping () -> PromptContent, @escaping (PromptResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
+        if personaID == agentOnlyPersonaID {
+            completion(false)
+            // Chromium keeps every answer it receives, so its profile forgets the denial again: this Persona remembers nothing.
+            if let context {
+                DispatchQueue.main.async { request.types.forEach { context.setRememberedPermission(nil, for: $0, origin: request.origin) } }
+            }
+            return
+        }
         let store = store
         let notifications = notifications
         // Chromium keeps every answer it receives, even the safe answer for a card that ended with its tab, so once it has the answer its kept answers return to the remembered ones.
@@ -75,8 +96,12 @@ final class SitePermissionAnswers {
         }
     }
 
-    /// Copies the remembered answers into a profile's own kept answers, now and after every change, such as one made in Settings. Now also takes away the answers removed while the profile was not running.
-    func follow(_ context: any EngineBrowserContext) {
+    /// Copies the remembered answers into the kept answers of a profile of the Persona `personaID`, now and after every change, such as one made in Settings. Now also takes away the answers removed while the profile was not running. A profile of the agent-only Persona takes none.
+    func follow(_ context: any EngineBrowserContext, of personaID: UUID) {
+        guard personaID != agentOnlyPersonaID else {
+            unfollowed.append((personaID, context))
+            return
+        }
         let store = store
         let apply = { (origin: String, types: [EnginePermissionType]) in
             guard let url = URL(string: origin) else { return }

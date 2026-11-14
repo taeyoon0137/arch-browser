@@ -42,7 +42,7 @@ public struct AISitePattern: Codable, Hashable, Sendable {
         return !site.isEmpty && (host == site || host.hasSuffix(".\(site)"))
     }
 
-    /// A host as patterns compare it: in lowercase, without the brackets of an IPv6 address and without the trailing dots that name the root, which both engines keep in a page's address, as in `https://example.org./`.
+    /// A host as patterns compare it: in lowercase, without the brackets of an IPv6 address and without the trailing dots that name the root, which both engines keep in a page's address, as in `https://example.org./`; a name with them reaches the same host, as `localhost.` reaches the Mac.
     static func normalizedHost(_ host: String) -> String {
         var host = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         while host.hasSuffix(".") { host.removeLast() }

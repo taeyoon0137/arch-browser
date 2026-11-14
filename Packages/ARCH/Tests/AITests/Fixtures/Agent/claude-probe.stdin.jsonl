@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"In one step, call both list_tabs and session_info in parallel. Then reply DONE."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with only the word: ok"}]}}

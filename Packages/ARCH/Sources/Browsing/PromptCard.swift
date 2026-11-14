@@ -87,7 +87,7 @@ struct PromptCard: View {
                     .padding(.top, layout.spacing(12))
             }
             if let pageText = content.pageText {
-                PageAuthoredTextView(text: pageText, author: content.identity.name)
+                PageAuthoredTextView(text: pageText, author: pageText.author ?? content.identity.name)
                     .padding(.top, layout.spacing(10))
             }
             if !content.items.isEmpty {

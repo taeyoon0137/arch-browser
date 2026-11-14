@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- The order page the agents' page script tests use for what a dialog's library hides from assistive apps while the dialog shows: the page's root marked aria-hidden, holding a filled card number field and another site's frame, and an inert section with a filled email field. Snapshots leave them out, and screenshots paint them over. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Order – Example</title>
+<style>
+  body { font: 14px -apple-system, sans-serif; margin: 0; padding: 8px; }
+  input { background: rgb(255, 0, 0); color: rgb(255, 0, 0); }
+  iframe { width: 300px; height: 60px; border: 0; }
+</style>
+</head>
+<body>
+<div id="app" aria-hidden="true">
+  <label>Card number <input name="card" autocomplete="cc-number" value="4111111111111111"></label>
+  <iframe title="Payments" src="data:text/html,%3Cinput%20name%3Dcard%20value%3D4111%3E"></iframe>
+</div>
+<section inert><label>Email <input type="email" name="email" value="me@example.org"></label></section>
+<div role="dialog" aria-label="Confirm your order"><button>Confirm order</button></div>
+</body>
+</html>

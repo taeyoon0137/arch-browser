@@ -1,4 +1,4 @@
-// The question popover: a question about the page, or about text selected in it, answered in a panel that floats over the page's top trailing corner. The palette's Ask About This Page and the page context menu's Ask About Selection open it.
+// The question popover: a question about the page, or about text selected in it, answered in a panel that floats over the page's top trailing corner, with Continue as Agent Task beside its Ask. The palette's Ask About This Page and the page context menu's Ask About Selection open it.
 import AI
 import SwiftUI
 
@@ -72,6 +72,7 @@ private struct PageQuestionPopover: View {
                 .reportsFocus(of: .question, isFocused: isFieldFocused)
                 .onSubmit(send)
                 .onExitCommand(perform: windowModel.dismissPageQuestion)
+            ContinueAsAgentTaskButton { ContinueAsAgentTaskButton.task(draft: draft, exchanges: conversation.exchanges) }
             if conversation.isAnswering {
                 SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
             } else {

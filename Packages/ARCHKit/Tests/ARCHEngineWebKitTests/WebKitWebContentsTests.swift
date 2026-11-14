@@ -1,4 +1,4 @@
-// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, and a page script's message reaches the page script delegate of that web contents. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
+// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, a page script's message reaches the page script delegate of that web contents, and the favicon lookup reads the page's declared icon from a world of the app's own. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -49,6 +49,14 @@ import Testing
             if result?.numberOfMatches == 0 { try await Task.sleep(for: .milliseconds(100)) }
         }
         #expect(result?.numberOfMatches == 2)
+    }
+
+    /// The favicon lookup runs in a world of the app's own and still reads the page's declared icon, here a one-pixel image in a data address.
+    @Test func theIconLookupReadsThePagesDeclaredIcon() async throws {
+        let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
+        let icon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        tab.webView.loadHTMLString("<!doctype html><title>Test</title><link rel=\"icon\" href=\"\(icon)\">", baseURL: nil)
+        #expect(await eventually { tab.favicon != nil })
     }
 
     @Test func closingAllWebContentsEndsEachPage() throws {

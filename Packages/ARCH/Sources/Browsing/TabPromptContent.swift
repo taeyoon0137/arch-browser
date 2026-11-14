@@ -7,21 +7,21 @@ import Foundation
 enum TabPromptContent {
     // MARK: Page dialogs
 
-    /// A page's `alert`: its words under the page's site, with OK.
-    static func alert(message: String, identity: PromptIdentity) -> PromptContent {
-        PromptContent(kind: .pageAlert, identity: identity, pageText: pageText(message),
+    /// A page's `alert`: its words under the page's site, with OK. Words from a frame inside the page, `embeddedFrame`, are captioned as an embedded page's (`pageText(_:embeddedFrame:)`).
+    static func alert(message: String, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil, identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .pageAlert, identity: identity, pageText: pageText(message, embeddedFrame: embeddedFrame),
                       buttons: [PromptButton(id: "ok", title: "OK")], defaultButtonID: "ok", cancelButtonID: "ok")
     }
 
     /// A page's `confirm`: OK answers true, anything else false.
-    static func confirm(message: String, identity: PromptIdentity) -> PromptContent {
-        PromptContent(kind: .pageConfirm, identity: identity, pageText: pageText(message),
+    static func confirm(message: String, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil, identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .pageConfirm, identity: identity, pageText: pageText(message, embeddedFrame: embeddedFrame),
                       buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "ok", title: "OK")], defaultButtonID: "ok", cancelButtonID: "cancel")
     }
 
     /// A page's `prompt`: a field that starts with the page's default text, which OK returns. The text is selected as the field takes the focus.
-    static func textInput(message: String, defaultText: String?, identity: PromptIdentity) -> PromptContent {
-        var content = confirm(message: message, identity: identity)
+    static func textInput(message: String, defaultText: String?, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil, identity: PromptIdentity) -> PromptContent {
+        var content = confirm(message: message, embeddedFrame: embeddedFrame, identity: identity)
         content.kind = .pageTextInput
         content.fields = [PromptField(id: "text", kind: .text, label: "Answer", initialValue: defaultText ?? "")]
         content.focusedFieldID = "text"
@@ -135,6 +135,19 @@ enum TabPromptContent {
         response.buttonID == "allow"
     }
 
+    // MARK: File choosers
+
+    /// A page's file chooser, which Arch's open or save panel answers (`FileChooserPanel`) once the tab's prompts before it have ended. No card shows it.
+    static func fileChooser(identity: PromptIdentity) -> PromptContent {
+        PromptContent(kind: .fileChooser, identity: identity,
+                      buttons: [PromptButton(id: "cancel", title: "Cancel"), PromptButton(id: "choose", title: "Choose")], defaultButtonID: "choose", cancelButtonID: "cancel")
+    }
+
+    /// Only a choice in the panel gives the page files; Cancel and a chooser that ended without the user, as when the tab left the screen, give it none.
+    static func fileChooserResult(_ response: PromptResponse) -> Bool {
+        response.buttonID == "choose"
+    }
+
     // MARK: Notices
 
     /// Arch's notice about the tab's page, such as a capture that failed. A detail that is a file path truncates in the middle and shows whole in its tooltip.
@@ -174,8 +187,13 @@ enum TabPromptContent {
 
     // MARK: Helpers
 
-    /// A page's words, or nothing for an empty message.
-    private static func pageText(_ message: String) -> PageAuthoredText? {
-        message.isEmpty ? nil : PageAuthoredText(text: message)
+    /// A page's words, or nothing for an empty message. Words from a frame inside the page say so in their caption, "An embedded page on “example.com” says" for a frame on another host, which VoiceOver names as their author, and "An embedded page says" for one without a host.
+    private static func pageText(_ message: String, embeddedFrame: PromptSiteIdentity.EmbeddedFrame? = nil) -> PageAuthoredText? {
+        guard !message.isEmpty else { return nil }
+        switch embeddedFrame {
+        case nil: return PageAuthoredText(text: message)
+        case .host(let host): return PageAuthoredText(caption: "An embedded page on \u{201C}\(host)\u{201D} says", text: message, author: host)
+        case .unnamed: return PageAuthoredText(caption: "An embedded page says", text: message, author: "an embedded page")
+        }
     }
 }

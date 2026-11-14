@@ -457,6 +457,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser.tryClose(completion: completion)
     }
     public private(set) lazy var devTools: (any EngineDevTools)? = ChromiumDevTools(webContents: self)
+    public private(set) lazy var input: (any EngineInput)? = ChromiumInput(webContents: self)
 
     fileprivate var hasDevTools: Bool { browser?.hasDevTools == true }
     fileprivate func showDevTools() { browser?.showDevTools() }
@@ -547,7 +548,13 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
         return true
     }
-    /// A link the user clicked with Shift reaches the navigation delegate as one for a new window, as on the WebKit engine. No other navigation asks the delegate.
+    /// Every main frame navigation reaches the navigation delegate, and each server redirect again before its request, as on the WebKit engine, so that a hop the delegate refuses sends nothing. A frame inside the page loads without asking.
+    public func cefBrowserShouldBrowse(toURL url: String, isRedirect: Bool, userGesture: Bool) -> Bool {
+        guard let navigationDelegate, let target = URL(engineString: url) else { return true }
+        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture)) == .allow
+    }
+
+    /// A link the user clicked with Shift reaches the navigation delegate as one for a new window, as on the WebKit engine; its load in place then asks again as a main frame navigation.
     public func cefBrowserShouldOpenNewWindow(withURL url: String) -> Bool {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
         return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .newWindow, isUserInitiated: true)) == .allow
@@ -651,12 +658,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         guard let word = sender.representedObject as? String else { return }
         browser?.replaceMisspelling(withWord: word)
     }
-    public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
+    /// CEF names the asking frame by the address it last committed (`GetLastCommittedURL()`), so a frame at an address without a host, as an `about:blank` one that another frame added, gets no origin here.
+    public func cefBrowserRunDialog(_ kind: ARCHCEFDialogKind, origin: String, message: String, defaultText: String, completion: @escaping (Bool, String?) -> Void) {
         guard let uiDelegate else { return completion(kind == .alert, nil) }
+        let frameOrigin = URL(string: origin).flatMap { $0.host?.isEmpty == false ? $0 : nil }
         switch kind {
-        case .confirm: uiDelegate.webContents(self, runJavaScriptConfirm: message) { completion($0, nil) }
-        case .prompt: uiDelegate.webContents(self, runJavaScriptPrompt: message, defaultText: defaultText) { completion($0 != nil, $0) }
-        default: uiDelegate.webContents(self, runJavaScriptAlert: message) { completion(true, nil) }
+        case .confirm: uiDelegate.webContents(self, runJavaScriptConfirm: message, frameOrigin: frameOrigin) { completion($0, nil) }
+        case .prompt: uiDelegate.webContents(self, runJavaScriptPrompt: message, defaultText: defaultText, frameOrigin: frameOrigin) { completion($0 != nil, $0) }
+        default: uiDelegate.webContents(self, runJavaScriptAlert: message, frameOrigin: frameOrigin) { completion(true, nil) }
         }
     }
     public func cefBrowserRunLeavePageDialog(completion: @escaping (Bool) -> Void) {
@@ -665,6 +674,23 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
     public func cefBrowserDidResetDialogs() {
         uiDelegate?.webContentsDidCancelDialogs(self)
+    }
+    /// The UI delegate shows the app's panel; without one the page gets no file. The page receives only what the request's rules keep (`answer(from:)`).
+    public func cefBrowserRunFileChooser(_ mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String], pageURL: String, completion: @escaping ([String]?) -> Void) {
+        guard let uiDelegate else { return completion(nil) }
+        let request = Self.fileChooserRequest(mode: mode, defaultPath: defaultPath, acceptedTypes: acceptedTypes, pageURL: pageURL)
+        uiDelegate.webContents(self, runFileChooser: request) { completion(request.answer(from: $0)?.map(\.path)) }
+    }
+    /// The request for a chooser the bridge reports. A save chooser suggests only the file name of CEF's default path, which can name a folder on the Mac. CEF names no frame, so the request names only the page, from the main frame's committed address.
+    static func fileChooserRequest(mode: ARCHCEFFileChooserMode, defaultPath: String, acceptedTypes: [String], pageURL: String) -> EngineFileChooserRequest {
+        let chooserMode: EngineFileChooserRequest.Mode = switch mode {
+        case .openMultiple: .openFiles
+        case .openFolder: .openFolder
+        case .save: .save
+        default: .openFile
+        }
+        let name = chooserMode == .save ? (defaultPath as NSString).lastPathComponent : nil
+        return EngineFileChooserRequest(mode: chooserMode, acceptedTypes: acceptedTypes, suggestedName: name, pageOrigin: URL(engineString: pageURL))
     }
     public func cefBrowserShouldDownloadURL(_ url: String, hasDocument: Bool) -> Bool {
         guard let uiDelegate, let url = URL(string: url) else { return true }

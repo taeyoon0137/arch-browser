@@ -1,4 +1,5 @@
-// Registers the engines, creates the browser session, which opens the browser windows, and connects the menu bar to it.
+// Registers the engines, creates the browser session, which opens the browser windows, and the agents' service, and connects the menu bar to them.
+import Agent
 import AppKit
 import ARCHEngine
 import ARCHEngineChromium
@@ -13,6 +14,8 @@ import Terminal
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     /// Scripting reads it through the application.
     private(set) var session: BrowserSession!
+    /// The agents' control endpoint and grants, which Settings ▸ AI ▸ Agents shows.
+    private var agents: AgentService?
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     /// Lists the favorites and the spaces' pinned folders and tabs each time it opens (bookmark rule 7).
@@ -43,12 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if let chromium {
             registry.register(chromium)
         }
-        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app. The Web Store asks for the Chromium version of Arch's engine, which its CEF version names, read without starting CEF. Web extensions reach native apps whose vendors install host manifests only for other browsers through links to those manifests, and the proof gate also counts the system folder that Chromium reads itself.
+        // The session starts the default engine, or another one when the default fails to start, and starts the rest as tabs need them. Every Persona offers the built-in plugins that ship with the app. The Web Store asks for the Chromium version of Arch's engine, which its CEF version names, read without starting CEF. Web extensions reach native apps whose vendors install host manifests only for other browsers through links to those manifests, and the proof gate also counts the system folder that Chromium reads itself. The Agents Persona that `agent.json` records, read before its seal is checked, is agent-only from the start, before a restored favorite's tab can start one of its profiles.
         let session: BrowserSession
         do {
             session = try BrowserSession(registry: registry, userDataDirectory: supportDirectory, builtInPlugins: [PageAddressPlugin.self],
                                          cefVersion: chromium?.extensionRuntimeVersion, nativeMessagingHostFolders: BrowserSource.nativeMessagingHostFolders,
-                                         chromiumNativeMessagingHosts: chromium?.systemNativeMessagingHosts)
+                                         chromiumNativeMessagingHosts: chromium?.systemNativeMessagingHosts,
+                                         agentOnlyPersonaID: AgentService.recordedAgentsPersonaID(in: supportDirectory))
         } catch {
             fatalError("The browser session could not start: \(error)")
         }
@@ -59,7 +63,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         session.openTerminal = { TerminalWindowController.shared.show() }
+        PreferencesWindowController.openTerminalTyping = { TerminalWindowController.shared.show(typing: $0) }
         PreferencesWindowController.session = session
+        // Before the windows open. It checks the seal of `agent.json`, keeps the session's agent-only Persona in line with it, and listens only once Allow Outside Clients is on.
+        let agents = AgentService(directory: supportDirectory, host: BrowserAgentHost(session: session),
+                                  version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
+        self.agents = agents
+        PreferencesWindowController.agents = agents
+        session.agents = agents
+        session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
         }
@@ -117,6 +129,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// Agent sessions end before Arch quits, so that their CLI processes and folders go and Codex's copies of their threads are deleted unless the user keeps them; Arch waits at most five seconds for them.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let agents, agents.sessions.contains(where: { !$0.hasEnded }) else { return .terminateNow }
+        Task { @MainActor [weak self] in
+            await agents.endSessionsForQuit()
+            // `ArchApplication.terminate` cleared the flag when AppKit returned to it.
+            self?.setQuitting(true)
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     /// Quitting stops the downloads in progress or paused, which the next launch does not list, and a program running in the built-in terminal, so the user confirms each first, as closing the terminal's window asks. `ArchApplication` asks before it answers the tabs' prompts, so that Cancel leaves their cards showing. Closing the last main window quits through the same path.
     func confirmsQuit() -> Bool {
         confirmsQuitStoppingDownloads() && TerminalWindowController.allowsQuit()
@@ -143,12 +167,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     func setQuitting(_ quitting: Bool) {
         session?.isQuitting = quitting
+        // AppKit calls the quit on the main thread, where the agents' grant sheets show.
+        if quitting { MainActor.assumeIsolated { agents?.cancelQuestions() } }
     }
 
-    /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits.
+    /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits. The agents' socket goes with the app.
     func applicationWillTerminate(_ notification: Notification) {
         session?.saveAtQuit()
         session?.history.finishWrites()
+        agents?.stop()
     }
 
     // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.
@@ -187,6 +214,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         closingItems = [closeTabItem, closeOthersItem, reopenItem]
         fileMenu.addItem(withTitle: "Open Location", action: #selector(openLocation), keyEquivalent: "l")
         fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "New Agent Task", action: #selector(newAgentTask), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Stop All Agents", action: #selector(stopAllAgents), keyEquivalent: "")
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Import from Browser\u{2026}", action: #selector(importFromBrowser), keyEquivalent: "")
@@ -217,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let downloadsItem = viewMenu.addItem(withTitle: "Downloads", action: #selector(toggleDownloads), keyEquivalent: "J")
         downloadsItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(withTitle: "Show Page Reader", action: #selector(togglePageReader), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Show Agent Panel", action: #selector(toggleAgentPanel), keyEquivalent: "")
         viewMenu.addItem(.separator())
         viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom), keyEquivalent: "0")
         viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
@@ -382,6 +413,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
+    /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
+    @MainActor @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
+    @MainActor @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
+    @MainActor @objc private func stopAllAgents() { agents?.stopAllAgents() }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
@@ -603,6 +638,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             item.isHidden = !PageAssistant.isReaderAvailable
             item.title = activeWindow?.isPageReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
             return activeWindow?.canTogglePageReader == true
+        }
+        // The agent commands stay out of the menu until a Claude Code or Codex model can run a session; Stop All Agents works while an agent acts.
+        if item.action == #selector(newAgentTask) || item.action == #selector(toggleAgentPanel) {
+            item.isHidden = MainActor.assumeIsolated { agents?.agentModels().isEmpty ?? true }
+            if item.action == #selector(toggleAgentPanel) {
+                item.title = (activeWindow ?? session?.lastMainWindow)?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
+            }
+            return !item.isHidden
+        }
+        if item.action == #selector(stopAllAgents) {
+            return MainActor.assumeIsolated { agents?.isAnyAgentActing ?? false }
         }
         // Both imports wait while another import runs or the last main window shows a sheet, and open a main window when none is open. They touch no tab, so an internal page does not disable them.
         if item.action == #selector(importBookmarksAndHistory) || item.action == #selector(importFromBrowser) {

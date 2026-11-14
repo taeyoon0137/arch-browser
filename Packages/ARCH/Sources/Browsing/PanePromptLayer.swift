@@ -1,4 +1,4 @@
-// Shows a tab's oldest prompt as a card over the tab's pane, in either kind of window and in each pane of a split view. The card hangs from 3 points above the page frame, in the window's margin, which a page cannot draw in, and comes down from behind that line; the dimming takes the page's events while the rest of the window works on. The tab's next prompt follows once the card has left, under the same dimming. A card that shows again, as after the user comes back to its tab, shows at once with its page.
+// Shows a tab's oldest prompt as a card over the tab's pane, in either kind of window and in each pane of a split view. The card hangs from 3 points above the page frame, in the window's margin, which a page cannot draw in, and comes down from behind that line; the dimming takes the page's events while the rest of the window works on. The tab's next prompt follows once the card has left, under the same dimming. A card that shows again, as after the user comes back to its tab, shows at once with its page. A page's file chooser shows its open or save panel as a sheet on the window instead, without the dimming.
 import AppKit
 import Combine
 import SwiftUI
@@ -31,11 +31,18 @@ struct PanePromptLayer: View {
     @State private var hasFocus = false
     /// The next card, which arrives once the one before it has left.
     @State private var pendingShow: DispatchWorkItem?
+    /// The file chooser whose panel shows as a sheet on the window.
+    @State private var shownPanel: PromptState?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The prompt the pane should show now.
     private var target: PromptState? {
         PromptPresentation.shownPrompt(in: prompts, tabID: tab.id, isOnScreen: isOnScreen, isCovered: isCovered)
+    }
+
+    /// The prompt the pane should show as a card now: any but a file chooser, whose panel shows instead.
+    private var cardTarget: PromptState? {
+        target?.panel == nil ? target : nil
     }
 
     /// Whether the find bar's or the question popover's field over the pane's page has the focus while the card does not. Only the focused pane has those fields.
@@ -44,7 +51,7 @@ struct PanePromptLayer: View {
     }
 
     var body: some View {
-        let isDimmed = target != nil
+        let isDimmed = cardTarget != nil
         GeometryReader { proxy in
             ZStack(alignment: .top) {
                 ZStack {
@@ -74,8 +81,19 @@ struct PanePromptLayer: View {
         }
         .background(PromptFocusGuard(isEngaged: displayed != nil, pageView: tab.webContents.view, isPageFieldFocused: isPageFieldFocused,
                                      requestCardFocus: requestFocus).allowsHitTesting(false))
-        .onAppear(perform: sync)
-        .onChange(of: target?.id) { sync() }
+        .onAppear {
+            sync()
+            syncPanel()
+        }
+        .onChange(of: target?.id) {
+            sync()
+            syncPanel()
+        }
+        // A file chooser's panel waits while the window shows another sheet, as another pane's panel or the print panel.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) { notification in
+            guard notification.object as? NSWindow === windowModel.nsWindow else { return }
+            syncPanel()
+        }
         .onChange(of: isFocusedPane) { _, isFocused in
             if isFocused, displayed != nil { requestFocus() }
         }
@@ -94,6 +112,7 @@ struct PanePromptLayer: View {
         .onDisappear {
             pendingShow?.cancel()
             focusDidChange(false)
+            endPanel()
         }
     }
 
@@ -101,7 +120,7 @@ struct PanePromptLayer: View {
 
     /// Follows the queue: the card that should show arrives, and one that was answered leaves first. A card that only hides, as under an internal page, goes at once, and quitting takes every card at once. A card that waits for the one before it to leave waits no more once the pane should show another prompt or none, as when its page is covered meanwhile. The fields of a prompt that ended keep their text until its card has gone, and then let it go, so a password does not stay in memory.
     private func sync() {
-        let next = target
+        let next = cardTarget
         pendingShow?.cancel()
         pendingShow = nil
         guard next?.id != displayed?.id else { return }
@@ -158,10 +177,33 @@ struct PanePromptLayer: View {
                                              isFocusedPane: isFocusedPane, isPageFieldFocused: isPageFieldFocused)
     }
 
+    /// Page words that the announcement reads are said to come from their author when that is not the asker, as for an embedded page, as the card's box of page words says.
     private func announce(_ state: PromptState) {
         let content = state.content
-        let subject = content.title ?? content.pageText.map { String($0.text.prefix(200)) } ?? content.kind.accessibilityName
-        AccessibilityNotification.Announcement("\(content.identity.name) asks: \(subject)").post()
+        let words = content.title == nil ? content.pageText : nil
+        let subject = content.title ?? words.map { String($0.text.prefix(200)) } ?? content.kind.accessibilityName
+        AccessibilityNotification.Announcement("\(words?.author ?? content.identity.name) asks: \(subject)").post()
+    }
+
+    // MARK: File choosers
+
+    /// Shows the panel of the pane's file chooser as a sheet on the window once the window shows no other sheet, and ends it with Cancel once the pane should no longer show it, as when its tab leaves the screen or the prompt ended without the user. A panel cannot wait to show again, so the page gets no file and can ask again.
+    private func syncPanel() {
+        let next = target?.panel == nil ? nil : target
+        if shownPanel != nil, shownPanel?.id != next?.id { endPanel() }
+        guard let next, shownPanel == nil, prompts.isAccepting, let panel = next.panel, let window = windowModel.nsWindow, window.attachedSheet == nil else { return }
+        shownPanel = next
+        panel.beginSheetModal(for: window) { [prompts] response in
+            if shownPanel?.id == next.id { shownPanel = nil }
+            prompts.answer(next.id, with: PromptAnswer(buttonID: response == .OK ? "choose" : "cancel"))
+        }
+    }
+
+    /// Ends the shown panel with Cancel. AppKit runs its completion before this returns.
+    private func endPanel() {
+        guard let panel = shownPanel?.panel else { return }
+        shownPanel = nil
+        panel.sheetParent?.endSheet(panel, returnCode: .cancel)
     }
 
     // MARK: Focus

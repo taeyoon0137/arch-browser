@@ -48,6 +48,15 @@ public struct TabFolder: Identifiable, Codable, Hashable {
     public var parentID: UUID?
     /// A live folder's source, item limit, and refresh interval (live folder rule 1), or `nil` for an ordinary folder and in files before version 16. A live folder sits among its space's pinned tabs and holds only its items' tabs. A private feed's address appears here without its query, which the Keychain keeps (live folder rule 8).
     public var live: LiveFolderConfiguration?
+    /// The agent session or outside client's grant whose tabs the folder holds, or nil for a folder of the user's (docs/agents.md, In the browser ▸ Agent folders). It is never encoded, and `session.json` leaves an agent folder out with its tabs (agent decision 10); Keep Tabs clears it, which makes the folder and its tabs the user's.
+    public var agentSessionID: UUID?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, spaceID, name, isPinned, isCollapsed, parentID, live
+    }
+
+    /// Whether the folder holds an agent's tabs.
+    public var isAgentFolder: Bool { agentSessionID != nil }
 }
 
 extension TabFolder {

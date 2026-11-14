@@ -18,9 +18,17 @@ public final class WebKitEngine: Engine {
         return Bundle(for: WKWebView.self).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ProcessInfo.processInfo.operatingSystemVersionString
     }
 
-    /// Registers the private APIs of the Web Inspector inside pages, so that the flags page lists them before the engine starts. Call on the main thread, where the flags live.
+    /// Registers the private APIs of the Web Inspector inside pages and of file choosers' types, so that the flags page lists them before the engine starts. Call on the main thread, where the flags live.
     public init() {
-        MainActor.assumeIsolated { WebKitInspectorAPI.register() }
+        MainActor.assumeIsolated {
+            WebKitInspectorAPI.register()
+            WebKitFileChooserAPI.register()
+        }
+    }
+
+    /// Whether an event is a key down that a web contents' trusted input sent (`EngineWebContents.input`). WebKit hands such a key that the page leaves unhandled back to the application with `NSApplication.sendEvent(_:)` once the page has answered, which the page can put off for seconds. The application would offer it to its local event monitors, in no fixed order, and to the menus, and then send it to whatever window and view are key by then, such as the address field, so the application's `sendEvent(_:)` drops it before all of them.
+    @MainActor public static func isTrustedInputKey(_ event: NSEvent) -> Bool {
+        event.type == .keyDown && WebKitSentKeys.contains(event)
     }
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {
@@ -43,8 +51,10 @@ public final class WebKitApplication: EngineApplication {
     public weak var delegate: (any EngineApplicationDelegate)?
     let configuration: EngineApplicationConfiguration
 
+    /// Registers the private member that page scripts run through without a user gesture, so that the flags page lists it before the first web contents.
     init(configuration: EngineApplicationConfiguration) {
         self.configuration = configuration
+        MainActor.assumeIsolated { WebKitUserGestureAPI.register() }
     }
 
     private var rendererCrashCount = 0
@@ -514,13 +524,15 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     /// The Web Inspector inside the app while its private API flags allow it; otherwise none.
     public var devTools: (any EngineDevTools)? { WebKitInspectorAPI.isAllowed ? inspector : nil }
     private lazy var inspector = WebKitDevTools(webView: webView)
+    public var input: (any EngineInput)? { webKitInput }
+    private lazy var webKitInput = WebKitInput(webView: webView)
 
     /// Lets the system's browser inspect the page, which keeps working when the Web Inspector inside the app is off.
     private func allowInspection() {
         webView.isInspectable = true
     }
 
-    /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate.
+    /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate. The lookup runs in a world of the app's own: `evaluateJavaScript` runs with a user gesture, which in the page's world would reach a DOM method the page replaced, and with it a file chooser or a popup after every load.
     func refreshFavicon() {
         guard let pageURL = webView.url else { return }
         if favicon != nil {
@@ -528,9 +540,9 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             uiDelegate?.webContentsDidChangeFavicon(self)
         }
         let script = "(function(){var l=document.querySelector('link[rel~=\"icon\"],link[rel=\"shortcut icon\"],link[rel=\"apple-touch-icon\"]');return l?l.href:null;})()"
-        webView.evaluateJavaScript(script) { [weak self] value, _ in
+        webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { [weak self] result in
             guard let self else { return }
-            let declared = (value as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
+            let declared = (try? result.get() as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
             guard let iconURL = declared ?? FaviconLoader.defaultIconURL(for: pageURL) else { return }
             FaviconLoader.load(iconURL) { [weak self] image in
                 // Ignore icons received after the tab navigates to another page.

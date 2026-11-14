@@ -1,4 +1,4 @@
-// One run of a command-line tool, started with `posix_spawn`: its own process group, pipes for standard input, output, and error instead of a terminal, only the given environment, and its own working directory. Ending it sends SIGTERM to the group and SIGKILL two seconds later.
+// One run of a command-line tool, started with `posix_spawn`: its own process group, pipes for standard input, output, and error instead of a terminal, only the given environment, and its own working directory. Standard input closes after the first input, or stays open for more in order, as a Claude Code session's messages need. Ending it sends SIGTERM to the group and SIGKILL two seconds later.
 import Darwin
 import Foundation
 
@@ -28,11 +28,12 @@ public final class CommandLineProcess: @unchecked Sendable {
     /// The end of standard error, kept for an error's detail.
     private let errorTail: Task<Data, Never>
     private let exit = ExitRecord()
+    private let input: InputPipe
     private let lock = NSLock()
     private var isTerminating = false
 
-    /// Starts the process. Throws a `POSIXError` when it cannot start, for example because the executable does not exist. `input` goes to standard input, which then closes.
-    public init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data) throws {
+    /// Starts the process. Throws a `POSIXError` when it cannot start, for example because the executable does not exist. `input` goes to standard input, which then closes, or with `keepsInputOpen` stays open for `write(_:)` until `closeInput()` or the process ends.
+    public init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data, keepsInputOpen: Bool = false) throws {
         let pipes = try Self.makePipes()
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
@@ -68,10 +69,10 @@ public final class CommandLineProcess: @unchecked Sendable {
 
         // A tool that exits without reading its input ends the write with EPIPE instead of a signal.
         _ = fcntl(pipes.inputWrite, F_SETNOSIGPIPE, 1)
-        DispatchQueue.global(qos: .userInitiated).async {
-            Self.write(input, to: pipes.inputWrite)
-            close(pipes.inputWrite)
-        }
+        let inputPipe = InputPipe(descriptor: pipes.inputWrite)
+        self.input = inputPipe
+        inputPipe.write(input)
+        if !keepsInputOpen { inputPipe.close() }
         let standardOutput = Self.stream(reading: pipes.outputRead)
         output = standardOutput.stream
         let outputSource = standardOutput.source
@@ -85,10 +86,11 @@ public final class CommandLineProcess: @unchecked Sendable {
             return tail
         }
         // `waitpid` blocks until the process ends, so it gets a thread of its own, which reaps the process as soon as it ends.
-        Thread.detachNewThread { [exit] in
+        Thread.detachNewThread { [exit, inputPipe] in
             var status: Int32 = 0
             while waitpid(processID, &status, 0) == -1, errno == EINTR {}
             exit.record(CommandLineTermination(waitStatus: status))
+            inputPipe.close()
             // A background process the tool started, such as an update check, can hold standard output open after the tool exits; reading stops once the tool's own output has been read.
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + Self.outputGrace) { outputSource.cancel() }
         }
@@ -97,6 +99,16 @@ public final class CommandLineProcess: @unchecked Sendable {
     /// Waits until the process has ended.
     public func termination() async -> CommandLineTermination {
         await exit.wait()
+    }
+
+    /// Writes more to standard input, after what was written before. Does nothing once standard input has closed.
+    func write(_ data: Data) {
+        input.write(data)
+    }
+
+    /// Closes standard input, after what was written before.
+    func closeInput() {
+        input.close()
     }
 
     /// Sends SIGTERM to the process group, then SIGKILL two seconds later to whatever of the group still runs. Calls after the first do nothing.
@@ -168,7 +180,7 @@ public final class CommandLineProcess: @unchecked Sendable {
     }
 
     /// Writes all of `data` unless the reader goes away.
-    private static func write(_ data: Data, to descriptor: Int32) {
+    fileprivate static func write(_ data: Data, to descriptor: Int32) {
         data.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count, let base = buffer.baseAddress {
@@ -189,6 +201,34 @@ public final class CommandLineProcess: @unchecked Sendable {
         let pointers = strings.map { strdup($0) }
         defer { pointers.forEach { free($0) } }
         return body(pointers + [nil])
+    }
+}
+
+/// The writing end of standard input. Writes and the close run in order on a queue of their own, so a tool that reads slowly holds no other thread; a write after the close does nothing.
+private final class InputPipe: @unchecked Sendable {
+    private let descriptor: Int32
+    private let queue = DispatchQueue(label: "xyz.taeyoon.arch.command-line-input", qos: .userInitiated)
+    /// Read and written only on `queue`.
+    private var isOpen = true
+
+    init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    func write(_ data: Data) {
+        guard !data.isEmpty else { return }
+        queue.async { [self] in
+            guard isOpen else { return }
+            CommandLineProcess.write(data, to: descriptor)
+        }
+    }
+
+    func close() {
+        queue.async { [self] in
+            guard isOpen else { return }
+            isOpen = false
+            Darwin.close(descriptor)
+        }
     }
 }
 

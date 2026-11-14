@@ -4,6 +4,8 @@ import AppKit
 /// What a prompt asks. VoiceOver names the card by it.
 enum PromptKind: Equatable {
     case sitePermission, pageAlert, pageConfirm, pageTextInput, leavePage, signIn, openInApp, extensionAccess, extensionReload, clearSiteData, pageDownloads, notice
+    /// A page's file chooser, which waits in the tab's queue as the others do, and which Arch's open or save panel answers as a sheet on the window instead of a card (`PromptState.panel`).
+    case fileChooser
 
     /// A page's own `alert`, `confirm`, or `prompt`, which the engine cancels when a navigation the user starts goes ahead.
     var isPageDialog: Bool {
@@ -26,6 +28,7 @@ enum PromptKind: Equatable {
         case .clearSiteData: "Clear Website Data"
         case .pageDownloads: "Multiple Downloads"
         case .notice: "Notice"
+        case .fileChooser: "Choose Files"
         }
     }
 }
@@ -66,10 +69,13 @@ struct PageAuthoredText: Equatable {
     /// Arch's words before the text, such as "The site says".
     var caption: String?
     var text: String
+    /// Who wrote the text when it is not the asker that the identity row names, as an embedded page of another site, which VoiceOver names instead.
+    var author: String?
 
-    init(caption: String? = nil, text: String) {
+    init(caption: String? = nil, text: String, author: String? = nil) {
         self.caption = caption
         self.text = text.count > Self.maximumLength ? String(text.prefix(Self.maximumLength)) + "\u{2026}" : text
+        self.author = author
     }
 }
 

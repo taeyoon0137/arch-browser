@@ -103,6 +103,8 @@ struct TabFolderRowView: View {
                 Button("Edit Live Folder\u{2026}") { windowModel.showEditLiveFolderSheet(folder.id) }
                 Divider()
             }
+            // An agent folder's tabs are the agent's until the user keeps them, which makes the folder an ordinary one.
+            if folder.isAgentFolder { Button("Keep Tabs") { session.keepTabs(ofFolder: folder.id) } }
             Button("Rename Folder") { windowModel.renamingFolderID = folder.id }
             FolderNestingItems(session: session, windowModel: windowModel, folder: folder)
             Divider()

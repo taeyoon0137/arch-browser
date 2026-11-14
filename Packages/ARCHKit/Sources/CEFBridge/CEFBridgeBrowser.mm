@@ -14,9 +14,11 @@
 #include "include/cef_client.h"
 #include "include/cef_context_menu_handler.h"
 #include "include/cef_devtools_message_observer.h"
+#include "include/cef_dialog_handler.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_jsdialog_handler.h"
+#include "include/cef_keyboard_handler.h"
 #include "include/cef_permission_handler.h"
 #include "include/cef_picture_in_picture_handler.h"
 #include "include/cef_request_context.h"
@@ -275,9 +277,14 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
 - (void)handleAfterCreated:(CefRefPtr<CefBrowser>)browser;
 - (void)handleDoClose;
 - (void)handleDevToolsClosed;
-- (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion;
+- (void)handleDialog:(ARCHCEFDialogKind)kind origin:(NSString *)origin message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion;
 - (void)handleLeavePageDialog:(void (^)(BOOL))completion;
 - (void)handleResetDialogs;
+- (void)handleFileChooser:(ARCHCEFFileChooserMode)mode
+              defaultPath:(NSString *)defaultPath
+            acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+                  pageURL:(NSString *)pageURL
+               completion:(void (^)(NSArray<NSString *> *_Nullable))completion;
 - (void)handleTitle:(NSString *)title;
 - (void)handleFullscreen:(BOOL)isFullscreen;
 - (void)handleActivate;
@@ -300,6 +307,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
                    client:(CefRefPtr<CefClient> &)client
                 extraInfo:(CefRefPtr<CefDictionaryValue> &)extraInfo;
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
+- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture;
 - (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture;
 - (void)handleMainFrameNavigationPending:(BOOL)pending;
 - (void)handleBeforeClose;
@@ -425,7 +433,9 @@ class BridgeClient : public CefClient,
                      public CefLoadHandler,
                      public CefFindHandler,
                      public CefDownloadHandler,
+                     public CefDialogHandler,
                      public CefJSDialogHandler,
+                     public CefKeyboardHandler,
                      public CefPermissionHandler,
                      public CefRequestHandler,
                      public CefContextMenuHandler,
@@ -445,7 +455,9 @@ public:
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+    CefRefPtr<CefDialogHandler> GetDialogHandler() override { return this; }
     CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+    CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
     CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
     CefRefPtr<CefFrameHandler> GetFrameHandler() override { return this; }
     CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
@@ -454,6 +466,12 @@ public:
     CefRefPtr<CefPictureInPictureHandler> GetPictureInPictureHandler() override { return this; }
 
     void OnFrameCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) override { [owner_ handleFrameCreated:frame]; }
+
+    // A key that the page leaves unhandled comes here before CEF offers it to the app's main menu. CEF builds the AppKit event of a key that `sendKeyEvent:…` sent without a window, while AppKit's keys carry the key window's number, so a key the bridge sent stops here and never runs a menu item.
+    bool OnKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent &event, CefEventHandle os_event) override {
+        NSEvent *nsEvent = CAST_CEF_EVENT_HANDLE_TO_NSEVENT(os_event);
+        return nsEvent && nsEvent.windowNumber == 0;
+    }
 
     // The app shows its own menu once CEF's current work returns, so Chromium's menu never shows. CEF's model is left as it is, because CEF asks only when the model has items.
     bool RunContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefContextMenuParams> params,
@@ -480,7 +498,7 @@ public:
                                  : dialog_type == JSDIALOGTYPE_PROMPT ? ARCHCEFDialogKindPrompt
                                                                       : ARCHCEFDialogKindAlert;
         CefRefPtr<CefJSDialogCallback> continuation = callback;
-        [owner_ handleDialog:kind message:ToNSString(message_text) defaultText:ToNSString(default_prompt_text) completion:^(BOOL accepted, NSString *text) {
+        [owner_ handleDialog:kind origin:ToNSString(origin_url) message:ToNSString(message_text) defaultText:ToNSString(default_prompt_text) completion:^(BOOL accepted, NSString *text) {
             continuation->Continue(accepted, CefString(text ? text.UTF8String : ""));
         }];
         return true;
@@ -493,6 +511,36 @@ public:
         }
         CefRefPtr<CefJSDialogCallback> continuation = callback;
         [owner_ handleLeavePageDialog:^(BOOL leave) { continuation->Continue(leave, CefString()); }];
+        return true;
+    }
+
+    // CEF's file dialog factory takes every chooser and asks the dialog handler of the browser it finds for the chooser's web contents, then for its window, then the focused one, and cancels when it finds none (`file_dialog_runner.cc`). So this browser's file inputs and other choosers, such as a download's Save As, come here, and so can those of views without a browser of their own, such as an extension's popup or docked DevTools. The app shows its own panel and answers through the callback, which stays alive in the block until then; CEF cancels the chooser when the callback goes unanswered. Returning true keeps Chromium's own panel closed and CEF from asking again for the same chooser, also for a browser without an owner. The app gets the accepted types as the page names them and maps MIME types to file types itself, so CEF's expansion into extensions goes unused. CEF names no frame, so the app gets the main frame's committed address (`GetURL()` reads `GetLastCommittedURL()`), not the address a navigation the page started is loading.
+    bool OnFileDialog(CefRefPtr<CefBrowser> browser, FileDialogMode mode, const CefString &title, const CefString &default_file_path,
+                      const std::vector<CefString> &accept_filters, const std::vector<CefString> &accept_extensions,
+                      const std::vector<CefString> &accept_descriptions, CefRefPtr<CefFileDialogCallback> callback) override {
+        if (!owner_) {
+            callback->Cancel();
+            return true;
+        }
+        ARCHCEFFileChooserMode chooserMode = mode == FILE_DIALOG_OPEN_MULTIPLE ? ARCHCEFFileChooserModeOpenMultiple
+                                             : mode == FILE_DIALOG_OPEN_FOLDER ? ARCHCEFFileChooserModeOpenFolder
+                                             : mode == FILE_DIALOG_SAVE        ? ARCHCEFFileChooserModeSave
+                                                                               : ARCHCEFFileChooserModeOpen;
+        NSMutableArray<NSString *> *types = [NSMutableArray arrayWithCapacity:accept_filters.size()];
+        for (const CefString &filter : accept_filters) {
+            [types addObject:ToNSString(filter)];
+        }
+        CefRefPtr<CefFrame> mainFrame = browser->GetMainFrame();
+        NSString *pageURL = mainFrame ? ToNSString(mainFrame->GetURL()) : @"";
+        CefRefPtr<CefFileDialogCallback> continuation = callback;
+        [owner_ handleFileChooser:chooserMode defaultPath:ToNSString(default_file_path) acceptedTypes:types pageURL:pageURL completion:^(NSArray<NSString *> *paths) {
+            std::vector<CefString> files;
+            for (NSString *path in paths) {
+                files.push_back(CefString(path.UTF8String));
+            }
+            // An empty list cancels.
+            continuation->Continue(files);
+        }];
         return true;
     }
 
@@ -555,10 +603,14 @@ public:
         return true;
     }
 
-    // A link with a scheme Chromium does not load goes to the app's own question instead of Chromium's.
+    // A link with a scheme Chromium does not load goes to the app's own question instead of Chromium's. The delegate decides every other main frame navigation, and CEF asks again before each server redirect's request, with `is_redirect` set, so a hop the delegate refuses sends nothing. A frame inside the page loads without asking.
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool user_gesture,
                         bool is_redirect) override {
-        bool cancel = owner_ != nil && [owner_ handleShouldOpenExternally:ToNSString(request->GetURL()) userGesture:user_gesture];
+        NSString *url = ToNSString(request->GetURL());
+        bool cancel = owner_ != nil && [owner_ handleShouldOpenExternally:url userGesture:user_gesture];
+        if (!cancel && frame->IsMain() && owner_ != nil) {
+            cancel = ![owner_ handleShouldBrowse:url isRedirect:is_redirect userGesture:user_gesture];
+        }
         if (!cancel && frame->IsMain()) {
             [owner_ handleMainFrameNavigationPending:YES];
         }
@@ -1118,6 +1170,11 @@ private:
     return delegate != nil && [delegate cefBrowserShouldOpenExternallyURL:url userGesture:userGesture];
 }
 
+- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    return delegate == nil || [delegate cefBrowserShouldBrowseToURL:url isRedirect:isRedirect userGesture:userGesture];
+}
+
 // Only a link the user clicked with Shift, which Chromium gives the new window disposition, asks the delegate. Every other link may open.
 - (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture {
     if (disposition != CEF_WOD_NEW_WINDOW || !userGesture) {
@@ -1172,7 +1229,7 @@ private:
     }
 }
 
-- (void)handleDialog:(ARCHCEFDialogKind)kind message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion {
+- (void)handleDialog:(ARCHCEFDialogKind)kind origin:(NSString *)origin message:(NSString *)message defaultText:(NSString *)defaultText completion:(void (^)(BOOL, NSString *_Nullable))completion {
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
     if (!delegate) {
         completion(kind == ARCHCEFDialogKindAlert, nil);
@@ -1193,7 +1250,7 @@ private:
         completion(accepted, text);
     };
     _pendingDialog = answer;
-    [delegate cefBrowserRunDialog:kind message:message defaultText:defaultText completion:answer];
+    [delegate cefBrowserRunDialog:kind origin:origin message:message defaultText:defaultText completion:answer];
 }
 
 // The page stops while its dialog waits, so a navigation the user starts would never commit. Dismiss the dialog first, as other browsers do on reload or going back.
@@ -1231,6 +1288,20 @@ private:
     }
     answer(NO, nil);
     [_delegate cefBrowserDidResetDialogs];
+}
+
+- (void)handleFileChooser:(ARCHCEFFileChooserMode)mode
+              defaultPath:(NSString *)defaultPath
+            acceptedTypes:(NSArray<NSString *> *)acceptedTypes
+                  pageURL:(NSString *)pageURL
+               completion:(void (^)(NSArray<NSString *> *_Nullable))completion {
+    id<ARCHCEFBrowserDelegate> delegate = _delegate;
+    if (!delegate) {
+        completion(nil);
+        return;
+    }
+    // CEF ignores a second answer, so a delegate that answers twice changes nothing.
+    [delegate cefBrowserRunFileChooser:mode defaultPath:defaultPath acceptedTypes:acceptedTypes pageURL:pageURL completion:completion];
 }
 
 - (void)handleBeforeClose {
@@ -1417,6 +1488,83 @@ private:
     if (_browser) {
         _browser->GetHost()->ReplaceMisspelling(CefString(word.UTF8String));
     }
+}
+
+/// CEF's event flags for the modifiers.
+static uint32_t InputEventFlags(ARCHCEFInputModifiers modifiers) {
+    uint32_t flags = EVENTFLAG_NONE;
+    if (modifiers & ARCHCEFInputModifierShift) {
+        flags |= EVENTFLAG_SHIFT_DOWN;
+    }
+    if (modifiers & ARCHCEFInputModifierControl) {
+        flags |= EVENTFLAG_CONTROL_DOWN;
+    }
+    if (modifiers & ARCHCEFInputModifierOption) {
+        flags |= EVENTFLAG_ALT_DOWN;
+    }
+    if (modifiers & ARCHCEFInputModifierCommand) {
+        flags |= EVENTFLAG_COMMAND_DOWN;
+    }
+    return flags;
+}
+
+static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
+    CefMouseEvent event;
+    event.x = (int)lround(point.x);
+    event.y = (int)lround(point.y);
+    event.modifiers = flags;
+    return event;
+}
+
+- (BOOL)sendMouseMoveTo:(NSPoint)point modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    _browser->GetHost()->SendMouseMoveEvent(InputMouseEvent(point, InputEventFlags(modifiers)), false);
+    return YES;
+}
+
+/// A press carries the pressed button among its flags, as AppKit's presses do, so the page reads it from the event's `buttons`.
+- (BOOL)sendMouseClickAt:(NSPoint)point mouseUp:(BOOL)mouseUp clickCount:(NSInteger)clickCount modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    uint32_t flags = InputEventFlags(modifiers) | (mouseUp ? 0 : EVENTFLAG_LEFT_MOUSE_BUTTON);
+    _browser->GetHost()->SendMouseClickEvent(InputMouseEvent(point, flags), MBT_LEFT, mouseUp, (int)clickCount);
+    return YES;
+}
+
+/// CEF's deltas follow AppKit's scrolling deltas, which are positive toward the top and the left.
+- (BOOL)sendMouseWheelAt:(NSPoint)point deltaX:(NSInteger)deltaX deltaY:(NSInteger)deltaY modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    _browser->GetHost()->SendMouseWheelEvent(InputMouseEvent(point, InputEventFlags(modifiers)), (int)-deltaX, (int)-deltaY);
+    return YES;
+}
+
+- (BOOL)sendKeyEvent:(ARCHCEFKeyEventKind)kind keyCode:(int)keyCode character:(unichar)character unmodifiedCharacter:(unichar)unmodifiedCharacter modifiers:(ARCHCEFInputModifiers)modifiers {
+    if (!_browser) {
+        return NO;
+    }
+    CefKeyEvent event;
+    switch (kind) {
+    case ARCHCEFKeyEventKindDown:
+        event.type = KEYEVENT_RAWKEYDOWN;
+        break;
+    case ARCHCEFKeyEventKindCharacter:
+        event.type = KEYEVENT_CHAR;
+        break;
+    case ARCHCEFKeyEventKindUp:
+        event.type = KEYEVENT_KEYUP;
+        break;
+    }
+    event.modifiers = InputEventFlags(modifiers);
+    event.native_key_code = keyCode;
+    event.character = character;
+    event.unmodified_character = unmodifiedCharacter;
+    _browser->GetHost()->SendKeyEvent(event);
+    return YES;
 }
 
 - (void)handleAuthenticationForHost:(NSString *)host

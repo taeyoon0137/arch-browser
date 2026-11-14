@@ -1,6 +1,6 @@
-// The prompts that tabs ask for: a page's own dialogs, permission questions, logins, leave-page checks, links for other apps, extensions' questions, and the app's notices about a page. Each tab's prompts wait in order, and a window shows a tab's oldest one as a card over the tab's pane while the tab is on its screen (`PanePromptLayer`), so a prompt never covers another tab's page and a background tab's prompt waits until the tab shows.
+// The prompts that tabs ask for: a page's own dialogs, permission questions, logins, leave-page checks, links for other apps, extensions' questions, file choosers, and the app's notices about a page. Each tab's prompts wait in order, and a window shows a tab's oldest one as a card over the tab's pane while the tab is on its screen (`PanePromptLayer`), or a file chooser's panel as a sheet on the window, so a prompt never covers another tab's page and a background tab's prompt waits until the tab shows.
+import AppKit
 import Combine
-import Foundation
 import SwiftUI
 
 final class TabPromptQueue: ObservableObject {
@@ -12,9 +12,9 @@ final class TabPromptQueue: ObservableObject {
     private(set) var isAccepting = true
 
     /// Adds a prompt after the tab's others, with `content`, or, with `makeContent`, the content that it makes each time a card shows the prompt (`PromptState.remake()`). While Arch quits, it ends at once with `.dismissed`.
-    func enqueue(_ content: PromptContent, for tabID: UUID, makeContent: (() -> PromptContent)? = nil, completion: @escaping (PromptResponse) -> Void) {
+    func enqueue(_ content: PromptContent, panel: NSSavePanel? = nil, for tabID: UUID, makeContent: (() -> PromptContent)? = nil, completion: @escaping (PromptResponse) -> Void) {
         guard isAccepting else { return completion(.dismissed) }
-        let state = PromptState(tabID: tabID, content: content, makeContent: makeContent)
+        let state = PromptState(tabID: tabID, content: content, panel: panel, makeContent: makeContent)
         completions[state.id] = completion
         waiting[tabID, default: []].append(state)
     }
@@ -58,9 +58,12 @@ final class TabPromptQueue: ObservableObject {
         return true
     }
 
-    /// Quitting: ends every tab's prompts without the user, each tab's oldest first, and the ones asked for until `reopen()`. Their cards go at once, without their motion.
+    /// Quitting: ends every tab's prompts without the user, each tab's oldest first, and the ones asked for until `reopen()`. Their cards go at once, without their motion. A file chooser's panel that shows as a sheet ends first with Cancel, which answers its prompt (`PanePromptLayer`), before AppKit decides whether to quit, since AppKit stops a quit for a sheet with more than one button and the card's view would end the panel only at its next update.
     func close() {
         isAccepting = false
+        for panel in waiting.values.flatMap({ $0 }).compactMap(\.panel) {
+            panel.sheetParent?.endSheet(panel, returnCode: .cancel)
+        }
         let ending = waiting
         var transaction = Transaction()
         transaction.disablesAnimations = true

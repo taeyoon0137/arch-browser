@@ -21,8 +21,8 @@ import Testing
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .microphone]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .geolocation]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .microphone]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera, .geolocation]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         #expect(granted == [true, false])
         #expect(prompts.contents.isEmpty)
     }
@@ -36,8 +36,8 @@ import Testing
         let request = EnginePermissionRequest(origin: Self.site, types: [.camera])
 
         var granted: [Bool] = []
-        answers.answer(request, forTab: tabID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
-        answers.answer(request, forTab: tabID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(request, forTab: tabID, personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(request, forTab: tabID, personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         #expect(prompts.contents.count == 1)
         #expect(prompts.contents.first?.notes.isEmpty == false)
 
@@ -54,9 +54,9 @@ import Testing
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         prompts.respond(.dismissed)
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.screenCapture]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.screenCapture]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         #expect(prompts.contents.last?.notes.isEmpty == true)
         #expect(prompts.contents.last?.glyph == .symbol("rectangle.dashed.badge.record", tint: .purple, label: "Screen Recording"))
         prompts.respond(Self.allow)
@@ -72,7 +72,7 @@ import Testing
         let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
 
-        answers.follow(context)
+        answers.follow(context, of: Persona.defaultID)
         #expect(context.kept["camera \(Self.origin)"] == .some(true))
         store.set(.deny, for: [.microphone], origin: Self.origin)
         #expect(context.kept["microphone \(Self.origin)"] == .some(false))
@@ -98,7 +98,7 @@ import Testing
         #expect(relaunched.removed == [Self.origin: [.geolocation]])
         let answers = SitePermissionAnswers(store: relaunched, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
-        answers.follow(context)
+        answers.follow(context, of: Persona.defaultID)
         #expect(context.kept["geolocation \(Self.origin)"] == .some(nil))
         #expect(context.kept["camera \(Self.origin)"] == .some(false))
 
@@ -116,7 +116,7 @@ import Testing
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         let content = try #require(prompts.show())
         #expect(content.notes.map(\.text) == ["Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites.", "After you click Allow, macOS asks whether Arch can send you notifications."])
         #expect(content.buttons.map(\.title) == ["Don\u{2019}t Allow", "Allow"])
@@ -128,7 +128,7 @@ import Testing
         #expect(store.decision(for: .notifications, origin: Self.origin) == .allow)
 
         // The remembered Allow answers without a card and without asking macOS again.
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         #expect(granted == [true, true])
         #expect(prompts.contents.count == 1)
         #expect(system.requests == 1)
@@ -142,11 +142,11 @@ import Testing
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         _ = prompts.show()
         prompts.respond(Self.deny)
         // A card for another permission says nothing about notifications.
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         #expect(prompts.show()?.notes.map(\.id) == ["remembers"])
         prompts.respond(Self.allow)
 
@@ -163,7 +163,7 @@ import Testing
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         let content = try #require(prompts.show())
         #expect(content.buttons.map(\.title) == ["Open System Settings", "Don\u{2019}t Allow", "Allow"])
         #expect(content.notes.contains { $0.text.contains("off in System Settings") })
@@ -179,7 +179,7 @@ import Testing
 
         // A bare build says that it cannot show notifications and offers no setting.
         let bare = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
-        bare.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        bare.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         let bareContent = try #require(prompts.show())
         #expect(bareContent.buttons.map(\.id) == ["deny", "allow"])
         #expect(bareContent.notes.contains { $0.text.contains("can\u{2019}t show notifications") })
@@ -197,8 +197,8 @@ import Testing
         let other = try #require(URL(string: "https://example.org/"))
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
-        answers.answer(EnginePermissionRequest(origin: other, types: [.notifications]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: other, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         // Both cards said that macOS asks when they were queued.
         #expect(prompts.contents.allSatisfy { $0.notes.contains { $0.id == "asksMacOS" } })
         #expect(prompts.show()?.notes.contains { $0.id == "asksMacOS" } == true)
@@ -223,7 +223,7 @@ import Testing
         let prompts = PromptRecorder()
 
         var granted: [Bool] = []
-        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.microphone, .camera]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.microphone, .camera]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         let content = try #require(prompts.contents.first)
         #expect(content.kind == .sitePermission && content.identity == Self.identity)
         // A call's camera and microphone read as one phrase, and the camera's symbol comes before the microphone's.
@@ -239,7 +239,7 @@ import Testing
         #expect(store.decision(for: .microphone, origin: Self.origin) == .deny)
 
         // A page without a host is "this page", and nothing about it is remembered.
-        answers.answer(EnginePermissionRequest(origin: URL(string: "data:text/html,hi")!, types: [.geolocation]), forTab: UUID(), in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: URL(string: "data:text/html,hi")!, types: [.geolocation]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
         #expect(prompts.contents.last?.title == "Allow this page to see your location?")
         #expect(prompts.contents.last?.notes.isEmpty == true)
     }

@@ -1,4 +1,5 @@
-// Each tab wraps an engine web contents instance. It publishes the state shown in the sidebar and command bar.
+// Each tab wraps an engine web contents instance. It publishes the state shown in the sidebar and command bar. A tab in an agent folder is an agent's (docs/agents.md, In the browser ▸ Agent folders): it records no visits, and it applies the rules of agent tabs to its page's requests and reports what they did.
+import Agent
 import AppKit
 import ARCHEngine
 import Combine
@@ -57,8 +58,8 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var hasCrashed = false
     /// How many times this tab's page process quit, kept for the tab close log.
     public private(set) var crashCount = 0
-    /// The session sets this callback so popups from this tab open as new tabs.
-    var openNewTab: ((any EngineWebContents) -> Void)?
+    /// The session sets this callback so popups from this tab open as new tabs, with the address the page opened when the engine reports one.
+    var openNewTab: ((any EngineWebContents, URL?) -> Void)?
     /// The session sets this callback to put in the tab's place a web contents that the engine made to load a page the tab's web contents cannot, as WebKit does for a web extension's pages.
     var takeReplacement: ((any EngineWebContents) -> Void)?
     /// The page that opened this tab, which the window returns to when the tab's page closes itself, as a sign-in popup does once it has reported back. The session sets it for a tab a page opens.
@@ -77,6 +78,8 @@ public final class Tab: ObservableObject, Identifiable {
     var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
+    /// The session sets this callback to show Arch's open or save panel for the page's file chooser, as a sheet that waits in the tab's prompts until a window shows the page. Without it the page gets no file.
+    var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
@@ -107,6 +110,12 @@ public final class Tab: ObservableObject, Identifiable {
     private(set) var isDownloadOnly = false
     /// Whether the page may start downloads without asking (`BrowserSession`'s download delegate).
     var pageDownloads = PageDownloadGate()
+    /// The address of the document the main frame last committed, or nil before the web contents commits one. A page's dialogs name it as their page: `url` can already be the address of a navigation the page started and has not committed, as WebKit gives it.
+    private var committedURL: URL?
+    /// The session sets this to name the agent whose agent folder has the given ID, or nil for a folder of the user's.
+    var agentOwnerOfFolder: ((UUID) -> UUID?)?
+    /// Where an agent tab asks about its navigations and reports what its rules did. The session sets it.
+    weak var agentMonitor: (any AgentTabMonitor)?
 
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
         self.id = id
@@ -202,6 +211,29 @@ public final class Tab: ObservableObject, Identifiable {
     func userDidNavigate() {
         pageDownloads.userDidNavigate()
     }
+
+    /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
+    public var agentOwnerID: UUID? {
+        folderID.flatMap { agentOwnerOfFolder?($0) }
+    }
+
+    /// Reports to the agent monitor when the tab is an agent's.
+    private func reportToAgent(_ report: AgentTabReport) {
+        guard let owner = agentOwnerID else { return }
+        agentMonitor?.agentTab(self, owner: owner, didReport: report)
+    }
+}
+
+/// Where agent tabs report what happened in them and ask about their navigations (docs/agents.md, Permissions, approvals, and injection defenses). `BrowserAgentHost` is the session's.
+protocol AgentTabMonitor: AnyObject {
+    /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool
+    /// Whether a download the agent tab's page started from `url` may go ahead, because the user allowed it (rule P6).
+    func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool
+    /// What happened in an agent tab, for its agent's next result.
+    func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport)
+    /// The agent tab closed, before the session removes an agent folder it leaves empty.
+    func agentTabDidClose(_ tab: Tab, owner: UUID)
 }
 
 extension Tab: EngineWebContentsUIDelegate {
@@ -213,6 +245,7 @@ extension Tab: EngineWebContentsUIDelegate {
     /// A pinned tab without a saved page, as one pinned before its page reported an address, takes the first address its page reports (bookmark rule 2), with an empty title: the tab's title is still the previous page's, and the new page's first title fills it.
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url?.withoutCredentials
+        reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
         if isPinned, savedPage == nil, let url { savedPage = SavedPage(url: url, title: "") }
@@ -225,39 +258,56 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
+        let wasLoading = isLoading
         isLoading = webContents.isLoading
         // The Chromium engine reloads a page after a crash unless it crashed just after its last reload; any new load clears the notice.
         if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         if !isLoading { didFinishLoad?() }
-        // Record a page when it finishes loading, when its title is usually known.
-        if !isLoading, !isDownloadOnly, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
+        if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
+        // Record a page when it finishes loading, when its title is usually known. An agent's tab records none (Persona rule 6).
+        if !isLoading, !isDownloadOnly, agentOwnerID == nil, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)
         }
     }
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
+        committedURL = url
         pageDownloads.documentDidCommit(site: Self.site(of: url))
     }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
         didLoadDocument.send()
+        reportToAgent(.loaded(url: webContents.url, title: webContents.title))
     }
 
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
-        openNewTab?(newWebContents)
+        openNewTab?(newWebContents, targetURL)
     }
     public func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {
         guard webContents === self.webContents else { return }
         takeReplacement?(replacement)
     }
+    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user.
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
+        if agentOwnerID != nil {
+            reportToAgent(.permissionDenied(request.types))
+            return completion(false)
+        }
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
     }
 
-    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again.
+    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
+        if let owner = agentOwnerID {
+            guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
+                reportToAgent(.downloadAsked(url))
+                return false
+            }
+            reportToAgent(.downloadStarted(url))
+            return true
+        }
         guard !hasPage else { return true }
         isDownloadOnly = true
         didOpenOnlyDownload?(!isRestored)
@@ -288,6 +338,7 @@ extension Tab: EngineWebContentsUIDelegate {
         answersBeforeUnloadWithStay = false
         hasCrashed = false
         isDownloadOnly = false
+        committedURL = nil
     }
 
     /// Loads the crashed page's address again, which starts a new page process.
@@ -299,28 +350,51 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: JavaScript dialogs
 
-    // A page's own dialogs show its words under its site, which a page cannot choose, so that a page cannot pass its dialog off as one from the app.
-    public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
-        showPrompt(TabPromptContent.alert(message: message, identity: pageIdentity)) { _ in completion() }
+    // A page's own dialogs show its words under its site, which a page cannot choose, so that a page cannot pass its dialog off as one from the app. The site is that of the document the main frame last committed, so that a page cannot show its dialog under the site of an address it starts to load. Words from a frame on another host, or from one without a host while the page has one, say so, so that an embedded page cannot pass its words off as the page's (`PromptSiteIdentity.embeddedFrame`).
+
+    /// An agent's tab dismisses its page's alert at once and reports its text with the frame's origin (rule P10).
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, frameOrigin: URL?, completion: @escaping () -> Void) {
+        if agentOwnerID != nil {
+            reportToAgent(.alertDismissed(message: message, frame: frameOrigin))
+            return completion()
+        }
+        showPrompt(TabPromptContent.alert(message: message, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) { _ in completion() }
     }
 
-    public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
-        showPrompt(TabPromptContent.confirm(message: message, identity: pageIdentity)) { completion(TabPromptContent.confirmResult($0)) }
+    /// In an agent's tab, as for `prompt`, the user answers on this card and the agent hears that it waits (rule P9).
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, frameOrigin: URL?, completion: @escaping (Bool) -> Void) {
+        reportToAgent(.dialogWaiting(.confirm, message: message, frame: frameOrigin))
+        showPrompt(TabPromptContent.confirm(message: message, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) { completion(TabPromptContent.confirmResult($0)) }
     }
 
-    public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) {
-        showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, identity: pageIdentity)) { completion(TabPromptContent.textInputResult($0)) }
+    public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void) {
+        reportToAgent(.dialogWaiting(.prompt, message: message, frame: frameOrigin))
+        showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) {
+            completion(TabPromptContent.textInputResult($0))
+        }
     }
 
-    /// Asks before the page is left. A page cannot choose this card's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show. Only Stay keeps the page, so a card that ends without the user, as when Arch quits, leaves it. An automatic unload asks nothing and stays (`answersBeforeUnloadWithStay`).
+    /// Asks before the page is left. A page cannot choose this card's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show; an agent's tab stays where it is, and the agent hears that the question waits for the user (rule P9). Only Stay keeps the page, so a card that ends without the user, as when Arch quits, leaves it. An automatic unload stays without asking.
     public func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) {
         if answersBeforeUnloadWithStay { return completion(false) }
-        requestSelection?()
+        if agentOwnerID != nil {
+            reportToAgent(.dialogWaiting(.leavePage, message: ""))
+        } else {
+            requestSelection?()
+        }
         showPrompt(TabPromptContent.leavePage(identity: pageIdentity)) { completion(TabPromptContent.leavePageResult($0)) }
     }
 
     public func webContentsDidCancelDialogs(_ webContents: any EngineWebContents) {
         didCancelDialogs?()
+    }
+
+    // MARK: File choosers
+
+    /// An agent tab's chooser gets no file and queues no panel, whatever started it, also a DOM `click()` from the agents' world, until the tool host asks about it (rule P7, plan task VII.22).
+    public func webContents(_ webContents: any EngineWebContents, runFileChooser request: EngineFileChooserRequest, completion: @escaping ([URL]?) -> Void) {
+        guard agentOwnerID == nil, let chooseFiles else { return completion(nil) }
+        chooseFiles(request, completion)
     }
 
     // MARK: Context menus
@@ -394,7 +468,9 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: Links for other apps
 
+    /// An agent's tab hands a link to another app only after the user allows it on a card in the agent panel, which names the app (rule P11).
     public func webContents(_ webContents: any EngineWebContents, openExternally url: URL, isUserInitiated: Bool) {
+        if agentOwnerID != nil { return reportToAgent(.externalAppAsked(url)) }
         if isUserInitiated { forgetExternalAppDecline() }
         offerExternalApp(for: url)
     }
@@ -434,9 +510,10 @@ extension Tab: EngineWebContentsUIDelegate {
 
     // MARK: HTTP authentication
 
-    /// Asks for a user name and password for a site or proxy, in a card whose password field is secure. The credential lasts for this session only and is never saved.
+    /// Asks for a user name and password for a site or proxy, in a card whose password field is secure. The credential lasts for this session only and is never saved. In an agent's tab, the user answers and the agent hears that the question waits (rule P9).
     public func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void) {
         let space = challenge.protectionSpace
+        reportToAgent(.dialogWaiting(.signIn, message: space.host))
         let identity = PromptSiteIdentity.signIn(space, tabURL: url, favicon: favicon)
         let content = TabPromptContent.signIn(space, proposedUser: challenge.proposedCredential?.user, failed: challenge.previousFailureCount > 0, identity: identity)
         showPrompt(content) { completion(TabPromptContent.signInCredential($0)) }
@@ -445,6 +522,22 @@ extension Tab: EngineWebContentsUIDelegate {
     /// The tab's page as the asker of its own prompts.
     private var pageIdentity: PromptIdentity {
         PromptSiteIdentity.make(for: url, in: self)
+    }
+
+    /// The page that shows a dialog of the frame at `frameOrigin`: the document the main frame last committed, or before the first one, the frame's own, as for the empty page of a new tab whose opener's script runs it.
+    private func dialogPage(of frameOrigin: URL?) -> URL? {
+        committedURL ?? frameOrigin
+    }
+
+    /// The page of a dialog as its asker.
+    private func dialogIdentity(_ frameOrigin: URL?) -> PromptIdentity {
+        let page = dialogPage(of: frameOrigin)
+        return PromptSiteIdentity.make(for: page, tabURL: page, favicon: favicon)
+    }
+
+    /// The frame that shows a page dialog when it is not the page's own (`PromptSiteIdentity.embeddedFrame`).
+    private func embeddedFrame(of frameOrigin: URL?) -> PromptSiteIdentity.EmbeddedFrame? {
+        PromptSiteIdentity.embeddedFrame(of: frameOrigin, pageURL: dialogPage(of: frameOrigin))
     }
 
     private func showPrompt(_ content: PromptContent, completion: @escaping (PromptResponse) -> Void) {
@@ -468,11 +561,12 @@ extension Tab: EnginePageScriptDelegate {
     }
 }
 
-// MARK: Link previews
+// MARK: Navigation checks and link previews
 
 extension Tab: EngineWebContentsNavigationDelegate {
-    /// A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
+    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A web link the user clicked with Shift opens in the preview panel instead of the page. The engine is still deciding, so the panel opens once its callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
+        if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
         guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }
         let url = action.url

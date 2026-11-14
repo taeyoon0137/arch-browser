@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Call the session_info tool, then reply with only the code word it returned."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Now call list_tabs and reply with only the number of tabs."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Write the numbers from 1 to 400, one per line, and nothing else."}]}}
+{"type":"control_request","request_id":"interrupt-1","request":{"subtype":"interrupt"}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with only the word: resumed"}]}}

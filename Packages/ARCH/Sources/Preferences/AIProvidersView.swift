@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Providers: the list of connected providers, the sheet that adds or edits an HTTP provider with its format, base URL, key, headers, models, and limits, and the parts that the command-line tool editor shares.
+// Settings ▸ AI ▸ Providers: the list of connected providers, the sheet that adds or edits an HTTP provider with its format, base URL, key, headers, models, and limits, the Claude Code and Codex presets, and the parts that the command-line tool editor shares.
 import AI
 import LocalAuthentication
 import SwiftUI
@@ -31,6 +31,9 @@ struct AIProvidersPage: View {
                 Menu("Add Provider") {
                     Button("HTTP API\u{2026}") { editing = .http(AIProviderDraft()) }
                     Button("Command-Line Tool\u{2026}") { editing = .commandLine(AICommandLineDraft()) }
+                    Divider()
+                    Button("Claude Code (Claude Subscription)\u{2026}") { addPreset(.claudeCode) }
+                    Button("Codex (ChatGPT Subscription)\u{2026}") { addPreset(.codex) }
                 }
                 .fixedSize()
             }
@@ -47,12 +50,19 @@ struct AIProvidersPage: View {
         }
     }
 
+    /// A preset finds its tool in the login shell's PATH before the editor opens; the editor then reads its version and sign-in.
+    private func addPreset(_ kind: AIAgentKind) {
+        Task { editing = .commandLine(await AICommandLineDraft.preset(kind)) }
+    }
+
     private static func detail(of provider: AIProviderConfiguration) -> String {
         let models = provider.models.count == 1 ? "1 model" : "\(provider.models.count) models"
         switch provider.kind {
         case .http(let http):
             let key = http.hasKey ? "key saved" : "no key"
             return [http.format.title, http.baseURL.host ?? http.baseURL.absoluteString, key, models].joined(separator: " \u{00B7} ")
+        case .commandLine(let tool) where tool.agent != nil:
+            return ["\(tool.agent?.title ?? "") on your subscription", tool.executable.lastPathComponent, "agent sessions", models].joined(separator: " \u{00B7} ")
         case .commandLine(let tool):
             let data = tool.runsWithoutTools ? "may get page data" : "text only"
             return ["Command-line tool", tool.executable.lastPathComponent, data, models].joined(separator: " \u{00B7} ")
@@ -477,7 +487,7 @@ private struct AIModelRow: View {
                 get: { model.capabilities == nil },
                 set: { model.capabilities = $0 ? nil : defaultCapabilities }))
             if let capabilities = model.capabilities {
-                ForEach(AIModelCapability.allCases, id: \.self) { capability in
+                ForEach(AIModelCapability.overridable, id: \.self) { capability in
                     Toggle(capability.title, isOn: Binding(
                         get: { capabilities.contains(capability) },
                         set: { isOn in
@@ -506,6 +516,7 @@ extension AIModelCapability {
         case .jsonOutput: return "JSON replies"
         case .images: return "Images"
         case .files: return "PDF files"
+        case .agent: return "Agent sessions"
         }
     }
 }

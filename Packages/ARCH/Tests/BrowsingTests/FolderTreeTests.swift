@@ -148,6 +148,34 @@ import Testing
         #expect(!FolderTree(folders: [f.a, f.b, f.c, deepest], tabs: []).canAddFolder(inside: deepest.id))
     }
 
+    @Test func agentFoldersStayAtTheRootUntilKeptAndTakeNoUserTabsOrFolders() {
+        var agent = folder("Agent", pinned: false)
+        agent.agentSessionID = UUID()
+        let ordinary = folder("Ordinary", pinned: false)
+        let userTab = tab("user", pinned: false)
+        let agentTab = tab("owned", in: agent)
+        var tree = FolderTree(folders: [agent, ordinary], tabs: [userTab, agentTab])
+        #expect(!tree.canAddFolder(inside: agent.id))
+        #expect(!tree.canMoveFolder(ordinary.id, into: agent.id))
+        #expect(!tree.canMoveFolder(agent.id, into: ordinary.id))
+        #expect(!tree.canMoveTab(userTab, into: agent.id))
+        #expect(tree.moveTargets(forFolder: agent.id).isEmpty)
+        #expect(tree.moveTargets(forFolder: ordinary.id).isEmpty)
+        #expect(tree.moveTargets(forTab: userTab, pinned: false).map(\.id) == [ordinary.id])
+        #expect(tree.dropTarget(for: ordinary.id, at: .onFolder(agent.id)) == nil)
+        #expect(tree.dropTarget(for: ordinary.id, at: .onTab(agentTab.id)) == nil)
+        #expect(tree.dropTarget(for: agent.id, at: .onFolder(ordinary.id)) == nil)
+        #expect(tree.dropTarget(for: agent.id, at: .listEnd(spaceID: spaceID, pinned: false)) == nil)
+        tree.moveFolder(agent.id, toSpace: otherSpaceID)
+        #expect(tree.folder(agent.id)?.spaceID == spaceID)
+
+        agent.agentSessionID = nil
+        tree = FolderTree(folders: [agent, ordinary], tabs: [userTab, agentTab])
+        #expect(tree.canAddFolder(inside: agent.id))
+        #expect(tree.canMoveFolder(agent.id, into: ordinary.id))
+        #expect(tree.canMoveTab(userTab, into: agent.id))
+    }
+
     /// Each target as its name, with a mark for one that takes no item, after two spaces for each target that holds it.
     private func outline(_ targets: [FolderTree.MoveTarget], depth: Int = 0) -> [String] {
         targets.flatMap { target in

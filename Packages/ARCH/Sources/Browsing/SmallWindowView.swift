@@ -1,4 +1,4 @@
-// The content of a small window, which opens for a link from another app while Arch is in the background, for a page that a small window's page or preview opens, and for an extension's `windows.create`: one row on the line of the traffic light buttons with the page's site and controls, and below it the page area over the window material with the tint of the tab's space. The window shows only its own tab; find, prompt cards, page fullscreen, the docked developer tools, the page reader, and the palette that edits the address work here, and sidebar commands go to the main window.
+// The content of a small window, which opens for a link from another app while Arch is in the background, for a page that a small window's page or preview opens, and for an extension's `windows.create`: one row on the line of the traffic light buttons with the page's site and controls, and below it the page area over the window material with the tint of the tab's space. The window shows only its own tab; find, prompt cards, page fullscreen, the docked developer tools, the page reader, the agent panel, and the palette that edits the address work here, and sidebar commands go to the main window.
 import SwiftUI
 
 struct SmallWindowView: View {
@@ -25,7 +25,11 @@ struct SmallWindowView: View {
                 HStack(spacing: 0) {
                     PageAreaView(session: session, sidebarDrag: nil, margins: Self.pageMargins)
                     if !windowModel.isPageFullscreen {
-                        PageReaderColumn(session: session)
+                        if windowModel.agentPanel != nil {
+                            AgentPanelColumn(session: session)
+                        } else {
+                            PageReaderColumn(session: session)
+                        }
                     }
                 }
             }

@@ -1,4 +1,5 @@
 // Settings window with a toolbar of sections in the system's settings layout: General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
+import Agent
 import AI
 import AppKit
 import ARCHEngine
@@ -42,11 +43,26 @@ public final class PreferencesWindowController: NSWindowController {
     public static let shared = PreferencesWindowController()
     /// Opens the built-in terminal, where the user installs and signs in to command-line tools for Settings ▸ AI. The app shell sets it, so this module does not depend on the terminal's.
     public static var openTerminal: (() -> Void)?
+    /// Opens the built-in terminal with a command typed at the prompt but not run, such as a tool's sign-in for Sign In in Settings ▸ AI. The app shell sets it beside `openTerminal`.
+    public static var openTerminalTyping: ((String) -> Void)?
     /// The session whose shortcuts Settings ▸ Site Search edits, whose remembered permissions Settings ▸ Websites shows, and whose Personas' plugins Settings ▸ Plugins shows. The app shell sets it at launch, before Settings first opens; without it those sections are left out.
     public static var session: BrowserSession?
+    /// The agents' service whose outside access, grants, and activity Settings ▸ AI ▸ Agents shows. The app shell sets it at launch, before Settings first opens; without it the page is left out.
+    public static var agents: AgentService?
+
+    /// Sign In for a Claude Code or Codex provider outside Settings, as from the agent panel: the built-in terminal with the tool's sign-in typed, as the provider's editor types it.
+    @MainActor public static func signInToAgentTool(_ providerID: AIProviderID) {
+        guard let provider = AIService.shared.settings.providers.first(where: { $0.id == providerID }), case .commandLine(let tool) = provider.kind,
+              let agent = tool.agent, let type = openTerminalTyping else { return shared.showAISection() }
+        Task {
+            let found = await AICommandLineConfiguration.locateExecutable(named: agent.executableName)
+            let program = found?.resolvingSymlinksInPath() == tool.executable.resolvingSymlinksInPath() ? agent.executableName : AICommandLineEditor.shellQuoted(tool.executable.path)
+            type(AICommandLineEditor.signInCommand(program: program, arguments: agent.signInArguments, environment: tool.environment))
+        }
+    }
 
     /// Settings ▸ AI, where the errors of AI features about models, keys, and limits send the user.
-    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView())
+    private let aiSection = PreferencesWindowController.section("AI", symbol: "sparkles", AISettingsView(agents: PreferencesWindowController.agents))
     /// Settings ▸ Plugins, while the app shell has set `session`.
     private var pluginsSection: NSTabViewItem?
 

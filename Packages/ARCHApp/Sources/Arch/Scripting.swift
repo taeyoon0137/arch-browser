@@ -6,11 +6,9 @@ import Browsing
 extension ArchApplication {
     private var browserSession: BrowserSession? { (delegate as? AppDelegate)?.session }
 
-    /// Every tab in sidebar order: the favorites' open tabs, then each space's pinned tabs and its open tabs, then the small windows' tabs.
+    /// Every tab in sidebar order (`BrowserSession.tabsInSidebarOrder`): the favorites' open tabs, then each space's pinned tabs and its open tabs, then the small windows' tabs.
     @objc var scriptTabs: [ScriptTab] {
-        guard let session = browserSession else { return [] }
-        let spaceTabs = session.spaces.flatMap { session.tabs(in: $0.id, pinned: true) + session.tabs(in: $0.id, pinned: false) }
-        return (session.openFavoriteTabs + spaceTabs + session.tabs.filter(\.isInSmallWindow)).map { ScriptTab($0) }
+        browserSession?.tabsInSidebarOrder.map { ScriptTab($0) } ?? []
     }
 
     /// The active window's selected tab.

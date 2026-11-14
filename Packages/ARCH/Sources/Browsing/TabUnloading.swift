@@ -11,11 +11,14 @@ enum TabCloseAction: Equatable {
     case end
     /// The tab leaves its space's list, into the closed list when `remember` is set.
     case close(remember: Bool)
+    /// An unkept agent tab closes without a closed record or a tab close log entry.
+    case forget
     /// A live folder item's tab leaves its folder without a closed record, and the item stays out of the folder while the source lists it, until Show Dismissed Items (live folder rule 4).
     case dismiss
 
-    /// What a close for `reason` does to the tab: a pinned tab unloads, except that Delete Persona closes it into the closed list with the Persona's other tabs; a favorite's tab, the only tab outside a space's list, ends; and any other tab closes into the closed list, except one that only pointed at a file. Archiving reaches only unpinned tabs. A live folder item's tab is dismissed when the user, an extension, or the page closes it. It unloads and keeps its place, so that the next plan does not replace it, when it only pointed at a file or its page crashed, which the user did not choose, and it closes without a closed record when its Persona goes, so that the up to 1,000 item tabs of 20 live folders cannot push other records out of the closed list. Agent tabs (forget, VII.12) join with their task.
+    /// What a close for `reason` does to the tab: a pinned tab unloads, except that Delete Persona closes it into the closed list with the Persona's other tabs; a favorite's tab, the only tab outside a space's list, ends; and any other tab closes into the closed list, except one that only pointed at a file. Archiving reaches only unpinned tabs. A live folder item's tab is dismissed when the user, an extension, or the page closes it. It unloads and keeps its place, so that the next plan does not replace it, when it only pointed at a file or its page crashed, which the user did not choose, and it closes without a closed record when its Persona goes, so that the up to 1,000 item tabs of 20 live folders cannot push other records out of the closed list. An agent tab is forgotten on every path.
     static func of(_ tab: Tab, reason: TabCloseReason) -> TabCloseAction {
+        if tab.agentOwnerID != nil { return .forget }
         if tab.spaceID == nil { return .end }
         if tab.liveItemID != nil {
             switch reason {
@@ -58,6 +61,8 @@ enum UnloadExclusion: CaseIterable {
     case prompt
     /// Downloads need the page (`EngineWebContents.closingStopsDownloads`), or the tab waits for the download of the file it points at.
     case downloads
+    /// An agent owns the tab until the user takes it over.
+    case agent
     /// A small window holds the tab.
     case smallWindow
     /// The page's developer tools are open, as in a window of their own, which unloading would close.
