@@ -10,7 +10,7 @@ import Testing
 @testable import Browsing
 
 @MainActor @Suite(.serialized) struct SessionFolderControlsTests {
-    private func fixture(in directory: URL, client: any AIClient) throws -> (BrowserSession, BrowserAgentHost, AgentService) {
+    private func fixture(in directory: URL, client: any AIClient, models: @escaping @MainActor () -> [AIModelRef] = { [] }) throws -> (BrowserSession, BrowserAgentHost, AgentService) {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
@@ -21,9 +21,93 @@ import Testing
             identify: { _ in throw CancellationError() }, processStart: { _ in nil }, prompt: AgentGrantSheetPresenter(host: host),
             authenticator: AgentDeviceOwnerAuthentication(), allowsAI: { _ in true }, now: Date.init, processRecord: { _ in nil },
             startRunner: { _ in throw CancellationError() }, sessionRoute: { .http(pinnedModel: $0) }, apiClient: client,
-            mcpExecutable: directory, sessionFolder: { _ in directory }, agentModels: { [] }, subscriptionToolName: { _ in nil }, attention: { _ in }))
+            mcpExecutable: directory, sessionFolder: { _ in directory }, agentModels: models, subscriptionToolName: { _ in nil }, attention: { _ in }))
         browser.agents = service
         return (browser, host, service)
+    }
+
+    @Test func paletteStartsOnlyWithTheDocumentAndPlaceItsRowOffered() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var models = [QuestionClient.model]
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient(), models: { models })
+        defer { service.stop() }
+        let home = try #require(browser.spaces.first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: home.id,
+                                                                      selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let task = "Compare these plans"
+        let address = try #require(URL(string: "https://fixture.invalid/plans"))
+        let page = browser.openTab(url: address, in: home.id, select: false)
+        window.renameTab(page.id, to: "Product plans")
+        func offer() throws -> AskAgentOffer { try #require(window.askAgentOffer(for: task, settings: settings)) }
+        func expectDraft(_ reviewed: AskAgentOffer) {
+            let count = service.sessions.count
+            window.askAgent(reviewed, settings: settings)
+            guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected an unsent draft"); return }
+            #expect(service.sessions.count == count && draft.text == task && draft.tab == nil && draft.problem != nil)
+            #expect(draft.spaceID == window.currentSpaceID && draft.personaID == window.personaID)
+        }
+        let blank = try offer()
+        #expect(blank.sharingDetail == "No page shared")
+        window.selectTab(page.id)
+        expectDraft(blank)
+        var reviewed = try offer()
+        #expect(reviewed.sharingDetail == "Shares Product plans")
+        models = []
+        #expect(window.askAgentOffer(for: task, settings: settings) == nil)
+        window.askAgent(reviewed, settings: settings)
+        guard case .composer(let setup) = window.agentPanel else { Issue.record("Expected local model setup"); return }
+        #expect(service.sessions.isEmpty && setup.text == task && setup.tab?.documentID == page.documentID)
+        models = [QuestionClient.model]
+        window.askAgent(reviewed, settings: settings)
+        let attached = try #require(service.sessions.first)
+        #expect(attached.handles.sharedTabIDs == [page.id] && window.agentPanel == .session(attached.id))
+
+        settings.setAllowsAI(false, on: address)
+        expectDraft(reviewed)
+        reviewed = try offer()
+        #expect(reviewed.sharingDetail == "No page shared")
+        window.askAgent(reviewed, settings: settings)
+        let detached = try #require(service.sessions.first { $0 !== attached })
+        #expect(detached.handles.sharedTabIDs.isEmpty && window.agentPanel == .session(detached.id))
+        settings.setAllowsAI(true, on: address)
+        expectDraft(reviewed)
+
+        reviewed = try offer()
+        let engine = try #require(page.webContents as? PageDouble)
+        engine.load(address.appendingPathComponent("other"), in: page)
+        expectDraft(reviewed)
+        reviewed = try offer()
+        page.webContents(page.webContents, didCommitDocumentAt: page.url)
+        expectDraft(reviewed)
+        reviewed = try offer()
+        window.submitCommandPalette("flags://")
+        expectDraft(reviewed)
+        let covered = try offer()
+        #expect(covered.sharingDetail == "No page shared")
+        window.closeInternalPage()
+        expectDraft(covered)
+        reviewed = try offer()
+        window.showPreview(of: address, engine: .webKit, in: window.personaID)
+        expectDraft(reviewed)
+        window.closePreview()
+
+        let favorite = Favorite(url: address, title: "Saved plans", personaID: home.resolvedPersonaID)
+        browser.addFavorites([favorite], in: home.resolvedPersonaID)
+        let favoriteTab = browser.openTab(for: favorite)
+        window.selectTab(favoriteTab.id)
+        reviewed = try offer()
+        let other = browser.makeSpace(in: home.resolvedPersonaID)
+        window.switchToSpace(other.id)
+        window.selectTab(favoriteTab.id)
+        expectDraft(reviewed)
+        reviewed = try offer()
+        let elsewhere = browser.addPersona(named: "Elsewhere")
+        window.switchToSpace(try #require(browser.spaces(in: elsewhere.id).first).id)
+        expectDraft(reviewed)
+        #expect(service.sessions.count == 2)
+        await service.endSessionsForQuit()
     }
 
     @Test func aSidebarTabCanOpenALocalDraftBeforeConnectingAModel() throws {

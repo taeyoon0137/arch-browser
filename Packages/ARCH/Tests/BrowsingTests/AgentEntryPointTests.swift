@@ -10,19 +10,19 @@ import Testing
     private static let page = URL(string: "https://example.com/plans")!
 
     @Test func askAgentNeedsTwoWordsOrMore() {
-        #expect(AskAgentOffer(text: "", canRunSession: true) == nil)
-        #expect(AskAgentOffer(text: "compare", canRunSession: true) == nil)
-        #expect(AskAgentOffer(text: "   compare \n", canRunSession: true) == nil)
-        #expect(AskAgentOffer(text: "https://example.com/plans", canRunSession: true) == nil)
-        #expect(AskAgentOffer(text: "compare plans", canRunSession: true)?.task == "compare plans")
+        #expect(Self.offer(text: "", canRunSession: true) == nil)
+        #expect(Self.offer(text: "compare", canRunSession: true) == nil)
+        #expect(Self.offer(text: "   compare \n", canRunSession: true) == nil)
+        #expect(Self.offer(text: "https://example.com/plans", canRunSession: true) == nil)
+        #expect(Self.offer(text: "compare plans", canRunSession: true)?.task == "compare plans")
         // The task is the text without the white space around it; white space inside it stays as typed.
-        let offer = AskAgentOffer(text: "  compare these\ttwo plans \n", canRunSession: true)
+        let offer = Self.offer(text: "  compare these\ttwo plans \n", canRunSession: true)
         #expect(offer?.task == "compare these\ttwo plans")
-        #expect(AskAgentOffer(text: "compare these two plans", canRunSession: true)?.title == "Ask Agent: \u{201C}compare these two plans\u{201D}")
+        #expect(Self.offer(text: "compare these two plans", canRunSession: true)?.title == "Ask Agent: \u{201C}compare these two plans\u{201D}")
     }
 
     @Test func askAgentNeedsAModelThatCanRunASession() {
-        #expect(AskAgentOffer(text: "compare these two plans", canRunSession: false) == nil)
+        #expect(Self.offer(text: "compare these two plans", canRunSession: false) == nil)
     }
 
     @Test func theWindowsPlaceNamesThePersonaAndSpaceAndLeavesOutACoveredPage() {
@@ -66,7 +66,7 @@ import Testing
     @Test func askAgentStartsInTheWindowsPlaceWithItsTabAttached() throws {
         let tab = Self.tab(url: Self.page)
         let context = Self.context(tab: tab)
-        let offer = try #require(AskAgentOffer(text: "compare these two plans", canRunSession: true))
+        let offer = try #require(Self.offer(text: "compare these two plans", canRunSession: true))
         let start = context.sessionStart(task: offer.task, mode: .readOnly) { _ in true }
         #expect(start.task == "compare these two plans")
         #expect(start.personaID == context.personaID)
@@ -136,6 +136,10 @@ import Testing
         #expect(ContinueAsAgentTaskButton.excerpt(tabID: id, documentID: documentID, url: Self.page, exchange: nil, selection: selection)?.selection == selection.text)
         #expect(PageAssistant.matchesMenuSelection("One\nTwo", "One  \r\n  Two "))
         #expect(!PageAssistant.matchesMenuSelection("One", "Other"))
+    }
+
+    private static func offer(text: String, canRunSession: Bool) -> AskAgentOffer? {
+        AskAgentOffer(text: text, canRunSession: canRunSession, context: context(tab: nil), allowsAI: { _ in true })
     }
 
     private static func context(tab: AgentTabInfo?) -> AgentComposerContext {

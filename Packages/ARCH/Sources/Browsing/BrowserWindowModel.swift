@@ -814,12 +814,26 @@ public enum BrowserWindowKind {
         showAgentPanel(.composer(agentComposerContext(text: text)))
     }
 
-    /// The palette's Ask Agent row: starts a session with the palette's text at once, in Settings' mode for new sessions, and shows it. A start the service refuses shows the composer with the task and the refusal's sentence instead.
-    func askAgent(_ offer: AskAgentOffer) {
+    func askAgentOffer(for text: String, settings: AISettingsStore) -> AskAgentOffer? {
+        AskAgentOffer(text: text, canRunSession: canStartAgentTask, context: agentComposerContext(), allowsAI: settings.allowsAI(on:))
+    }
+
+    /// Start only with the place and disclosure offered in the palette. A changed context leaves the task for review.
+    func askAgent(_ offer: AskAgentOffer, settings: AISettingsStore) {
         guard let agents = session.agents else { return }
         let context = agentComposerContext(text: offer.task)
+        guard offer.matches(context, allowsAI: settings.allowsAI(on:)) else {
+            context.tab = nil
+            context.problem = "The page, sharing setting, or destination changed. Review the task before starting."
+            showAgentPanel(.composer(context))
+            return
+        }
+        guard canStartAgentTask else {
+            showAgentPanel(.composer(context))
+            return
+        }
         do {
-            let started = try agents.startSession(context.sessionStart(task: offer.task, mode: agents.newSessionMode, allowsAI: AIService.shared.settings.allowsAI(on:)))
+            let started = try agents.startSession(context.sessionStart(task: offer.task, mode: agents.newSessionMode, allowsAI: settings.allowsAI(on:)))
             showAgentSession(started.id)
         } catch {
             context.problem = error.localizedDescription

@@ -1,5 +1,6 @@
 // The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists Install from the Web Store for an extension that the text names, Ask Agent for text of two or more words and agent sessions to show, matching plugin commands, Ask About This Page when the words begin its name, Install Extension from This Page on a Web Store page, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
 import Agent
+import AI
 import AppKit
 import Extensions
 import History
@@ -7,6 +8,7 @@ import Plugins
 import SwiftUI
 
 struct CommandPaletteView: View {
+    @ObservedObject private var aiSettings = AIService.shared.settings
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let mode: CommandPaletteMode
@@ -24,8 +26,8 @@ struct CommandPaletteView: View {
     @State private var hasArrived = false
     /// The pages from history for `text`, which `loadHistorySuggestions()` reads as the text changes. The palette redraws for many other changes, such as a loading page's title, and none of them queries the history store again.
     @State private var historySuggestions: [HistoryEntry] = []
-    /// The row that Up and Down selected, by its identity. Nil, or a row that has left the list, selects the first row; typing selects it again.
-    @State private var selectedRowID: AnyHashable?
+    /// The row that Up and Down selected. Its identity selects a matching row on redraw. Nil, or a row that has left the list, selects the first row; typing selects it again.
+    @State private var selectedRow: PaletteItem?
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
@@ -97,7 +99,7 @@ struct CommandPaletteView: View {
     }
 
     private var askAgentOffer: AskAgentOffer? {
-        AskAgentOffer(text: text, canRunSession: windowModel.canStartAgentTask)
+        windowModel.askAgentOffer(for: text, settings: aiSettings)
     }
 
     /// The live agent sessions whose titles contain the text, ignoring case, to show in the panel.
@@ -135,19 +137,22 @@ struct CommandPaletteView: View {
     }
 
     private func selectedIndex(in items: [PaletteItem]) -> Int {
-        selectedRowID.flatMap { id in items.firstIndex { $0.id == id } } ?? 0
+        selectedRow.flatMap { selected in items.firstIndex { $0.id == selected.id } } ?? 0
     }
 
     /// Up and Down stop at the first and the last row.
-    private func moveSelection(by step: Int) {
-        let items = rows
-        selectedRowID = items[max(0, min(selectedIndex(in: items) + step, items.count - 1))].id
+    private func moveSelection(by step: Int, in items: [PaletteItem]) {
+        selectedRow = items[max(0, min(selectedIndex(in: items) + step, items.count - 1))]
     }
 
     /// Return runs the selected row while the results show, and otherwise acts on the text as before.
-    private func submit() {
+    private func submit(in items: [PaletteItem]) {
         guard showsResults else { return windowModel.submitCommandPalette(text) }
-        let items = rows
+        // Keep the reviewed document when Return runs a highlighted Ask Agent row after a redraw.
+        if case .askAgent(let offer) = selectedRow, offer.task == text.trimmingCharacters(in: .whitespacesAndNewlines) {
+            perform(.askAgent(offer))
+            return
+        }
         perform(items[selectedIndex(in: items)])
     }
 
@@ -160,7 +165,7 @@ struct CommandPaletteView: View {
             installFromWebStore(id, fromPage: false)
         case .askAgent(let offer):
             windowModel.dismissCommandPalette()
-            windowModel.askAgent(offer)
+            windowModel.askAgent(offer, settings: aiSettings)
         case .agentSession(let agentSession):
             windowModel.dismissCommandPalette()
             windowModel.showAgentSession(agentSession.id)
@@ -187,7 +192,7 @@ struct CommandPaletteView: View {
         case .typedStore:
             PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.typedTitle, isSelected: isSelected)
         case .askAgent(let offer):
-            PaletteRow(symbol: "sparkles", title: offer.title, isSelected: isSelected)
+            PaletteRow(symbol: "sparkles", title: offer.title, subtitle: offer.sharingDetail, isSelected: isSelected)
         case .agentSession(let agentSession):
             PaletteRow(symbol: "text.bubble", title: agentSession.title, detail: session.agents?.place(of: agentSession), isSelected: isSelected)
         case .command(let command):
@@ -206,6 +211,7 @@ struct CommandPaletteView: View {
     }
 
     var body: some View {
+        let items: [PaletteItem] = showsResults ? rows : [.primary]
         VStack(spacing: Self.surfaceSpacing) {
             // The symbol's column and the text start line up with the rows' below.
             HStack(spacing: 14) {
@@ -217,15 +223,14 @@ struct CommandPaletteView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 22))
                     .focused($isFocused)
-                    .onSubmit(submit)
+                    .onSubmit { submit(in: items) }
                     .onExitCommand { windowModel.dismissCommandPalette() }
             }
             .padding(.horizontal, 22)
             .frame(height: Self.fieldHeight)
             .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous)))
-            .background(PaletteArrowKeys(isActive: isFocused && showsResults && !isLeaving && !isWarmUp, move: moveSelection))
+            .background(PaletteArrowKeys(isActive: isFocused && showsResults && !isLeaving && !isWarmUp, move: { moveSelection(by: $0, in: items) }))
             if showsResults {
-                let items = rows
                 let selected = selectedIndex(in: items)
                 VStack(spacing: 2) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, row in
@@ -258,7 +263,7 @@ struct CommandPaletteView: View {
             DispatchQueue.main.async { isFocused = true }
         }
         // At once, unlike the history read, so Return right after typing runs the first row for the new text.
-        .onChange(of: text) { selectedRowID = nil }
+        .onChange(of: text) { selectedRow = nil }
         .task(id: text) { await loadHistorySuggestions() }
     }
 }
@@ -368,18 +373,37 @@ struct PaletteWebStoreRows: Equatable {
     }
 }
 
-/// The palette's Ask Agent row (docs/agents.md, In the browser ▸ Starting a session): offered once the text has two or more words while a Claude Code or Codex model can run a session, and starting one with the text as its task.
-struct AskAgentOffer: Equatable {
-    /// The palette's text without the white space around it.
+/// The task, destination and visible document reviewed in the palette.
+@MainActor struct AskAgentOffer {
     let task: String
+    private let personaID: UUID
+    private let spaceID: UUID
+    private let tabID: UUID?
+    private let documentID: UUID?
+    private let url: URL?
+    private let sharedTitle: String?
 
-    init?(text: String, canRunSession: Bool) {
+    init?(text: String, canRunSession: Bool, context: @autoclosure () -> AgentComposerContext, allowsAI: (URL) -> Bool) {
         let task = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canRunSession, task.split(whereSeparator: \.isWhitespace).count >= 2 else { return nil }
         self.task = task
+        let context = context()
+        personaID = context.personaID
+        spaceID = context.spaceID
+        tabID = context.tab?.id
+        documentID = context.tab?.documentID
+        url = context.tab?.url
+        sharedTitle = context.attachableTab(allowsAI: allowsAI)?.title
     }
 
     var title: String { "Ask Agent: \u{201C}\(task)\u{201D}" }
+    var sharingDetail: String { sharedTitle.map { "Shares \($0)" } ?? "No page shared" }
+
+    func matches(_ context: AgentComposerContext, allowsAI: (URL) -> Bool) -> Bool {
+        context.personaID == personaID && context.spaceID == spaceID && context.tab?.id == tabID &&
+            context.tab?.documentID == documentID && context.tab?.url == url &&
+            (context.attachableTab(allowsAI: allowsAI) != nil) == (sharedTitle != nil)
+    }
 }
 
 /// The command palette over a window of either kind, with the dimming behind it that a click dismisses. Each opening gets a fresh palette, which arrives with its origin's motion; closing fades out the palette and the dimming, then removes both.
@@ -523,6 +547,8 @@ extension Animation {
 struct PaletteRow: View {
     let symbol: String
     let title: String
+    /// A second line when the action needs a sharing disclosure.
+    var subtitle: String?
     /// Dim text at the trailing end, such as the plugin that adds a command or a history page's site. It keeps its width, so a long title truncates first.
     var detail: String?
     /// The first row, which acts on the text as typed, has a heavier title.
@@ -535,9 +561,16 @@ struct PaletteRow: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
-            Text(title)
-                .font(.system(size: 15, weight: isPrimary ? .medium : .regular))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 15, weight: isPrimary ? .medium : .regular))
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
             Spacer(minLength: 0)
             if let detail {
                 Text(detail)
