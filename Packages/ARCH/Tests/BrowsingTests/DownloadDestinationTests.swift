@@ -4,6 +4,52 @@ import Foundation
 import Testing
 
 @Suite @MainActor struct DownloadDestinationTests {
+    @Test func aSmallWindowOpensTheDownloadsInItsMainWindow() throws {
+        try withFixture { session, _, _, _ in
+            let space = try #require(session.spaces.first)
+            let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: false)
+            let main = session.makeWindow(from: record, kind: .main)
+            let small = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: false), kind: .small)
+            defer { session.windowWillClose(small); session.windowWillClose(main) }
+            main.nsWindow = nil
+            small.toggleLibrary()
+            #expect(main.isSidebarVisible && main.isLibraryVisible)
+            #expect(!small.isSidebarVisible && !small.isLibraryVisible)
+            small.toggleLibrary()
+            #expect(main.isLibraryVisible)
+        }
+    }
+
+    @Test func closingADownloadOnlyTabReturnsToItsSourceOrPreviousTab() throws {
+        try withFixture { session, _, _, _ in
+            let space = try #require(session.spaces.first)
+            let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            defer { session.windowWillClose(window) }
+            @MainActor func tab() -> Tab {
+                session.openTab(url: URL(string: "about:blank")!, in: space.id, select: false, engine: .chromium)
+            }
+            let unrelated = tab(), source = tab()
+            window.selectTab(source.id)
+            let popup = tab()
+            popup.opener = source.webContents
+            window.selectTab(popup.id)
+            session.closeTab(popup, reason: .download)
+            #expect(window.selectedTabID == source.id)
+
+            window.selectTab(source.id)
+            let direct = tab()
+            window.selectTab(direct.id)
+            session.closeTab(direct, reason: .download)
+            #expect(window.selectedTabID == source.id)
+
+            let background = tab()
+            background.opener = source.webContents
+            window.selectTab(unrelated.id)
+            session.closeTab(background, reason: .download)
+            #expect(window.selectedTabID == unrelated.id)
+        }
+    }
+
     @Test func simultaneousRequestsReserveNamesAcrossProfilesBeforeEitherFileExists() throws {
         try withFixture { session, chromium, webKit, directory in
             let existing = directory.appendingPathComponent("report.txt")

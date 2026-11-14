@@ -1119,8 +1119,15 @@ public enum BrowserWindowKind {
 
     public func toggleSidebar() { isSidebarVisible.toggle() }
 
-    /// Shows the sidebar first if hidden because the library opens in it. With the sidebar hidden, the library always opens.
+    /// A small window shows the library in its main window. A main window with its sidebar hidden reveals both together.
     public func toggleLibrary() {
+        if kind == .small {
+            let main = session.sidebarTarget()
+            main.isSidebarVisible = true
+            main.isLibraryVisible = true
+            main.nsWindow?.makeKeyAndOrderFront(nil)
+            return
+        }
         guard isSidebarVisible else {
             isSidebarVisible = true
             isLibraryVisible = true

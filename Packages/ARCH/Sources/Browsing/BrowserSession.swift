@@ -1208,25 +1208,25 @@ final class EngineRuntime {
         return true
     }
 
-    /// Each main window that selected a tab that closes or unloads selects another as `tabToSelect(after:opener:splitNeighbor:among:spaceID:isShownInAnotherWindow:)` picks: for a page that closed itself, the opener is the listed tab of the page that opened it, as a sign-in popup closes once it has reported back. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab. The tab leaves its split view first, and the opener is read after it.
+    /// Each main window that selected a tab that closes or unloads selects another using its selection history when a download-only tab closes: a popup that closes itself or starts a download returns to its opener. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab. The tab leaves its split view first, and the opener is read after it.
     private func moveSelections(awayFrom tab: Tab, reason: TabCloseReason) {
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
-        let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
+        let opener = reason == .page || reason == .download ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         for window in windows where window.selectedTabID == tab.id {
             guard window.kind == .main else {
                 window.close()
                 continue
             }
             let next = Self.tabToSelect(after: tab, opener: opener, splitNeighbor: splitNeighbor, among: tabs, spaceID: tab.spaceID ?? window.currentSpaceID,
-                                        isShownInAnotherWindow: window.isShownInAnotherWindow)
+                                        recentTabs: reason == .download ? window.recentTabs : [], isShownInAnotherWindow: window.isShownInAnotherWindow)
             window.selectTab(next?.id)
         }
     }
 
-    /// The tab that a window selects after its selected `tab` closes or unloads, one that no other window shows (window rule 3): `opener`, then `splitNeighbor`, so the rest of a split view stays on screen, or else a listed open tab of `spaceID` among `tabs` before a pinned one, or nil for the empty page. A pinned tab without its page is passed over: it is closed (bookmark rule 4), so selecting it would load a page the user closed or has not opened since launch, and two pinned tabs whose saved pages are files would download them in turn.
-    static func tabToSelect(after tab: Tab, opener: Tab?, splitNeighbor: Tab?, among tabs: [Tab], spaceID: UUID?, isShownInAnotherWindow: (Tab) -> Bool) -> Tab? {
+    /// The tab that a window selects after its selected `tab` closes or unloads, one that no other window shows (window rule 3): `opener`, then `splitNeighbor`, so the rest of a split view stays on screen, then the previous tabs when closing a download-only tab, or else a listed open tab of `spaceID` among `tabs` before a pinned one, or nil for the empty page. A pinned tab without its page is passed over: it is closed (bookmark rule 4), so selecting it would load a page the user closed or has not opened since launch, and two pinned tabs whose saved pages are files would download them in turn.
+    static func tabToSelect(after tab: Tab, opener: Tab?, splitNeighbor: Tab?, among tabs: [Tab], spaceID: UUID?, recentTabs: [Tab] = [], isShownInAnotherWindow: (Tab) -> Bool) -> Tab? {
         let siblings = tabs.filter { $0 !== tab && $0.spaceID == spaceID && $0.isListedInSidebar }
-        let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
+        let candidates = [opener, splitNeighbor].compactMap { $0 } + recentTabs + siblings.filter { !$0.isPinned } + siblings
         return candidates.first { $0 !== tab && ($0.isLoaded || !$0.isPinned) && !isShownInAnotherWindow($0) }
     }
 

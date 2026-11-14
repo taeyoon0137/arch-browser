@@ -98,6 +98,7 @@ private struct SmallWindowTopRow: View {
             } else {
                 SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: session.menuShortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
             }
+            LibraryButton(session: session, activityOnly: true)
             LowPowerModeIndicator()
             SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)

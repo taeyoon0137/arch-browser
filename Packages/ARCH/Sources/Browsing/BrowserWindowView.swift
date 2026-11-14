@@ -63,6 +63,13 @@ public struct BrowserWindowView: View {
                     }
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
+                    LibraryButton(session: session, activityOnly: true)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(2 * Self.pageMargin)
+                }
+            }
             if !windowModel.isSidebarVisible || isSidebarPeeking, !windowModel.isPageFullscreen {
                 peekingSidebar
             }

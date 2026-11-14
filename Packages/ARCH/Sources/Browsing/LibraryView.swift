@@ -76,12 +76,14 @@ struct LibraryButton: View {
     @ObservedObject var session: BrowserSession
     /// The downloads' progress, which redraws this button without the views that follow the session.
     @ObservedObject private var downloads: DownloadSummary
+    let activityOnly: Bool
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @Environment(\.sidebarIsFloating) private var isFloating
     @State private var isHovering = false
 
-    init(session: BrowserSession) {
+    init(session: BrowserSession, activityOnly: Bool = false) {
         self.session = session
+        self.activityOnly = activityOnly
         _downloads = ObservedObject(wrappedValue: session.downloadSummary)
     }
 
@@ -97,12 +99,20 @@ struct LibraryButton: View {
     private var label: String { windowModel.isLibraryVisible ? "Hide Library" : "Show Library" }
 
     private var accessibilityValue: String {
-        if downloads.isDownloading { return "Downloading" }
+        if downloads.isDownloading {
+            return downloads.progress.map { "Downloading, " + $0.formatted(.percent.precision(.fractionLength(0))) } ?? "Downloading"
+        }
         let count = session.unseenDownloadIDs.count
         return count == 0 ? "" : count == 1 ? "1 new download" : "\(count) new downloads"
     }
 
     var body: some View {
+        if !activityOnly || downloads.isDownloading || !session.unseenDownloadIDs.isEmpty {
+            button
+        }
+    }
+
+    private var button: some View {
         Button(action: toggle) {
             Group {
                 if !downloads.isDownloading {
