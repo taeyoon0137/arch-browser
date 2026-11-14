@@ -1042,6 +1042,18 @@ private:
     ExtensionsBrowserDidCreate(self);
     if (popup) {
         [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
+        // A popup can acquire AppKit's first responder while CEF is still creating
+        // it. Once CEF finishes, activate its page only if it already has the keys.
+        __weak ARCHCEFBrowser *weakPopup = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            ARCHCEFBrowser *popupBrowser = weakPopup;
+            NSView *page = popupBrowser.browserView;
+            NSWindow *window = page.window;
+            if (window.isKeyWindow && [window.firstResponder isKindOfClass:NSView.class] &&
+                [(NSView *)window.firstResponder isDescendantOf:page] && popupBrowser->_browser) {
+                popupBrowser->_browser->GetHost()->SetFocus(true);
+            }
+        });
     }
     // A browser without a delegate here is one nobody keeps: a popup the opener's delegate dropped, since `OnBeforePopup` asked that delegate in the same task, or a browser whose owner went before CEF created it. It closes, as does one the app closed before then. CEF owns a popup's page only once the opener shows the popup, later in this task, and closing the popup before then crashes CEF, so the block keeps this object until the next turn of the run loop and closes the browser then.
     if (!_delegate || _closeRequested) {
