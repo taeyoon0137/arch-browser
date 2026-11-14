@@ -59,6 +59,37 @@ import Testing
         }
     }
 
+    @Test func deletingAPersonaCancelsItsRetryAndReleasesOnlyItsReservedNames() throws {
+        try withFixture { session, surviving, retiring, directory in
+            let failed = TestDownload(), otherFailed = TestDownload(), completed = TestDownload()
+            retiring.delegate?.downloads(retiring, didCreate: failed)
+            surviving.delegate?.downloads(surviving, didCreate: otherFailed)
+            let name = try #require(choose(failed, in: retiring, name: "report.txt"))
+            #expect(choose(otherFailed, in: surviving, name: "report.txt")?.lastPathComponent == "report 2.txt")
+            failed.state = .failed
+            otherFailed.state = .failed
+            retiring.delegate?.downloads(retiring, didUpdate: failed)
+            surviving.delegate?.downloads(surviving, didUpdate: otherFailed)
+            completed.state = .completed
+            let saved = directory.appendingPathComponent("finished.txt")
+            try Data("kept".utf8).write(to: saved)
+            completed.targetPath = saved
+            retiring.delegate?.downloads(retiring, didCreate: completed)
+
+            let personaID = try #require(session.downloads.first(where: { $0.item === failed })?.personaID)
+            session.deletePersona(personaID)
+
+            #expect(failed.state == .cancelled)
+            #expect(otherFailed.state == .failed && completed.state == .completed)
+            #expect(try Data(contentsOf: saved) == Data("kept".utf8))
+            #expect(choose(failed, in: retiring, name: "report.txt") == nil)
+            let replacement = TestDownload()
+            surviving.delegate?.downloads(surviving, didCreate: replacement)
+            #expect(choose(replacement, in: surviving, name: "report.txt") == name)
+            #expect(choose(otherFailed, in: surviving, name: "report.txt")?.lastPathComponent == "report 2.txt")
+        }
+    }
+
     @Test func manualChoicesAndFinishedFileRenamesRespectOtherDownloads() throws {
         try withFixture { session, chromium, webKit, directory in
             let finished = TestDownload(), manual = TestDownload(), automatic = TestDownload()

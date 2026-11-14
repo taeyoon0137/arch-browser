@@ -50,12 +50,16 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         state == .completed || state == .cancelled || state == .failed
     }
 
-    /// A paused or failed download can still resume into its partial file.
-    private var reservedDestination: URL? {
+    /// Failed downloads can still retry in the profile that started them.
+    var canCancel: Bool {
         switch item.state {
-        case .inProgress, .paused, .failed: return chosenDestination ?? item.targetPath
-        case .completed, .cancelled: return nil
+        case .inProgress, .paused, .failed: return true
+        case .completed, .cancelled: return false
         }
+    }
+
+    private var reservedDestination: URL? {
+        canCancel ? chosenDestination ?? item.targetPath : nil
     }
 
     /// Two spellings in the same folder can name the same future file on a case-insensitive volume.
@@ -75,7 +79,7 @@ public final class DownloadEntry: ObservableObject, Identifiable {
     /// A save panel may replace an existing file with the user's consent. Every accepted name belongs to one transfer.
     @MainActor
     func reserveDestination(_ url: URL) -> Bool {
-        guard item.state != .completed, item.state != .cancelled, !isReserved(url) else { return false }
+        guard canCancel, !isReserved(url) else { return false }
         chosenDestination = url
         return true
     }

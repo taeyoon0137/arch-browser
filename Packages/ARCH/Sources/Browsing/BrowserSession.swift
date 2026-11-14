@@ -722,8 +722,8 @@ final class EngineRuntime {
         }
         for tab in allTabs where tab.personaID == id { closeTab(tab, reason: .persona) }
         undoableCloseCount = 0
-        // Its unfinished downloads stop, and the pages kept for them close. Finished rows stay in the library.
-        downloads.filter { $0.personaID == id && !$0.isFinished }.forEach { $0.item.cancel() }
+        // A failed transfer can still retry in this profile. Cancel it with the active and paused transfers before retiring the profile.
+        downloads.filter { $0.personaID == id && $0.canCancel }.forEach { $0.item.cancel() }
         for page in downloadPages where page.runtime.personaID == id { page.runtime.browser.closeWebContents(page.webContents) }
         downloadPages.removeAll { $0.runtime.personaID == id }
         // Its spaces go with their folders and split views, and its favorites with the tabs saved for them.
