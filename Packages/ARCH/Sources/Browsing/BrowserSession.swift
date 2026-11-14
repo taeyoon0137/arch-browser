@@ -32,7 +32,7 @@ public final class BrowserSession: ObservableObject {
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
-    /// Whether macOS lets Arch show notifications, which the download notifier asks through. The permission sheet and Settings ▸ Websites show it only once websites' notifications can show (`docs/plan.md`, VI.7).
+    /// Whether macOS lets Arch show notifications, which the download notifier asks through. The permission card and Settings ▸ Websites show it only once websites' notifications can show (`docs/plan.md`, VI.7).
     public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
@@ -80,7 +80,8 @@ public final class BrowserSession: ObservableObject {
 
     /// The results page of the search engine chosen in Settings.
     public static var searchURL: URL { SearchEngine.current.resultsURL }
-    public static let newTabURL = URL(string: "https://www.google.com")!
+    /// The page a tab opens without an address: the home page of the search engine chosen in Settings.
+    public static var newTabURL: URL { SearchEngine.current.homeURL }
 
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
@@ -91,16 +92,18 @@ public final class BrowserSession: ObservableObject {
     public var rendererCrashCount: Int { crashCounts.values.reduce(0, +) }
     /// Tabs that only ever pointed at a file. Each closes once the engine creates the download its page started.
     private var downloadOnlyTabIDs: Set<UUID> = []
+    /// The downloads a page's `PageDownloadGate` let through. WebKit asks for a destination again when Resume starts a download over without resume data, which the gate does not count again.
+    private let admittedDownloads = NSHashTable<AnyObject>.weakObjects()
     /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium, each with the runtime that created it. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
     private let downloadNotifier: DownloadNotifier
-    /// The sheets that tabs asked for, which wait until a window shows their tab.
-    let sheets = TabSheetQueue()
-    /// Set while the app quits. Every sheet gets its safe answer at once, so that a page's next dialog cannot hold the quit.
+    /// The prompts that tabs asked for, which a window shows as cards over their tabs' panes.
+    let prompts = TabPromptQueue()
+    /// Set while the app quits. Every prompt ends at once without the user, so that a page's next dialog cannot hold the quit and every engine callback has its answer before the engines shut down. A quit that does not happen, as when a window's own sheet holds it, opens the prompt queue again.
     public var isQuitting = false {
         didSet {
-            if isQuitting { sheets.cancelAll() }
+            if isQuitting { prompts.close() } else { prompts.reopen() }
         }
     }
 
@@ -146,7 +149,6 @@ public final class BrowserSession: ObservableObject {
         favorites = snapshot.favorites
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
         closedTabs = snapshot.closedTabs ?? []
-        sheets.windows = { [weak self] in self?.windows ?? [] }
         start(primary)
         MainActor.assumeIsolated {
             nativeMessagingHosts.gateWidens = { [weak self] in await self?.takeGatedVersionsOutOfChromium() }
@@ -242,7 +244,7 @@ public final class BrowserSession: ObservableObject {
         updateFocusedTab()
     }
 
-    /// Window rule 5: a main window's tabs stay open, and a small window closes with its tab or once a main window takes it. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their sheets. A main window's record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
+    /// Window rule 5: a main window's tabs stay open, and a small window closes with its tab or once a main window takes it. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their prompts. A main window's record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
     @MainActor func windowWillClose(_ window: BrowserWindowModel) {
         // The tabs the window showed were in view until now, as the archive timer and the saved session count the tabs of open windows, also when closing the last main window quits.
         window.paneTabs.forEach { $0.lastActivatedAt = Date() }
@@ -250,7 +252,6 @@ public final class BrowserSession: ObservableObject {
         if window.kind == .main { windowsToReopen = [window.record] }
         windows.removeAll { $0 === window }
         windows.forEach { $0.updateShownTabs() }
-        sheets.showNext()
         updateFocusedTab()
         // AppKit goes on closing the window after this, so its controller, which owns it, goes on the next turn of the run loop.
         if let index = windowControllers.firstIndex(where: { $0.model === window }) {
@@ -801,9 +802,10 @@ public final class BrowserSession: ObservableObject {
         }
         // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
         tab.didCancelDialogs = { [weak self, weak tab] in
-            if let self, let tab { self.sheets.cancel(for: tab, pageDialogsOnly: true) }
+            guard let self, let tab else { return }
+            self.prompts.dismiss(tabID: tab.id, pageDialogsOnly: true)
         }
-        // A leave-page sheet shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and another window selects a tab that no window shows.
+        // A leave-page card shows over its page. The window that shows the tab makes it the focused pane, or leaves the internal page over it when it is selected already, and another window selects a tab that no window shows.
         tab.requestSelection = { [weak self, weak tab] in
             guard let self, let tab else { return }
             guard let window = self.window(showing: tab) else { return self.selectUnshownTab(tab) }
@@ -844,8 +846,8 @@ public final class BrowserSession: ObservableObject {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, ask: { alert, response in
-                self.enqueueSheet(alert, for: tab, completion: response)
+            self.permissionAnswers.answer(request, forTab: tab.id, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), ask: { content, response in
+                self.enqueuePrompt(content, for: tab, completion: response)
             }, completion: completion)
         }
         tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
@@ -868,9 +870,9 @@ public final class BrowserSession: ObservableObject {
             guard let self, let tab else { return }
             self.window(showing: tab)?.showPreview(of: url, engine: tab.engineKind, in: tab.personaID)
         }
-        tab.presentAlert = { [weak self, weak tab] alert, isPageDialog, completion in
-            guard let self, let tab else { return completion(.cancel) }
-            self.enqueueSheet(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
+        tab.presentPrompt = { [weak self, weak tab] content, completion in
+            guard let self, let tab else { return completion(.dismissed) }
+            self.enqueuePrompt(content, for: tab, completion: completion)
         }
         // Every change to what `session.json` keeps of a tab, such as a new address or name, is saved.
         tabObservers[tab.id] = tab.persistedChanges.sink { [weak self] in self?.scheduleSave() }
@@ -902,10 +904,10 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Puts `replacement`, which the Persona's runtime for its engine owns, in place of the tab's web contents and closes the old one. Sheets and searches belong to the old page, and the window that selects the tab docks the new page's tools.
+    /// Puts `replacement`, which the Persona's runtime for its engine owns, in place of the tab's web contents and closes the old one. Prompts and searches belong to the old page, and the window that selects the tab docks the new page's tools.
     private func replaceWebContents(of tab: Tab, with replacement: any EngineWebContents) {
         let old = tab.webContents
-        sheets.cancel(for: tab)
+        prompts.dismiss(tabID: tab.id)
         let window = windows.first { $0.selectedTabID == tab.id }
         if window?.isFindBarVisible == true { window?.hideFindBar() }
         tab.replaceWebContents(with: replacement)
@@ -923,28 +925,34 @@ public final class BrowserSession: ObservableObject {
         }
     }
 
-    /// Closes a tab once its page agrees to close, then runs `didClose`.
+    /// Closes a tab the user asked to close, from its row, its favorite, or a menu, once its page agrees to close, then runs `didClose` if this close removed it. While the tab's leave-page card shows, that card is the question, so the tab only comes forward to show it; otherwise the tab's prompts end first (`TabPromptQueue.endForClose`).
     private func closeWhenPageAgrees(_ tab: Tab, then didClose: @escaping () -> Void) {
+        guard prompts.endForClose(tabID: tab.id) else {
+            tab.requestSelection?()
+            return
+        }
         // Asking means closing the browser, which would stop its downloads, so such a tab closes at once; its kept page answers the handlers with Leave when it moves to a blank page.
         guard !tab.webContents.closingStopsDownloads else {
-            closeTab(tab)
-            return didClose()
+            if closeTab(tab) { didClose() }
+            return
         }
         tab.webContents.tryToClose { [weak self, weak tab] closing in
-            guard closing, let self, let tab else { return }
-            self.closeTab(tab)
+            guard closing, let self, let tab, self.closeTab(tab) else { return }
             didClose()
         }
     }
 
-    /// Closes a tab. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
-    public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) {
+    /// Closes a tab and returns whether it was still open. `remember` adds it to the closed list so that it can reopen; a tab that only pointed at a file is not worth reopening, and a favorite's tab reopens from its favorite. `reason` goes to the tab close log.
+    @discardableResult
+    public func closeTab(_ tab: Tab, remember: Bool = true, reason: TabCloseReason = .user) -> Bool {
+        guard tabs.contains(where: { $0.id == tab.id }) || favoriteTabs.values.contains(where: { $0 === tab }) else { return false }
+        windows.forEach { $0.setPageFullscreen(false, of: tab) }
+        // Ending the tab's prompts runs the code that asked for them before `dismiss` returns. The lists are read afterwards, and a tab that closed meanwhile is left alone.
+        prompts.dismiss(tabID: tab.id)
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
-        guard index != nil || favoriteID != nil else { return }
+        guard index != nil || favoriteID != nil else { return false }
         recordClose(of: tab, reason: reason)
-        windows.forEach { $0.setPageFullscreen(false, of: tab) }
-        sheets.cancel(for: tab)
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
         tabObservers[tab.id] = nil
@@ -954,8 +962,8 @@ public final class BrowserSession: ObservableObject {
             addToClosedList(SessionSnapshot.TabRecord(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, engine: tab.engineKind, personaID: tab.personaID))
         }
         // Each main window that selected the tab selects one that no other window shows (window rule 3): for a page that closed itself, the listed tab of the page that opened it, as a sign-in popup closes once it has reported back; then the pane beside it, so the rest of its split view stays on screen, or else a listed open tab of the tab's space before a pinned one. A favorite's tab leaves the selection to a tab of the window's current space. A small window closes with its tab.
-        let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
+        let opener = reason == .page ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         for window in windows where window.selectedTabID == tab.id {
             guard window.kind == .main else {
                 window.close()
@@ -965,6 +973,7 @@ public final class BrowserSession: ObservableObject {
             let candidates = [opener, splitNeighbor].compactMap { $0 } + siblings.filter { !$0.isPinned } + siblings
             window.selectTab(candidates.first { !window.isShownInAnotherWindow($0) }?.id)
         }
+        return true
     }
 
     /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
@@ -1081,12 +1090,22 @@ public final class BrowserSession: ObservableObject {
         tab.isPinned.toggle()
     }
 
-    /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or a dotted host without spaces. Adds `https://` to a dotted host. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
+    /// Accepts only a full URL with a scheme and host, a file URL, which has no host, or an address without spaces whose host is dotted, `localhost` or a name under it, or an IPv6 address in brackets. Adds `http://` to an address on this Mac, where development servers run without TLS, and `https://` to the others. `localhost:3000` is thus an address, though it parses as a URL whose scheme is `localhost`. A file URL loads as typed, so the address of a dropped file that the palette shows reloads the file instead of sending its path to the search engine.
     public static func url(forInput input: String) -> URL? {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if let parsed = URL(string: text), let scheme = parsed.scheme, parsed.host != nil || scheme.lowercased() == "file" { return parsed }
-        if !text.contains(" "), let parsed = URL(string: "https://\(text)"), parsed.host?.contains(".") == true { return parsed }
-        return nil
+        guard !text.contains(" "), let parsed = URL(string: "https://\(text)"), let host = parsed.host?.lowercased(), !host.isEmpty else { return nil }
+        if isOnThisMac(host) { return URL(string: "http://\(text)") }
+        return host.contains(".") || host.contains(":") ? parsed : nil
+    }
+
+    /// Whether `host`, in lowercase, names this Mac: `localhost`, a name under it, or a loopback address (127.0.0.0/8 or ::1).
+    private static func isOnThisMac(_ host: String) -> Bool {
+        if host == "localhost" || host.hasSuffix(".localhost") { return true }
+        var ipv4 = in_addr()
+        if inet_pton(AF_INET, host, &ipv4) == 1 { return withUnsafeBytes(of: &ipv4) { $0[0] } == 127 }
+        var ipv6 = in6_addr()
+        return inet_pton(AF_INET6, host, &ipv6) == 1 && withUnsafeBytes(of: &ipv6) { Array($0) } == [UInt8](repeating: 0, count: 15) + [1]
     }
 
     /// Returns a site's results page for text that starts with a site search keyword and a space, the input URL, a web search URL for other text, such as a keyword whose template makes no web address, or `nil` for empty text.
@@ -1181,15 +1200,14 @@ public final class BrowserSession: ObservableObject {
 
     // MARK: Site permissions
 
-    /// Answers the tabs' permission requests from `sitePermissions` or with a sheet on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
+    /// Answers the tabs' permission requests from `sitePermissions` or with a card on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
     let permissionAnswers: SitePermissionAnswers
 
-    // MARK: Sheets
+    // MARK: Prompts
 
-    /// Queues a sheet for a tab, which shows on the window that shows the tab on screen (`TabSheetQueue`). While the app quits, the sheet gets the safe answer, `.cancel`, at once.
-    func enqueueSheet(_ alert: NSAlert, for tab: Tab, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        guard !isQuitting else { return completion(.cancel) }
-        sheets.enqueue(alert, for: tab, isPageDialog: isPageDialog, completion: completion)
+    /// Queues a prompt for a tab, which a card shows over the tab's pane while a window shows the tab (`TabPromptQueue`). While the app quits, it ends at once without the user.
+    func enqueuePrompt(_ content: PromptContent, for tab: Tab, completion: @escaping (PromptResponse) -> Void) {
+        prompts.enqueue(content, for: tab.id, completion: completion)
     }
 
     // MARK: Zoom
@@ -1286,9 +1304,10 @@ public final class BrowserSession: ObservableObject {
 
     /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. A space of another Persona refuses the tab.
     public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
-        guard canMoveTab(id, toSpace: spaceID), let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID != spaceID else { return }
+        guard canMoveTab(id, toSpace: spaceID), let moving = tabs.first(where: { $0.id == id }), moving.spaceID != spaceID else { return }
         // The other panes of its split view stay together in the space it leaves.
-        leaveSplitView(tabs[index])
+        leaveSplitView(moving)
+        guard let index = tabs.firstIndex(where: { $0 === moving }) else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
         tab.spaceID = spaceID
@@ -1437,10 +1456,8 @@ public final class BrowserSession: ObservableObject {
     /// Each space's split view: two to four of its tabs that share the page area, left to right. The page area shows a space's split view while one of its tabs is selected, and the selected tab is the focused pane.
     @Published private(set) var splitTabIDs: [UUID: [UUID]] = [:] {
         didSet {
-            // The panes on screen change with the split views, and the sheets that can show change with them. A pane that joins a window's split view while another window shows its tab stays with that window.
+            // The panes on screen change with the split views, and the prompt cards that show change with them. A pane that joins a window's split view while another window shows its tab stays with that window.
             windows.forEach { $0.updateShownTabs() }
-            windows.forEach(sheets.deferSheet(of:))
-            sheets.showNext()
         }
     }
 
@@ -1690,8 +1707,38 @@ extension BrowserSession: EngineDownloadsDelegate {
         closeDownloadPagesIfIdle()
     }
 
-    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
+    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a card over the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows; a tab that only pointed at the file, or a page without a tab, has nothing to ask about. The others go on as `chooseDestination` says.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
+        let choose = { [weak self] in self?.chooseDestination(in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
+        guard let tab = allTabs.first(where: { $0.webContents === item.webContents }), !tab.isDownloadOnly, !admittedDownloads.contains(item) else { return choose() }
+        let decide = { [weak self] (allowed: Bool) in
+            guard allowed else {
+                completion(nil)
+                return item.remove()
+            }
+            self?.admittedDownloads.add(item)
+            choose()
+        }
+        switch tab.pageDownloads.admit(decide) {
+        case .allow: decide(true)
+        case .deny: decide(false)
+        case .wait: break
+        case .ask: askToAllowDownloads(from: tab)
+        }
+    }
+
+    /// Asks with a card over the tab whether its page may download more files (`TabPromptContent.pageDownloads`). Only Allow allows; Don't Allow and a card that ended without the user, as when the tab closes, answer no.
+    private func askToAllowDownloads(from tab: Tab) {
+        let content = TabPromptContent.pageDownloads(pageURL: tab.url, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
+        enqueuePrompt(content, for: tab) { [weak tab] response in
+            guard let tab else { return }
+            let allowed = TabPromptContent.pageDownloadsResult(response)
+            tab.pageDownloads.answer(allowed).forEach { $0(allowed) }
+        }
+    }
+
+    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
+    private func chooseDestination(in downloads: any EngineDownloads, defaultFilename: String, completion: @escaping (URL?) -> Void) {
         guard runtime(owning: downloads)?.context.preferences.promptForDownloadPath == true else {
             return completion(Self.uniqueDestination(for: defaultFilename, in: downloadsDirectory))
         }

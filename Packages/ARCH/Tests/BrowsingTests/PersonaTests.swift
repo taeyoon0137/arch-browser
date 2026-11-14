@@ -18,6 +18,8 @@ import Testing
     private let defaultPersona = Persona(id: Persona.defaultID, name: "Default")
     private let work = Persona(name: "Work")
     private var research: Space { Space(name: "Research", personaID: work.id) }
+    /// The identity row of a Clear Site Data card, before the card names the site.
+    private let site = PromptIdentity(icon: .symbol("globe"), name: "", isSecure: true)
 
     @Test func oneDefaultPersonaIsNeverNamed() {
         let personal = Space(name: "Personal", personaID: Persona.defaultID)
@@ -26,8 +28,10 @@ import Testing
         #expect(BrowserWindowController.title(tabTitle: "Example Domain", spaceName: "Personal", place: nil) == "Example Domain")
         #expect(BrowserWindowController.title(tabTitle: nil, spaceName: "Personal", place: nil) == "Personal")
         #expect(BrowserWindowModel.sheetName(ofPersona: Persona.defaultID, space: personal, among: [defaultPersona]) == nil)
-        #expect(BrowserWindowModel.clearSiteDataTexts(site: "example.org", persona: nil).information
-            == "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again.")
+        let clear = TabPromptContent.clearSiteData(siteName: "example.org", personaSpace: BrowserSession.displayedPlace(ofPersona: Persona.defaultID, space: personal, among: [defaultPersona]),
+                                                   identity: site)
+        #expect(clear.identity.context == nil)
+        #expect(clear.message == "Its cookies and other website data are removed from both engines, which signs you out of the site. Its open tabs load again.")
     }
 
     @Test func twoPersonasNameThePersonaWithTheSpace() {
@@ -38,16 +42,16 @@ import Testing
         #expect(BrowserWindowController.title(tabTitle: nil, spaceName: "Research", place: place) == "Work / Research")
         let persona = BrowserWindowModel.sheetName(ofPersona: work.id, space: research, among: personas)
         #expect(persona == "the Persona of \u{201C}Work / Research\u{201D}")
-        let clear = BrowserWindowModel.clearSiteDataTexts(site: "example.org", persona: persona)
-        #expect(clear.message == "Clear the data stored by \u{201C}example.org\u{201D}?")
-        #expect(clear.information == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+        let clear = TabPromptContent.clearSiteData(siteName: "example.org", personaSpace: place, identity: site)
+        #expect(clear.identity.name == "example.org" && clear.identity.context == "Work / Research")
+        #expect(clear.message == "Its cookies and other website data are removed from both engines for every space of this Persona, which signs you out of the site. Its open tabs load again.")
         let delete = BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 2, favoriteCount: 1, tabCount: 3)
         #expect(delete.message == "Delete the Persona of \u{201C}Work / Research\u{201D}?")
         #expect(delete.information == "Its 2 spaces and 1 favorite are removed, and its 3 tabs close into the closed list. Its downloads in progress stop. Arch removes its cookies and website data from this Mac the next time it opens.")
         #expect(BrowserWindowModel.deletePersonaTexts(persona: persona ?? "", spaceCount: 1, favoriteCount: 0, tabCount: 1).information.hasPrefix("Its 1 space and 0 favorites are removed, and its 1 tab closes into"))
     }
 
-    /// A favorite's tab belongs to no space and shows in the window's current space, so a sheet about it names the Persona with that space, as the window title does.
+    /// A favorite's tab belongs to no space and shows in the window's current space, so a sheet or card about it names the Persona with that space, as the window title does.
     @Test func aFavoritesTabTakesTheWindowsSpace() {
         let personas = [defaultPersona, work]
         let research = self.research
@@ -60,8 +64,8 @@ import Testing
         #expect(space?.id == research.id)
         let persona = BrowserWindowModel.sheetName(ofPersona: work.id, space: space, among: personas)
         #expect(persona == "the Persona of \u{201C}Work / Research\u{201D}")
-        #expect(BrowserWindowModel.clearSiteDataTexts(site: "example.org", persona: persona).information
-            == "Its cookies and other website data are removed from both engines in the Persona of \u{201C}Work / Research\u{201D}, which signs you out of the site. Its open tabs load again.")
+        let clear = TabPromptContent.clearSiteData(siteName: "example.org", personaSpace: BrowserSession.displayedPlace(ofPersona: work.id, space: space, among: personas), identity: site)
+        #expect(clear.identity.context == "Work / Research")
         // Only a tab outside every space of its Persona names the Persona alone.
         #expect(BrowserWindowModel.sheetSpace(ofTabIn: nil, personaID: work.id, spaces: spaces, currentSpace: personal) == nil)
         #expect(BrowserSession.displayedPlace(ofPersona: work.id, space: nil, among: personas) == "Work")

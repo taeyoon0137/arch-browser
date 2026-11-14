@@ -116,12 +116,17 @@ struct WebExtensionRuntimeTests {
         #expect(await eventually { allowed != nil })
         // Native messaging, which only the install grants, and sites and pages other than web pages are never asked about.
         #expect(allowed == [.permission("cookies"), .site("https://example.com/*")])
-        #expect(host.sheets.first?.informativeText.hasPrefix("Use the extension API cookies\nRun scripts on pages from example.com\n") == true)
-        host.sheetAnswer = .alertSecondButtonReturn
+        #expect(host.questions.first == WebExtensionQuestion(kind: .access, extensionName: "Sample Extension", items: ["Use the extension API cookies", "Run scripts on pages from example.com"],
+                                                             keeps: "The extension keeps this access until you quit Arch or switch the extension off.", confirmsNext: false))
+        // Don't Allow, or a question that ended without the user, allows nothing.
+        host.answer = false
         runtime.extensions(engine, extension: sampleID, requests: [.permission("cookies")], in: nil) { allowed = $0 }
         #expect(allowed == [])
         #expect(WebExtensionAccessPrompt(requested: [.site("<all_urls>")], extensionName: "A").grant.confirmationReason(for: "A") != nil)
+        #expect(WebExtensionAccessPrompt(requested: [.site("<all_urls>")], extensionName: "A").question().confirmsNext)
         #expect(WebExtensionAccessPrompt(requested: [.permission("cookies"), .site("https://example.com/*")], extensionName: "A").grant.confirmationReason(for: "A") == nil)
+        #expect(WebExtensionAccessPrompt(requested: [.permission("cookies")], extensionName: "A", version: .chromium).question().keeps
+            == "Only the Chromium version gets this access. It keeps it until you quit Arch or switch the extension off.")
     }
 
     @Test func passesNativeMessagesOnlyWithTheGrant() async throws {

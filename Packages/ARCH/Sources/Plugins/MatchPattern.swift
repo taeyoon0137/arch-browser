@@ -52,9 +52,10 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
         "\(scheme ?? "*")://\(host.map { (includesSubdomains ? "*." : "") + $0 } ?? "*")\(path)"
     }
 
-    /// The sites the pattern covers in words, such as `example.com`, `example.com and its subdomains`, or `every website`, without its scheme and path.
+    /// The sites the pattern covers in words, such as `example.com`, `example.com and its subdomains`, `every .com website`, or `every website`, without its scheme and path.
     public var siteName: String {
         guard let host else { return "every website" }
+        if coversTopLevelDomain { return "every .\(host) website" }
         return includesSubdomains ? "\(host) and its subdomains" : host
     }
 
@@ -63,9 +64,14 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
         "Run scripts on pages from \(siteName)"
     }
 
-    /// Whether the pattern covers every host, which granting asks the user to confirm with Touch ID or the login password.
+    /// Whether the pattern covers every host, or every host under a top-level domain, as `*://*.com/*` does, which granting asks the user to confirm with Touch ID or the login password. A few such patterns would otherwise reach most of the web without the confirmation.
     public var coversEverySite: Bool {
-        host == nil
+        host == nil || coversTopLevelDomain
+    }
+
+    /// Whether the pattern names a top-level domain, a name of one label, and its subdomains.
+    private var coversTopLevelDomain: Bool {
+        includesSubdomains && host?.contains(".") == false
     }
 
     /// Whether `pattern`, in which each `*` matches any run of bytes, matches all of `text`. After a mismatch it lets the last `*` take one more byte and tries again. Keep it in step with `glob` in `javaScriptMatcher`.

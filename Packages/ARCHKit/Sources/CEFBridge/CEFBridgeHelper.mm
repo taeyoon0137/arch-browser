@@ -43,7 +43,10 @@ const char kAudibleScript[] = R"JS((() => {
   const updateMedia = () => { const text = stringify(describe()); if (text !== reported) { reported = text; reportMedia(text); } };
   const update = (event) => {
     if (event && event.target instanceof HTMLMediaElement && sounds(event.target)) current = event.target;
-    const now = !hidden && [...document.querySelectorAll("video, audio")].some(sounds);
+    const media = [...document.querySelectorAll("video, audio")];
+    // When the element described last stops sounding while another still sounds, the media keys and Now Playing follow the one still sounding.
+    if (!current || !current.isConnected || !sounds(current)) current = media.find(sounds) || current;
+    const now = !hidden && media.some(sounds);
     if (now !== audible) { audible = now; report(now); }
     updateMedia();
   };

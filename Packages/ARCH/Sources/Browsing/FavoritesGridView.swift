@@ -28,6 +28,11 @@ struct FavoritesGridView: View {
         return LazyVGrid(columns: columns, spacing: 8) {
             ForEach(favorites) { favorite in
                 FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasOpenPage(favorite))
+                    // The favorite's tab waits for the user's answer to a prompt.
+                    .overlay(alignment: .topTrailing) {
+                        TabPromptIndicator(prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
+                            .padding(5)
+                    }
                     // The release that ends a drag does not also open the favorite.
                     .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
                     .accessibilityAction { windowModel.openFavorite(favorite) }

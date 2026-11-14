@@ -1,4 +1,5 @@
-// Loading and saving `session.json`: files of each version gain what they lack through `normalized()`, files this build cannot read or fully understand stay on disk, and a scheduled save writes the snapshot taken last, or nothing without one.
+// Loading and saving `session.json`: files of each version gain what they lack through `normalized()`, files this build cannot read or fully understand stay on disk, a scheduled save writes the snapshot taken last, or nothing without one, and the page state is sealed in a file only the user can read.
+import CryptoKit
 import Foundation
 import Testing
 @testable import Browsing
@@ -57,6 +58,31 @@ import Testing
         #expect(ids.count == 5)
         #expect(Set(ids).count == 5)
         #expect(Array(ids.prefix(2)) == [tab1, tab2])
+    }
+
+    /// WebKit's state keeps a form a page sent, a password among it, so the file holds the state only sealed. State from a build before sealing loads as it was and is sealed when the session saves.
+    @Test func pageStateIsSealedInAFileOnlyTheUserReads() throws {
+        let folder = try SessionFolder()
+        try folder.write(version4File)
+        var snapshot = try #require(folder.store.load())
+        #expect(snapshot.tabs[0].state == Data([0, 1]))
+        let state = Data("user=alice&pw=HUNTER2SECRET".utf8)
+        snapshot.tabs[1].state = state
+        snapshot.favoriteTabs = [SessionSnapshot.FavoriteTabRecord(id: UUID(), favoriteID: favoriteID, url: nil, engine: .webKit, state: state)]
+        folder.store.saveNow(snapshot)
+        let file = try folder.contents(of: "session.json")
+        #expect(file.range(of: Data("HUNTER2SECRET".utf8)) == nil && file.range(of: Data(state.base64EncodedString().utf8)) == nil)
+        #expect(file.range(of: Data(#""AAE=""#.utf8)) == nil)
+        let attributes = try FileManager.default.attributesOfItem(atPath: folder.url.appendingPathComponent("session.json").path)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        let reloaded = try #require(folder.store.load())
+        #expect(reloaded.tabs.map(\.state) == [Data([0, 1]), state, nil])
+        #expect(reloaded.favoriteTabs?.first?.state == state)
+        // Without the key, as after the user denies the keychain prompt, the tabs load without their state.
+        let keyless = SessionStore(directory: folder.url, seal: SessionStateSeal { nil })
+        #expect(try #require(keyless.load()).tabs.allSatisfy { $0.state == nil })
+        keyless.saveNow(reloaded)
+        #expect(try #require(folder.store.load()).tabs.allSatisfy { $0.state == nil })
     }
 
     @Test func savedSnapshotsLoadWithTheSameIDs() throws {
@@ -299,7 +325,12 @@ import Testing
 /// A folder of its own for one test's files, removed when the test ends.
 private final class SessionFolder {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("ArchBrowsingTests-\(UUID().uuidString)", isDirectory: true)
-    var store: SessionStore { SessionStore(directory: url) }
+    /// Seals with a key of the folder's own, so that the tests never touch the Keychain.
+    private let seal: SessionStateSeal = {
+        let key = SymmetricKey(size: .bits256)
+        return SessionStateSeal { key }
+    }()
+    var store: SessionStore { SessionStore(directory: url, seal: seal) }
 
     init() throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

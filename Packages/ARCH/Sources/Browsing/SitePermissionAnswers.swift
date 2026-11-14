@@ -1,5 +1,4 @@
-// Answers websites' permission requests for the session: from the answers that Settings ▸ Websites remembers, or with a sheet on the tab, whose answer it then remembers. It also keeps the answers that each engine profile keeps itself in line with the remembered ones.
-import AppKit
+// Answers websites' permission requests for the session: from the answers that Settings ▸ Websites remembers, or with a card on the tab, whose answer it then remembers. It also keeps the answers that each engine profile keeps itself in line with the remembered ones.
 import ARCHEngine
 import Combine
 import Foundation
@@ -7,7 +6,7 @@ import Foundation
 final class SitePermissionAnswers {
     /// The remembered answers, which the session keeps in its folder.
     let store: SitePermissionStore
-    /// The answers waiting for each permission sheet, keyed by tab, origin, and types, so that a page that asks again before the user answers gets the same sheet's answer.
+    /// The answers waiting for each permission card, keyed by tab, origin, and types, so that a page that asks again before the user answers gets the same card's answer.
     private var waiters: [String: [(Bool) -> Void]] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
@@ -15,11 +14,11 @@ final class SitePermissionAnswers {
         self.store = store
     }
 
-    /// Answers a request of the tab `tabID` from the remembered answers, or asks with the sheet it passes to `ask` and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
-    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?,
-                ask: (NSAlert, @escaping (NSApplication.ModalResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
+    /// Answers a request of the tab `tabID` from the remembered answers, or asks with the card it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page.
+    func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity,
+                ask: (PromptContent, @escaping (PromptResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
         let store = store
-        // Chromium keeps every answer it receives, even the safe answer for a sheet that closed with its tab, so once it has the answer its kept answers return to the remembered ones.
+        // Chromium keeps every answer it receives, even the safe answer for a card that ended with its tab, so once it has the answer its kept answers return to the remembered ones.
         let answer = { [weak self] (granted: Bool) in
             completion(granted)
             guard let context else { return }
@@ -38,12 +37,12 @@ final class SitePermissionAnswers {
             return
         }
         waiters[key] = [answer]
-        ask(Self.alert(for: request, remembersAnswer: origin != nil)) { [weak self] response in
+        ask(Self.content(for: request, remembersAnswer: origin != nil, identity: identity)) { [weak self] response in
             let waiters = self?.waiters.removeValue(forKey: key) ?? [answer]
-            let granted = response == .alertFirstButtonReturn
+            let granted = response.buttonID == "allow"
             waiters.forEach { $0(granted) }
-            // A sheet that closed without an answer, as when its tab closed, leaves nothing to remember.
-            if let origin, response == .alertFirstButtonReturn || response == .alertSecondButtonReturn {
+            // Don't Allow, also through Escape, is an answer to remember. A card that ended without the user, as when its tab closed, leaves nothing to remember.
+            if let origin, response.buttonID != nil {
                 store.set(granted ? .allow : .deny, for: request.types, origin: origin)
             }
         }
@@ -74,21 +73,33 @@ final class SitePermissionAnswers {
             .store(in: &cancellables)
     }
 
-    /// The sheet that asks. The engine asks from inside its own message loop, so the sheet never blocks, and the answer reaches the engine once. A request for notifications says that they don't show as banners yet: the pinned engine posts them through `NSUserNotificationCenter`, which macOS refuses for Arch whatever Arch's notification permission is, so the sheet neither asks macOS nor points to System Settings (`docs/plan.md`, VI.7).
-    private static func alert(for request: EnginePermissionRequest, remembersAnswer: Bool) -> NSAlert {
-        let alert = NSAlert()
-        alert.messageText = "Allow \u{201C}\(request.origin.host ?? request.origin.absoluteString)\u{201D} to \(description(of: request.types))?"
-        var notes: [String] = []
+    /// The card that asks, under the site that asks, with the symbol of the first of its types in the order screen, camera, microphone, location, notifications, clipboard, and MIDI. The engine asks from inside its own message loop, so the card never blocks, and the answer reaches the engine once. Allow waits for the card to arm. A request for notifications says that they don't show as banners yet: the pinned engine posts them through `NSUserNotificationCenter`, which macOS refuses for Arch whatever Arch's notification permission is, so the card neither asks macOS nor points to System Settings (`docs/plan.md`, VI.7).
+    static func content(for request: EnginePermissionRequest, remembersAnswer: Bool, identity: PromptIdentity) -> PromptContent {
+        var notes: [PromptNote] = []
         if remembersAnswer {
-            notes.append("Arch remembers your answer for this website. You can change it in Settings > Websites.")
+            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website. You can change it in Settings > Websites.", tone: .info))
         }
         if request.types.contains(.notifications) {
-            notes.append("Websites\u{2019} notifications don\u{2019}t show as banners yet.")
+            notes.append(PromptNote(id: "banners", symbol: "bell.slash", text: "Websites\u{2019} notifications don\u{2019}t show as banners yet.", tone: .info))
         }
-        alert.informativeText = notes.joined(separator: " ")
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Don\u{2019}t Allow")
-        return alert
+        let asker = request.origin.host?.isEmpty == false ? "this website" : "this page"
+        return PromptContent(kind: .sitePermission, identity: identity, glyph: glyph(for: request.types),
+                             title: "Allow \(asker) to \(description(of: request.types))?", notes: notes,
+                             buttons: [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)],
+                             defaultButtonID: "allow", cancelButtonID: "deny")
+    }
+
+    private static func glyph(for types: [EnginePermissionType]) -> PromptGlyph {
+        let order: [EnginePermissionType] = [.screenCapture, .camera, .microphone, .geolocation, .notifications, .clipboard, .midi]
+        switch order.first(where: types.contains) ?? .camera {
+        case .screenCapture: return .symbol("rectangle.dashed.badge.record", tint: .purple, label: "Screen Recording")
+        case .camera: return .symbol("video.fill", tint: .green, label: "Camera")
+        case .microphone: return .symbol("mic.fill", tint: .orange, label: "Microphone")
+        case .geolocation: return .symbol("location.fill", tint: .accent, label: "Location")
+        case .notifications: return .symbol("bell.badge.fill", tint: .accent, label: "Notifications")
+        case .clipboard: return .symbol("doc.on.clipboard", tint: .accent, label: "Clipboard")
+        case .midi: return .symbol("pianokeys", tint: .accent, label: "MIDI Devices")
+        }
     }
 
     private static func description(of types: [EnginePermissionType]) -> String {

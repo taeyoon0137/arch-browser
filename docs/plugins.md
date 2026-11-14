@@ -164,7 +164,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
 - Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. Once site access modes exist, the user can also switch `siteAccess` to `whenInvoked`, and a manifest that asks for all sites starts with `whenInvoked`; until then an installed plugin's page scripts run in every page its granted sites cover. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for.
-- Granting access to all sites or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
+- Granting access to all sites, which a pattern for every host under a top-level domain such as `*://*.com/*` counts as, or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
 - A web extension's `tabs`, `clipboardWrite`, and `nativeMessaging` are Arch's `tabs`, `clipboard`, and `nativeMessaging`. Its other API permissions, such as `storage` or `cookies`, come with the install, as in other browsers: the install sheet and Settings list them in one sentence (`PluginManifest.extensionPermissions`), and only its sites can be left out.
 - Settings ▸ Plugins lists each grant. Revoking any part of it is not built yet; once it is, calls that need a revoked permission get `permissionDenied`, and contributions that need it are hidden.
 - An update shows the sheet again, with the permissions and sites that the installed version did not ask for marked New. A site that the installed version asked for starts as the user left it, and a new site starts on. The new grant keeps only what the new manifest asks for, so an update that asks for less narrows it.
@@ -246,7 +246,7 @@ The `Extensions` module turns a web extension into a plugin of the `webExtension
 | `action` | An item in the site settings popover with the action's icon, label, and badge for the tab, and an `action` command, titled with its default title or the extension's name, which the palette lists. The popup shows in a popover from the site settings button. An extension without one has an item only while the tab's engine keeps it from the tab's site, for Allow on This Site |
 | `permissions` | `tabs`, `clipboardWrite`, and `nativeMessaging` as Arch's permissions; the others as `extensionPermissions`, which come with the install. An entry that is an object with one key, a permission with arguments, counts by its key, as Chromium reads it |
 | `host_permissions` and `content_scripts[].matches` | The install sheet's sites, each with a switch. Patterns that Arch's match patterns cannot hold, such as `file:///*` or one with a port, are left out; on Chromium, Arch's engine also loads extensions without access to file URLs |
-| Requests at run time (`permissions.request` and the access WebKit asks about) | Arch's own sheet on the tab, in the install sheet's sentences on WebKit and in Chromium's own sentences on Chromium; sites other than web pages and `nativeMessaging`, which only the install grants, are never granted, and every website needs Touch ID or the login password, which on Chromium also counts the sites the install left out, since Chromium withholds them and lets `permissions.request()` ask for them again. On WebKit the answer lasts while the extension stays loaded; Chromium keeps it until the extension is removed, except sites: a grant that covers every site, such as `<all_urls>`, lasts until the extension next loads while its install grant leaves sites out, and every site granted at run time goes when the install grant moves from every site to some, as at an update review that switches a site off |
+| Requests at run time (`permissions.request` and the access WebKit asks about) | Arch's own card over the tab, in the install sheet's sentences on WebKit and in Chromium's own sentences on Chromium; sites other than web pages and `nativeMessaging`, which only the install grants, are never granted, and every website needs Touch ID or the login password, which on Chromium also counts the sites the install left out, since Chromium withholds them and lets `permissions.request()` ask for them again. On WebKit the answer lasts while the extension stays loaded; Chromium keeps it until the extension is removed, except sites: a grant that covers every site, such as `<all_urls>`, lasts until the extension next loads while its install grant leaves sites out, and every site granted at run time goes when the install grant moves from every site to some, as at an update review that switches a site off |
 | `content_scripts`, `background` | Run by the engine's extension runtime, not by Arch's page scripts |
 | `nativeMessaging` | Arch relays messages to the native app (see below) |
 | `commands`, `options_ui` or `options_page` | Not built yet: commands with their suggested shortcuts, and a settings page entry that opens the options page in a sheet |
@@ -447,7 +447,7 @@ public struct MatchPattern: Hashable, Codable, Sendable, CustomStringConvertible
     public init(_ pattern: String) throws
     public func matches(_ url: URL) -> Bool
     public var description: String { get }
-    /// The sites in words, such as `example.com and its subdomains` or `every website`.
+    /// The sites in words, such as `example.com and its subdomains`, `every .com website`, or `every website`.
     public var siteName: String { get }
 }
 
@@ -1066,7 +1066,8 @@ public protocol WebExtensionHost: AnyObject {
     func openTab(_ url: URL?, in engine: EngineKind, persona: PersonaID, window windowID: UUID?, active: Bool, index: Int?, completion: @escaping ((any EngineWebContents)?) -> Void)
     /// Opens a small window of the Persona whose one tab, in the engine, loads the address, or the new tab page for none, which extensions see with only that tab; several addresses open nothing. Completes with its identity once it is reported, or with nil when it opens none.
     func openWindow(with urls: [URL], in engine: EngineKind, persona: PersonaID, focused: Bool, completion: @escaping (UUID?) -> Void)
-    func presentSheet(_ alert: NSAlert, for tab: (any EngineWebContents)?, completion: @escaping (NSApplication.ModalResponse) -> Void)
+    /// Asks the user an interface-free question for the tab, or the front window's tab for none, as a card over the tab, and answers whether the user agreed; a question that ends without the user answers false.
+    func ask(_ question: WebExtensionQuestion, for tab: (any EngineWebContents)?, completion: @escaping (Bool) -> Void)
 }
 
 /// The web extensions of one Persona: the `webExtension` kind's runtime and the engines' extension delegate.

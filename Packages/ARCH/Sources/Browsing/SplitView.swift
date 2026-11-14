@@ -68,7 +68,7 @@ struct PageAreaView: View {
                     ForEach(panes) { tab in
                         Group {
                             if windowModel.shows(tab) {
-                                PagePaneView(session: session, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
+                                PagePaneView(session: session, prompts: session.prompts, tab: tab, isSplit: panes.count > 1, isPageFullscreen: isPageFullscreen)
                             } else {
                                 ShownElsewherePaneView(tab: tab, isSplit: panes.count > 1)
                             }
@@ -86,9 +86,11 @@ struct PageAreaView: View {
     }
 }
 
-/// One tab's page in its rounded frame, with the crash notice and, for the selected tab, the internal page, the region capture overlay, the find bar, and the question popover. In a split view, a click on the page selects its tab, the selected tab's pane has a ring in the space's tint, and each pane has a close control.
+/// One tab's page in its rounded frame, with the crash notice and, for the selected tab, the internal page, the region capture overlay, the find bar, and the question popover, and above them the tab's prompt card, which waits while an internal page or the preview panel covers the page. In a split view, a click on the page selects its tab, the selected tab's pane has a ring in the space's tint, and each pane has a close control, which stays above the card, and the card leaves it room.
 private struct PagePaneView: View {
     @ObservedObject var session: BrowserSession
+    /// Observed so that VoiceOver leaves the page under a card.
+    @ObservedObject var prompts: TabPromptQueue
     @EnvironmentObject private var windowModel: BrowserWindowModel
     /// Observed so that the pane shows the new view when the tab switches engines.
     @ObservedObject var tab: Tab
@@ -100,7 +102,11 @@ private struct PagePaneView: View {
     private var cornerRadius: CGFloat { isPageFullscreen ? 0 : PageFrameShape.cornerRadius }
 
     var body: some View {
-        WebContentsHostView(contentView: tab.webContents.view, cornerRadius: cornerRadius, onClick: isSplit ? selectTab : nil)
+        let isOnScreen = windowModel.tabsOnScreen.contains { $0.id == tab.id }
+        // The preview panel floats over every pane.
+        let isCovered = (isSelected && windowModel.internalPage != nil) || windowModel.preview != nil
+        let showsCard = PromptPresentation.shownPrompt(in: prompts, tabID: tab.id, isOnScreen: isOnScreen, isCovered: isCovered) != nil
+        WebContentsHostView(contentView: tab.webContents.view, cornerRadius: cornerRadius, onClick: isSplit ? selectTab : nil, hidesPageFromAccessibility: showsCard)
             .background(PageBackgroundView(isEmpty: false))
             .overlay { PageCrashNoticeView(tab: tab) }
             .overlay { if isSelected { InternalPageOverlay() } }
@@ -123,10 +129,14 @@ private struct PagePaneView: View {
                     .padding(.trailing, 16)
                 }
             }
+            .overlay {
+                PanePromptLayer(prompts: prompts, tab: tab, isOnScreen: isOnScreen, isFocusedPane: isSelected, isCovered: isCovered,
+                                cornerRadius: cornerRadius, leadingClearance: isSplit ? PaneCloseButton.reach : 0, selectPane: selectTab)
+            }
             .overlay(alignment: .topLeading) {
                 if isSplit {
                     PaneCloseButton { windowModel.closePane(tab) }
-                        .padding(6)
+                        .padding(PaneCloseButton.inset)
                 }
             }
     }
@@ -174,7 +184,7 @@ private struct ShownElsewherePaneView: View {
         .overlay(alignment: .topLeading) {
             if isSplit {
                 PaneCloseButton { windowModel.closePane(tab) }
-                    .padding(6)
+                    .padding(PaneCloseButton.inset)
             }
         }
     }
@@ -194,6 +204,12 @@ private struct InternalPageOverlay: View {
 
 /// Takes a pane's tab out of the split view. The tab stays open in the sidebar.
 private struct PaneCloseButton: View {
+    /// The control's distance from the pane's top leading corner.
+    static let inset: CGFloat = 6
+    static let diameter: CGFloat = 20
+    /// How far the control reaches from the pane's leading edge, which a prompt card leaves free.
+    static var reach: CGFloat { inset + diameter }
+
     let action: () -> Void
     @State private var isHovering = false
 
@@ -201,7 +217,7 @@ private struct PaneCloseButton: View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.system(size: 9, weight: .bold))
-                .frame(width: 20, height: 20)
+                .frame(width: Self.diameter, height: Self.diameter)
                 // A solid background: a material over the engine's view cannot sample it.
                 .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
                 .overlay(Circle().strokeBorder(Color(nsColor: .separatorColor)))

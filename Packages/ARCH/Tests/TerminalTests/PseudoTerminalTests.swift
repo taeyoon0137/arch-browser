@@ -28,8 +28,12 @@ import Testing
         defer { terminal.close() }
         var batches: [Data] = []
         terminal.onOutput = { batches.append($0) }
-        // The main queue stays busy while the program writes, as it does while a window draws.
-        usleep(500_000)
+        // The main queue stays busy while the program writes, as it does while a window draws, until reading pauses, however late the program starts under load.
+        let deadline = ContinuousClock.now + .seconds(30)
+        while !terminal.isReadingPaused, ContinuousClock.now < deadline {
+            usleep(1_000)
+        }
+        try #require(terminal.isReadingPaused)
         await waitUntil { batches.reduce(0) { $0 + $1.count } >= count }
         #expect(batches.reduce(Data(), +) == Data(repeating: UInt8(ascii: "y"), count: count))
         // The first batch holds what was read until reading paused: the limit, plus at most one read of 64 KB.

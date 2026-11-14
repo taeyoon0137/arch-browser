@@ -1,4 +1,4 @@
-// The web search engines for palette text that is not an address. Settings saves the choice.
+// The web search engines for palette text that is not an address, whose home page a tab opened without an address loads. Settings saves the choice.
 import Foundation
 
 /// A web search engine, saved by its raw value under `ARCHSearchEngine`.
@@ -19,6 +19,15 @@ public enum SearchEngine: String, CaseIterable {
         case .google: return "Google"
         case .bing: return "Bing"
         case .duckDuckGo: return "DuckDuckGo"
+        }
+    }
+
+    /// The home page, which a tab opened without an address loads.
+    var homeURL: URL {
+        switch self {
+        case .google: return URL(string: "https://www.google.com/")!
+        case .bing: return URL(string: "https://www.bing.com/")!
+        case .duckDuckGo: return URL(string: "https://duckduckgo.com/")!
         }
     }
 

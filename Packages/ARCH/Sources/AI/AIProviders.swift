@@ -50,6 +50,15 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
         }
     }
 
+    /// Whether the key saved for this provider may go with `edited`, the same provider with other settings: an HTTP provider's key goes only to the base URL it was saved for, and a command-line provider has none.
+    public func keepsItsKey(in edited: AIProviderConfiguration) -> Bool {
+        switch (kind, edited.kind) {
+        case let (.http(saved), .http(edited)): return saved.baseURL == edited.baseURL
+        case (.commandLine, .commandLine): return true
+        default: return false
+        }
+    }
+
     /// The capabilities a model of this provider has unless it overrides them.
     public var defaultCapabilities: Set<AIModelCapability> {
         switch kind {

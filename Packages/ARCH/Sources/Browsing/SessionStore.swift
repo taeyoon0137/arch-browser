@@ -3,8 +3,8 @@ import ARCHEngine
 import Foundation
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, and version 12 each open tab's suggested title. Files without a version are version 1.
-    static let currentVersion = 12
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, version 12 each open tab's suggested title, and version 13 seals the page state (`SessionStateSeal`). Files without a version are version 1.
+    static let currentVersion = 13
 
     struct TabRecord: Codable, Equatable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
@@ -21,7 +21,7 @@ struct SessionSnapshot: Codable {
         var lastActivatedAt: Date?
         /// `nil` in version 1 files; such a tab opens in the default engine.
         var engine: EngineKind?
-        /// The engine's restorable page state, such as WebKit's back-forward list. `nil` for engines that keep none, in closed-tab records, and in files before version 3.
+        /// The engine's restorable page state, such as WebKit's back-forward list, which the file keeps sealed from version 13. `nil` for engines that keep none, in closed-tab records, in files before version 3, and when the state cannot be sealed or opened.
         var state: Data?
         /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
         var personaID: UUID?
@@ -179,6 +179,24 @@ struct SessionSnapshot: Codable {
     }
 }
 
+extension SessionSnapshot {
+    /// The snapshot with the page state of each open tab and favorite's tab passed through `transform`, which leaves out a state it returns nil for.
+    func mappingPageState(_ transform: (Data) -> Data?) -> SessionSnapshot {
+        var snapshot = self
+        snapshot.tabs = tabs.map { record in
+            var record = record
+            record.state = record.state.flatMap(transform)
+            return record
+        }
+        snapshot.favoriteTabs = favoriteTabs?.map { record in
+            var record = record
+            record.state = record.state.flatMap(transform)
+            return record
+        }
+        return snapshot
+    }
+}
+
 extension SessionSnapshot.TabRecord {
     /// An open tab as `session.json` keeps it, in the space `spaceID` and active last at `lastActivatedAt`. A tab without its page writes what its stand-in keeps of its saved record (`UnloadedWebContents`).
     init(_ tab: Tab, spaceID: UUID, lastActivatedAt: Date) {
@@ -192,9 +210,12 @@ final class SessionStore {
     private var pendingSave: DispatchWorkItem?
     /// Encodes and writes the snapshots in the order they were taken, away from the main thread.
     private let writeQueue = DispatchQueue(label: "xyz.taeyoon.arch.session-store", qos: .utility)
+    /// Seals the page state in the file. The tests give one with a key of their own, so they never touch the Keychain.
+    private let seal: SessionStateSeal
 
-    init(directory: URL) {
+    init(directory: URL, seal: SessionStateSeal = .keychain) {
         fileURL = directory.appendingPathComponent("session.json")
+        self.seal = seal
     }
 
     /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
@@ -208,7 +229,7 @@ final class SessionStore {
             _ = try? FileManager.default.replaceItemAt(directory.appendingPathComponent("session.unreadable.json"), withItemAt: fileURL)
             return nil
         }
-        return snapshot.normalized()
+        return snapshot.mappingPageState(seal.open).normalized()
     }
 
     /// The version a file was written with, read on its own so that a newer file is copied even when the rest does not decode.
@@ -233,9 +254,11 @@ final class SessionStore {
         writeQueue.sync { write(snapshot) }
     }
 
+    /// Only the user can read the file.
     private func write(_ snapshot: SessionSnapshot) {
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        guard let data = try? JSONEncoder().encode(snapshot.mappingPageState(seal.seal)) else { return }
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: fileURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 }

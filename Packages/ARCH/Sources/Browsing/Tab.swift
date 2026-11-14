@@ -50,16 +50,16 @@ public final class Tab: ObservableObject, Identifiable {
     var didFinishLoad: (() -> Void)?
     /// Sends each time the main frame finishes loading a document, for the AI interface's hooks. Loads of frames inside the page and navigations within the document send nothing.
     let didLoadDocument = PassthroughSubject<Void, Never>()
-    /// The session sets this callback to close the sheets of a page whose dialogs no longer apply.
+    /// The session sets this callback to end the prompts of a page whose dialogs no longer apply.
     var didCancelDialogs: (() -> Void)?
-    /// The session sets this callback to bring the tab forward, so that a sheet it needs can show.
+    /// The session sets this callback to bring the tab forward, so that a prompt it needs can show.
     var requestSelection: (() -> Void)?
     /// The session sets this callback to show the tab and bring its window and the app forward, as the return button of the page's picture-in-picture window asks.
     var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
-    /// The session sets this callback to show a sheet for the page, which waits until a window shows the page. The flag marks the page's own `alert`, `confirm`, and `prompt`, which the engine can cancel. Without the callback the handler receives `.cancel` and the page gets the safe answer.
-    var presentAlert: ((NSAlert, Bool, @escaping (NSApplication.ModalResponse) -> Void) -> Void)?
+    /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
+    var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
     /// The session sets this callback to open an address from the page's context menu in a background tab.
     var openURLInNewTab: ((URL) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
@@ -72,7 +72,7 @@ public final class Tab: ObservableObject, Identifiable {
     var previewLink: ((URL) -> Void)?
     /// The session sets this callback to fill the window with the page while it is in fullscreen. Only engines that leave the transition to the app report it.
     var didChangeFullscreen: ((Bool) -> Void)?
-    /// Set while a sheet asks to open a link in another app, so that a page cannot queue more of them.
+    /// Set while a card asks to open a link in another app, so that a page cannot queue more of them.
     private var isOfferingExternalApp = false
     /// The site whose own request to open another app the user declined: its host, or its scheme for a page without one, such as a file. The page asks no more until the tab moves to another site, so changing its own address or reloading does not bring the question back. A link the user clicks or an address the user types still asks.
     private var declinedExternalAppSite: String?
@@ -85,7 +85,9 @@ public final class Tab: ObservableObject, Identifiable {
     /// The session sets this callback to learn that the tab only ever pointed at a file. The argument tells whether the file downloads; the session removes the tab without a closed-list entry.
     var didOpenOnlyDownload: ((Bool) -> Void)?
     /// Set when the tab turned out to point at a file, so the file's address does not enter history.
-    private var isDownloadOnly = false
+    private(set) var isDownloadOnly = false
+    /// Whether the page may start downloads without asking (`BrowserSession`'s download delegate).
+    var pageDownloads = PageDownloadGate()
 
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
         self.id = id
@@ -94,7 +96,7 @@ public final class Tab: ObservableObject, Identifiable {
         self.isPinned = isPinned
         self.personaID = personaID
         self.title = webContents.title
-        self.url = webContents.url
+        self.url = webContents.url?.withoutCredentials
         self.isLoading = webContents.isLoading
         self.canGoBack = webContents.canGoBack
         self.canGoForward = webContents.canGoForward
@@ -123,7 +125,7 @@ public final class Tab: ObservableObject, Identifiable {
         suggestedTitle = record.suggestedTitle
         self.folderID = folderID
         isRestored = true
-        recordedURL = record.url
+        recordedURL = record.url?.withoutCredentials
     }
 
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
@@ -148,12 +150,22 @@ public final class Tab: ObservableObject, Identifiable {
         if !title.isEmpty { return title }
         return url?.host ?? "New Tab"
     }
+
+    /// The user clicked in the tab's page, which lets the page start one more download without asking, as for the link of a file.
+    public func userDidClickInPage() {
+        pageDownloads.userDidClick()
+    }
+
+    /// Arch loads a page in the tab for the user, as an address typed in the palette, Back, or Reload, so a download it starts is not the page's (`PageDownloadGate`).
+    func userDidNavigate() {
+        pageDownloads.userDidNavigate()
+    }
 }
 
 extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeTitle(_ webContents: any EngineWebContents) { title = webContents.title }
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
-        url = webContents.url
+        url = webContents.url?.withoutCredentials
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
     }
@@ -165,18 +177,24 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
         isLoading = webContents.isLoading
-        // The Chromium engine reloads a page once after its first crash; any new load clears the notice.
+        // The Chromium engine reloads a page after a crash unless it crashed just after its last reload; any new load clears the notice.
         if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         if !isLoading { didFinishLoad?() }
         // Record a page when it finishes loading, when its title is usually known.
-        if !isLoading, !isDownloadOnly, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
+        if !isLoading, !isDownloadOnly, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)
         }
     }
-    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) { didLoadDocument.send() }
+    public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
+        pageDownloads.documentDidCommit(site: Self.site(of: url))
+    }
+    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
+        didLoadDocument.send()
+    }
+
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents)
     }
@@ -222,45 +240,30 @@ extension Tab: EngineWebContentsUIDelegate {
 
     /// Loads the crashed page's address again, which starts a new page process.
     public func reloadAfterCrash() {
+        userDidNavigate()
         guard let url else { return webContents.navigationController.reload() }
         webContents.navigationController.load(URLRequest(url: url))
     }
 
     // MARK: JavaScript dialogs
 
+    // A page's own dialogs show its words under its site, which a page cannot choose, so that a page cannot pass its dialog off as one from the app.
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptAlert message: String, completion: @escaping () -> Void) {
-        let alert = pageAlert(message)
-        alert.addButton(withTitle: "OK")
-        showAlert(alert, isPageDialog: true) { _ in completion() }
+        showPrompt(TabPromptContent.alert(message: message, identity: pageIdentity)) { _ in completion() }
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptConfirm message: String, completion: @escaping (Bool) -> Void) {
-        let alert = pageAlert(message)
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn) }
+        showPrompt(TabPromptContent.confirm(message: message, identity: pageIdentity)) { completion(TabPromptContent.confirmResult($0)) }
     }
 
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, completion: @escaping (String?) -> Void) {
-        let alert = pageAlert(message)
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(string: defaultText ?? "")
-        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        showAlert(alert, isPageDialog: true) { completion($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
+        showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, identity: pageIdentity)) { completion(TabPromptContent.textInputResult($0)) }
     }
 
-    /// Asks before the page is left. A page cannot choose this sheet's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show.
+    /// Asks before the page is left. A page cannot choose this card's text, so the message is ignored, as in other browsers. Closing a background tab brings it forward so the question can show. Only Stay keeps the page, so a card that ends without the user, as when Arch quits, leaves it.
     public func webContents(_ webContents: any EngineWebContents, runBeforeUnloadPanel message: String, completion: @escaping (Bool) -> Void) {
         requestSelection?()
-        let alert = NSAlert()
-        alert.messageText = "Leave this page?"
-        alert.informativeText = "Changes you made may not be saved."
-        alert.addButton(withTitle: "Leave")
-        alert.addButton(withTitle: "Stay")
-        showAlert(alert) { completion($0 != .alertSecondButtonReturn) }
+        showPrompt(TabPromptContent.leavePage(identity: pageIdentity)) { completion(TabPromptContent.leavePageResult($0)) }
     }
 
     public func webContentsDidCancelDialogs(_ webContents: any EngineWebContents) {
@@ -352,75 +355,49 @@ extension Tab: EngineWebContentsUIDelegate {
         return url.host ?? "\(url.scheme ?? ""):"
     }
 
-    /// Asks before a page hands a link to another app, then opens the link there. Nothing happens without an app for the link. One question shows at a time, and a site the user said no to asks no more.
+    /// Asks before a page hands a link to another app, with the app's name and icon, then opens the link there. Nothing happens without an app for the link. One question shows at a time, and a site the user said no to asks no more.
     private func offerExternalApp(for url: URL) {
         guard !isOfferingExternalApp, declinedExternalAppSite == nil || declinedExternalAppSite != Self.site(of: self.url),
               let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
         isOfferingExternalApp = true
         let appName = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
-        let alert = NSAlert()
-        alert.messageText = "Open \u{201C}\(appName)\u{201D}?"
-        alert.informativeText = "\(self.url?.host.map { "\u{201C}\($0)\u{201D}" } ?? "This page") wants to open a \(url.scheme ?? "") link in \(appName)."
-        alert.icon = NSWorkspace.shared.icon(forFile: appURL.path)
-        alert.addButton(withTitle: "Open")
-        alert.addButton(withTitle: "Cancel")
+        let content = TabPromptContent.openInApp(appName: appName, appIcon: NSWorkspace.shared.icon(forFile: appURL.path), scheme: url.scheme ?? "",
+                                                 hasHost: self.url?.host?.isEmpty == false, identity: pageIdentity)
         let pageSite = Self.site(of: self.url)
-        showAlert(alert) { [weak self] response in
+        showPrompt(content) { [weak self] response in
             self?.isOfferingExternalApp = false
-            if response == .alertFirstButtonReturn {
+            switch TabPromptContent.openInAppResult(response) {
+            case .open:
                 NSWorkspace.shared.open(url)
-            } else if response == .alertSecondButtonReturn, let self, Self.site(of: self.url) == pageSite {
-                // Only the Cancel button counts as an answer; a sheet the app ended, as for an engine switch, does not.
-                self.declinedExternalAppSite = pageSite
+            case .decline:
+                // Only Cancel, clicked or through Escape, counts as an answer; a card that ended without the user, as for an engine switch, does not.
+                if let self, Self.site(of: self.url) == pageSite { self.declinedExternalAppSite = pageSite }
+            case .none:
+                break
             }
         }
     }
 
     // MARK: HTTP authentication
 
-    /// Asks for a user name and password for a site or proxy. The credential lasts for this session only and is never saved.
+    /// Asks for a user name and password for a site or proxy, in a card whose password field is secure. The credential lasts for this session only and is never saved.
     public func webContents(_ webContents: any EngineWebContents, didReceiveAuthenticationChallenge challenge: URLAuthenticationChallenge, completion: @escaping (URLCredential?) -> Void) {
         let space = challenge.protectionSpace
-        let alert = NSAlert()
-        alert.messageText = space.isProxy() ? "Log In to the Proxy \u{201C}\(space.host)\u{201D}" : "Log In to \u{201C}\(space.host)\u{201D}"
-        var details: [String] = []
-        if challenge.previousFailureCount > 0 { details.append("The user name or password was incorrect.") }
-        if let realm = space.realm, !realm.isEmpty { details.append("The site says: \u{201C}\(realm)\u{201D}") }
-        if !space.receivesCredentialSecurely { details.append("Your login information will be sent without encryption.") }
-        alert.informativeText = details.joined(separator: "\n")
-        alert.addButton(withTitle: "Log In")
-        alert.addButton(withTitle: "Cancel")
-        let userField = NSTextField(string: challenge.proposedCredential?.user ?? "")
-        userField.placeholderString = "User Name"
-        let passwordField = NSSecureTextField(string: "")
-        passwordField.placeholderString = "Password"
-        let fields = NSStackView(views: [userField, passwordField])
-        fields.orientation = .vertical
-        fields.spacing = 8
-        fields.frame = NSRect(x: 0, y: 0, width: 280, height: 56)
-        userField.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        passwordField.widthAnchor.constraint(equalToConstant: 280).isActive = true
-        alert.accessoryView = fields
-        alert.window.initialFirstResponder = userField
-        userField.nextKeyView = passwordField
-        showAlert(alert) { response in
-            guard response == .alertFirstButtonReturn else { return completion(nil) }
-            completion(URLCredential(user: userField.stringValue, password: passwordField.stringValue, persistence: .forSession))
-        }
+        let identity = PromptSiteIdentity.signIn(space, tabURL: url, favicon: favicon)
+        let content = TabPromptContent.signIn(space, proposedUser: challenge.proposedCredential?.user, failed: challenge.previousFailureCount > 0, identity: identity)
+        showPrompt(content) { completion(TabPromptContent.signInCredential($0)) }
     }
 
-    /// Names the site in the title so that a page cannot pass its dialog off as one from the app.
-    private func pageAlert(_ message: String) -> NSAlert {
-        let alert = NSAlert()
-        alert.messageText = url?.host.map { "\u{201C}\($0)\u{201D} says" } ?? "This page says"
-        alert.informativeText = message
-        return alert
+    /// The tab's page as the asker of its own prompts.
+    private var pageIdentity: PromptIdentity {
+        PromptSiteIdentity.make(for: url, in: self)
     }
 
-    private func showAlert(_ alert: NSAlert, isPageDialog: Bool = false, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-        guard let presentAlert else { return completion(.cancel) }
-        presentAlert(alert, isPageDialog, completion)
+    private func showPrompt(_ content: PromptContent, completion: @escaping (PromptResponse) -> Void) {
+        guard let presentPrompt else { return completion(.dismissed) }
+        presentPrompt(content, completion)
     }
+
 }
 
 // MARK: Page scripts
@@ -462,6 +439,14 @@ extension URL {
     var withoutFragment: URL {
         guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false), components.fragment != nil else { return self }
         components.fragment = nil
+        return components.url ?? self
+    }
+
+    /// The address without a user name and password, as a page's own `location.href` has it. WebKit reports the address it loaded with them, and the sidebar, the history, and `session.json` keep the address without them.
+    var withoutCredentials: URL {
+        guard var components = URLComponents(url: self, resolvingAgainstBaseURL: false), components.user != nil || components.password != nil else { return self }
+        components.user = nil
+        components.password = nil
         return components.url ?? self
     }
 }

@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// Clicking a shortcut records the next key pressed with its modifiers: Escape cancels and Delete removes the shortcut. A shortcut that another command uses moves only after the user confirms.
+/// Clicking a shortcut records the next key pressed with its modifiers: Escape cancels and Delete removes the shortcut. A shortcut that another command uses, recorded or restored as a default, moves only after the user confirms.
 struct ShortcutsSection: View {
     @ObservedObject private var shortcuts = ShortcutSettings.shared
     @State private var recording: ShortcutCommand?
@@ -55,7 +55,11 @@ struct ShortcutsSection: View {
         LabeledContent {
             HStack(spacing: 4) {
                 if shortcuts.isChanged(command) {
-                    Button { shortcuts.resetShortcut(for: command) } label: {
+                    Button {
+                        if let owner = shortcuts.resetShortcut(for: command), let shortcut = command.defaultShortcut {
+                            conflict = Conflict(command: command, shortcut: shortcut, owner: owner)
+                        }
+                    } label: {
                         Label("Restore Default", systemImage: "arrow.uturn.backward")
                             .labelStyle(.iconOnly)
                     }
