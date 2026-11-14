@@ -224,13 +224,14 @@ public final class AIAgentSession {
         startNextTurn()
     }
 
-    /// A failed turn ends with its user message in Arch's transcript. Reuse it, including the first turn's session preamble,
-    /// so restarting the CLI sends it once and keeps the earlier conversation in order.
+    /// Retry a failed user turn without adding another copy of its message to Arch's replay transcript.
     public func retry(_ message: String) throws {
         guard !hasEnded, !isTurnRunning else { return }
         guard let last = transcript.last, last.role == .user else { return try send(message) }
-        try checkMessage(last.text)
-        startTurn(last.text, isRetry: true)
+        // A new Claude Code process needs Arch's original preamble. An existing CLI conversation already has it.
+        let input = processKind == .claudeCode && process == nil ? last.text : message
+        try checkMessage(input)
+        startTurn(input, isRetry: true)
     }
 
     /// Throws what `send(_:)` would throw for the message, without sending it, so that a caller that queues messages itself can keep a refused one in its composer.

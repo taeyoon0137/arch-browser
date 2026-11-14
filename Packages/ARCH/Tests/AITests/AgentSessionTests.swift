@@ -574,6 +574,26 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         await session.end()
     }
 
+    @Test func retryOnTheExistingCLIProcessSendsOnlyTheCurrentMessage() async throws {
+        let refused = #"{"type":"result","subtype":"success","is_error":true,"result":"Fixture provider failed."}"#
+        let replies = try claudeTurns("claude-session")
+        let cli = try FakeCLI.claude(turns: [longTurnStart + "\n" + refused, replies[3]])
+        let fixture = try AgentFixture(cli: cli)
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        let task = "Retry on the same process."
+        let initialContext = "<arch-session>Original tab handles.</arch-session>"
+        try session.send(initialContext + "\n" + task)
+        try await log.wait { $0.contains { $0.hasPrefix("failed:") } }
+        let child = try #require(session.processID)
+        try session.retry(task)
+        try await log.wait { $0.contains("finished:completed") }
+        let input = try #require(cli.text("stdin.log").split(separator: "\n").last)
+        #expect(input.contains(task) && !input.contains(initialContext))
+        #expect(session.processID == child)
+        await session.end()
+    }
+
     @Test func stopEndsTheProcessGroupWhenTheTurnDoesNotEnd() async throws {
         let cli = try FakeCLI.claude(turns: [longTurnStart, try claudeTurns("claude-session")[3]])
         let fixture = try AgentFixture(cli: cli)
