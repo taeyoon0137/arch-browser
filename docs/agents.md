@@ -866,6 +866,8 @@ The first build adds no engine protocol member; `executeJavaScript(_:inWorld:com
 
 In-app `read_text` uses the same page extraction, size limits, and untrusted text marking as an outside client's read. It accepts a handle for a tab the session owns or the user shared in its Persona. A closed tab, a changed address, a withdrawn share, or a newly excluded site discards a pending read. Stop and Take Over suppress the pending result.
 
+Continue as Agent Task opens the composer with the user's draft or question. Share reader excerpt lets the user preview the selection and previous answer, up to 4,096 UTF-8 bytes each. They are available to the model through `session_info` as quoted page data while the original tab and address are still shared and allowed. The quotes do not add destinations to the session's site scope.
+
 ## Checks from the bundle
 
 Each task that needs the app adds its check at the end of the regression checklist in `docs/plan.md`, under the next free number there, which this list and the queue use: checks 74 to 86. Run them on both engines with a fresh Application Support folder.
@@ -888,6 +890,7 @@ Fixture pages: a fresh `ai.json` excludes `file:` and `local-network` (`AISitePa
 
 ## Facts
 
+- On 2026-11-14, the debug bundle made by `scripts/bundle_app.sh` passed `codesign --verify --deep --strict`. Its relative `arch-mcp` link points to `arch-cli`. The helper printed the agent guide and command help. With the installed app running without a control listener, status returned 69. An MCP initialize request over standard input returned server name `arch` and the helper exited 0 at EOF.
 Checked on this Mac with Claude Code 2.1.323 and Codex 0.164.0, with no model run and nothing signed in or out:
 
 - `claude --help`: `-p`, `--input-format stream-json` (print mode only), `--output-format stream-json`, `--include-partial-messages`, `--verbose`, `--no-session-persistence`, `--session-id`, `--restricted` (its text as quoted under Claude Code), `--tools`, `--strict-mcp-config`, `--mcp-config`, `--allowedTools`, `--permission-mode` (`acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan`), `--permission-prompts host|none`, `--disable-slash-commands`, `--append-system-prompt`, `--model`, `--fallback-model` (a comma-separated list, used when the model is overloaded or unavailable, retrying the primary at the start of each user turn), `--effort` (`low` to `max`), `--setting-sources`, `--plugin-dir`, `--bare` (never the subscription sign-in), `--safe-mode` (turns MCP servers off); `claude auth status --json`. In the binary: `--append-system-prompt-file`, `--max-turns`, the `init` event's `tools`, `mcp_servers`, `model`, and `permissionMode`, `rate_limit_event`, `total_cost_usd`, `cache_read_input_tokens`, `MCP_TIMEOUT`, `MCP_TOOL_TIMEOUT`, `ENABLE_TOOL_SEARCH`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_CLAUDE_MDS` (which skips the instruction files), `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `CLAUDE_CONFIG_DIR`, the `init` event's `agents`, `skills`, `plugins`, `memory_paths`, and `analytics_disabled`, and the `result` event's `modelUsage`. `~/.local/bin/claude` links to `~/.local/share/claude/versions/2.1.323`.
@@ -975,7 +978,7 @@ Checked in `ARCHEngineWebKitTests` on this Mac (macOS 27.2) with a page in a win
 
 Each item names the task that checks it first. A differing result changes the design in this note and the affected task row.
 
-- VII.10.1: the signing and link facts of the scratch bundle (Facts) in `build/Arch.app` as `scripts/bundle_app.sh` signs it, which is regression check 74's first part.
+- VII.10.1: repeat the no-listener status check after the installed app quits. The bundle and stdio results are recorded under Facts.
 - VII.11.1: whether the code directory hash that `SecStaticCodeCreateWithPath` reads from the bundled file equals the one the running peer's code reports in `build/Arch.app` as the script signs it, with the Apple Development identity when the Mac has one; in a scratch bundle signed ad hoc they were equal (Facts). Regression check 74's `arch-cli status` shows it: with unequal hashes, Arch refuses the connection and the client exits 6.
 - VII.11.1: the grant sheet's look and keys, Touch ID, and the notification in the background, which need the running app and the screen.
 - VII.11.1: whether updating the seal item's data with a write's generation (`SecItemUpdate`) asks for the keychain password in `build/Arch.app` after the launch's read was allowed, also after a rebuild; the tests use a key store in memory.

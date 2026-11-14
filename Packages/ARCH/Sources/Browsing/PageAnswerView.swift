@@ -23,7 +23,7 @@ struct PageExchangeView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .textSelection(.enabled)
             if showsSelection, let selection = exchange.selection {
-                SelectionQuote(text: selection)
+                SelectionQuote(text: selection.text)
             }
             if !exchange.reply.isEmpty {
                 Text(PageReply.text(exchange.reply))

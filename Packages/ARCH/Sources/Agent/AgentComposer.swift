@@ -24,6 +24,40 @@ public struct AgentPanelActions {
     }
 }
 
+/// A bounded excerpt the user can attach from the page reader. The task field holds only their own instructions.
+public struct AgentReaderExcerpt: Equatable {
+    public let tabID: UUID
+    public let url: URL
+    public let selection: String?
+    public let reply: String?
+
+    public init?(tabID: UUID, url: URL, selection: String?, reply: String?) {
+        guard AgentSite.of(url) != nil else { return nil }
+        self.tabID = tabID
+        self.url = url
+        self.selection = Self.excerpt(selection)
+        self.reply = Self.excerpt(reply)
+        guard self.selection != nil || self.reply != nil else { return nil }
+    }
+
+    /// Keep previews and tool results small even for text with long combining sequences.
+    private static func excerpt(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        let byteLimit = 4096
+        guard text.utf8.prefix(byteLimit + 1).count > byteLimit else { return text }
+        let prefix = text.utf8.prefix(byteLimit - "…".utf8.count)
+        // A UTF-8 scalar takes up to four bytes. Drop its unfinished tail before adding the ellipsis.
+        for tail in 0...3 {
+            if let complete = String(bytes: prefix.dropLast(tail), encoding: .utf8) { return complete + "…" }
+        }
+        return nil
+    }
+
+    func matches(_ tab: AgentTabInfo?) -> Bool {
+        tab?.id == tabID && tab?.url == url
+    }
+}
+
 /// Where a new session starts and what it starts with. Each one is a new draft.
 public struct AgentComposerContext: Equatable, Identifiable {
     public let id = UUID()
@@ -34,6 +68,7 @@ public struct AgentComposerContext: Equatable, Identifiable {
     /// The selected tab, which the composer attaches unless its site is excluded from AI.
     public var tab: AgentTabInfo?
     public var text: String
+    public var readerExcerpt: AgentReaderExcerpt?
     /// The sentence of a start that was refused before the composer showed, as for the palette's Ask Agent; the task stays in the field with it.
     public var problem: String?
 
@@ -67,6 +102,7 @@ public struct AgentComposer: View {
     let didStart: (AgentSession) -> Void
     @State private var text: String
     @State private var attachesTab = true
+    @State private var sharesExcerpt = false
     @State private var usesAgentsPersona = false
     @State private var mode: AgentAccessLevel?
     @State private var model: AIModelRef?
@@ -111,6 +147,24 @@ public struct AgentComposer: View {
                     .onSubmit(start)
                 if let tab = attachableTab, attachesTab, !usesAgentsPersona {
                     AgentTabChip(title: tab.title.isEmpty ? (tab.url?.host ?? "Tab") : tab.title) { attachesTab = false }
+                    if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
+                        Toggle("Share reader excerpt", isOn: $sharesExcerpt)
+                            .toggleStyle(.checkbox)
+                        DisclosureGroup("Preview excerpt") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    if let selection = excerpt.selection {
+                                        Text("Selected text").fontWeight(.medium)
+                                        Text(verbatim: selection)
+                                    }
+                                    if let reply = excerpt.reply {
+                                        Text("Reader answer").fontWeight(.medium)
+                                        Text(verbatim: reply)
+                                    }
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                            }.frame(maxHeight: 120)
+                        }.font(.system(size: 12))
+                    }
                 }
                 Divider()
                 options
@@ -229,8 +283,9 @@ public struct AgentComposer: View {
         let task = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { return }
         let attached = attachesTab && !usesAgentsPersona ? attachableTab.map { [$0.id] } ?? [] : []
-        let start = AgentService.SessionStart(task: task, personaID: context.personaID, spaceID: context.spaceID, attachedTabIDs: attached,
+        var start = AgentService.SessionStart(task: task, personaID: context.personaID, spaceID: context.spaceID, attachedTabIDs: attached,
                                               mode: chosenMode, model: model, effort: effort, usesAgentsPersona: usesAgentsPersona)
+        if sharesExcerpt, let excerpt = context.readerExcerpt, attached.contains(excerpt.tabID) { start.readerExcerpt = excerpt }
         do {
             let session = try service.startSession(start)
             problem = nil

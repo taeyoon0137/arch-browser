@@ -577,6 +577,7 @@ import Foundation
         public var spaceID: UUID
         /// Tabs shared with the session from the start, such as the selected tab; one on a site excluded from AI is left out.
         public var attachedTabIDs: [UUID]
+        var readerExcerpt: AgentReaderExcerpt?
         public var mode: AgentAccessLevel
         /// Nil uses the `agent` route, or the first preset model when the route has none (`AIService.startAgentSession(_:)`).
         public var model: AIModelRef?
@@ -632,9 +633,13 @@ import Foundation
         let tabs = host.userTabs(in: personaID).filter { tab in
             attachedIDs.contains(tab.id) && tab.url.map { AgentSite.of($0) != nil && dependencies.allowsAI($0) } == true
         }
+        if let excerpt = start.readerExcerpt, !tabs.contains(where: excerpt.matches) {
+            throw SessionError(message: "The source page changed or is no longer shared. Turn off Share reader excerpt to continue.")
+        }
         tabs.compactMap(\.url).forEach { scope.add($0) }
         let session = AgentSession(title: AgentSession.title(forTask: start.task), personaID: personaID, spaceID: spaceID, origin: start.origin, mode: mode,
                                    model: start.model, effort: start.effort, scope: scope, attachedTabIDs: tabs.map(\.id), tools: [])
+        session.readerExcerpt = start.readerExcerpt
         session.reportedTools = listedTools(for: session)
         let runner = try makeRunner(for: session)
         do {

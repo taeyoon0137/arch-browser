@@ -960,6 +960,7 @@ struct AgentToolClient {
         var sharedTabCount: Int
         var callsLeftThisTurn: Int
         var callsLeftThisSession: Int
+        var readerExcerpt: AgentReaderExcerpt?
     }
 
     /// The grant's or session's ID, which owns its agent tabs.
@@ -988,7 +989,7 @@ struct AgentToolClient {
         level = session.mode
         scopes = AgentGrantScopes(searchHistory: searchesHistory, startTasks: false)
         self.session = Session(siteScope: session.scope.sites, hasSearchResults: session.scope.searchResults != nil, sharedTabCount: session.handles.sharedTabIDs.count,
-                               callsLeftThisTurn: session.callsLeftThisTurn, callsLeftThisSession: session.callsLeftThisSession)
+                               callsLeftThisTurn: session.callsLeftThisTurn, callsLeftThisSession: session.callsLeftThisSession, readerExcerpt: session.readerExcerpt)
     }
 }
 
@@ -1048,6 +1049,11 @@ extension AgentToolHost {
         lines.append("Agent tabs: \(openTabs == 0 ? "none" : String(openTabs)) open, at most \(AgentLimits.agentTabs) at once. Tabs the user shared: \(shared.isEmpty ? "none" : shared.joined(separator: ", ")).")
         lines.append("Limits: \(session.callsLeftThisTurn) of \(AgentLimits.toolCallsPerTurn) tool calls left for this message and \(session.callsLeftThisSession) of \(AgentLimits.toolCallsPerSession) for the session, \(AgentLimits.actionsPerSecond) actions a second.")
         lines.append(contentsOf: asks)
+        if let excerpt = session.readerExcerpt, handles.sharedTabIDs.contains(excerpt.tabID),
+           host.userTabs(in: client.personaID).contains(where: excerpt.matches), AgentPolicy.showsTitle(of: excerpt.url, allowsAI: allowsAI) {
+            if let text = excerpt.selection { lines.append("Selected text shared from the reader:\n" + AgentUntrusted.wrap(text, url: excerpt.url)) }
+            if let reply = excerpt.reply { lines.append("Previous model answer shared from the reader:\n" + AgentUntrusted.wrap(reply, url: excerpt.url)) }
+        }
         let structured: AgentJSON = [
             "mode": .string(client.level.rawValue),
             "persona": .string(persona),

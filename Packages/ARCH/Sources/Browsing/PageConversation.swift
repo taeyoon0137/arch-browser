@@ -37,7 +37,9 @@ final class PageConversation: ObservableObject {
         let title: String
         let selectionSource: QuestionSelection
         /// The selected text the question went out with.
-        var selection: String?
+        var selection: AISelection?
+        /// Set only when all page and selection context behind this answer came from this address.
+        var replySourceURL: URL?
         /// Whether earlier questions and replies went out with the question.
         var followsEarlierQuestions = false
         var reply = ""
@@ -61,6 +63,7 @@ final class PageConversation: ObservableObject {
     private var pageChanges = 0
     /// The value of `pageChanges` when the page text in `messages` was read; nil while they carry none.
     private var pageInMessages: Int?
+    private var replySourceURL: URL?
     private var task: Task<Void, Never>?
     private var answeringID: Exchange.ID?
 
@@ -104,6 +107,7 @@ final class PageConversation: ObservableObject {
         exchanges = []
         messages = []
         pageInMessages = nil
+        replySourceURL = nil
     }
 
     /// Clears the conversation and asks a question that ended without a whole reply again, on its own, as for a conversation that grew past what the model takes.
@@ -127,14 +131,19 @@ final class PageConversation: ObservableObject {
             let history = carriesPage ? messages.map(Self.withoutPage) : messages
             update(id) { $0.followsEarlierQuestions = !history.isEmpty }
             var parts: [AIPart] = []
+            var sourceURL = replySourceURL
             if carriesPage {
-                parts.append(.page(try await pages.content(ofTab: tabID, limit: Self.pageTextLimit)))
+                let page = try await pages.content(ofTab: tabID, limit: Self.pageTextLimit)
+                if history.isEmpty { sourceURL = page.url }
+                if sourceURL != page.url { sourceURL = nil }
+                parts.append(.page(page))
             }
             let selected = try await selection(for: exchange.selectionSource)
             // An engine finishes a read it has started, so a question stopped during the read takes nothing from it.
             try Task.checkCancellation()
             if let selected {
-                update(id) { $0.selection = selected.text }
+                if selected.pageURL != sourceURL { sourceURL = nil }
+                update(id) { $0.selection = selected }
                 parts.append(.selection(selected))
             }
             parts.append(.text(exchange.prompt))
@@ -165,6 +174,8 @@ final class PageConversation: ObservableObject {
             // A cancelled stream ends without an error.
             try Task.checkCancellation()
             messages = history + [question, AIMessage(role: .assistant, parts: [.text(reply)])]
+            replySourceURL = sourceURL
+            update(id) { $0.replySourceURL = sourceURL }
             if carriesPage { pageInMessages = pageRead }
         } catch where Task.isCancelled {
             // `cancel()` marked the question stopped, which an error from a read that ends later does not undo.

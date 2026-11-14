@@ -59,6 +59,24 @@ import Testing
         #expect(client.messageCounts == [1, 3, 1])
     }
 
+    @Test func aReplyBasedOnTwoPagesCannotBeSharedAsAnExcerptOfOne() async throws {
+        let pages = HeldPageSource()
+        let conversation = PageConversation(feature: .pageReader, tabID: UUID(), instructions: "", pages: pages, client: ShortContextClient(messageLimit: 3))
+        conversation.ask("Read")
+        try await pages.waitForRead()
+        pages.finishRead(returning: AIPageContent(url: selection.pageURL, title: "", text: "First"))
+        try await Self.waitUntilAnswered(conversation)
+        #expect(conversation.exchanges.last?.replySourceURL == selection.pageURL)
+        conversation.pageDidChange()
+        let other = selection.pageURL.appendingPathComponent("next")
+        conversation.ask("Read again")
+        try await pages.waitForRead()
+        pages.finishRead(returning: AIPageContent(url: other, title: "", text: "Second"))
+        try await Self.waitUntilAnswered(conversation)
+        #expect(Self.isFinished(conversation.exchanges.last))
+        #expect(conversation.exchanges.last?.replySourceURL == nil)
+    }
+
     private static func isStopped(_ exchange: PageConversation.Exchange?) -> Bool {
         if case .stopped = exchange?.state { true } else { false }
     }
@@ -136,12 +154,15 @@ private final class FixedPageSource: AIPageSource {
 private final class ShortContextClient: AIClient, @unchecked Sendable {
     private let lock = NSLock()
     private var counts: [Int] = []
+    private let messageLimit: Int
+
+    init(messageLimit: Int = 1) { self.messageLimit = messageLimit }
 
     var messageCounts: [Int] { lock.withLock { counts } }
 
     func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
         lock.withLock { counts.append(request.messages.count) }
-        let fits = request.messages.count == 1
+        let fits = request.messages.count <= messageLimit
         return AsyncThrowingStream { continuation in
             guard fits else { return continuation.finish(throwing: AIError.contextTooLong(AIProviderID(rawValue: "test"))) }
             continuation.yield(.text("Reply"))

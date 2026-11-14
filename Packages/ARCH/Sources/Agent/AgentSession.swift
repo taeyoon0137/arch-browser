@@ -109,6 +109,8 @@ extension AIAgentSession: AgentSessionRunning {}
     /// The service's: one sentence and an action for an error, with the tool's name.
     var describe: (AIError) -> (String, AgentErrorAction?) = { ($0.localizedDescription, .retry) }
     private var attachedTabHandles: [String] = []
+    /// Available through session_info after the model starts, while the user still shares the source page.
+    var readerExcerpt: AgentReaderExcerpt?
     private var hasSentFirstMessage = false
     private var hasNotedForeignTicket = false
 
@@ -386,6 +388,7 @@ extension AIAgentSession: AgentSessionRunning {}
     func end(keepingThread: Bool, because reason: String = "The session was deleted.") async {
         guard !hasEnded else { return }
         hasEnded = true
+        readerExcerpt = nil
         queuedMessages = []
         callEpoch += 1
         taskEvent?(.failed, reason)

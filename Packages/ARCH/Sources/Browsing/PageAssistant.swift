@@ -140,14 +140,22 @@ public final class PageAssistant: ObservableObject {
         }
         for tab in tabs where tabObservers[tab.id] == nil {
             // The page's context menu opens in the window that shows the tab, which need not be the active one.
-            tab.askAboutSelection = { [weak self, weak tab] text in
-                guard let self, let tab else { return }
-                MainActor.assumeIsolated { self.session?.window(showing: tab)?.askAboutSelection(text, in: tab) }
+            tab.askAboutSelection = { [weak self, weak tab] text, sourceURL in
+                Task { @MainActor [weak self, weak tab] in
+                    guard let self, let tab, tab.url == sourceURL, let selection = try? await self.pages.selection(ofTab: tab.id),
+                          selection.pageURL == sourceURL, Self.matchesMenuSelection(selection.text, text) else { return }
+                    self.session?.window(showing: tab)?.askAboutSelection(selection, in: tab)
+                }
             }
             tabObservers[tab.id] = tab.$url.sink { [weak self, weak tab] url in
                 if let self, let tab { self.tab(tab, willMoveTo: url) }
             }
         }
+    }
+
+    /// The readable selection excludes editable regions and normalizes whitespace; a menu that remained open through a selection change cannot share the old text.
+    static func matchesMenuSelection(_ readable: String, _ menu: String) -> Bool {
+        readable.split(whereSeparator: \.isWhitespace) == menu.split(whereSeparator: \.isWhitespace)
     }
 
     /// A move to another site starts the tab's conversations over. Another page of the same site closes the popover, whose reply was about the page it left, and joins the reader conversation with the next question.

@@ -778,9 +778,11 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// Continue as Agent Task in the page reader and the question popover, whose questions are about the selected tab's page: the composer with the question and that tab.
-    @MainActor func continueAsAgentTask(_ question: String) {
+    @MainActor func continueAsAgentTask(_ question: String, excerpt: AgentReaderExcerpt?) {
+        var context = agentComposerContext(text: question)
+        context.readerExcerpt = excerpt
         closePageQuestion()
-        showAgentComposer(text: question)
+        showAgentPanel(.composer(context))
     }
 
     /// Shows a session in the panel, as a row or the indicator's menu does.
@@ -843,9 +845,10 @@ public final class BrowserWindowModel: ObservableObject {
     }
 
     /// From the page's context menu, so the tab is this window's selected tab: a click in another pane selects that pane's tab first.
-    @MainActor func askAboutSelection(_ text: String, in tab: Tab) {
-        guard PageAssistant.isQuestionAvailable, !session.prompts.hasPrompt(for: tab.id), let url = tab.url, PageAssistant.canRead(url) else { return }
-        openPageQuestion(in: tab, selection: AISelection(pageURL: url, pageTitle: tab.pageTitle, text: text))
+    @MainActor func askAboutSelection(_ selection: AISelection, in tab: Tab) {
+        guard selectedTabID == tab.id, PageAssistant.isQuestionAvailable, !session.prompts.hasPrompt(for: tab.id),
+              selection.pageURL == tab.url, PageAssistant.canRead(selection.pageURL) else { return }
+        openPageQuestion(in: tab, selection: selection)
     }
 
     /// Closes the popover the user dismissed and gives the page keyboard focus again.

@@ -145,6 +145,68 @@ import Testing
         #expect(session.items.contains { $0.kind == .turnFooter(model: AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet"), usage: AIUsage(inputTokens: 10, outputTokens: 2)) })
     }
 
+    @Test func readerDataTravelsOnlyThroughTheSharedPagesToolResult() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let url = try #require(URL(string: "https://docs.example/terms?private=42"))
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Terms", url: url, isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        let selected = "A clause about a renewal."
+        let answer = "The previous answer mentioned other.example."
+        var start = AgentService.SessionStart(task: "Check last year's terms", personaID: persona, spaceID: space.id, attachedTabIDs: [tab.id],
+                                              mode: .readOnly, model: nil, effort: nil)
+        start.readerExcerpt = try #require(AgentReaderExcerpt(tabID: tab.id, url: url, selection: selected, reply: answer))
+        let session = try service.startSession(start)
+        let runner = try #require(harness.runners.last)
+        let first = try #require(runner.sent.first)
+        #expect(!first.contains(selected) && !first.contains(answer))
+        #expect(!session.siteScope.contains("other.example"))
+
+        spawnCLI(runner, harness)
+        let client = try TestClient(harness.location)
+        _ = try await client.hello(ticket: session.ticket.text)
+        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "claude"), model: "sonnet")))
+        try await waitUntil { session.model != nil }
+        let info = try await client.callTool("session_info")
+        let forAPI = AgentAPISession.result(info, of: AgentToolCall(name: "session_info"), callID: "call")
+        let pages = forAPI.parts.compactMap { part -> AIPageContent? in
+            if case .page(let page) = part { return page }
+            return nil
+        }
+        #expect(pages.map(\.text) == [selected, answer])
+        #expect(pages.allSatisfy { $0.url == AgentAddress.reduced(url) })
+        #expect(!info.text.contains("private=42"))
+        harness.host.userTabIDs = []
+        #expect(!(try await client.callTool("session_info")).text.contains(answer))
+        harness.host.userTabIDs = [tab.id]
+        harness.excludedHosts.value.insert("docs.example")
+        #expect(!(try await client.callTool("session_info")).text.contains(selected))
+        harness.excludedHosts.value = []
+        harness.host.tabs[0].url = url.appendingPathComponent("other")
+        #expect(!(try await client.callTool("session_info")).text.contains(answer))
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+        harness.host.tabs = [tab]
+        session.handles.sharedTabIDs = []
+        #expect(!(try await client.callTool("session_info")).text.contains(selected))
+        start.usesAgentsPersona = true
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+    }
+
+    @Test func readerExcerptsHaveABoundedUnicodePreview() throws {
+        let text = String(repeating: "界", count: 1500)
+        let page = try #require(URL(string: "https://site.example/"))
+        let excerpt = try #require(AgentReaderExcerpt(tabID: UUID(), url: page, selection: text, reply: nil))
+        let clipped = try #require(excerpt.selection)
+        #expect(clipped.utf8.count <= 4096)
+        #expect(clipped.hasSuffix("…") && text.hasPrefix(clipped.dropLast()))
+        #expect(AgentReaderExcerpt(tabID: UUID(), url: URL(fileURLWithPath: "/tmp/document"), selection: text, reply: nil) == nil)
+        #expect(AgentReaderExcerpt(tabID: UUID(), url: page, selection: "", reply: nil) == nil)
+    }
+
     @Test func aMessageThatStartsWithASlashStaysInTheComposer() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
