@@ -114,7 +114,7 @@ final class BrowserHooks: AIHookHost {
     /// The load's tab while it is a space's tab that takes a hook's name for the loaded document. A favorite's tab goes by its favorite's name.
     private func unnamedTab(showing load: AIPageLoad) -> Tab? {
         guard let tab = session?.tabs.first(where: { $0.id == load.tabID }),
-              Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.url) else { return nil }
+              Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.committedURL) else { return nil }
         return tab
     }
 

@@ -24,9 +24,11 @@ public final class Tab: ObservableObject, Identifiable {
     @Published public private(set) var title: String
     /// The name the user gave the tab, shown in place of the page's title. A window's rename sets it, and the session restores it.
     @Published public internal(set) var customTitle: String?
-    /// The name a hook gave the tab's document, shown while the user has not named the tab, or a mark that the user turned it down. Another address clears it, even one a single-page site sets within its document, since the name may no longer fit; another fragment does not. The session restores it.
+    /// The name a hook gave the tab's document, shown while the user has not named the tab, or a mark that the user turned it down. Another address clears it once the tab commits it (`committedURL`), even one a single-page site sets within its document, since the name may no longer fit; another fragment does not. The session restores it.
     @Published var suggestedTitle: SuggestedTitle?
     @Published public private(set) var url: URL?
+    /// The address of the document the tab shows, which its events carry and a hook's name goes by. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails, stops, or becomes a download, while Chromium reports an address only once it commits, so `url` counts at once when it changes while the page does not load, and otherwise once the load or its document's load ends.
+    @Published private(set) var committedURL: URL?
     @Published public private(set) var isLoading: Bool
     @Published public private(set) var canGoBack: Bool
     @Published public private(set) var canGoForward: Bool
@@ -98,6 +100,7 @@ public final class Tab: ObservableObject, Identifiable {
         self.personaID = personaID
         self.title = webContents.title
         self.url = webContents.url
+        self.committedURL = webContents.url
         self.isLoading = webContents.isLoading
         self.canGoBack = webContents.canGoBack
         self.canGoForward = webContents.canGoForward
@@ -165,7 +168,7 @@ extension Tab: EngineWebContentsUIDelegate {
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         url = webContents.url
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
-        if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
+        if !webContents.isLoading { commitURL() }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
@@ -179,14 +182,27 @@ extension Tab: EngineWebContentsUIDelegate {
         if isLoading { hasCrashed = false }
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
-        if !isLoading { didFinishLoad?() }
+        if !isLoading {
+            commitURL()
+            didFinishLoad?()
+        }
         // Record a page when it finishes loading, when its title is usually known.
         if !isLoading, !isDownloadOnly, let url = webContents.url, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)
         }
     }
-    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) { didLoadDocument.send() }
+    public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
+        commitURL()
+        didLoadDocument.send()
+    }
+
+    /// Takes `url` as the committed address, then drops a hook's name, or its refusal, that is not for it.
+    private func commitURL() {
+        if committedURL != url { committedURL = url }
+        if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
+    }
+
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents)
     }

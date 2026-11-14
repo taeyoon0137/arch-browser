@@ -1,4 +1,4 @@
-// The browser event source on fake web contents: a new tab but no restored tabs, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
+// The browser event source on fake web contents: a new tab but no restored tabs, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -169,6 +169,46 @@ import Testing
         ])
     }
 
+    @Test func anAddressTheTabLeavesBeforeItCommitsKeepsAHooksNameAndPostsNoTitleChange() {
+        let named = URL(string: "https://example.org/pricing")!
+        let (tab, page) = makeTab(named.absoluteString, space: space, engine: .webKit)
+        tab.suggestedTitle = SuggestedTitle(title: "Plans", url: named)
+        // A page without a title shows its host.
+        let (untitled, untitledPage) = makeTab(space: space, engine: .webKit)
+        source.follow(tabs: [tab, untitled], postingNewTabs: false)
+        // WebKit reports a navigation's address before it commits, and the earlier address once the navigation becomes a download or the user stops it.
+        for target in ["https://example.org/pricing.pdf", "https://example.net/"] {
+            load(tab, page) {
+                page.url = URL(string: target)
+                tab.webContentsDidChangeURL(page)
+                page.isLoading = false
+                page.url = named
+                tab.webContentsDidChangeURL(page)
+            }
+        }
+        load(untitled, untitledPage) {
+            untitledPage.url = URL(string: "https://example.net/file.zip")
+            untitled.webContentsDidChangeURL(untitledPage)
+            untitledPage.isLoading = false
+            untitledPage.url = URL(string: "https://example.org/a")
+            untitled.webContentsDidChangeURL(untitledPage)
+        }
+        #expect(recorder.events.isEmpty)
+        #expect(tab.suggestedTitle == SuggestedTitle(title: "Plans", url: named) && tab.displayTitle == "Plans" && tab.committedURL == named)
+        // A navigation that commits drops the name once its document loads, and the page's title that came before then posts after the address, with it.
+        load(tab, page) {
+            page.url = URL(string: "https://example.net/")
+            tab.webContentsDidChangeURL(page)
+            page.title = "Example"
+            tab.webContentsDidChangeTitle(page)
+            tab.webContentsDidFinishLoadingDocument(page)
+        }
+        #expect(recorder.events.map(Self.describeAddress) == [
+            "addressChanged https://example.org/pricing > https://example.net/", "titleChanged page https://example.net/", "pageLoaded https://example.net/",
+        ])
+        #expect(tab.suggestedTitle == nil && tab.displayTitle == "Example")
+    }
+
     @Test func selectionsAndSpaceSwitchesPostWithThePersonaChangeButNotWhileWindowsAreRestored() {
         let (tab, _) = makeTab(space: space)
         let (other, _) = makeTab(space: secondSpace)
@@ -282,6 +322,7 @@ import Testing
         switch event.payload {
         case .addressChanged(let tab, let previousURL): return "addressChanged \(previousURL?.absoluteString ?? "") > \(tab.url?.absoluteString ?? "")"
         case .pageLoaded(let tab, _, _): return "pageLoaded \(tab.url?.absoluteString ?? "")"
+        case .titleChanged(let tab, let source): return "titleChanged \(source.rawValue) \(tab.url?.absoluteString ?? "")"
         default: return event.kind.rawValue
         }
     }

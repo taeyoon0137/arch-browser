@@ -41,18 +41,18 @@ final class BrowserEventSource {
     private final class FollowedTab {
         weak var tab: Tab?
         var observers: Set<AnyCancellable> = []
-        /// The inputs of the tab's shown name and its address as last published.
+        /// The inputs of the tab's shown name, its address, and its committed address as last published.
         var shown: Shown
-        /// The address of the tab's last `addressChanged`, or its address when the source began to follow it.
-        var address: URL?
+        /// The inputs as the source last read the shown name, while the tab showed its committed address.
+        var named: Shown
         /// Set at the tab's `tabOpened` until its first load of a web address.
         var awaitsFirstLoadAfterOpen = false
         var hasLoaded = false
 
         init(_ tab: Tab) {
             self.tab = tab
-            shown = Shown(title: tab.title, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, url: tab.url)
-            address = tab.url
+            shown = Shown(title: tab.title, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, url: tab.url, committedURL: tab.committedURL)
+            named = shown
         }
     }
 
@@ -61,8 +61,11 @@ final class BrowserEventSource {
         var customTitle: String?
         var suggestedTitle: SuggestedTitle?
         var url: URL?
+        var committedURL: URL?
 
-        var name: String { Tab.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: url) }
+        /// Whether the tab shows its committed address, so that the shown name is its committed document's.
+        var isSettled: Bool { url == committedURL }
+        var name: String { Tab.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: committedURL) }
     }
 
     private var tabs: [UUID: FollowedTab] = [:]
@@ -134,23 +137,29 @@ final class BrowserEventSource {
             }
             .store(in: &followed.observers)
         // A published value reaches its subscribers before the tab holds it, so the change comes with its new value.
-        Publishers.CombineLatest4(tab.$title, tab.$customTitle, tab.$suggestedTitle, tab.$url).dropFirst()
-            .sink { [weak self, weak tab] title, customTitle, suggestedTitle, url in
+        Publishers.CombineLatest(Publishers.CombineLatest4(tab.$title, tab.$customTitle, tab.$suggestedTitle, tab.$url), tab.$committedURL).dropFirst()
+            .sink { [weak self, weak tab] inputs, committedURL in
                 MainActor.assumeIsolated {
-                    if let self, let tab { self.tab(tab, didChangeTo: Shown(title: title, customTitle: customTitle, suggestedTitle: suggestedTitle, url: url)) }
+                    let (title, customTitle, suggestedTitle, url) = inputs
+                    if let self, let tab { self.tab(tab, didChangeTo: Shown(title: title, customTitle: customTitle, suggestedTitle: suggestedTitle, url: url, committedURL: committedURL)) }
                 }
             }
             .store(in: &followed.observers)
     }
 
-    /// A new address posts `addressChanged` at once while the page is not loading; a new shown name posts `titleChanged` with the input that supplies it.
+    /// A new committed address (`Tab.committedURL`) posts `addressChanged` with the tab's pending cause. A new shown name posts `titleChanged` with the input that supplies it while the tab shows its committed address; a name that changes while the tab's address waits to settle posts once it settles, if it differs then, since the tab may leave that address before it commits.
     private func tab(_ tab: Tab, didChangeTo shown: Shown) {
         guard let followed = tabs[tab.id], followed.shown != shown else { return }
         let previous = followed.shown
         followed.shown = shown
-        if shown.url != previous.url, !tab.webContents.isLoading { settleAddress(of: tab, followed, at: shown.url) }
-        guard shown.name != previous.name else { return }
-        bus.post(.titleChanged(tab: ref(tab, url: shown.url), source: Self.titleSource(of: shown, after: previous)))
+        if shown.committedURL != previous.committedURL {
+            bus.post(.addressChanged(tab: ref(tab, url: shown.committedURL), previousURL: previous.committedURL), cause: tab.pendingCause)
+        }
+        guard shown.isSettled else { return }
+        let named = followed.named
+        followed.named = shown
+        guard shown.name != named.name else { return }
+        bus.post(.titleChanged(tab: ref(tab, url: shown.committedURL), source: Self.titleSource(of: shown, after: named)))
     }
 
     /// The input that supplies a new shown name: the user's name or its removal, and the user turning down a hook's name, are `user`; a hook's name is `suggested`; the page's title or host, also once another address drops a hook's name, is `page`.
@@ -160,19 +169,9 @@ final class BrowserEventSource {
         return suggested.title == nil ? .user : .suggested
     }
 
-    /// Posts `addressChanged` with the tab's pending cause for an address the tab committed and has not posted. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails or becomes a download, so an address that changes while the page loads waits for the end of the load or its document's load, as Chromium reports an address only once it commits.
-    private func settleAddress(of tab: Tab, _ followed: FollowedTab, at url: URL?) {
-        guard url != followed.address else { return }
-        let previousURL = followed.address
-        followed.address = url
-        bus.post(.addressChanged(tab: ref(tab, url: url), previousURL: previousURL), cause: tab.pendingCause)
-    }
-
     /// The tab's load ended, whether it committed or not. A pending cause that no `pageLoaded` uses up by the end of the update goes, since its navigation failed or became a download; WebKit reports the end of a load just before its document's load.
     private func tabDidStopLoading(_ tab: Tab) {
-        guard let followed = tabs[tab.id] else { return }
-        settleAddress(of: tab, followed, at: tab.url)
-        guard let cause = tab.pendingCause else { return }
+        guard tabs[tab.id] != nil, let cause = tab.pendingCause else { return }
         DispatchQueue.main.async { [weak tab] in
             MainActor.assumeIsolated {
                 guard let tab, !tab.webContents.isLoading, tab.pendingCause == cause else { return }
@@ -181,11 +180,9 @@ final class BrowserEventSource {
         }
     }
 
-    /// Posts the load of a tab that has an address, after its address, with its pending cause, which the load uses up. The first load of a restored tab is a restore.
+    /// Posts the load of a tab that has an address, after its address, which the tab commits first, with its pending cause, which the load uses up. The first load of a restored tab is a restore.
     private func tabDidLoadDocument(_ tab: Tab) {
-        guard let followed = tabs[tab.id] else { return }
-        settleAddress(of: tab, followed, at: tab.url)
-        guard let url = tab.url else { return }
+        guard let followed = tabs[tab.id], let url = tab.committedURL else { return }
         let isFirstLoad = !followed.hasLoaded
         followed.hasLoaded = true
         let isWebAddress = ["http", "https"].contains(url.scheme?.lowercased() ?? "")
@@ -197,7 +194,7 @@ final class BrowserEventSource {
     }
 
     private func ref(_ tab: Tab) -> BrowserTabRef {
-        ref(tab, url: tab.url)
+        ref(tab, url: tab.committedURL)
     }
 
     private func ref(_ tab: Tab, url: URL?) -> BrowserTabRef {
