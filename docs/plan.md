@@ -696,6 +696,8 @@ To check the main workflow, right-click a normal tab or a loaded favorite, choos
 
 The engine repository keeps an unfinished start of VI.10 on its local branch `wip/writing-tools-in-place` (see that row).
 
+Completed in-app turns list the still-accessible pages the model actually read. Native source links on Chromium and WebKit selected the original document among two with identical titles. After reload, a previously retained link did nothing. These checks used hidden windows with intercepted raise requests.
+
 ### Primary browser acceptance checklist
 
 Assessment on November 14, 2026. Open rows describe what still needs to pass for the user's own workload. Two-Mac sync and protected playback apply when that workflow is used. Run the checks on the same signed build intended for everyday use.
