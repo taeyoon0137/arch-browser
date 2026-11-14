@@ -515,6 +515,38 @@ import Testing
         #expect(runner.sent.count == 1)
     }
 
+    @Test func overlappingRetriesOfAFailedStartSendTheMessageOnce() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        runner.fail(.authentication(AIProviderID(rawValue: "claude")))
+        try await waitUntil { if case .failed = session.state { return true } else { return false } }
+        runner.endDelay = .milliseconds(100)
+        let first = Task { await service.retry(session) }
+        try await waitUntil { runner.endedKeepingThread != nil }
+        await service.retry(session)
+        await first.value
+        #expect(harness.runners.count == 2)
+        #expect(harness.runners.dropFirst().flatMap(\.sent).count == 1)
+    }
+
+    @Test(arguments: [false, true]) func stoppingOrDeletingDuringRetryDoesNotResend(deleting: Bool) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        runner.fail(.authentication(AIProviderID(rawValue: "claude")))
+        try await waitUntil { if case .failed = session.state { return true } else { return false } }
+        runner.endDelay = .milliseconds(100)
+        let retry = Task { await service.retry(session) }
+        try await waitUntil { runner.endedKeepingThread != nil }
+        if deleting { await service.deleteSession(session.id) } else { session.stop() }
+        await retry.value
+        #expect(harness.runners.count == 1)
+        #expect(service.sessions.isEmpty == deleting)
+    }
+
     @Test func aSessionFailedAfterAModelHeldItOffersNoRetry() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -528,6 +560,7 @@ import Testing
         #expect(action == nil)
         await service.retry(session)
         #expect(harness.runners.count == 1)
+        #expect(runner.sent.count == 1)
     }
 
     @Test func endingASessionTellsTheClientThatStartedIt() async throws {
