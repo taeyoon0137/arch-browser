@@ -1,4 +1,5 @@
 // A conversation chosen in another Persona stays in its invoking window. Its tab buttons follow the tab's place.
+@testable import Agent
 import AppKit
 import Combine
 import ARCHEngine
@@ -172,6 +173,100 @@ import Testing
             #expect(linked.url == address && linked.spaceID == research.id && linked.personaID == research.resolvedPersonaID)
             #expect(linked.isInSmallWindow && !linked.isListedInSidebar && linked.agentOwnerID == nil)
             #expect(main.currentSpaceID == home.id && main.selectedTabID == mainSelection && small.selectedTab === popup)
+        }
+    }
+
+    @Test(arguments: [false, true]) func movingAPopupKeepsItsReviewedFirstTask(visible: Bool) throws {
+        try withWindows { session, main, small, _, _ in
+            let tab = try #require(small.selectedTab)
+            let page = try #require(tab.webContents as? PageDouble)
+            let address = try #require(URL(string: "https://fixture.invalid/terms"))
+            page.load(address, in: tab)
+            tab.webContents(page, didCommitDocumentAt: address)
+            small.showAgentComposer(text: "Check the original terms")
+            guard case .composer(let draft) = small.agentPanel else { Issue.record("Expected a source draft"); return }
+            let reviewed = try #require(draft.tab)
+            draft.attachesTab = false
+            if !visible { small.hideAgentPanel() }
+            // A reload retains the address but invalidates the reviewed document.
+            tab.webContents(page, didCommitDocumentAt: address)
+            session.moveToMainWindow(small)
+            #expect(main.selectedTab === tab && !tab.isInSmallWindow)
+            if !visible {
+                #expect(main.agentPanel == nil)
+                main.toggleAgentPanel()
+            }
+            #expect(main.agentPanel == .composer(draft))
+            #expect(draft.text == "Check the original terms" && !draft.attachesTab)
+            #expect(draft.tab == reviewed && reviewed.id == tab.id && reviewed.documentID != tab.documentID)
+        }
+    }
+
+    enum DraftPanel: CaseIterable { case hidden, visible, conversation, reader }
+
+    @Test(arguments: DraftPanel.allCases) func movingADraftPreservesTheMainWindowsWorkInAnotherSpace(existing: DraftPanel) throws {
+        try withWindows { session, main, small, home, research in
+            main.showAgentComposer(text: "Keep the main window's notes")
+            guard case .composer(let original) = main.agentPanel else { Issue.record("Expected main draft"); return }
+            switch existing {
+            case .hidden: main.hideAgentPanel()
+            case .conversation: main.showAgentSession(UUID())
+            case .reader: main.hideAgentPanel(); main.togglePageReader()
+            case .visible: break
+            }
+            let panel = main.agentPanel
+            small.showAgentComposer(text: "Carry the small window's notes")
+            guard case .composer(let incoming) = small.agentPanel else { Issue.record("Expected small draft"); return }
+
+            session.moveToMainWindow(small)
+            #expect(main.currentSpaceID == research.id)
+            if existing == .reader {
+                #expect(main.agentPanel == nil && main.isPageReaderVisible)
+            } else {
+                #expect(main.agentPanel == (panel ?? .composer(incoming)))
+            }
+            main.hideAgentPanel()
+            main.toggleAgentPanel()
+            #expect(main.agentPanel == .composer(incoming))
+            main.hideAgentPanel()
+            main.switchToSpace(home.id)
+            main.toggleAgentPanel()
+            #expect(main.agentPanel == .composer(original))
+        }
+    }
+
+    @Test(arguments: [false, true]) func competingDraftsMoveToSeparateMainWindows(reuse: Bool) throws {
+        try withWindows { session, main, small, _, research in
+            main.switchToSpace(research.id)
+            let originalTab = session.openTab(url: URL(string: "https://fixture.invalid/main"), in: research.id, select: false)
+            main.selectTab(originalTab.id)
+            main.showAgentComposer(text: "Review these notes")
+            guard case .composer(let original) = main.agentPanel else { Issue.record("Expected main draft"); return }
+            if !reuse { main.hideAgentPanel() } // A hidden same-space draft still owns its slot.
+            let panel = main.agentPanel
+            let alternative = reuse ? session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: research.id,
+                                                                      selectedTabID: nil, isSidebarVisible: true), kind: .main) : nil
+            let receiver = WindowSpy()
+            alternative?.nsWindow = receiver
+            session.windowDidBecomeMain(main)
+            let originalWindows = Set(session.windows.map(\.id))
+            // A collision can create a main window. Replace its raise target once selection reaches it.
+            let observation = session.$focusedTabID.sink { id in
+                guard id != nil, let window = session.activeWindow, !originalWindows.contains(window.id) else { return }
+                window.nsWindow = receiver
+            }
+            defer { observation.cancel() }
+            small.showAgentComposer(text: "Review these notes")
+            guard case .composer(let incoming) = small.agentPanel else { Issue.record("Expected small draft"); return }
+            let moved = try #require(small.selectedTab)
+            session.moveToMainWindow(small)
+            let target = try #require(session.windows.first { $0.kind == .main && $0.selectedTab === moved })
+            defer { session.windowWillClose(target) }
+            #expect(target !== main && (reuse ? target === alternative : !originalWindows.contains(target.id)))
+            #expect(target.agentPanel == .composer(incoming) && main.agentPanel == panel && main.selectedTab === originalTab)
+            if panel == nil { main.toggleAgentPanel() }
+            #expect(main.agentPanel == .composer(original) && original !== incoming)
+            #expect(receiver.raises == 1 && !receiver.isVisible)
         }
     }
 

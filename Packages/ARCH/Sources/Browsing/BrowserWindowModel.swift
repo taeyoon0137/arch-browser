@@ -916,9 +916,22 @@ public enum BrowserWindowKind {
         }
     }
 
-    private var resumableAgentDraft: AgentComposerContext? {
+    var resumableAgentDraft: AgentComposerContext? {
         guard let draft = agentDrafts[currentSpaceID], draft.personaID == personaID else { return nil }
         return draft
+    }
+
+    /// Each window has one local draft per space. Even a blank task can hold reviewed sharing choices.
+    func canReceiveAgentDraft(_ draft: AgentComposerContext) -> Bool {
+        agentDrafts[draft.spaceID] == nil
+    }
+
+    func receiveAgentDraft(_ draft: AgentComposerContext, showing: Bool) {
+        if showing && agentPanel == nil && !isPageReaderVisible {
+            showAgentPanel(.composer(draft))
+        } else {
+            agentDrafts[draft.spaceID] = draft
+        }
     }
 
     /// An open panel and this space’s unfinished setup draft stay reachable before a model can run.

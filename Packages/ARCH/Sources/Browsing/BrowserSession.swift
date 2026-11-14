@@ -452,9 +452,16 @@ final class EngineRuntime {
         var reordered = tabs
         reordered.append(reordered.remove(at: index))
         tabs = reordered
-        let target = sidebarTarget()
         let panel = smallWindow.agentPanel
+        let draft = smallWindow.resumableAgentDraft
+        var target = sidebarTarget()
+        if let draft, !target.canReceiveAgentDraft(draft) {
+            // Another window can hold this space's second draft without replacing the first.
+            target = windows.first { $0.kind == .main && $0.personaID == draft.personaID && $0.canReceiveAgentDraft(draft) }
+                ?? makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: draft.spaceID, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        }
         target.selectTab(tab.id)
+        if let draft { target.receiveAgentDraft(draft, showing: panel == .composer(draft)) }
         if case .session(let id) = panel, target.agentPanel == nil {
             target.showAgentSession(id)
         }
