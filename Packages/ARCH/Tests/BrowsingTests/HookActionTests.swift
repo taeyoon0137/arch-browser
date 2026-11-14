@@ -44,6 +44,59 @@ import Testing
     }
 }
 
+@MainActor @Suite struct DownloadFileActionTests {
+    @Test func missingFileAndFolderActionsCheckTheLatestPathsWithoutOpeningAnythingElse() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let folder = root.appendingPathComponent("downloads", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = folder.appendingPathComponent("report.txt")
+        let entry = DownloadEntry(item: FinishedDownload(targetPath: original), personaID: Persona.defaultID)
+        var opened: [URL] = []
+        func record(_ file: URL) -> Bool {
+            opened.append(file)
+            return true
+        }
+
+        // Row click, accessibility press, and menu Open use the same file check as Show in Finder.
+        #expect(entry.accessFile(onFailure: .open, record) == .missing)
+        #expect(entry.accessFile(onFailure: .reveal, record) == .missing)
+        #expect(opened.isEmpty)
+        #expect(entry.showContainingFolder(record) == nil)
+        #expect(opened == [folder])
+        #expect(entry.showContainingFolder { _ in false } == .folder)
+
+        try Data("fixture".utf8).write(to: original)
+        #expect(entry.accessFile(onFailure: .open) { _ in false } == .open)
+        #expect(entry.accessFile(onFailure: .reveal) { _ in false } == .reveal)
+        #expect(entry.accessFile(onFailure: .open, record) == nil)
+        #expect(opened.last == original)
+
+        #expect(entry.rename(to: "Renamed"))
+        let renamed = try #require(entry.renamedPath)
+        #expect(entry.accessFile(onFailure: .reveal, record) == nil)
+        #expect(opened.last == renamed)
+        let moved = root.appendingPathComponent("moved.txt")
+        try FileManager.default.moveItem(at: renamed, to: moved)
+        #expect(entry.accessFile(onFailure: .restore) { _ in entry.restoreOriginalName() } == .missing)
+        #expect(entry.renamedPath == renamed)
+        try FileManager.default.moveItem(at: moved, to: renamed)
+        #expect(entry.accessFile(onFailure: .restore) { _ in entry.restoreOriginalName() } == nil)
+        #expect(entry.fileURL == original)
+        #expect(try Data(contentsOf: original) == Data("fixture".utf8))
+
+        // The file can also disappear between the existence check and the workspace call.
+        #expect(entry.accessFile(onFailure: .open) { file in
+            try? FileManager.default.removeItem(at: file)
+            return false
+        } == .missing)
+        try FileManager.default.removeItem(at: folder)
+        #expect(entry.containingFolder == nil)
+        #expect(entry.showContainingFolder(record) == .folder)
+        #expect(opened == [folder, original, renamed])
+    }
+}
+
 @MainActor
 @Suite struct TabNameTests {
     @Test func aTabNameIsTheReplysFirstLineCutToLength() {

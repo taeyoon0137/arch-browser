@@ -1,4 +1,5 @@
 // The downloads list fills the top of the sidebar's library. Each row reflects one download's entry (`DownloadEntry.swift`) and offers open, reveal, pause, resume, retry, cancel, and remove actions, and gives a file that a hook renamed its original name back.
+import Accessibility
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -77,12 +78,26 @@ struct DownloadRowView: View {
     @ObservedObject var entry: DownloadEntry
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
+    @State private var fileIssue: DownloadEntry.FileIssue?
 
     /// A finished file opens on a click, so only its row shows the hover fill and answers VoiceOver's press.
-    private var opensFile: Bool { entry.state == .completed && entry.fileURL != nil }
+    private var opensFile: Bool { entry.state == .completed }
+
+    private func showIssue(_ issue: DownloadEntry.FileIssue?) {
+        fileIssue = issue
+        if let issue { AccessibilityNotification.Announcement(issue.rawValue).post() }
+    }
 
     private func openFile() {
-        if opensFile, let path = entry.fileURL { NSWorkspace.shared.open(path) }
+        showIssue(entry.accessFile(onFailure: .open) { NSWorkspace.shared.open($0) })
+    }
+
+    private func revealFile() {
+        showIssue(entry.accessFile(onFailure: .reveal) { NSWorkspace.shared.selectFile($0.path, inFileViewerRootedAtPath: "") })
+    }
+
+    private func showFolder() {
+        if let issue = entry.showContainingFolder({ NSWorkspace.shared.open($0) }) { showIssue(issue) }
     }
 
     private var icon: NSImage {
@@ -125,10 +140,20 @@ struct DownloadRowView: View {
                     }
                     .progressViewStyle(.linear)
                 }
-                Text(status)
+                Text(fileIssue?.rawValue ?? status)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if fileIssue != nil {
+                    HStack {
+                        if entry.containingFolder != nil {
+                            Button("Show Folder", action: showFolder)
+                        }
+                        Button("Remove from List") { session.removeDownload(entry) }
+                    }
+                    .font(.system(size: 11))
+                    .buttonStyle(.link)
+                }
             }
             Spacer(minLength: 0)
             // A pair of buttons touches, as the address pill's do. A failed download starts a new attempt, which may begin again from the start, so it offers Retry rather than Resume.
@@ -147,8 +172,8 @@ struct DownloadRowView: View {
                     SidebarIconButton(symbol: "arrow.clockwise.circle", label: "Retry", action: entry.item.resume)
                     SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
                 }
-            } else if entry.state == .completed, let path = entry.fileURL {
-                SidebarIconButton(symbol: "magnifyingglass.circle", label: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
+            } else if entry.state == .completed, entry.fileURL != nil {
+                SidebarIconButton(symbol: "magnifyingglass.circle", label: "Show in Finder", action: revealFile)
             }
         }
         .padding(6)
@@ -156,12 +181,20 @@ struct DownloadRowView: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: openFile)
+        .onChange(of: entry.fileURL) { fileIssue = nil }
         .contextMenu {
-            if let path = entry.fileURL, entry.state == .completed {
-                Button("Open") { NSWorkspace.shared.open(path) }
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([path]) }
+            if entry.state == .completed {
+                Button("Open", action: openFile)
+                if entry.fileURL != nil {
+                    Button("Show in Finder", action: revealFile)
+                }
+                if fileIssue != nil, entry.containingFolder != nil {
+                    Button("Show Folder", action: showFolder)
+                }
                 if entry.renamedPath != nil {
-                    Button("Restore Original Name", action: entry.restoreOriginalName)
+                    Button("Restore Original Name") {
+                        showIssue(entry.accessFile(onFailure: .restore) { _ in entry.restoreOriginalName() })
+                    }
                 }
                 Divider()
             }

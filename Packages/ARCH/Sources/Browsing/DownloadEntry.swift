@@ -50,6 +50,35 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         state == .completed || state == .cancelled || state == .failed
     }
 
+    enum FileIssue: String {
+        case missing = "File not found"
+        case open = "Couldn’t open file"
+        case reveal = "Couldn’t show file in Finder"
+        case restore = "Couldn’t restore original name"
+        case folder = "Couldn’t open folder"
+    }
+
+    /// Resolve the file again on every attempt. Finder may have moved it, or a hook may have renamed it since the menu opened.
+    func accessFile(onFailure issue: FileIssue, _ action: (URL) -> Bool) -> FileIssue? {
+        guard state == .completed else { return nil }
+        guard let file = fileURL, file.isFileURL, FileManager.default.fileExists(atPath: file.path) else { return .missing }
+        if action(file) { return nil }
+        return FileManager.default.fileExists(atPath: file.path) ? issue : .missing
+    }
+
+    /// The last folder Arch saved or renamed the file in, while that folder is still available.
+    var containingFolder: URL? {
+        guard let file = fileURL, file.isFileURL else { return nil }
+        let folder = file.deletingLastPathComponent()
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory) && isDirectory.boolValue ? folder : nil
+    }
+
+    func showContainingFolder(_ open: (URL) -> Bool) -> FileIssue? {
+        guard let folder = containingFolder, open(folder) else { return .folder }
+        return nil
+    }
+
     /// Failed downloads can still retry in the profile that started them.
     var canCancel: Bool {
         switch item.state {
@@ -113,10 +142,11 @@ public final class DownloadEntry: ObservableObject, Identifiable {
 
     /// Gives the renamed file back the name the engine saved it under, or the nearest unused one.
     @MainActor
-    func restoreOriginalName() {
-        guard let current = renamedPath, let original = targetPath else { return }
+    @discardableResult
+    func restoreOriginalName() -> Bool {
+        guard let current = renamedPath, let original = targetPath else { return false }
         let destination = unusedDestination(for: original.lastPathComponent, in: original.deletingLastPathComponent(), keeping: current)
-        if destination != current { move(current, to: destination) }
+        return destination == current || move(current, to: destination)
     }
 
     @discardableResult
