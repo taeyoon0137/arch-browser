@@ -660,6 +660,8 @@ Rules for every tier:
 
 ### Integration handoff
 
+At 00:48 KST on November 15, the signed user preview is `build/previews/387d6d22/Arch.app`. It passed 1,853 tests across 18 targets, including the user-reported sidebar, link and download changes described below. Main now also includes the more precise VoiceOver description of positive transfer progress below one percent (`27f7b086`, 1,854 tests). The 22-tab and personal-agent elapsed runs remain in progress. Their scheduled finish times are 04:40 and 04:15 KST respectively.
+
 Bookmarks, agent tabs, and script hooks now share the same sidebar and event source. The CEF distribution is pinned to `arch-8078-6`.
 
 Resume from `main`. The original bookmark, agent, design, hook, and sync worktrees have been integrated. The hook and sync worktrees still contain their original uncommitted edits.
