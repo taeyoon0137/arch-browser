@@ -455,6 +455,18 @@ Rules for every tier:
 4. Finish by updating this file (remove the row, update Current State) and the feature row in `docs/features.md` in the same commit, then go through the After each task list in `AGENTS.md`.
 5. Verification steps use a fresh Application Support folder unless the step says otherwise.
 
+### Branches waiting to merge
+
+As of 2026-11-14, these local branches (worktrees under `.claude/worktrees/`, never pushed) hold work that is not on main yet. A session that takes over merges each into main in this order, rebuilding `docs/plan.md` conflicts as diff3 and merging them word by word, renumbering colliding regression checks after main's last, running the Verification checks of `AGENTS.md`, pushing main, and then removing the worktree with `git worktree remove --force` (the build symlinks are untracked). Main pins `arch-8078-6`, and the other worktrees link to its `Frameworks` and CEFBridge folders.
+
+1. `work/merge-design`: the code-level design pass over the whole app (sidebar, window chrome, palette and page tools, sheets, Settings, menus, and cross-app consistency), merged onto main with its sheet fixes carried into the prompt cards, the prompt cards' design findings, and a fix for the Web Store review in Settings ▸ Plugins growing past the window. Its review and fix were running. Its source, `work/design-pass`, can go once it lands.
+2. `work/ctxmenu2`: macOS text items in the page context menu on both engines (Look Up, Translate, Search with, Spelling and Grammar, Substitutions, Transformations, Speech, Share, Learn and Ignore Spelling), rebased onto the prompt cards merge; its review findings were being fixed.
+3. `work/merge-agents`: the agents' sessions, control channel, `arch-cli` and `arch-mcp`, agent tabs, tools, approvals, grants, and policies (VII.10 to VII.19 built), merged onto the prompt cards with a page dialog's frame origin on its card; its review findings were being fixed. Then `work/merge-hooks`, which merges the first hook parts (the browser event bus, model tiers, the hook registry, and JavaScript hook scripts with the hooks list) onto it. Its sources, `work/agents-int` and `work/agent-hooks`, can go once both land. After them come VII.17.1, VII.19.1, VII.21, VII.22, and the hooks from VII.27.
+4. `work/merge-bm`: bookmarks, pinned tabs' saved pages, unloading, nested folders, the Bookmarks menu, and live folders (the LiveFolders module, its sidebar, and the New Live Folder sheet), being merged onto main with one Persona / Space helper and session file versions after main's 13. Its source, `work/q-bm`, can go once it lands.
+5. `work/sync`: V.9 parts 1 to 5 built and part 6 in progress, from 0c90558; it merges onto main after the others.
+
+The engine repository keeps an unfinished start of VI.10 on its local branch `wip/writing-tools-in-place` (see that row).
+
 ### Phase I: Stabilize the current features
 
 | ID | Task | Reasoning | Files | Done when |
