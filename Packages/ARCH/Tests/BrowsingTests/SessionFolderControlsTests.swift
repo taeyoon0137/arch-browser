@@ -1,4 +1,5 @@
 // A native window's session-folder actions use its current Persona, space and the live folder owner.
+import AppKit
 import AgentControl
 import AI
 import ARCHEngine
@@ -21,7 +22,7 @@ import Testing
             identify: { _ in throw CancellationError() }, processStart: { _ in nil }, prompt: AgentGrantSheetPresenter(host: host),
             authenticator: AgentDeviceOwnerAuthentication(), allowsAI: { _ in true }, now: Date.init, processRecord: { _ in nil },
             startRunner: { _ in throw CancellationError() }, sessionRoute: { .http(pinnedModel: $0) }, apiClient: client,
-            mcpExecutable: directory, sessionFolder: { _ in directory }, agentModels: { [] }, subscriptionToolName: { _ in nil }, attention: {}))
+            mcpExecutable: directory, sessionFolder: { _ in directory }, agentModels: { [] }, subscriptionToolName: { _ in nil }, attention: { _ in }))
         browser.agents = service
         return (browser, host, service)
     }
@@ -137,6 +138,101 @@ import Testing
         #expect(service.sessions.map(\.id) == [first.id, second.id, third.id])
         await service.endSessionsForQuit()
     }
+
+    @Test func notificationsRaiseTheWaitingOwnerWithoutNavigatingOtherWindows() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchNotificationWindows-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, host, service) = try fixture(in: directory, client: QuestionClient())
+        defer { service.stop() }
+        let home = try #require(browser.spaces.first)
+        let work = browser.addPersona(named: "Work")
+        let office = try #require(browser.spaces(in: work.id).first)
+        func window(in space: Space, kind: BrowserWindowKind) -> BrowserWindowModel {
+            browser.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: kind == .main), kind: kind)
+        }
+        let main = window(in: home, kind: .main), small = window(in: office, kind: .small)
+        defer {
+            for window in [small, main] where browser.windows.contains(where: { $0 === window }) { browser.windowWillClose(window) }
+        }
+        let front = RaisingWindow(), popup = RaisingWindow()
+        main.nsWindow = front
+        small.nsWindow = popup
+        let mainTab = browser.openTab(url: URL(string: "about:blank#home"), in: home.id, select: false, engine: .webKit)
+        let smallTab = browser.openTab(url: URL(string: "about:blank#work"), in: office.id, select: false, engine: .webKit)
+        smallTab.isInSmallWindow = true
+        main.selectTab(mainTab.id)
+        small.selectTab(smallTab.id)
+        browser.windowDidBecomeMain(main)
+        main.showAgentComposer(text: "Unsent research draft")
+        let draft = main.agentPanel
+
+        let session = try service.startSession(.init(task: "Ask a question", personaID: home.resolvedPersonaID, spaceID: home.id,
+                                                     attachedTabIDs: [], mode: .readOnly, model: QuestionClient.model, effort: nil))
+        try #require(await eventually { session.state == .waitingForUser })
+        browser.showWaitingAgent(session.id)
+        #expect(popup.raises == 1 && front.raises == 0 && small.agentPanel == .session(session.id))
+        #expect(main.agentPanel == draft && small.selectedTab === smallTab && small.currentSpaceID == office.id)
+        main.hideAgentPanel()
+        browser.showWaitingAgent(session.id)
+        #expect(popup.raises == 2 && front.raises == 0 && main.agentPanel == nil)
+        let question = try #require(service.approvals.pending.first { $0.ownerID == session.id })
+        try #require(await service.approvals.answer(question.id, with: .answer("Continue")))
+        small.hideAgentPanel()
+        browser.showWaitingAgent(session.id)
+        #expect(small.agentPanel == nil && main.agentPanel == nil && popup.raises == 2 && front.raises == 0)
+
+        // A previous client owns the selected tab. The notification must show the client whose card is pending.
+        let previous = UUID(), waiting = UUID()
+        for (id, name) in [(previous, "Previous client"), (waiting, "Waiting client")] {
+            service.panel.describe(.init(name: name, access: "Read Only", place: "Home"), for: id)
+        }
+        let owned = try #require(host.openAgentTab(at: URL(string: "https://fixture.invalid/previous")!, engine: .webKit,
+                                                  for: .init(id: previous, spaceID: home.id, folderName: "Previous client")))
+        main.selectTab(owned.id)
+        main.showAgentComposer(text: "Keep while a client asks")
+        let clientDraft = main.agentPanel
+        let card = AgentApproval(ownerID: waiting, clientName: "Waiting client", isOutsideClient: true, kind: .question([]), isSensitive: false,
+                                 offers: [.deny], action: "Question", createdAt: .now, deadline: .now.addingTimeInterval(60))
+        service.approvals.open(card) { _ in }
+        #expect(main.agentPanel == clientDraft)
+        browser.showWaitingAgent(waiting)
+        #expect(small.agentPanel == .client(waiting) && main.agentPanel == clientDraft && popup.raises == 3 && front.raises == 0)
+        small.showAgentSession(session.id)
+        // Both panels are occupied, so the explicit click opens the waiting client in the active window.
+        browser.showWaitingAgent(waiting)
+        #expect(front.raises == 1 && popup.raises == 3 && main.agentPanel == .client(waiting))
+        #expect(main.selectedTabID == owned.id && main.currentSpaceID == home.id && small.agentPanel == .session(session.id))
+        let column = AgentPanelColumn(session: browser).environmentObject(main).frame(width: 360, height: 420)
+        let renderer = ImageRenderer(content: column)
+        func header() -> Data? {
+            guard let image = renderer.cgImage,
+                  let header = image.cropping(to: CGRect(x: 15, y: 16, width: 180, height: 30))
+            else { return nil }
+            return NSBitmapImageRep(cgImage: header).representation(using: .png, properties: [:])
+        }
+        let initialHeader = try #require(header())
+        service.panel.describe(.init(name: "Renamed previous client", access: "Read Only", place: "Home"), for: previous)
+        #expect(header() == initialHeader)
+        service.panel.describe(.init(name: "New name of waiting client", access: "Read Only", place: "Home"), for: waiting)
+        #expect(await eventually {
+            guard let renamed = header() else { return false }
+            return renamed != initialHeader
+        })
+        main.selectTab(owned.id)
+        #expect(main.agentPanel == .client(waiting))
+        main.selectTab(mainTab.id)
+        main.selectTab(owned.id)
+        #expect(main.agentPanel == .client(previous))
+        service.approvals.end(card.id, because: "Client left")
+        browser.showWaitingAgent(waiting)
+        #expect(main.agentPanel == .client(previous) && front.raises == 1 && popup.raises == 3)
+        await service.endSessionsForQuit()
+    }
+}
+
+@MainActor private final class RaisingWindow: NSWindow {
+    var raises = 0
+    override func makeKeyAndOrderFront(_ sender: Any?) { raises += 1 }
 }
 
 private actor UnusedFolderKeys: AgentSealKeyStore {
