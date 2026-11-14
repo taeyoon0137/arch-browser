@@ -8,6 +8,41 @@ import UniformTypeIdentifiers
 @MainActor @Suite struct FileChooserPanelTests {
     private let site = URL(string: "https://example.com/")
 
+    @Test func newDocumentsDismissOnlyTheirTabsFileChooserAndIgnoreItsLateAnswer() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let source = session.openTab(url: site, in: space.id, select: false)
+        let neighbor = session.openTab(url: site, in: space.id, select: false)
+        let request = EngineFileChooserRequest(mode: .openFile, pageOrigin: site)
+        var replies: [[URL]?] = [], otherReplies: [[URL]?] = []
+        neighbor.webContents(neighbor.webContents, runFileChooser: request) { otherReplies.append($0) }
+        let other = try #require(session.prompts.current(for: neighbor.id))
+        // Both a different address and a reload at the same address commit a new document.
+        let target = try #require(URL(string: "https://example.org/next"))
+        for _ in 0..<2 {
+            source.webContents(source.webContents, runFileChooser: request) { replies.append($0) }
+            let chooser = try #require(session.prompts.current(for: source.id))
+            let count = replies.count
+            #expect(chooser.panel is NSOpenPanel && chooser.panel?.isVisible == false)
+            source.webContents(source.webContents, didCommitDocumentAt: target)
+            #expect(!session.prompts.contains(chooser.id))
+            #expect(replies.count == count + 1 && replies.last == .some(nil))
+            source.webContents(source.webContents, runFileChooser: request) { replies.append($0) }
+            let fresh = try #require(session.prompts.current(for: source.id))
+            session.prompts.answer(chooser.id, with: PromptAnswer(buttonID: "choose"))
+            #expect(fresh.id != chooser.id && session.prompts.contains(fresh.id))
+            #expect(otherReplies.isEmpty && session.prompts.contains(other.id))
+            session.prompts.answer(fresh.id, with: PromptAnswer(buttonID: "cancel"))
+        }
+        session.prompts.answer(other.id, with: PromptAnswer(buttonID: "cancel"))
+        #expect(otherReplies == [nil])
+    }
+
     @Test func aFileInputGetsAnOpenPanelForOneFileOfItsTypes() throws {
         let panel = try #require(FileChooserPanel.make(for: EngineFileChooserRequest(mode: .openFile, acceptedTypes: ["image/*", ".pdf"], origin: site, pageOrigin: site)) as? NSOpenPanel)
         #expect(panel.canChooseFiles && !panel.canChooseDirectories && !panel.allowsMultipleSelection)
