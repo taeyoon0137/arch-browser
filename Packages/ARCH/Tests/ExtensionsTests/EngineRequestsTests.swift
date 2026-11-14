@@ -157,7 +157,7 @@ struct EngineRequestsTests {
         runtime.extensions(chromium, extension: id, asks: EngineExtensionPrompt(kind: .permissions(["Read and change your data on example.com"]), tab: nil)) { answer = $0 }
         #expect(await eventually { answer != nil })
         #expect(answer == true)
-        #expect(host.questions.last == WebExtensionQuestion(kind: .enginePermissions, extensionName: "Asker", items: ["Read and change your data on example.com"],
+        #expect(host.questions.last == WebExtensionQuestion(kind: .enginePermissions, extensionName: "Asker", pluginID: installed.id, items: ["Read and change your data on example.com"],
                                                             keeps: "The extension gets this access on Chromium tabs. Chromium keeps it until you remove the extension, though access to websites can end sooner, as after an update that leaves some of the extension\u{2019}s websites out.",
                                                             confirmsNext: false))
         host.answer = false

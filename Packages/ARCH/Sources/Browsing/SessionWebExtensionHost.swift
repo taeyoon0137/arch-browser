@@ -168,10 +168,11 @@ final class SessionWebExtensionHost: WebExtensionHost {
         completion(window.id)
     }
 
-    /// Shows the question as a card over the tab, or without a tab over the tab of the window that last became main. A question for a tab that has closed, or without any tab, gets the safe answer. The extension's own icon is not known to the plugins, so the card shows the extension symbol.
+    /// Shows the question as a card over the tab, or without a tab over the tab of the window that last became main. A question for a tab that has closed, or without any tab, gets the safe answer. The card shows the extension's action icon for the tab as the site settings popover does, or the extension symbol without one.
     func ask(_ question: WebExtensionQuestion, for tab: (any EngineWebContents)?, completion: @escaping (Bool) -> Void) {
         guard let session, let tab = if let tab { self.tab(tab) } else { session.focusedTab } else { return completion(false) }
-        let content = TabPromptContent.extensionQuestion(question, icon: nil, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
+        let icon = question.pluginID.flatMap { id in session.webExtensions(in: tab.personaID)?.actions(for: tab.webContents).first { $0.id == id }?.action?.icon }
+        let content = TabPromptContent.extensionQuestion(question, icon: icon, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
         session.enqueuePrompt(content, for: tab) { completion(TabPromptContent.extensionAnswer($0)) }
     }
 
