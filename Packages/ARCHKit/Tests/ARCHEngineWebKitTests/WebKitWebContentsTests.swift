@@ -1,4 +1,4 @@
-// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, and a page script's message reaches the page script delegate of that web contents. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
+// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, and a page script's message reaches the page script delegate of that web contents. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -33,6 +33,22 @@ import Testing
         #expect(recorder.messages.first?.world == "test")
         #expect(recorder.messages.first?.json == #"{"ready":true}"#)
         #expect(recorder.sender === tab)
+    }
+
+    /// WebKit's find matches no text that spans two blocks, so the count leaves such text out too, while text in inline elements runs on.
+    @Test func findCountsNoMatchAcrossBlocks() async throws {
+        let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
+        tab.webView.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+        tab.webView.loadHTMLString("<!doctype html><body><p>foo</p><p>bar</p><p>foobar</p><span>foo</span><b>bar</b></body>", baseURL: nil)
+        #expect(await eventually { !tab.webView.isLoading })
+        var result: EngineFindResult?
+        for _ in 0..<20 where result.map({ $0.numberOfMatches == 0 }) ?? true {
+            result = await withCheckedContinuation { continuation in
+                tab.find("foobar", forward: true, matchCase: false) { continuation.resume(returning: $0) }
+            }
+            if result?.numberOfMatches == 0 { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        #expect(result?.numberOfMatches == 2)
     }
 
     @Test func closingAllWebContentsEndsEachPage() throws {

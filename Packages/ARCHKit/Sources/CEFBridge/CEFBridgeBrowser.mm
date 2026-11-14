@@ -867,6 +867,8 @@ private:
     BOOL _pageScriptsChanged;
     /// Set from `close` or `tryCloseWithCompletion:` until the browser closes or the user chooses to stay, so that `DoClose` tells the app's closes from the page's own.
     BOOL _closeRequested;
+    /// The address the app last asked to load before CEF created the browser, which loads once it has.
+    NSString *_pendingURL;
 }
 
 @synthesize delegate = _delegate;
@@ -967,6 +969,10 @@ private:
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _browserView = view;
     [self applyAccessibilityState];
+    if (_pendingURL && !_closeRequested) {
+        browser->GetMainFrame()->LoadURL(CefString(_pendingURL.UTF8String));
+    }
+    _pendingURL = nil;
     ExtensionsBrowserDidCreate(self);
     if (popup) {
         [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
@@ -1206,6 +1212,8 @@ private:
 }
 
 - (void)handleBeforeClose {
+    // The delegate's close handler can release the last reference to this object, as for a page that closed itself, which nothing put in `gBrowsersInTransition`, and the client reaches the object without retaining it. This reference keeps it until the method returns.
+    ARCHCEFBrowser *keepAlive __attribute__((objc_precise_lifetime)) = self;
     [self finishContextMenu];
     [self finishScriptRequests];
     ExtensionsBrowserWillClose(self);
@@ -1382,10 +1390,13 @@ private:
     }
 }
 
+// `CreateBrowser` returns before CEF creates the browser, so a load the app asks for meanwhile, such as an address the user enters while a tab's page starts, waits for `OnAfterCreated`. The latest one wins.
 - (void)loadURL:(NSString *)url {
     [self dismissPendingDialog];
     if (_browser) {
         _browser->GetMainFrame()->LoadURL(CefString(url.UTF8String));
+    } else if (!_closeRequested) {
+        _pendingURL = [url copy];
     }
 }
 

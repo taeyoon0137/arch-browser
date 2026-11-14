@@ -382,7 +382,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         findQuery = nil
     }
 
-    /// Counts the matches in the text of visible elements, as find sees the page, and returns the position of the match that starts at the selection, or `nil` when the selection lies outside that text. It runs in its own script world, out of the page's reach.
+    /// Counts the matches in the text of visible elements, as find sees the page, and returns the position of the match that starts at the selection, or `nil` when the selection lies outside that text. A line break separates the text of different blocks, as in the text WebKit's find searches, so that no match spans two paragraphs or table cells, while text in inline elements runs on. It runs in its own script world, out of the page's reach.
     private func countMatches(of text: String, matchCase: Bool, completion: @escaping (Int, Int?) -> Void) {
         guard let query = try? JSONSerialization.data(withJSONObject: [text]), let queryJSON = String(data: query, encoding: .utf8) else { return completion(0, nil) }
         let script = """
@@ -399,8 +399,24 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             if (!parent || parent.closest("script, style, noscript, template")) return NodeFilter.FILTER_REJECT;
             return parent.checkVisibility && !parent.checkVisibility() ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
           } });
-          let text = "", mark = -1;
+          const inline = new Map();
+          const isInline = (element) => {
+            if (!inline.has(element)) {
+              const display = getComputedStyle(element).display;
+              inline.set(element, display.startsWith("inline") || display === "contents");
+            }
+            return inline.get(element);
+          };
+          const blockOf = (node) => {
+            let element = node.parentElement;
+            while (element && element !== root && isInline(element)) element = element.parentElement;
+            return element;
+          };
+          let text = "", mark = -1, block;
           for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const nodeBlock = blockOf(node);
+            if (text && nodeBlock !== block) text += "\\n";
+            block = nodeBlock;
             if (range && node === range.startContainer) mark = text.length + range.startOffset;
             text += node.data;
           }
