@@ -27,7 +27,7 @@ struct FavoritesGridView: View {
         let selectedFavoriteID = windowModel.selectedFavoriteID
         return LazyVGrid(columns: columns, spacing: 8) {
             ForEach(favorites) { favorite in
-                FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasTab(favorite))
+                FavoriteTileView(favorite: favorite, isActive: favorite.id == selectedFavoriteID, isOpen: session.hasOpenPage(favorite))
                     // The release that ends a drag does not also open the favorite.
                     .onTapGesture { if sidebarDrag.item == nil { windowModel.openFavorite(favorite) } }
                     .accessibilityAction { windowModel.openFavorite(favorite) }
@@ -55,7 +55,7 @@ struct FavoriteTileView: View {
     let favorite: Favorite
     /// Set while the favorite's tab is selected.
     let isActive: Bool
-    /// Set while the favorite has a tab of its own, which a dot below the tile shows, as the Dock does for an open app.
+    /// Set while the favorite's page is open, which a dot below the tile shows, as the Dock does for an open app. Otherwise the icon is dimmed, as an unopened tab's row is.
     let isOpen: Bool
     @Environment(\.colorScheme) private var colorScheme
     @State private var icon: NSImage?
@@ -73,12 +73,15 @@ struct FavoriteTileView: View {
                         .interpolation(.high)
                         .frame(width: 22, height: 22)
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .opacity(isOpen ? 1 : SidebarDimming.unopened)
                 } else {
                     Image(systemName: "globe")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .opacity(isOpen ? 1 : SidebarDimming.unopened)
                 }
             }
+            .animation(.easeOut(duration: 0.2), value: isOpen)
             // The dot sits in the gap below the tile, nearer the tile than the row below it; a short tile has no room for it under the icon.
             .overlay(alignment: .bottom) {
                 if isOpen {

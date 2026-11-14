@@ -13,6 +13,8 @@ struct TabRowView: View {
     @State private var isHovering = false
 
     private var isSelected: Bool { tab.id == windowModel.selectedTabID }
+    /// A tab restored from the last session has no page until a window shows it, and its icon and title are dimmed until then.
+    private var isDimmed: Bool { !tab.isLoaded && !isSelected }
     /// Rows ignore the pointer while a tab is dragged over them.
     private var showsHover: Bool { isHovering && !isDraggingTab }
 
@@ -27,6 +29,7 @@ struct TabRowView: View {
         HStack(spacing: 8) {
             TabIconView(tab: tab)
                 .frame(width: 18, height: 18)
+                .opacity(isDimmed ? SidebarDimming.unopened : 1)
             if windowModel.renamingTabID == tab.id {
                 SidebarNameField(placeholder: "Tab Name", name: tab.displayTitle,
                                  onRename: { windowModel.renameTab(tab.id, to: $0) }, onEnd: { windowModel.endRenaming(tab.id) })
@@ -34,6 +37,7 @@ struct TabRowView: View {
                 Text(tab.displayTitle)
                     .font(.system(size: 14))
                     .lineLimit(1)
+                    .opacity(isDimmed ? SidebarDimming.unopened : 1)
             }
             if tab.isAudible {
                 TabAudioBadge()
@@ -49,6 +53,7 @@ struct TabRowView: View {
                 TabUnreadDot()
             }
         }
+        .animation(.easeOut(duration: 0.2), value: isDimmed)
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: 36)

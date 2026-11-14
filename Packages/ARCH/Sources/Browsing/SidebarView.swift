@@ -18,6 +18,11 @@ enum SidebarFill {
     }
 }
 
+/// The opacity of the icon and title of a sidebar item whose page is not open, so open pages stand out: a tab restored from the last session before a window shows it, and a favorite without its tab.
+enum SidebarDimming {
+    static let unopened = 0.5
+}
+
 struct SidebarView: View {
     static let defaultWidth: CGFloat = 250
     /// The top row needs about 235 points: the window buttons end 79 points in, and its four buttons, gaps, and spacer take 144 more inside the margins.

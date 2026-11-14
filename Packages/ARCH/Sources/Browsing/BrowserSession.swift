@@ -712,6 +712,11 @@ public final class BrowserSession: ObservableObject {
         endFavoriteTab(favorite) {}
     }
 
+    /// Whether the favorite's page is open: its tab exists, which always has its engine's page. A tab saved from the last session does not count until the favorite is opened.
+    public func hasOpenPage(_ favorite: Favorite) -> Bool {
+        favoriteTabs[favorite.id] != nil
+    }
+
     /// Whether the favorite has a tab of its own: an open one, or one saved from the last session.
     public func hasTab(_ favorite: Favorite) -> Bool {
         favoriteTabs[favorite.id] != nil || savedFavoriteTabs[favorite.id] != nil

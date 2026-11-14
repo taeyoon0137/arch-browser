@@ -97,7 +97,7 @@ struct SidebarItemDragLayer: View {
         switch sidebarDrag.item {
         case .favorite(let id):
             if let favorite = session.favorites.first(where: { $0.id == id }) {
-                FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasTab(favorite))
+                FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasOpenPage(favorite))
                     .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
         case .space(let id):
