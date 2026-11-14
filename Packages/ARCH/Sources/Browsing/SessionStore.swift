@@ -83,6 +83,9 @@ struct SessionSnapshot: Codable {
     }
 
     var version: Int?
+    /// This session began without a readable local sidebar. Its old sync token cannot establish
+    /// which bookmarks exist until a full fetch restores a durable sidebar.
+    var needsFullSidebarSync: Bool? = nil
 
     /// Every Persona, the default one among them. `nil` in files before version 9.
     var personas: [Persona]?

@@ -29,6 +29,7 @@ public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
     /// Whether this Mac's Persona deletions can sync, including changes made while offline.
     public var isSyncing = false
+    public private(set) var needsFullSidebarSync: Bool
     /// The folder that holds every file the session keeps: `session.json`, Chromium's profiles in `Cache/Chromium`, the plugins, the browser import's record, and the files of `history`, `sitePermissions`, and `siteSearch`. WebKit keeps its website data where the system puts it for the app.
     public let userDataDirectory: URL
     /// The pages visited in every Persona. The tabs record their pages there, and the palette, the History window, and imports read and add pages.
@@ -148,7 +149,9 @@ public final class BrowserSession: ObservableObject {
         permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization, agentOnlyPersonaID: Self.agentOnly(agentOnlyPersonaID))
         downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
-        let snapshot = store.load() ?? SessionSnapshot.empty.normalized()
+        let loaded = store.load()
+        needsFullSidebarSync = loaded?.needsFullSidebarSync == true || loaded == nil
+        let snapshot = loaded ?? SessionSnapshot.empty.normalized()
         // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
         let keepsUnknownLiveFolders = store.keepsUnknownLiveFolders
         liveFolderService = MainActor.assumeIsolated {
@@ -1883,6 +1886,14 @@ public final class BrowserSession: ObservableObject {
         store.saveNow(snapshot())
     }
 
+    /// Clear the recovery marker only after the full fetch and its mirror checkpoint have been
+    /// saved. If this final write fails, the next launch safely repeats the fetch.
+    @MainActor public func finishSidebarSyncRecovery() {
+        guard needsFullSidebarSync else { return }
+        needsFullSidebarSync = false
+        if case .failure = saveNow() { needsFullSidebarSync = true }
+    }
+
     /// The app saves the session before confirming quit. Stop live folders and flush each Persona's cookie record only once the app actually terminates.
     public func finishWritesAtQuit() {
         MainActor.assumeIsolated { liveFolderService.stop() }
@@ -1901,7 +1912,7 @@ public final class BrowserSession: ObservableObject {
         let savedTabIDs = Set(kept.tabs.map(\.id)).union(favoriteRecords.compactMap(\.id))
         let windowRecords = Self.windowsKeepingSelections(windowsToSave, among: savedTabIDs)
         let front = windowRecords[0]
-        return SessionSnapshot(version: SessionSnapshot.currentVersion, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
+        return SessionSnapshot(version: SessionSnapshot.currentVersion, needsFullSidebarSync: needsFullSidebarSync ? true : nil, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
                                tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) ? now : $0.lastActivatedAt) },
                                folders: kept.folders, selectedTabIndex: kept.tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
                                splitViews: splitViewRecords(among: kept.tabs), favoriteTabs: favoriteRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
