@@ -45,6 +45,48 @@ import Testing
         #expect(window.selectedTab === selected && service.sessions.isEmpty)
     }
 
+    @Test func reopeningThePanelKeepsItsUnsentDraftAndReviewedTabInTheSameWindow() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let space = try #require(browser.spaces.first)
+        let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true)
+        let window = BrowserWindowModel(session: browser, record: record, kind: .main)
+        let tab = browser.openTab(url: URL(string: "https://fixture.invalid/reviewed"), in: space.id, select: false)
+        let reviewed = try #require(window.sidebarAgentDraft(for: tab))
+        window.askAgentAboutSidebarTab(tab, reviewed: reviewed)
+        guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a reviewed draft"); return }
+        draft.text = "Compare this with the earlier report"
+        draft.attachesTab = false
+        draft.mode = .readOnly
+        window.hideAgentPanel()
+        let other = BrowserWindowModel(session: browser, record: record, kind: .main)
+        other.toggleAgentPanel()
+        guard case .composer(let otherDraft) = other.agentPanel else { Issue.record("Expected the other window's composer"); return }
+        #expect(otherDraft !== draft && otherDraft.text.isEmpty)
+        window.toggleAgentPanel()
+        guard case .composer(let resumed) = window.agentPanel else { Issue.record("Expected the draft to reopen"); return }
+        #expect(resumed === draft && resumed.text == "Compare this with the earlier report")
+        #expect(resumed.tab?.documentID == reviewed.tab?.documentID && !resumed.attachesTab && resumed.mode == .readOnly)
+        #expect(service.sessions.isEmpty)
+
+        window.hideAgentPanel()
+        let anotherSpace = browser.makeSpace(in: space.resolvedPersonaID, named: "Separate")
+        window.currentSpaceID = anotherSpace.id
+        window.toggleAgentPanel()
+        guard case .composer(let fresh) = window.agentPanel else { Issue.record("Expected a draft for the new space"); return }
+        #expect(fresh.spaceID == anotherSpace.id && fresh.text.isEmpty)
+        window.showAgentComposer(text: "New task")
+        guard case .composer(let replacement) = window.agentPanel else { Issue.record("Expected a new draft"); return }
+        #expect(replacement !== fresh && replacement.text == "New task")
+        window.agentTaskDidStart(UUID(), from: replacement)
+        window.hideAgentPanel()
+        window.toggleAgentPanel()
+        guard case .composer(let afterStart) = window.agentPanel else { Issue.record("Expected an empty composer"); return }
+        #expect(afterStart !== replacement && afterStart.text.isEmpty)
+    }
+
     @Test func folderCommandsFollowOnlyTheReviewedSessionAndKeepUserTabs() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchFolderTests-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }

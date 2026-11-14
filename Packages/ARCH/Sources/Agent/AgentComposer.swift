@@ -67,18 +67,25 @@ public struct AgentReaderExcerpt: Equatable {
 }
 
 /// Where a new session starts and what it starts with. Each one is a new draft.
-public struct AgentComposerContext: Equatable, Identifiable {
+@MainActor public final class AgentComposerContext: ObservableObject, Equatable, Identifiable {
     public let id = UUID()
     public var personaID: UUID
     public var spaceID: UUID
     /// "Persona / Space".
     public var place: String
-    /// The selected tab, which the composer attaches unless its site is excluded from AI.
+    /// The document reviewed when this draft opened.
     public var tab: AgentTabInfo?
-    public var text: String
     public var readerExcerpt: AgentReaderExcerpt?
-    /// The sentence of a start that was refused before the composer showed, as for the palette's Ask Agent; the task stays in the field with it.
-    public var problem: String?
+    @Published public var text: String
+    @Published var attachesTab = true
+    @Published var sharesExcerpt = false
+    @Published var usesAgentsPersona = false
+    @Published var mode: AgentAccessLevel?
+    @Published var model: AIModelRef?
+    @Published var effort: String?
+    @Published public var problem: String?
+
+    public nonisolated static func == (lhs: AgentComposerContext, rhs: AgentComposerContext) -> Bool { lhs === rhs }
 
     public init(personaID: UUID, spaceID: UUID, place: String, tab: AgentTabInfo?, text: String = "", problem: String? = nil) {
         self.personaID = personaID
@@ -108,27 +115,17 @@ public struct AgentComposerContext: Equatable, Identifiable {
 public struct AgentComposer: View {
     @ObservedObject var service: AgentService
     @ObservedObject private var settings = AIService.shared.settings
-    let context: AgentComposerContext
+    @ObservedObject private var context: AgentComposerContext
     let actions: AgentPanelActions
     let didStart: (AgentSession) -> Void
-    @State private var text: String
     @FocusState private var isTaskFocused: Bool
-    @State private var attachesTab = true
-    @State private var sharesExcerpt = false
-    @State private var usesAgentsPersona = false
-    @State private var mode: AgentAccessLevel?
-    @State private var model: AIModelRef?
-    @State private var effort: String?
     @State private var loadedEffort: (source: EffortSource, levels: [String])?
-    @State private var problem: String?
 
     public init(service: AgentService, context: AgentComposerContext, actions: AgentPanelActions, didStart: @escaping (AgentSession) -> Void) {
         self.service = service
         self.context = context
         self.actions = actions
         self.didStart = didStart
-        _text = State(initialValue: context.text)
-        _problem = State(initialValue: context.problem)
     }
 
     private var models: [AIModelRef] { service.agentModels() }
@@ -139,20 +136,20 @@ public struct AgentComposer: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            TextField("What should the agent do?", text: $text, axis: .vertical)
+            TextField("What should the agent do?", text: $context.text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .lineLimit(3...10)
                 .focused($isTaskFocused)
                 .onAppear { isTaskFocused = true }
                 .onSubmit(start)
-            if let tab = attachableTab, attachesTab, !usesAgentsPersona {
+            if let tab = attachableTab, context.attachesTab, !context.usesAgentsPersona {
                 AgentTabChip(tab: tab) {
-                    attachesTab = false
-                    sharesExcerpt = false
+                    context.attachesTab = false
+                    context.sharesExcerpt = false
                 }
                 if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
-                    Toggle("Share reader excerpt", isOn: $sharesExcerpt)
+                    Toggle("Share reader excerpt", isOn: $context.sharesExcerpt)
                         .toggleStyle(.checkbox)
                     DisclosureGroup("Preview excerpt") {
                         ScrollView {
@@ -169,14 +166,14 @@ public struct AgentComposer: View {
                         }.frame(maxHeight: 120)
                     }.font(.system(size: 12))
                 }
-            } else if !attachesTab, !usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
+            } else if !context.attachesTab, !context.usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
                 HStack {
                     Button("Reattach Reviewed Tab") {
                         guard service.canReattach(tab, in: context.personaID) else {
-                            problem = "The reviewed page changed or is no longer available."
+                            context.problem = "The reviewed page changed or is no longer available."
                             return
                         }
-                        attachesTab = true
+                        context.attachesTab = true
                     }
                     AgentAttachmentLabel(tab: tab)
                 }
@@ -193,7 +190,7 @@ public struct AgentComposer: View {
                 if let warning = codexInstructionsWarning {
                     note(warning)
                 }
-                if let problem {
+                if let problem = context.problem {
                     Text(problem)
                         .font(.system(size: 12))
                         .foregroundStyle(.red)
@@ -203,7 +200,7 @@ public struct AgentComposer: View {
                     Spacer()
                     Button("Start", action: start)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(selectedModel == nil || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(selectedModel == nil || context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
@@ -232,8 +229,8 @@ public struct AgentComposer: View {
             GridRow {
                 label("In")
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(usesAgentsPersona ? service.agentsPersonaPlace : context.place).font(.system(size: 12))
-                    Toggle("Use the Agents Persona", isOn: $usesAgentsPersona)
+                    Text(context.usesAgentsPersona ? service.agentsPersonaPlace : context.place).font(.system(size: 12))
+                    Toggle("Use the Agents Persona", isOn: $context.usesAgentsPersona)
                         .toggleStyle(.checkbox)
                         .font(.system(size: 11))
                 }
@@ -241,7 +238,7 @@ public struct AgentComposer: View {
             GridRow {
                 label("Mode")
                 // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
-                Picker("Mode", selection: Binding(get: { chosenMode }, set: { mode = $0 })) {
+                Picker("Mode", selection: Binding(get: { chosenMode }, set: { context.mode = $0 })) {
                     ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
                 }
                 .labelsHidden()
@@ -249,7 +246,7 @@ public struct AgentComposer: View {
             }
             GridRow {
                 label("Model")
-                Picker("Model", selection: Binding(get: { selectedModel }, set: { model = $0; effort = nil })) {
+                Picker("Model", selection: Binding(get: { selectedModel }, set: { context.model = $0; context.effort = nil })) {
                     if selectedModel == nil { Text("Choose a model…").tag(nil as AIModelRef?).disabled(true) }
                     ForEach(models, id: \.self) { Text(settings.title(of: $0)).tag(Optional($0)) }
                 }
@@ -259,7 +256,7 @@ public struct AgentComposer: View {
             if !effortLevels.isEmpty {
                 GridRow {
                     label("Effort")
-                    Picker("Effort", selection: $effort) {
+                    Picker("Effort", selection: $context.effort) {
                         Text("Tool\u{2019}s default").tag(String?.none)
                         ForEach(effortLevels, id: \.self) { Text($0).tag(Optional($0)) }
                     }
@@ -287,13 +284,13 @@ public struct AgentComposer: View {
     /// The mode the user picked, at most Settings' mode.
     private var chosenMode: AgentAccessLevel {
         let limit = service.newSessionMode
-        guard let mode, mode.rank <= limit.rank else { return limit }
+        guard let mode = context.mode, mode.rank <= limit.rank else { return limit }
         return mode
     }
 
     /// The route's first model until the user picks another.
     private var selectedModel: AIModelRef? {
-        if let model { return models.contains(model) ? model : nil }
+        if let model = context.model { return models.contains(model) ? model : nil }
         return models.first
     }
 
@@ -320,13 +317,13 @@ public struct AgentComposer: View {
     private func loadEffortLevels() async {
         guard let source = effortSource else {
             loadedEffort = nil
-            effort = nil
+            context.effort = nil
             return
         }
         let levels = await AIService.shared.agentEffortLevels(for: source.model)
         guard !Task.isCancelled, source == effortSource else { return }
         loadedEffort = (source, levels)
-        if let effort, !levels.contains(effort) { self.effort = nil }
+        if let effort = context.effort, !levels.contains(effort) { context.effort = nil }
     }
 
     /// Codex adds a non-empty `AGENTS.md` (or `AGENTS.override.md`) in its home folder to every turn, which no argument keeps out.
@@ -345,21 +342,21 @@ public struct AgentComposer: View {
     }
 
     private func start() {
-        let task = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let task = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty, selectedModel != nil else { return }
-        let attached = attachesTab && !usesAgentsPersona ? attachableTab.map { [$0.id] } ?? [] : []
+        let attached = context.attachesTab && !context.usesAgentsPersona ? attachableTab.map { [$0.id] } ?? [] : []
         var start = AgentService.SessionStart(task: task, personaID: context.personaID, spaceID: context.spaceID, attachedTabIDs: attached,
-                                              mode: chosenMode, model: model, effort: effort.flatMap { effortLevels.contains($0) ? $0 : nil },
-                                              usesAgentsPersona: usesAgentsPersona)
+                                              mode: chosenMode, model: context.model, effort: context.effort.flatMap { effortLevels.contains($0) ? $0 : nil },
+                                              usesAgentsPersona: context.usesAgentsPersona)
         if !attached.isEmpty { start.reviewedDocument = attachableTab }
-        if sharesExcerpt, let excerpt = context.readerExcerpt, attached.contains(excerpt.tabID) { start.readerExcerpt = excerpt }
+        if context.sharesExcerpt, let excerpt = context.readerExcerpt, attached.contains(excerpt.tabID) { start.readerExcerpt = excerpt }
         do {
             let session = try service.startSession(start)
-            problem = nil
+            context.problem = nil
             didStart(session)
         } catch {
             // The task stays in the field.
-            problem = error.localizedDescription
+            context.problem = error.localizedDescription
         }
     }
 }

@@ -56,6 +56,8 @@ public enum BrowserWindowKind {
     @Published public private(set) var isPageReaderVisible = false
     /// What the agent panel shows in the trailing column in place of the page reader, or nil while it is hidden; only one of the two shows.
     @Published public private(set) var agentPanel: AgentPanelContent?
+    /// The unsubmitted composer in this window. Closing the panel keeps it in its original space.
+    private var agentDraft: AgentComposerContext?
     /// The question popover over the selected tab's page while it is open. It closes when another tab is selected or the tab loads another page.
     @Published private(set) var pageQuestion: PageQuestion?
     /// Where the selected tab's developer tools show.
@@ -803,7 +805,7 @@ public enum BrowserWindowKind {
     /// The palette's Ask Agent row: starts a session with the palette's text at once, in Settings' mode for new sessions, and shows it. A start the service refuses shows the composer with the task and the refusal's sentence instead.
     func askAgent(_ offer: AskAgentOffer) {
         guard let agents = session.agents else { return }
-        var context = agentComposerContext(text: offer.task)
+        let context = agentComposerContext(text: offer.task)
         do {
             let started = try agents.startSession(context.sessionStart(task: offer.task, mode: agents.newSessionMode, allowsAI: AIService.shared.settings.allowsAI(on:)))
             showAgentSession(started.id)
@@ -822,7 +824,7 @@ public enum BrowserWindowKind {
         } else if !isPageReaderVisible {
             return
         }
-        var context = agentComposerContext(text: question)
+        let context = agentComposerContext(text: question)
         if let excerpt, let attached = context.attachableTab(allowsAI: AIService.shared.settings.allowsAI(on:)), excerpt.matches(attached) {
             context.readerExcerpt = excerpt
         }
@@ -876,10 +878,12 @@ public enum BrowserWindowKind {
         }
     }
 
-    /// View ▸ Show Agent Panel: hides the panel, or shows the latest session of the window's current space, or the composer when it has none.
+    /// Hides the panel, or resumes its draft in this space before showing the most recent session or a new composer.
     public func toggleAgentPanel() {
         guard agentPanel == nil else { return hideAgentPanel() }
-        if let latest = session.agents?.sessions.last(where: { $0.spaceID == currentSpaceID }) {
+        if let agentDraft, agentDraft.spaceID == currentSpaceID, agentDraft.personaID == personaID {
+            showAgentPanel(.composer(agentDraft))
+        } else if let latest = session.agents?.sessions.last(where: { $0.spaceID == currentSpaceID }) {
             showAgentSession(latest.id)
         } else {
             showAgentComposer()
@@ -890,7 +894,13 @@ public enum BrowserWindowKind {
         withAnimation(SidebarView.pageSpring) { agentPanel = nil }
     }
 
+    func agentTaskDidStart(_ sessionID: UUID, from draft: AgentComposerContext) {
+        if agentDraft === draft { agentDraft = nil }
+        showAgentSession(sessionID)
+    }
+
     private func showAgentPanel(_ content: AgentPanelContent) {
+        if case .composer(let context) = content { agentDraft = context }
         if isPageReaderVisible { session.pageReaderDidHide(in: self) }
         withAnimation(SidebarView.pageSpring) {
             isPageReaderVisible = false

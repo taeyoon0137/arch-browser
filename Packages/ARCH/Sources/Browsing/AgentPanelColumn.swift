@@ -68,7 +68,7 @@ private struct AgentPanelFrame: View {
             Divider()
             switch content {
             case .composer(let context):
-                AgentComposer(service: agents, context: context, actions: actions) { windowModel.showAgentSession($0.id) }
+                AgentComposer(service: agents, context: context, actions: actions) { windowModel.agentTaskDidStart($0.id, from: context) }
                     // A new context, as from New Agent Task with another tab selected, starts a new draft.
                     .id(context.id)
             case .client:

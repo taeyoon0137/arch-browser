@@ -58,7 +58,13 @@ import UserNotifications
         #expect(!window.isVisible && service.sessions.isEmpty)
         let recovered = try #require(descendants(host.view).compactMap { $0 as? NSTextField }.first)
         #expect(recovered === field && recovered.stringValue == task)
-        recovered.sendAction(recovered.action, to: recovered.target)
+        #expect(context.text == task)
+        let reopened = NSHostingController(rootView: AgentComposer(service: service, context: context, actions: actions) { _ in })
+        window.contentViewController = reopened
+        window.contentView?.layoutSubtreeIfNeeded()
+        try await waitUntil { descendants(reopened.view).contains { ($0 as? NSTextField)?.stringValue == task } }
+        let reopenedField = try #require(descendants(reopened.view).compactMap { $0 as? NSTextField }.first { $0.stringValue == task })
+        reopenedField.sendAction(reopenedField.action, to: reopenedField.target)
         try await waitUntil { service.sessions.count == 1 }
         let session = try #require(service.sessions.first)
         #expect(session.transcript.lastUserMessage == task)
