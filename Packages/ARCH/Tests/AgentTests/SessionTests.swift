@@ -259,6 +259,32 @@ import Testing
         #expect(!service.canEditAttachments(of: one) && !service.share(fresh, with: one))
     }
 
+    @Test func aReviewedComposerAttachmentRequiresTheSameDocumentWhenTheUserStarts() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(harness.host.spaces(in: persona).first)
+        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Original", url: URL(string: "https://docs.example/article"), isLoading: false, engine: .webKit)
+        harness.host.tabs = [tab]
+        harness.host.userTabIDs = [tab.id]
+        let context = AgentComposerContext(personaID: persona, spaceID: space.id, place: "Research", tab: tab)
+        let start = context.sessionStart(task: "Review this page", mode: .readOnly, allowsAI: { _ in true })
+        #expect(service.sessions.isEmpty)
+        harness.host.tabs[0].documentID = UUID()
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+        harness.host.tabs = [tab]
+        harness.host.tabs[0].url = URL(string: "https://docs.example/next")
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+        harness.host.tabs = [tab]
+        harness.excludedHosts.value.insert("docs.example")
+        #expect(throws: AgentService.SessionError.self) { try service.startSession(start) }
+        #expect(service.sessions.isEmpty && harness.runners.isEmpty)
+        harness.excludedHosts.value = []
+        let session = try service.startSession(start)
+        #expect(session.handles.sharedTabIDs == [tab.id])
+    }
+
     @Test func readerExcerptsHaveABoundedUnicodePreview() throws {
         let text = String(repeating: "界", count: 1500)
         let page = try #require(URL(string: "https://site.example/"))

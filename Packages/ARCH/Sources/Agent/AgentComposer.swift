@@ -85,14 +85,17 @@ public struct AgentComposerContext: Equatable, Identifiable {
 
     /// The tab a session started here attaches: the selected tab while it shows a web page on a site not excluded from AI.
     public func attachableTab(allowsAI: (URL) -> Bool) -> AgentTabInfo? {
-        guard let tab, let url = tab.url, AgentSite.of(url) != nil, allowsAI(url) else { return nil }
+        guard let tab, tab.agentOwnerID == nil, let url = tab.url, AgentSite.of(url) != nil, allowsAI(url) else { return nil }
         return tab
     }
 
     /// A session that starts here at once with `task`, without the composer's choices, as the palette's Ask Agent starts one: the attachable tab, `mode`, and the `agent` route's model.
     public func sessionStart(task: String, mode: AgentAccessLevel, allowsAI: (URL) -> Bool) -> AgentService.SessionStart {
-        AgentService.SessionStart(task: task, personaID: personaID, spaceID: spaceID, attachedTabIDs: attachableTab(allowsAI: allowsAI).map { [$0.id] } ?? [],
-                                  mode: mode, model: nil, effort: nil)
+        let tab = attachableTab(allowsAI: allowsAI)
+        var start = AgentService.SessionStart(task: task, personaID: personaID, spaceID: spaceID, attachedTabIDs: tab.map { [$0.id] } ?? [],
+                                              mode: mode, model: nil, effort: nil)
+        start.reviewedDocument = tab
+        return start
     }
 }
 
@@ -287,6 +290,7 @@ public struct AgentComposer: View {
         let attached = attachesTab && !usesAgentsPersona ? attachableTab.map { [$0.id] } ?? [] : []
         var start = AgentService.SessionStart(task: task, personaID: context.personaID, spaceID: context.spaceID, attachedTabIDs: attached,
                                               mode: chosenMode, model: model, effort: effort, usesAgentsPersona: usesAgentsPersona)
+        if !attached.isEmpty { start.reviewedDocument = attachableTab }
         if sharesExcerpt, let excerpt = context.readerExcerpt, attached.contains(excerpt.tabID) { start.readerExcerpt = excerpt }
         do {
             let session = try service.startSession(start)
