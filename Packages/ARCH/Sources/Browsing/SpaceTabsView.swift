@@ -1,4 +1,4 @@
-// The space pages below the favorites: one page per space, each with the space's header and menu, then its pinned tabs, its open tabs, their nested folders, and the new tab row. A tab or folder row's drag starts and ends here (`SidebarDragState.swift`).
+// Each sidebar page holds its Persona’s favorites, the space header, pinned and open tabs, nested folders, and the new tab row. A tab or folder row's drag starts and ends here (`SidebarDragState.swift`).
 import AppKit
 import SwiftUI
 
@@ -24,18 +24,22 @@ struct SpacePagesView: View {
             ForEach(session.spaces) { space in
                 let isCurrent = space.id == windowModel.currentSpaceID
                 VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
-                    favoritesBar(in: space, current: isCurrent)
+                    if !session.favorites(in: space.resolvedPersonaID).isEmpty {
+                        FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
+                            .modifier(FavoriteDropArea(spaceID: space.id))
+                            .padding(.horizontal, SidebarView.inset)
+                    }
                     if isCurrent {
                         PluginSidebarItemsView(plugins: windowModel.plugins)
                         if let agents = session.agents { ConnectedAgentRows(agents: agents) }
                     }
                     SpaceTabsView(session: session, space: space)
                 }
-                    .frame(width: width, alignment: .topLeading)
-                    // Clipping hides the other pages but does not stop them from taking clicks over the page beside the sidebar, or from reaching assistive apps.
-                    .allowsHitTesting(isCurrent)
-                    .accessibilityElement(children: isCurrent ? .contain : .ignore)
-                    .accessibilityHidden(!isCurrent)
+                .frame(width: width, alignment: .topLeading)
+                // Clipping alone does not keep offscreen pages from receiving clicks or accessibility actions.
+                .allowsHitTesting(isCurrent)
+                .accessibilityElement(children: isCurrent ? .contain : .ignore)
+                .accessibilityHidden(!isCurrent)
             }
         }
         .onPreferenceChange(FavoriteBarFramesKey.self) { sidebarDrag.favoriteBarFrames = $0 }
@@ -44,37 +48,24 @@ struct SpacePagesView: View {
         .clipped()
         .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
     }
+}
 
-    @ViewBuilder
-    private func favoritesBar(in space: Space, current: Bool) -> some View {
-        let favorites = session.favorites(in: space.resolvedPersonaID)
-        let draggingTab = current ? sidebarDrag.tabID.flatMap { id in session.tabs.first { $0.id == id } } : nil
-        let acceptsDrag = draggingTab.map { $0.spaceID == space.id && $0.agentOwnerID == nil && session.canAddFavorite($0) } ?? false
-        if !favorites.isEmpty || acceptsDrag {
-            Group {
-                if favorites.isEmpty {
-                    Label("Add to Favorites", systemImage: "star")
-                        .font(.callout)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: FavoriteTileLayout.height)
-                } else {
-                    FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
-                }
-            }
+/// Measures the existing grid, or the space header while it offers the first favorite.
+private struct FavoriteDropArea: ViewModifier {
+    let spaceID: UUID
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
+
+    func body(content: Content) -> some View {
+        content
             .overlay {
-                if acceptsDrag {
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(sidebarDrag.targetFavoriteSpaceID == space.id ? Color.accentColor : .secondary.opacity(0.45),
-                                      style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                if sidebarDrag.targetFavoriteSpaceID == spaceID {
+                    RoundedRectangle(cornerRadius: 9).strokeBorder(Color.accentColor, lineWidth: 1)
                         .allowsHitTesting(false)
                 }
             }
             .background(GeometryReader { proxy in
-                let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
-                Color.clear.preference(key: FavoriteBarFramesKey.self, value: [space.id: frame])
+                Color.clear.preference(key: FavoriteBarFramesKey.self, value: [spaceID: proxy.frame(in: .named(BrowserWindowView.coordinateSpace))])
             })
-            .padding(.horizontal, SidebarView.inset)
-        }
     }
 }
 
@@ -133,6 +124,12 @@ struct SpaceTabsView: View {
         return tree.rows(in: space.id, pinned: pinned, hidingContentsOf: isDragging ? sidebarDrag.folderID : nil) { $0.id == windowModel.selectedTabID || ($0.id == sidebarDrag.tabID && isDragging) }.map(Item.row)
     }
 
+    private var offersFirstFavorite: Bool {
+        guard windowModel.currentSpaceID == space.id, session.favorites(in: space.resolvedPersonaID).isEmpty,
+              let id = sidebarDrag.tabID, let tab = session.tabs.first(where: { $0.id == id }) else { return false }
+        return tab.spaceID == space.id && tab.agentOwnerID == nil && session.canAddFavorite(tab)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
@@ -140,6 +137,17 @@ struct SpaceTabsView: View {
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
                     .padding(.bottom, 4)
+                    .opacity(offersFirstFavorite ? 0 : 1)
+                    .overlay {
+                        if offersFirstFavorite {
+                            Label("Add to Favorites", systemImage: "star")
+                                .font(.callout)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                                .modifier(FavoriteDropArea(spaceID: space.id))
+                                .allowsHitTesting(false)
+                        }
+                    }
                 ForEach(items) { item in
                     Group {
                         switch item {
