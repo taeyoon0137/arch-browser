@@ -795,13 +795,16 @@ public enum BrowserWindowKind {
     }
 
     static func sidebarAgentDraft(for tab: AgentTabInfo, in space: Space, personas: [Persona], allowsAI: (URL) -> Bool) -> AgentComposerContext? {
-        guard tab.spaceID == space.id else { return nil }
+        // An open favorite belongs to its Persona across spaces. Its window supplies the task's destination.
+        guard tab.spaceID == nil || tab.spaceID == space.id else { return nil }
         let context = agentComposerContext(in: space, personas: personas, selectedTab: tab, isPageCovered: false, text: "")
         return context.attachableTab(allowsAI: allowsAI) == nil ? nil : context
     }
 
     func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext) {
-        guard let context = sidebarAgentDraft(for: tab), context.tab?.documentID == reviewed.tab?.documentID, context.tab?.url == reviewed.tab?.url else { return }
+        guard let context = sidebarAgentDraft(for: tab), context.spaceID == reviewed.spaceID, context.personaID == reviewed.personaID,
+              let document = context.tab, let original = reviewed.tab, document.id == original.id,
+              document.documentID == original.documentID, document.url == original.url else { return }
         showAgentPanel(.composer(context))
     }
 

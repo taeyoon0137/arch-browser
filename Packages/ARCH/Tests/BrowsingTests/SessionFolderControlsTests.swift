@@ -55,6 +55,39 @@ import Testing
         #expect(window.agentPanel == .composer(draft) && draft.text == "Compare these notes" && service.sessions.isEmpty)
     }
 
+    @Test func anOpenFavoritesDraftUsesTheReviewedDocumentAndSpace() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let home = try #require(browser.spaces.first)
+        let otherSpace = browser.makeSpace(in: home.resolvedPersonaID)
+        let elsewhere = browser.addPersona(named: "Elsewhere")
+        let away = try #require(browser.spaces(in: elsewhere.id).first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let favorite = Favorite(url: URL(string: "https://fixture.invalid/favorite")!, title: "Notes", personaID: home.resolvedPersonaID)
+        browser.addFavorites([favorite], in: home.resolvedPersonaID)
+        #expect(browser.openTab(ofFavorite: favorite) == nil)
+        let page = browser.openTab(for: favorite)
+        let selected = browser.openTab(url: URL(string: "https://fixture.invalid/selected"), in: home.id, select: false)
+        window.selectTab(selected.id)
+        let reviewed = try #require(window.sidebarAgentDraft(for: page))
+        window.switchToSpace(otherSpace.id)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        #expect(window.agentPanel == nil)
+        window.switchToSpace(away.id)
+        #expect(window.sidebarAgentDraft(for: page) == nil)
+        window.switchToSpace(home.id)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a draft for the open favorite"); return }
+        #expect(draft.spaceID == home.id && draft.tab?.id == page.id && draft.tab?.documentID == reviewed.tab?.documentID)
+        #expect(window.selectedTab === selected && service.sessions.isEmpty)
+        window.hideAgentPanel()
+        browser.closeFavorite(favorite)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        #expect(window.agentPanel == nil && browser.openTab(ofFavorite: favorite) == nil)
+    }
+
     @Test func reopeningThePanelKeepsItsUnsentDraftAndReviewedTabInTheSameWindow() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
