@@ -1430,6 +1430,7 @@ public final class BrowserWindowModel: ObservableObject {
         let now = Date()
         for tab in session.allTabs where shownTabIDs.contains(tab.id) && !ids.contains(tab.id) { tab.lastActivatedAt = now }
         shownTabIDs = ids
+        session.applyPendingSyncEngines()
     }
 
     /// The panes of `panes` that a window shows, and so loads, after a change: its selected tab, the panes it shows already (`shownTabIDs`), and each other pane that no other window shows.

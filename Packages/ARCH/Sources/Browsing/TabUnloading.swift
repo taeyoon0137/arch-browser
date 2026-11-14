@@ -23,11 +23,11 @@ enum TabCloseAction: Equatable {
         if tab.liveItemID != nil {
             switch reason {
             case .user, .page, .webExtension: return .dismiss
-            case .persona: return .close(remember: false)
+            case .persona, .sync: return .close(remember: false)
             case .crash, .download, .archive: return .unload
             }
         }
-        if tab.isPinned { return reason == .persona ? .close(remember: true) : .unload }
+        if tab.isPinned { return reason == .persona || reason == .sync ? .close(remember: true) : .unload }
         return .close(remember: reason != .download)
     }
 

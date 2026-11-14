@@ -27,6 +27,7 @@ extension BrowserTabCloseReason {
         case .download: self = .download
         case .webExtension: self = .webExtension
         case .persona: self = .spaceDeleted
+        case .sync: self = .sync
         }
     }
 }

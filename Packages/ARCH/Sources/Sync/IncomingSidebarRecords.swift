@@ -1,0 +1,255 @@
+// Repairs the complete, field-merged sidebar graph once a fetch has finished successfully.
+import ARCHEngine
+import Browsing
+import CryptoKit
+import Foundation
+import LiveFolders
+
+public enum IncomingSidebarRecords {
+    public struct Plan {
+        public let sidebar: SidebarSyncState
+        public let deletions: SidebarSyncDeletions
+        public let repairs: [SyncRecord]
+        public let recordsToDelete: [String]
+    }
+
+    public enum InvalidGraph: Error {
+        case malformedRecord(String)
+        case inconsistentIdentity(String)
+    }
+
+    /// Merges a completed fetch against base records from the mirror. Absent fetched records
+    /// carry no implication of deletion. An explicit tombstone takes precedence over a local save.
+    public static func plan(local: [SyncRecord], fetched: [SyncRecord], mirror: [SyncRecord],
+                            deleted: [String: SyncRecordType], foundAt: Date) throws -> Plan {
+        func byName(_ records: [SyncRecord]) throws -> [String: SyncRecord] {
+            var result: [String: SyncRecord] = [:]
+            for item in records where item.recordType != .setting {
+                guard result.updateValue(item, forKey: item.recordName) == nil else { throw InvalidGraph.inconsistentIdentity(item.recordName) }
+            }
+            return result
+        }
+        var combined = try byName(local)
+        let bases = try byName(mirror)
+        var sends: [String: SyncRecord] = [:]
+        for (name, server) in try byName(fetched) {
+            if let localRecord = combined[name] {
+                // Local IDs never move a tab, folder, favorite, or space into another Persona.
+                guard localRecord[.persona] == server[.persona], localRecord.recordType == server.recordType,
+                      bases[name].map({ $0.recordType == server.recordType }) ?? true else { throw InvalidGraph.inconsistentIdentity(name) }
+                let merge = SyncMerge.merge(local: localRecord, server: server, base: bases[name].map(SyncMerge.Base.mirror) ?? .firstWrite)
+                combined[name] = merge.record
+                if merge.needsSend { sends[name] = merge.record }
+            } else { combined[name] = server }
+        }
+        let plan = try plan(records: Array(combined.values), deleted: deleted, foundAt: foundAt)
+        for name in deleted.keys { sends[name] = nil }
+        for name in plan.recordsToDelete { sends[name] = nil }
+        for row in plan.repairs { sends[row.recordName] = row }
+        return Plan(sidebar: plan.sidebar, deletions: plan.deletions,
+                    repairs: sends.values.sorted { $0.recordName < $1.recordName }, recordsToDelete: plan.recordsToDelete)
+    }
+
+    /// Inputs contain all sidebar records after field merging, including unsent local records. An
+    /// explicit deletion always wins. Settings use SyncedSettings independently of this graph.
+    public static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date) throws -> Plan {
+        var all: [String: SyncRecord] = [:]
+        var removed = deleted.filter { $0.value != .setting }
+        // The fixed default profile owns the platform's default storage and cannot be removed.
+        removed.removeValue(forKey: "default")
+        for item in records where item.recordType != .setting {
+            if let removal = removed[item.recordName] {
+                guard removal == item.recordType else { throw InvalidGraph.inconsistentIdentity(item.recordName) }
+                continue
+            }
+            guard all.updateValue(item, forKey: item.recordName) == nil else { throw InvalidGraph.inconsistentIdentity(item.recordName) }
+        }
+        let original = all
+        let personas = SyncOrderKeys.sorted(all.values.filter { $0.recordType == .persona })
+        let owners = Set(personas.map(\.recordName))
+        for item in original.values where item.recordType != .persona {
+            let owner = try reference(item, .persona)
+            if !owners.contains(owner) {
+                removed[item.recordName] = item.recordType
+                all.removeValue(forKey: item.recordName)
+            }
+        }
+        var spaces = Dictionary(grouping: SyncOrderKeys.sorted(all.values.filter { $0.recordType == .space }), by: { $0[.persona] })
+        for persona in personas where spaces[.reference(persona.recordName)] == nil {
+            let name = try personalSpaceID(for: persona).uuidString
+            guard all[name] == nil else { throw InvalidGraph.inconsistentIdentity(name) }
+            // The same deterministic repair can be deleted remotely while its Persona survives.
+            // Recreate it only if the Persona still has no other space.
+            removed.removeValue(forKey: name)
+            let item = SyncRecord(recordType: .space, recordName: name, fields: [
+                "persona": .reference(persona.recordName), "name": .text("Personal"), "order": .number(1),
+                "symbol": .text("circle.fill"), "tint": .text("blue")], modifiedAt: foundAt)
+            all[name] = item
+            spaces[.reference(persona.recordName)] = [item]
+        }
+
+        for var item in all.values where item.recordType == .folder || item.recordType == .tab {
+            let owner = item[.persona]
+            let space = item[.space].flatMap { value -> SyncRecord? in
+                guard case .reference(let id) = value else { return nil }
+                return all[id]
+            }
+            if space?.recordType != .space || space?[.persona] != owner {
+                guard let first = spaces[owner]?.first else { throw InvalidGraph.malformedRecord(item.recordName) }
+                item[.space] = .reference(first.recordName)
+            }
+            let key: SyncField = item.recordType == .folder ? .parent : .folder
+            if let parent = item[key] {
+                let folder: SyncRecord? = if case .reference(let id) = parent { all[id] } else { nil }
+                if folder?.recordType != .folder || folder?[.persona] != owner || folder?[.live] != nil { item[key] = nil }
+            }
+            all[item.recordName] = item
+        }
+        let folders = all.values.filter { $0.recordType == .folder }.map(\.recordName).sorted()
+        // A folder has one parent. A walk either hits a resolved chain, a root, or a cycle.
+        var finished = Set<String>()
+        for id in folders where !finished.contains(id) {
+            var path: [String] = []
+            var positions: [String: Int] = [:]
+            var current: String? = id
+            while let name = current, !finished.contains(name) {
+                if let pos = positions[name] {
+                    if let first = path[pos...].min() { all[first]?[.parent] = nil }
+                    break
+                }
+                positions[name] = path.count
+                path.append(name)
+                if case .reference(let parent) = all[name]?[.parent] { current = parent } else { current = nil }
+            }
+            finished.formUnion(path)
+        }
+        let sortedFolders = SyncOrderKeys.sorted(folders.compactMap { all[$0] })
+        let children = Dictionary(grouping: sortedFolders, by: { $0[.parent] })
+        var orderedFolders: [SyncRecord] = []
+        // Keep the third-level ancestor for flattening everything below level four.
+        var queue = (children[nil] ?? []).map { (item: $0, depth: 1, third: Optional<String>.none) }
+        var index = 0
+        while index < queue.count {
+            let (item, depth, ancestor) = queue[index]
+            index += 1
+            var row = item
+            if case .reference(let parent) = row[.parent] { row[.space] = all[parent]?[.space] }
+            if depth > 4 { row[.parent] = ancestor.map(SyncValue.reference) }
+            all[row.recordName] = row
+            orderedFolders.append(row)
+            let third = depth == 3 ? row.recordName : ancestor
+            for child in children[.reference(row.recordName)] ?? [] { queue.append((child, depth + 1, third)) }
+        }
+        // Flattened siblings must be sorted together by their original keys.
+        let repairedChildren = Dictionary(grouping: SyncOrderKeys.sorted(orderedFolders), by: { $0[.parent] })
+        var parentFirst: [SyncRecord] = []
+        func appendFolders(of parent: SyncValue?) {
+            for folder in repairedChildren[parent] ?? [] {
+                parentFirst.append(folder)
+                appendFolders(of: .reference(folder.recordName))
+            }
+        }
+        appendFolders(of: nil)
+        for var tab in all.values where tab.recordType == .tab {
+            if case .reference(let parent) = tab[.folder] { tab[.space] = all[parent]?[.space] }
+            all[tab.recordName] = tab
+        }
+
+        var repairs: [SyncRecord] = []
+        for var row in all.values.sorted(by: { $0.recordName < $1.recordName }) where original[row.recordName]?.fields != row.fields {
+            let old = original[row.recordName]?.fields ?? [:]
+            for field in Set(old.keys).union(row.fields.keys) where old[field] != row.fields[field] { row.fieldModifiedAt[field] = foundAt }
+            row.modifiedAt = max(foundAt, row.modifiedAt)
+            repairs.append(row)
+        }
+        let state = try sidebar(personas: personas, spaces: spaces, folders: parentFirst, all: all)
+        var tombstones = SidebarSyncDeletions()
+        for (name, type) in removed {
+            let id = try identifier(name, type: type)
+            switch type {
+            case .persona: tombstones.personas.insert(id)
+            case .space: tombstones.spaces.insert(id)
+            case .folder: tombstones.folders.insert(id)
+            case .favorite: tombstones.favorites.insert(id)
+            case .tab: tombstones.tabs.insert(id)
+            case .setting: break
+            }
+        }
+        let repairDeletions = removed.keys.filter { deleted[$0] == nil }.sorted()
+        return Plan(sidebar: state, deletions: tombstones, repairs: repairs, recordsToDelete: repairDeletions)
+    }
+
+    /// RFC 9562 UUIDv5 using the Persona UUID as the namespace and an invariant UTF-8 name.
+    private static func personalSpaceID(for persona: SyncRecord) throws -> UUID {
+        var namespace = try identifier(persona.recordName, type: .persona).uuid
+        var bytes = withUnsafeBytes(of: &namespace) { Data($0) }
+        bytes.append(contentsOf: "Arch Personal space".utf8)
+        var hash = Array(Insecure.SHA1.hash(data: bytes).prefix(16))
+        hash[6] = (hash[6] & 0x0f) | 0x50
+        hash[8] = (hash[8] & 0x3f) | 0x80
+        return hash.withUnsafeBytes { UUID(uuid: $0.loadUnaligned(as: uuid_t.self)) }
+    }
+
+    private static func identifier(_ raw: String, type: SyncRecordType) throws -> UUID {
+        if type == .persona, raw == "default" { return Persona.defaultID }
+        guard let id = UUID(uuidString: raw), raw == id.uuidString, type != .persona || id != Persona.defaultID else {
+            throw InvalidGraph.malformedRecord(raw)
+        }
+        return id
+    }
+
+    private static func reference(_ item: SyncRecord, _ field: SyncField) throws -> String {
+        guard case .reference(let name) = item[field] else { throw InvalidGraph.malformedRecord(item.recordName) }
+        return name
+    }
+
+    private static func sidebar(personas: [SyncRecord], spaces: [SyncValue?: [SyncRecord]], folders: [SyncRecord],
+                                all: [String: SyncRecord]) throws -> SidebarSyncState {
+        func text(_ item: SyncRecord, _ field: SyncField) throws -> String {
+            guard case .text(let text) = item[field] else { throw InvalidGraph.malformedRecord(item.recordName) }
+            return text
+        }
+        func url(_ item: SyncRecord, _ field: SyncField) throws -> URL {
+            guard let url = URL(string: try text(item, field), encodingInvalidCharacters: false), url.scheme != nil else {
+                throw InvalidGraph.malformedRecord(item.recordName)
+            }
+            return url
+        }
+        func owner(_ item: SyncRecord) throws -> UUID { try identifier(reference(item, .persona), type: .persona) }
+        func optionalParent(_ item: SyncRecord, _ field: SyncField) throws -> UUID? {
+            try item[field].map { _ in try identifier(reference(item, field), type: .folder) }
+        }
+        let people = try personas.map { try Persona(id: identifier($0.recordName, type: .persona), name: text($0, .name)) }
+        let spaceRows = try personas.flatMap { persona in
+            try (spaces[.reference(persona.recordName)] ?? []).map { item in
+                guard let tint = try SpaceTint(rawValue: text(item, .tint)) else { throw InvalidGraph.malformedRecord(item.recordName) }
+                var space = try Space(id: identifier(item.recordName, type: .space), name: text(item, .name),
+                                      symbol: text(item, .symbol), tint: tint, personaID: owner(item))
+                if item[.homeURL] != nil { space.homeURL = try url(item, .homeURL) }
+                return space
+            }
+        }
+        let folderRows = try folders.map { item in
+            var live: LiveFolderConfiguration?
+            if item[.live] != nil {
+                live = try JSONDecoder().decode(LiveFolderConfiguration.self, from: Data(text(item, .live).utf8))
+                guard SidebarSyncState.canShare(live) else { throw InvalidGraph.malformedRecord(item.recordName) }
+            }
+            return try SidebarSyncState.Folder(id: identifier(item.recordName, type: .folder), personaID: owner(item),
+                spaceID: identifier(reference(item, .space), type: .space), parentID: optionalParent(item, .parent),
+                name: text(item, .name), live: live)
+        }
+        let favorites = try SyncOrderKeys.sorted(all.values.filter { $0.recordType == .favorite }).map { item in
+            try Favorite(id: identifier(item.recordName, type: .favorite), url: url(item, .url), title: text(item, .title), personaID: owner(item))
+        }
+        let tabs = try SyncOrderKeys.sorted(all.values.filter { $0.recordType == .tab }).map { item in
+            guard let engine = try EngineKind(rawValue: text(item, .engine)) else { throw InvalidGraph.malformedRecord(item.recordName) }
+            let saved = try item[.url].map { _ in try SavedPage(url: url(item, .url), title: text(item, .title)) }
+            let custom = try item[.customTitle].map { _ in try text(item, .customTitle) }
+            return try SidebarSyncState.PinnedTab(id: identifier(item.recordName, type: .tab), personaID: owner(item),
+                spaceID: identifier(reference(item, .space), type: .space), folderID: optionalParent(item, .folder),
+                savedPage: saved, customTitle: custom, engine: engine)
+        }
+        return SidebarSyncState(personas: people, spaces: spaceRows, folders: folderRows, favorites: favorites, pinnedTabs: tabs)
+    }
+}

@@ -11,6 +11,15 @@ public struct SidebarSyncState: Equatable {
         public let parentID: UUID?
         public let name: String
         public let live: LiveFolderConfiguration?
+
+        public init(id: UUID, personaID: UUID, spaceID: UUID, parentID: UUID?, name: String, live: LiveFolderConfiguration?) {
+            self.id = id
+            self.personaID = personaID
+            self.spaceID = spaceID
+            self.parentID = parentID
+            self.name = name
+            self.live = live
+        }
     }
 
     public struct PinnedTab: Equatable {
@@ -21,6 +30,16 @@ public struct SidebarSyncState: Equatable {
         public let savedPage: SavedPage?
         public let customTitle: String?
         public let engine: EngineKind
+
+        public init(id: UUID, personaID: UUID, spaceID: UUID, folderID: UUID?, savedPage: SavedPage?, customTitle: String?, engine: EngineKind) {
+            self.id = id
+            self.personaID = personaID
+            self.spaceID = spaceID
+            self.folderID = folderID
+            self.savedPage = savedPage
+            self.customTitle = customTitle
+            self.engine = engine
+        }
     }
 
     public let personas: [Persona]
@@ -28,6 +47,14 @@ public struct SidebarSyncState: Equatable {
     public let folders: [Folder]
     public let favorites: [Favorite]
     public let pinnedTabs: [PinnedTab]
+
+    public init(personas: [Persona], spaces: [Space], folders: [Folder], favorites: [Favorite], pinnedTabs: [PinnedTab]) {
+        self.personas = personas
+        self.spaces = spaces
+        self.folders = folders
+        self.favorites = favorites
+        self.pinnedTabs = pinnedTabs
+    }
 
     /// Uses the captured session after migration or a successful save. A folder can only enter the
     /// result through its own space and an ordinary pinned ancestor at every level.
@@ -60,13 +87,29 @@ public struct SidebarSyncState: Equatable {
                   tab.personaID == nil || tab.personaID == owner else { return nil }
             if let folder = tab.folderID, !ordinary.contains(folder) || folderSpaces[folder] != tab.spaceID { return nil }
             return PinnedTab(id: id, personaID: owner, spaceID: tab.spaceID, folderID: tab.folderID,
-                             savedPage: tab.savedPage, customTitle: tab.customTitle, engine: tab.engine ?? defaultEngine)
+                             savedPage: tab.savedPage, customTitle: tab.customTitle, engine: tab.pendingSyncEngine ?? tab.engine ?? defaultEngine)
         }
     }
 
-    private static func canShare(_ live: LiveFolderConfiguration?) -> Bool {
-        guard case .feed(let address, let isPrivate) = live?.source else { return true }
-        // Also exclude a legacy or malformed unmarked feed with credentials, a query, or a fragment.
-        return !isPrivate && address.query == nil && address.fragment == nil && address.user == nil && address.password == nil
+    public static func canShare(_ live: LiveFolderConfiguration?) -> Bool {
+        switch live?.source {
+        case nil: return true
+        case .gitHub(let search): return GitHubSearch.isValidHost(search.host)
+        case .feed(let address, let isPrivate):
+            // Refuse private and malformed incoming configurations before a service can open them.
+            return !isPrivate && address.scheme?.lowercased() == "https" && address.host?.isEmpty == false
+                && address.query == nil && address.fragment == nil && address.user == nil && address.password == nil
+        }
     }
+}
+
+/// Explicit incoming deletions, separated by type because local-only items outside the mirror survive.
+public struct SidebarSyncDeletions {
+    public var personas: Set<UUID> = []
+    public var spaces: Set<UUID> = []
+    public var folders: Set<UUID> = []
+    public var favorites: Set<UUID> = []
+    public var tabs: Set<UUID> = []
+
+    public init() {}
 }

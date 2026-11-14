@@ -132,7 +132,7 @@ public struct BrowserDownloadRef: Codable, Hashable, Sendable {
 
 public enum BrowserTabCloseReason: String, Codable, Hashable, Sendable {
     /// `TabCloseReason`'s cases, then closes by code and with a deleted space or Persona.
-    case user, page, crash, archive, download, webExtension, plugin, hook, agent, spaceDeleted
+    case user, page, crash, archive, download, webExtension, plugin, hook, agent, spaceDeleted, sync
 }
 
 public enum BrowserTitleSource: String, Codable, Hashable, Sendable {
@@ -341,7 +341,7 @@ extension BrowserEvent {
 
 `BrowserEventSource` in `Browsing` follows the session's tabs, favorites' tabs, small windows' tabs, windows, and downloads, as `BrowserHooks` now follows three kinds, and posts every kind.
 
-- `tabClosed` comes from `BrowserSession.closeTab(_:remember:reason:)`, with `TabCloseReason` mapped case by case, and from deleting a Persona, whose tabs close as `spaceDeleted`; deleting a space moves its tabs instead. Closes by code pass their reason (`plugin`, `hook`, or `agent`) through `closeTab(_:remember:reason:eventReason:)`. The source posts it before the session removes the tab from its lists, so the tab's last name and address are still there while subscribers handle the event.
+- `tabClosed` comes from `BrowserSession.closeTab(_:remember:reason:)`, with `TabCloseReason` mapped case by case, and from deleting a Persona, whose tabs close as `spaceDeleted`; deleting a space moves its tabs instead. A pinned tab removed by a sidebar sync deletion closes with the reason `sync`. Closes by code pass their reason (`plugin`, `hook`, or `agent`) through `closeTab(_:remember:reason:eventReason:)`. The source posts it before the session removes the tab from its lists, so the tab's last name and address are still there while subscribers handle the event.
 - `tabOpened` follows the session's tab lists and names the opening tab, which the session sets before a popup's tab joins its list. The tabs listed when the session attaches the source are the restored ones.
 - `titleChanged` follows the inputs of `Tab.displayTitle` with the tab's committed address, and waits while the tab's address waits to settle, so a navigation the tab leaves before it commits posts no name for that address, and the page's title of a document that commits posts after its `addressChanged`. A suggested name that code gives while the address waits, which the tab takes for the document it still shows, keeps its cause, and the title change that names it posts with that cause once the address settles, so the hook or plugin that gave it still sees its own effect. Its source is the input that supplies the new name: `customTitle` set or cleared, or a hook's name that the user turns down (`user`); a hook's name in `suggestedTitle` (`suggested`); and otherwise the page's title or host (`page`), also when another address drops a hook's name.
 - `addressChanged` follows `Tab.committedURL`, which takes the tab's address at once when it changes while the page is not loading. WebKit reports a navigation's address before it commits and goes back to the earlier one when the navigation fails, is stopped, or becomes a download, while Chromium reports an address only once it commits, so an address that changes while the page loads waits until the load ends or its document loads, and posts only when the tab then shows an address it has not posted. The tab drops a hook's name at the same point, so the name stays through such a navigation, and every event's `BrowserTabRef.url` is the committed address.

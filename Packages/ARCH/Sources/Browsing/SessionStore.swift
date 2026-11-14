@@ -25,6 +25,8 @@ struct SessionSnapshot: Codable {
         var engine: EngineKind?
         /// The engine's restorable page state, such as WebKit's back-forward list, which the file keeps sealed from version 13. `nil` for engines that keep none, in closed-tab records, in files before version 3, and when the state cannot be sealed or opened.
         var state: Data?
+        /// A synced engine change that waits until this tab is no longer visible.
+        var pendingSyncEngine: EngineKind? = nil
         /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
         var personaID: UUID?
         /// The name a hook gave the tab's document, or the user's refusal of it, with the document's address. `nil` without either, in closed-tab records, and in files before version 12.
@@ -139,7 +141,7 @@ struct SessionSnapshot: Codable {
     /// What the session starts from when nothing was saved or the file did not load. Normalizing it gives the default Persona and its first space.
     static var empty: SessionSnapshot { SessionSnapshot(spaces: [], currentSpaceID: UUID(), favorites: [], tabs: []) }
 
-    /// Gives every space and favorite a listed Persona, every Persona a space, and the tab records their Personas. Files before version 9 list none, so everything joins the default Persona. An item whose Persona is not listed joins the first Persona, as in sync's orphan rule.
+    /// Gives every space and favorite a listed Persona, every Persona a space, and the tab records their Personas. Files before version 9 list none, so everything joins the default Persona. An item whose Persona is not listed joins the first Persona. This local recovery rule preserves the old session.
     private mutating func assignPersonas() {
         // The default Persona is always there, first unless the file placed it elsewhere. A Persona listed twice keeps its first place.
         var listed: Set<UUID> = []
@@ -241,6 +243,7 @@ extension SessionSnapshot.TabRecord {
         self.init(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, lastActivatedAt: lastActivatedAt,
                   engine: tab.engineKind, state: tab.webContents.restorableState, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle, savedPage: tab.savedPage,
                   liveItemID: tab.liveItemID)
+        pendingSyncEngine = tab.pendingSyncEngine
     }
 }
 
