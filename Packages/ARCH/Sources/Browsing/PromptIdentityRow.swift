@@ -1,4 +1,4 @@
-// The first row of a prompt card, which says who asks: the site's icon or a symbol, its name, a lock for an encrypted connection, a tag such as "Proxy", and where the asker is. For a page's own dialog, which has no title of Arch's, the row heads the card in the title's weight. Where the asker is takes the name's size in a lighter color, and the name keeps its room first, since it says who asks; each shows whole in its tooltip.
+// The first row of a prompt card, which says who asks: the site's icon or a symbol, its name, a lock for an encrypted connection, a tag such as "Proxy", and where the asker is. For a page's own dialog, which has no title of Arch's, the row heads the card in the title's weight. Where the asker is takes the name's size in regular weight and the secondary color, since it tells the user that a frame from another site asks, and the name keeps its room first, since it says who asks; each shows whole in its tooltip.
 import AppKit
 import SwiftUI
 
@@ -19,8 +19,9 @@ struct PromptIdentityRow: View {
                 .layoutPriority(1)
                 .help(identity.name)
             if identity.isSecure {
+                // The lock of the address pill and the preview's header.
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .accessibilityLabel("Secure connection")
             }
@@ -36,7 +37,7 @@ struct PromptIdentityRow: View {
             if let context = identity.context {
                 Text(context)
                     .font(.system(size: isHeader ? 13 : 12))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(context)
