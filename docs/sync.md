@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, and the check whether this Mac can sync. Queue tasks V.9.6 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model, merge, CloudKit records, the Settings list, the check whether this Mac can sync, and the sync engine. Queue tasks V.9.7 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, it creates no sync engine and sends or fetches no records. Only in a build whose own entitlements name a container does it create that container's `CKContainer`, to ask for the account's status (`accountStatus()`) and hear of account changes, so that Settings ▸ Sync can say whether sync can run (Accounts and removed data). Whether that question reaches Apple's servers is Not verified 6.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -21,7 +21,7 @@
 - Settings stores its choices in `UserDefaults`. Download settings apply to every engine context through `UserDefaults.didChangeNotification`. Appearance applies only at launch and in Settings' `onChange`.
 - The Settings window lists General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. `Preferences` depends on `Browsing`. The Delete Persona sheet's text is in `BrowserWindowModel.swift`.
 - `scripts/bundle_app.sh` signs the app with `codesign --deep`, without entitlements or a provisioning profile.
-- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, `SyncDiff`, `SyncCloudKitRecords`, `SyncMirror`, `SyncedSettings`, `SyncDatabase`, and `SyncAvailability`. No other target depends on it yet, and nothing in it sends or fetches records. `SyncTests` also depends on `ARCHEngine`, `Browsing`, and `Preferences` to compare the synced keys and values with the app's constants and enums.
+- The `Sync` module holds `SyncRecord`, `SyncMerge`, `SyncOrderKeys`, `SyncDiff`, `SyncCloudKitRecords`, `SyncMirror`, `SyncedSettings`, `SyncDatabase`, `SyncAvailability`, `SyncEngineClient`, and `CloudKitSyncEngine`. No other target depends on it yet, and nothing creates the engine, so nothing sends or fetches records. `SyncTests` also depends on `ARCHEngine`, `Browsing`, and `Preferences` to compare the synced keys and values with the app's constants and enums.
 
 ### CloudKit
 
@@ -33,6 +33,12 @@ Checked in the CloudKit Swift interface of the macOS 27.2 SDK:
 - `CKSyncEngine.FetchChangesOptions` has a `scope` of `.all`, `.allExcluding(_:)`, or `.zoneIDs(_:)`, and `.all` is the default, for `fetchChanges(_:)` too. The delegate's `nextFetchChangesOptions(_:syncEngine:)` gives the options of each fetch the engine schedules.
 - A record's system parent, which CloudKit uses for sharing, has the key `___parent` (`CKRecord.SystemFieldKey.parent`). Setting a custom field `parent` leaves `CKRecord.parent` nil.
 - `CKContainer.h` documents that a container posts `CKAccountChanged` (`Notification.Name.CKAccountChanged`) on an arbitrary queue when the account's status changes, that an app creates a `CKContainer` to receive it, and that after `temporarilyUnavailable` an app waits for that notification instead of starting operations.
+- `CKSyncEngine.h`, `CKSyncEngineState.h`, `CKSyncEngineConfiguration.h`, and `CKSyncEngineRecordZoneChangeBatch.h` document that the engine:
+  - delivers events serially, each after the delegate returns from the one before, and that a delegate does not call `fetchChanges` or `sendChanges` while it handles an event. Their completion comes after the delegate has handled the events they caused.
+  - holds its delegate weakly.
+  - sends at most 250 records per request, saves and deletions together. `init?(pendingChanges:recordProvider:)` stops once a batch is full, and the rest stay pending for the next batch. A batch with a change outside the send's scope fails with `invalidArguments`, and a record provider's nil skips that change.
+  - keeps no duplicate pending changes, and a record's later save or deletion replaces its earlier opposite, as a zone's does.
+  - removes each change it sends from the pending changes and keeps those that fail for a recoverable error. It retries `notAuthenticated`, `accountTemporarilyUnavailable`, `networkFailure`, `networkUnavailable`, `requestRateLimited`, `serviceUnavailable`, and `zoneBusy` itself, and leaves every other error, such as `serverRecordChanged`, to the app.
 
 Checked on macOS 27.2 by `SyncTests`, whose test runner has no iCloud entitlements, and by an ad hoc signed program without entitlements:
 
@@ -40,6 +46,7 @@ Checked on macOS 27.2 by `SyncTests`, whose test runner has no iCloud entitlemen
 - `allKeys()` lists the encrypted keys too. A plain read of an encrypted key returns nil, and an encrypted read of a plain key does too. Setting a key in one of the two, even to nil, while the other holds it raises an exception.
 - An array of records unarchives with `unarchivedObject(ofClasses:from:)` given `NSArray` and `CKRecord`. `unarchivedArrayOfObjects(ofClass:from:)` refuses it because of the dictionaries inside a record.
 - `SecTaskCopyValueForEntitlement` on the test runner's own task returns nil for `com.apple.developer.icloud-services` and `com.apple.developer.icloud-container-identifiers`.
+- The same process builds `CKSyncEngine.FetchChangesOptions` values and their scopes, `CKSyncEngine`'s pending changes, and `CKError` values that carry a server record, without creating a `CKSyncEngine`. The options keep a copy of the operation group they are given.
 
 ## Decisions
 
@@ -174,7 +181,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
   - A local favorite matches a server favorite with the same address in the same Persona. The local favorite is removed, and its open tab becomes the server favorite's tab.
   - Personas match only by record name. A local Persona keeps its record and site data even when a server Persona has the same name.
   - For settings, the server's value wins for the keys it has.
-- Sync sends the merge in one atomic batch.
+- Sync sends the merge atomically. A merge of more than 250 records, the most one request holds, goes in several batches, each atomic, so another Mac can fetch it in parts.
 
 ## Conflicts
 
@@ -188,16 +195,25 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 - Each unit of a merged record keeps the edit times of the side whose values it takes. A merged record that must be sent takes the later `modifiedAt` of the two sides and the higher `schemaVersion`, since it can hold fields of the newer format. A merge that leaves the server's fields unchanged needs no send and keeps the server's record.
 - Deletion wins. A save that fails with `unknownItem` found no record with the change tag of its mirror copy: another Mac deleted the record, or the zone was created again after the copy was fetched. The failure by itself deletes nothing. Sync fetches and acts on what the fetch brings. The record's deletion applies locally, as every incoming deletion does, instead of recreating the record. The zone's deletion follows its reason (Accounts and removed data). If the fetch brings neither, the mirror's copy came from an earlier zone: Sync drops it, and the comparisons save the record again without a base. An incoming deletion drops this Mac's pending save for that record.
 - Every mirror copy comes from the zone as it now is. Before Sync creates the zone again, it drops the mirror's records and keeps the pending saves (Offline behavior, and Accounts and removed data). The comparisons then save every item in scope without a base, so no outgoing record carries a change tag from the old zone. A save built on such a tag would fail with `unknownItem` for every record.
-- Changes to several records go in one batch with `atomicByZone`, which CloudKit saves atomically within the zone. Examples include deleting a space and moving its tabs and folders, renumbering order keys, and first-sync merges. Other Macs never fetch half of a change.
+- Changes to several records go in one batch with `atomicByZone`, which CloudKit saves atomically within the zone. Examples include deleting a space and moving its tabs and folders, renumbering order keys, and first-sync merges. Other Macs never fetch half of a change of up to 250 records. A larger change goes in several batches, each atomic (Facts ▸ CloudKit).
+- When one save of such a batch fails, CloudKit refuses the batch's other changes with `batchRequestFailed` (Not verified 8). `CKSyncEngine` keeps only the changes that fail for a reason it retries, so `CloudKitSyncEngine` adds these back to the pending changes and reports only the failure that refused the batch.
 - Edit times come from each Mac's clock. A Mac whose clock is far ahead can win conflicts it should lose. Network time keeps this rare.
 
 ## Offline behavior
 
 - Edits go into `session.json` at once. Pending changes live in the sync engine's state, which Sync writes to `sync.json` at every `stateUpdate` event, with each pending save's field values and edit times, once `session.json` holds every change applied from the mirror it writes (Mapping the session store to records). They survive quitting. Sync sends them after a later launch.
-- `CKSyncEngine` retries network failures, rate limits, and service unavailability using CloudKit's requested delays. Sync handles the failures it can fix: `serverRecordChanged` merges, and `unknownItem` fetches and acts on what the fetch brings (Conflicts).
+- `CKSyncEngine` retries network failures, a missing network, rate limits, an unavailable service, a busy zone, and a missing authentication or a temporarily unavailable account, using CloudKit's requested delays, and keeps those changes pending. `CloudKitSyncEngine` reports no failure for them. Sync handles the failures it can fix: `serverRecordChanged` merges, and `unknownItem` fetches and acts on what the fetch brings (Conflicts).
 - `zoneNotFound` creates the zone and sends again only while the mirror is empty, which means this Mac has neither fetched nor sent a record of the zone, as at a first sync before any Mac created the zone. With records in the mirror, the zone existed and is gone: Sync fetches and follows the zone deletion's reason (Accounts and removed data), and a fetch that reports no deletion of the zone counts as `.deleted`. A zone that another Mac deleted with Delete iCloud Data therefore does not come back holding this Mac's pending saves.
 - `CKSyncEngine` fetches when CloudKit sends a change notification and at launch. Sync also calls `fetchChanges()` when the app becomes active to cover missed notifications.
 - A Mac that was offline for weeks sends its pending changes when it reconnects. Conflicts compare each field's edit time, so its old edits do not overwrite newer ones from other Macs, even after it edited another field of the same record.
+
+## Sync engine
+
+- The controller uses the engine through `SyncEngineClient` on the main actor, so its tests run on `FakeSyncEngine` and no `CKSyncEngine` type reaches it. An engine starts when it is created (`SyncEngineFactory`), on the database that the availability check returns, from the state serialization that `sync.json` kept for that database, or from none for a first sync. `CloudKitSyncEngine` creates one `CKSyncEngine` on the private database of that container, which syncs on its own. A state serialization that does not decode counts as none: the engine fetches the zone from its start, and every record merges with its mirror copy.
+- Pending changes go by record name (`SyncPendingChange`): a record's save or deletion in `ArchSync1`, or the zone's save or deletion. The controller adds and removes them, and the engine keeps them in its state, which reaches `sync.json` with each state update.
+- The engine reports Arch's own events (`SyncEvent`) one at a time to its delegate, which it holds weakly, and waits for each before its next event or batch: a state update, an account change, each page of a fetch, a zone deletion with its reason, the fetch's end, and each sent batch with its saved records, its deleted record names, and its refused saves. A refused save comes as server record changed with the server's record, unknown item, zone not found, or other with CloudKit's code. Fetched records, record deletions, and zone deletions keep their zone, so the controller drops those of other zones. An account change that this build does not know counts as a switch, and a zone deletion reason it does not know counts as `deleted`. Both turn sync off and keep local data.
+- For each batch, the engine asks the delegate for each pending save's record (`SyncEngineDelegate.record(toSave:)`), and nil drops the save. A delegate that needs a fetch or send while it handles an event starts it in a task.
+- `stop()` cancels the engine's operations, after which it reports nothing and fetches and sends nothing. Turning sync off and an account change that ends sync stop the engine before dropping it, so a late state update cannot write `sync.json` again after the controller deleted it.
 
 ## Accounts and removed data
 
@@ -251,8 +267,8 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 | `Sync/SyncedSettings.swift` | The Settings list: reading, validating, and applying values, the keys changed here, and the settings comparison's records and scope | Built |
 | `Sync/SyncDatabase.swift` | The container and environment that sync uses, and the digest that `sync.json` keeps | Built |
 | `Sync/SyncAvailability.swift` | Entitlement and account checks | Built |
-| `Sync/SyncEngineClient.swift` | The protocol the controller uses and Arch's own events | V.9.6 |
-| `Sync/CloudKitSyncEngine.swift` | Implements the protocol with `CKSyncEngine` | V.9.6 |
+| `Sync/SyncEngineClient.swift` | The protocol the controller uses and Arch's own events | Built |
+| `Sync/CloudKitSyncEngine.swift` | Implements the protocol with `CKSyncEngine` | Built |
 | `Sync/FirstSyncMerge.swift` | The first sync's matches and moves | V.9.7 |
 | `Browsing/SidebarSync.swift` | The sidebar's syncable state and the methods that apply incoming changes | V.9.8, V.9.9 |
 | `Sync/SidebarRecords.swift` | Converts syncable state to records and fetched records to session changes and orphan repairs | V.9.8, V.9.9 |
@@ -266,7 +282,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
 
 ## User steps
 
-Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.6 to V.9.13.
+Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.7 to V.9.13.
 
 1. In the Apple Developer account, make an explicit App ID for the app's bundle identifier (`CFBundleIdentifier` in `scripts/bundle_app.sh`) with the iCloud capability, CloudKit selected, and Push Notifications.
 2. Create an iCloud container and assign it to the App ID. Its identifier stays out of the repository.
@@ -293,3 +309,5 @@ Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at
 4. Whether a free personal team can use the iCloud capability. The User steps assume a paid membership.
 5. Whether `CKSyncEngine` sends `.signIn` when it starts without a state serialization. The controller starts a first sync either way.
 6. Whether `accountStatus()` reaches Apple's servers or only asks the system's CloudKit service. Sync asks it while off in a build signed for iCloud (Purpose and principles), at launch, when the app becomes active, and after `CKAccountChanged`.
+7. Whether `CKSyncEngine` reports `didFetchChanges`, which becomes `SyncEvent.fetchEnded`, after a fetch that fails partway, such as when the network drops between pages. Until verified, a child that waits for its parent can wait until a later fetch ends.
+8. Whether CloudKit refuses the other changes of an atomic batch with `batchRequestFailed` when one change fails, and whether `CKSyncEngine` then drops them from its pending changes. `CloudKitSyncEngine` adds them back either way, and the engine keeps no duplicate pending change.
