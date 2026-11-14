@@ -2,7 +2,7 @@
 
 ## Purpose and principles
 
-- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). Queue tasks V.9.1 to V.9.14 in `docs/plan.md` build it behind a toggle in Module layout order.
+- Sync copies the sidebar and settings between the user's Macs (row 35 of `docs/features.md`). The `Sync` module holds its record model and merge. Queue tasks V.9.2 to V.9.14 in `docs/plan.md` build the rest behind a toggle in Module layout order.
 - Sync uses the CloudKit private database of the user's Apple Account. Apple's iCloud servers store the records. Arch runs no server, calls no web service of its own, and uses neither the public nor the shared database. The records count against the user's iCloud storage.
 - Sync is off by default. While off, the `Sync` module creates no CloudKit object and makes no network request.
 - `session.json` stays the local source of truth. Changes apply on the Mac first. Sync copies them to the other Macs. Without a network or an iCloud account, the Mac works as it does without sync.
@@ -21,6 +21,7 @@
 - Settings stores its choices in `UserDefaults`. Download settings apply to every engine context through `UserDefaults.didChangeNotification`. Appearance applies only at launch and in Settings' `onChange`.
 - The Settings window lists General, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. `Preferences` depends on `Browsing`. The Delete Persona sheet's text is in `BrowserWindowModel.swift`.
 - `scripts/bundle_app.sh` signs the app with `codesign --deep`, without entitlements or a provisioning profile.
+- The `Sync` module holds `SyncRecord` and `SyncMerge`, without CloudKit code. No other target depends on it yet.
 
 ### CloudKit
 
@@ -154,6 +155,10 @@ Every record also has `modifiedAt` and `schemaVersion`.
 - Sync sends each record with the change tag of its mirror copy. If another Mac saved the record first, CloudKit refuses the save with `serverRecordChanged` and returns the server's record.
 - Sync merges that record field by field, using the mirror's copy as the common base (decision 3). A field changed only on this Mac takes the local value. A field changed only on the server keeps the server's value. A field changed on both sides takes the value from the side with the later `modifiedAt`. The server wins ties. Sync applies the merged record locally and sends it with the server's change tag. A field changed to the same value on both sides needs no send.
 - A `Setting` record has a fixed name. Two Macs that first write the same setting therefore conflict without a base. Both sides count as changed, and the later `modifiedAt` wins.
+- A field that a record lacks has no value. Removing a field, as when a tab leaves its folder and loses `folder`, is a change like any other.
+- Without a base, a field that only one side has keeps its value, since nothing shows that the other side removed it.
+- A field that this build does not know for the record type (`SyncRecordType.fields`) counts as unchanged on this Mac, which cannot edit it, so the merge keeps the server's value. Fields from newer builds survive this way.
+- A merged record that must be sent takes the later `modifiedAt` of the two sides, so other Macs compare their edits with its latest edit. It also takes the higher `schemaVersion`, since it can hold fields of the newer format. A merge that leaves the server's fields unchanged needs no send and keeps the server's record.
 - Deletion wins. If a save fails with `unknownItem`, meaning the server record was deleted, Sync applies the deletion locally instead of recreating the record. An incoming deletion drops this Mac's pending save for that record.
 - Changes to several records go in one batch with `atomicByZone`, which CloudKit saves atomically within the zone. Examples include deleting a space and moving its tabs and folders, renumbering order keys, and first-sync merges. Other Macs never fetch half of a change.
 - `modifiedAt` comes from each Mac's clock. A Mac whose clock is far ahead can win conflicts it should lose. Network time keeps this rare.
@@ -208,8 +213,8 @@ Every record also has `modifiedAt` and `schemaVersion`.
 
 | File | Role | Task |
 |---|---|---|
-| `Sync/SyncRecord.swift` | Record types, names, field values, `modifiedAt`, and `schemaVersion`, without CloudKit types | V.9.1 |
-| `Sync/SyncMerge.swift` | Per-field merge with the mirror's copy as the base | V.9.1 |
+| `Sync/SyncRecord.swift` | Record types, names, field values, `modifiedAt`, and `schemaVersion`, without CloudKit types | Built |
+| `Sync/SyncMerge.swift` | Per-field merge with the mirror's copy as the base | Built |
 | `Sync/SyncOrderKeys.swift` | Order keys: midpoints, renumbering, and sorting | V.9.2 |
 | `Sync/SyncDiff.swift` | Pending saves and deletions from the current records and the mirror | V.9.2 |
 | `Sync/SyncCloudKitRecords.swift` | `SyncRecord` values to `CKRecord` values and back | V.9.3 |
@@ -231,7 +236,7 @@ Every record also has `modifiedAt` and `schemaVersion`.
 
 ## User steps
 
-Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.1 to V.9.13.
+Only the user can take these steps (queue task V.9.14). Steps 1 to 3 can come at any time. The checks need V.9.2 to V.9.13.
 
 1. In the Apple Developer account, make an explicit App ID for the app's bundle identifier (`CFBundleIdentifier` in `scripts/bundle_app.sh`) with the iCloud capability, CloudKit selected, and Push Notifications.
 2. Create an iCloud container and assign it to the App ID. Its identifier stays out of the repository.

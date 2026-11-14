@@ -46,6 +46,7 @@ let package = Package(
         .library(name: "Plugins", targets: ["Plugins"]),
         .library(name: "Extensions", targets: ["Extensions"]),
         .library(name: "Terminal", targets: ["Terminal"]),
+        .library(name: "Sync", targets: ["Sync"]),
         .executable(name: "Arch", targets: ["Arch"]),
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
     ],
@@ -74,6 +75,7 @@ let package = Package(
         .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI"], path: "Packages/ARCH/Sources/Browsing"),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
+        .target(name: "Sync", path: "Packages/ARCH/Sources/Sync"),
         .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins"], path: "Packages/ARCH/Sources/Preferences"),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
@@ -94,6 +96,7 @@ let package = Package(
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences"], path: "Packages/ARCH/Tests/PreferencesTests"),
+        .testTarget(name: "SyncTests", dependencies: ["Sync"], path: "Packages/ARCH/Tests/SyncTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],
     cxxLanguageStandard: .cxx20
