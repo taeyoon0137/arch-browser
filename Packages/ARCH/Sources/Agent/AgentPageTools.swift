@@ -133,7 +133,7 @@ extension AgentToolHost {
         let lines = outline(reply.nodes, full: full, shared: shared, pageURL: url)
         // A new page's snapshot starts the record again; a subtree's adds its refs to the record of the same page.
         let prior = store.current(tab, pages: pages)
-        var record = prior ?? AgentSnapshotRecord(url: url, documentID: tab.documentID, document: pages, refs: [:], lines: [])
+        var record = prior ?? AgentSnapshotRecord(url: url, documentID: tab.documentID, ownerID: tab.agentOwnerID, document: pages, refs: [:], lines: [])
         if target == nil { record.refs = [:] }
         for node in reply.nodes {
             guard let ref = node.ref, let fingerprint = node.fingerprint else { continue }
