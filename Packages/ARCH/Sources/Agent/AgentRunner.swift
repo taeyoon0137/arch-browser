@@ -68,7 +68,8 @@ public final class AgentRunner: ObservableObject {
         let open = host.userTabs(in: personaID).filter { requested.contains($0.id) && $0.agentOwnerID == nil }
         guard Set(open.map(\.id)) == requested else { return Self.refused("notGranted", "A requested tab is no longer in the hook's Persona.") }
         let selected = open.filter { tab in
-            guard let document = request.documents[tab.id], Self.sameDocument(tab.url, document) else { return false }
+            guard request.documentIDs[tab.id] == tab.documentID, let document = request.documents[tab.id],
+                  Self.sameDocument(tab.url, document) else { return false }
             return AgentPolicy.showsTitle(of: document, allowsAI: allowsAI)
         }
         let closed = request.closedTab.flatMap { AgentPolicy.showsTitle(of: $0.url, allowsAI: allowsAI) ? $0 : nil }
@@ -225,14 +226,14 @@ public final class AgentRunner: ObservableObject {
         }
         let id = run.tabs[index - 1].id
         guard let document = run.request.documents[id], let tab = host.userTabs(in: run.personaID).first(where: { $0.id == id && $0.agentOwnerID == nil }),
-              Self.sameDocument(tab.url, document), AgentPolicy.showsTitle(of: document, allowsAI: allowsAI) else {
+              tab.documentID == run.tabs[index - 1].documentID, Self.sameDocument(tab.url, document), AgentPolicy.showsTitle(of: document, allowsAI: allowsAI) else {
             return response("stale", error: true)
         }
         if tool.name == "read_text" {
             let host = self.host
             let toolHost = AgentToolHost(host: host, allowsAI: allowsAI)
             let outcome = await toolHost.readText(args, tab: tab, handle: handle) { current in
-                run.active && !Task.isCancelled && current.agentOwnerID == nil && Self.sameDocument(current.url, document)
+                run.active && !Task.isCancelled && current.agentOwnerID == nil && current.documentID == tab.documentID && Self.sameDocument(current.url, document)
                     && host.userTabs(in: run.personaID).contains { $0.id == id }
             }
             return AgentAPISession.result(outcome.result, of: AgentToolCall(name: tool.name, arguments: args), callID: call.id)

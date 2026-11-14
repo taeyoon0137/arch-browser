@@ -22,7 +22,8 @@ enum BuiltInHooks {
         AIHookRegistration(feature: .tabNameHook, events: [.pageLoaded], delay: .milliseconds(1_500), allowedActions: [.renameTab]) { event, context in
             guard case .pageLoaded(let load) = event, await needsName(load) else { return .none }
             // A page without a document a script can read, such as an engine's error page, gets no name, and a tab that moved on during the wait gets its name from the newer page's event.
-            guard let page = try? await context.pages.content(ofTab: load.tabID, limit: tabNamePageText), page.url.withoutFragment == load.url.withoutFragment else { return .none }
+            guard let page = try? await context.pages.content(ofTab: load.tabID, limit: tabNamePageText),
+                  page.url.withoutFragment == load.url.withoutFragment, await needsName(load), !Task.isCancelled else { return .none }
             let reply = try await context.client.reply(AIRequest(feature: .tabNameHook, instructions: tabNameInstructions,
                                                                   messages: [AIMessage(role: .user, parts: [.page(page)])], maxOutputTokens: replyTokens))
             let name = plainReply(reply.text)

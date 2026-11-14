@@ -15,7 +15,7 @@ import Testing
         host.tabs = [AgentTabInfo(id: tab, spaceID: nil, title: "Title", url: page, isLoading: false, engine: .webKit)]
         host.userTabIDs = [tab]
         return AgentRunRequest(options: AgentRunOptions(prompt: "Name it", model: .tier(.fast), tools: ["rename_tab"], limits: AgentRunLimits(rounds: 1), dryRun: true),
-                               tabs: [tab], allowedTabs: [tab], documents: [tab: page], knownProviders: [provider.id: AgentRunRequest.destination(of: provider)],
+                               tabs: [tab], allowedTabs: [tab], documents: [tab: page], documentIDs: [tab: host.tabs[0].documentID], knownProviders: [provider.id: AgentRunRequest.destination(of: provider)],
                                origin: .hook(hook, run: UUID()), promptSource: .user, feature: .agentHook(hook), grant: AgentRunGrant(tools: ["rename_tab"]))
     }
 
@@ -80,7 +80,31 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func pageAccessUsesTheGrantedDocumentAndRechecksItAfterExtraction(changed: Bool) async throws {
+    func aMissingOrReplacedEventDocumentNeverReachesTheModel(missing: Bool) async {
+        var req = request()
+        if missing { req.documentIDs = [:] } else { host.tabs[0].documentID = UUID() }
+        let client = ScriptedClient { _ in [] }
+        let result = await runner(client).run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        #expect(result.status == .refused && client.requests.isEmpty)
+    }
+
+    @Test func aModelCannotRenameAReloadAtTheSameAddress() async {
+        let req = request()
+        let client = ScriptedClient { _ in
+            [.perform { await MainActor.run { host.tabs[0].documentID = UUID() } },
+             .event(.toolCall(AIToolCall(id: "r", name: "rename_tab", arguments: Data(#"{"tab":"t1","name":"Old title"}"#.utf8)))), .event(.finished(.toolUse))]
+        }
+        let result = await runner(client).run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in
+            Issue.record("A rename reached the replacement document.")
+            return false
+        }
+        #expect(result.actions.isEmpty && client.requests.count == 1)
+    }
+
+    private enum PageChange: CaseIterable, Sendable { case unchanged, differentAddress, reload }
+
+    @Test(arguments: PageChange.allCases)
+    private func pageAccessUsesTheGrantedDocumentAndRechecksItAfterExtraction(change: PageChange) async throws {
         var req = request()
         req.options.tabAccess = .page
         req.grant.tabAccess = .page
@@ -88,7 +112,11 @@ import Testing
         req.grant.tools = ["read_text"]
         req.options.limits.rounds = 2
         host.pages[page] = ("Title", "permitted page text")
-        if changed { host.beforeReturningContent = { host.tabs[0].url = URL(string: "https://private.example/") } }
+        switch change {
+        case .unchanged: break
+        case .differentAddress: host.beforeReturningContent = { host.tabs[0].url = URL(string: "https://private.example/") }
+        case .reload: host.beforeReturningContent = { host.tabs[0].documentID = UUID() }
+        }
         let client = ScriptedClient { n in
             n == 0 ? [.event(.toolCall(AIToolCall(id: "r", name: "read_text", arguments: Data(#"{"tab":"t1"}"#.utf8)))), .event(.finished(.toolUse))]
                 : [.event(.text("Done")), .event(.finished(.completed))]
@@ -102,6 +130,7 @@ import Testing
             if case .page(let page) = part { return page.text }
             return nil
         }
+        let changed = change != .unchanged
         #expect(tool.isError == changed)
         #expect(pageText == (changed ? [] : ["permitted page text"]))
     }

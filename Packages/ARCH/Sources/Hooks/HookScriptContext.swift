@@ -103,7 +103,7 @@ final class HookScriptContext: PluginAgentContext {
                   invocation.closedTab != nil else { return try refused("The closed tab must belong to this close event.") }
         }
         options.dryRun = options.dryRun || !invocation.appliesActions
-        let request = AgentRunRequest(options: options, tabs: tabs, allowedTabs: invocation.tabs, documents: invocation.documents,
+        let request = AgentRunRequest(options: options, tabs: tabs, allowedTabs: invocation.tabs, documents: invocation.documents, documentIDs: invocation.documentIDs,
                                       closedTab: options.closedTab == nil ? nil : invocation.closedTab, knownProviders: invocation.knownProviders,
                                       origin: invocation.isTest ? .test(hook: invocation.hook.id) : .hook(invocation.hook.id, run: invocation.run),
                                       promptSource: .user, feature: .agentHook(invocation.hook.id), grant: grant)
@@ -132,7 +132,7 @@ final class HookScriptContext: PluginAgentContext {
 
     func tabs() throws -> [PluginTab] {
         let run = try currentRun()
-        return host.tabs(in: personaID).filter { run.tabs.contains($0.id) }.map { shown($0, document: run.documents[$0.id]) }
+        return host.tabs(in: personaID).filter { run.tabs.contains($0.id) && run.documentIDs[$0.id] == $0.documentID }.map { shown($0, document: run.documents[$0.id]) }
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {
@@ -144,7 +144,8 @@ final class HookScriptContext: PluginAgentContext {
         let run = try currentRun()
         guard grant.permissions.contains(.renameTabs) else { throw PluginError.permissionDenied(.renameTabs) }
         guard run.tabs.contains(id) else { throw PluginError.notGranted(id) }
-        guard let document = run.documents[id] else { return false }
+        guard let document = run.documents[id],
+              let live = host.tabs(in: personaID).first(where: { $0.id == id }), run.documentIDs[id] == live.documentID else { return false }
         let took = host.renameTab(id, to: name, showing: document, cause: run.cause, applying: run.appliesActions)
         if took, let shown = name.flatMap(PluginTab.name(from:)) { actions.append(.renamedTab(tab: id, name: shown)) }
         return took

@@ -45,7 +45,7 @@ final class FakePluginHost: PluginBrowserHost {
     func tabs(in persona: PersonaID) -> [PluginTab] {
         tabs.openTabs.filter { $0.personaID == persona }.map {
             PluginTab(id: $0.id, spaceID: $0.spaceID, title: "Title of \($0.url?.path ?? "")", url: shownURLs[$0.id] ?? $0.url, engine: $0.engine, isPinned: $0.kind == .pinned,
-                      isSelected: false, kind: $0.kind)
+                      isSelected: false, kind: $0.kind, documentID: $0.documentID)
         }
     }
 
@@ -347,6 +347,24 @@ extension PluginValue {
         let count = plugins.renames.count
         #expect(await runner.run(invocation(of: hook, script: script, loading: shown, documents: [:])).failure == "notTaken")
         #expect(plugins.renames.count == count)
+    }
+
+    @Test func aScriptCannotInspectOrRenameAReplacementDocumentAtTheSameAddress() async throws {
+        defer { harness.cleanUp() }
+        let hook = instantHook("Inspect and rename", pageLoads, grant: HookGrant(permissions: [.tabs, .tabsRename]))
+        var tab = harness.tab("/a", id: Probe.covered)
+        let captured = UUID()
+        tab.documentID = captured
+        var listing = invocation(of: hook, script: try fixture("report.js"), loading: tab)
+        listing.documentIDs = [tab.id: captured]
+        var rename = invocation(of: hook, script: try fixture("rename.js"), loading: tab)
+        rename.documentIDs = listing.documentIDs
+        tab.documentID = UUID()
+        harness.host.show(tab)
+        let result = try report(of: await runner.run(listing))
+        #expect(result["get"]?[Probe.covered.uuidString] == .null && result["list"]?.array?.isEmpty == true)
+        #expect(await runner.run(rename).failure == "notTaken")
+        #expect(plugins.renames.isEmpty)
     }
 
     @Test func aRenameOfATabOutsideTheFilterIsRefused() async throws {

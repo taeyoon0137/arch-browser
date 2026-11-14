@@ -27,13 +27,19 @@ public struct BrowserTabRef: Codable, Hashable, Sendable {
     /// The committed address; nil until the engine reports one.
     public var url: URL?
 
-    public init(id: UUID, personaID: UUID, spaceID: UUID?, kind: BrowserTabKind, engine: EngineKind, url: URL?) {
+    /// Identity of the live main document, used only inside Arch.
+    public var documentID: UUID?
+
+    private enum CodingKeys: String, CodingKey { case id, personaID, spaceID, kind, engine, url }
+
+    public init(id: UUID, personaID: UUID, spaceID: UUID?, kind: BrowserTabKind, engine: EngineKind, url: URL?, documentID: UUID? = nil) {
         self.id = id
         self.personaID = personaID
         self.spaceID = spaceID
         self.kind = kind
         self.engine = engine
         self.url = url
+        self.documentID = documentID
     }
 }
 

@@ -198,6 +198,9 @@ public final class BrowserSession: ObservableObject {
             hooks.attach(to: self)
             startLiveFolders()
             pluginBrowserHost.attach(to: self)
+            eventSource.documentDidChange = { tab, address, documentID in
+                AIService.shared.hooks.scheduler.cancel(subject: tab, otherThan: address, documentID: documentID)
+            }
             eventSource.attach(to: self)
         }
     }

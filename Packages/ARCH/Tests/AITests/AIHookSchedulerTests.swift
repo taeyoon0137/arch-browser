@@ -84,6 +84,15 @@ import Testing
         #expect(await eventually { ["same stopped", "none stopped", "elsewhere stopped"].allSatisfy(log.entries.contains) })
     }
 
+    @Test func aReloadAtTheSameAddressEndsTheEarlierDocumentsChain() async {
+        let first = UUID()
+        scheduler.post([step("original", work: untilCanceled("original"))], kind: "titleChanged", subject: tab, event: UUID(), document: page("/a"), documentID: first)
+        #expect(await eventually { log.entries == ["start original"] })
+        scheduler.cancel(subject: tab, otherThan: page("/a#part"), documentID: first)
+        scheduler.cancel(subject: tab, otherThan: page("/a"), documentID: UUID())
+        #expect(await eventually { log.entries.contains("original stopped") })
+    }
+
     @Test func cancelingAnOwnerStopsItsRunningStepAndSkipsItsWaitingOnes() async {
         scheduler.post([step("running", work: untilCanceled("running")), step("other", owner: "hook.b", order: 2_000), step("waiting", order: 3_000)],
                        kind: "pageLoaded", subject: tab, event: UUID(), document: page("/a"))

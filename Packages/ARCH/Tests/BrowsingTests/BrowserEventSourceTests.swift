@@ -46,10 +46,10 @@ import Testing
         source.follow(tabs: [restored, opened, imported, favorite, small], postingNewTabs: true)
         source.follow(tabs: [restored, opened, imported, favorite, small, popup], postingNewTabs: true)
         #expect(recorder.payloads == [
-            .tabOpened(tab: BrowserTabRef(id: opened.id, personaID: persona, spaceID: space, kind: .open, engine: .chromium, url: URL(string: "https://example.org/a")), openerTabID: nil),
-            .tabOpened(tab: BrowserTabRef(id: favorite.id, personaID: persona, spaceID: nil, kind: .favorite, engine: .webKit, url: URL(string: "https://example.org/a")), openerTabID: nil),
-            .tabOpened(tab: BrowserTabRef(id: small.id, personaID: persona, spaceID: secondSpace, kind: .smallWindow, engine: .chromium, url: URL(string: "https://example.org/a")), openerTabID: nil),
-            .tabOpened(tab: BrowserTabRef(id: popup.id, personaID: persona, spaceID: space, kind: .open, engine: .chromium, url: URL(string: "https://example.org/sign-in")), openerTabID: opened.id),
+            .tabOpened(tab: BrowserTabRef(id: opened.id, personaID: persona, spaceID: space, kind: .open, engine: .chromium, url: URL(string: "https://example.org/a"), documentID: opened.documentID), openerTabID: nil),
+            .tabOpened(tab: BrowserTabRef(id: favorite.id, personaID: persona, spaceID: nil, kind: .favorite, engine: .webKit, url: URL(string: "https://example.org/a"), documentID: favorite.documentID), openerTabID: nil),
+            .tabOpened(tab: BrowserTabRef(id: small.id, personaID: persona, spaceID: secondSpace, kind: .smallWindow, engine: .chromium, url: URL(string: "https://example.org/a"), documentID: small.documentID), openerTabID: nil),
+            .tabOpened(tab: BrowserTabRef(id: popup.id, personaID: persona, spaceID: space, kind: .open, engine: .chromium, url: URL(string: "https://example.org/sign-in"), documentID: popup.documentID), openerTabID: opened.id),
         ])
         #expect(BrowserEventSource.kind(of: imported) == .pinned)
     }
@@ -65,7 +65,7 @@ import Testing
         bus.subscribe(BrowserEventFilter()) { userEvents.events.append($0) }
         source.follow(tabs: [tab], postingNewTabs: true)
         source.tabWillClose(tab, reason: .agent)
-        let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .agent, engine: .chromium, url: URL(string: "https://example.org/a"))
+        let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .agent, engine: .chromium, url: URL(string: "https://example.org/a"), documentID: tab.documentID)
         #expect(recorder.payloads == [.tabOpened(tab: ref, openerTabID: nil), .tabClosed(tab: ref, reason: .agent)])
         #expect(userEvents.events.isEmpty)
         tab.folderID = nil
@@ -91,7 +91,7 @@ import Testing
         source.follow(tabs: [tab], postingNewTabs: false)
         let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .persona]
         for reason in reasons { source.tabWillClose(tab, reason: BrowserTabCloseReason(reason)) }
-        let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .pinned, engine: .chromium, url: URL(string: "https://example.org/last"))
+        let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .pinned, engine: .chromium, url: URL(string: "https://example.org/last"), documentID: tab.documentID)
         #expect(recorder.payloads == [.user, .page, .crash, .archive, .download, .webExtension, .spaceDeleted].map { .tabClosed(tab: ref, reason: $0) })
     }
 
@@ -123,6 +123,22 @@ import Testing
             "opened https://example.org/b restore:false first:true",
             "opened https://example.org/b restore:false first:false",
         ])
+    }
+
+    @Test func aReloadSignalsDocumentReplacementAtCommitBeforeItsLoadEvent() {
+        let (tab, page) = makeTab(space: space)
+        let original = tab.documentID
+        var replacements: [UUID] = []
+        source.documentDidChange = { id, _, documentID in
+            #expect(id == tab.id)
+            replacements.append(documentID)
+        }
+        source.follow(tabs: [tab], postingNewTabs: false)
+        tab.webContents(page, didCommitDocumentAt: tab.committedURL)
+        #expect(replacements == [tab.documentID] && original != tab.documentID)
+        #expect(recorder.events.isEmpty)
+        tab.webContentsDidFinishLoadingDocument(page)
+        #expect(recorder.events.last?.tab?.documentID == tab.documentID)
     }
 
     @Test func addressChangesCarryThePreviousAddressAndRepeatsPostNothing() {
@@ -200,7 +216,7 @@ import Testing
         page.url = URL(string: "https://example.net/b")
         tab.webContentsDidChangeURL(page)
         #expect(tab.url == URL(string: "https://example.net/b") && tab.committedURL == URL(string: "https://example.org/a"))
-        #expect(BrowserHookHost.ref(tab) == BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .open, engine: .webKit, url: URL(string: "https://example.org/a")))
+        #expect(BrowserHookHost.ref(tab) == BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .open, engine: .webKit, url: URL(string: "https://example.org/a"), documentID: tab.documentID))
     }
 
     @Test func titleChangesNameTheirSourceAndNoneWhenTheShownNameStays() {
@@ -324,7 +340,7 @@ import Testing
         source.follow(windows: [])
         window.selectedTabID = tab.id
         #expect(recorder.payloads == [
-            .tabSelected(tab: BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .open, engine: .chromium, url: URL(string: "https://example.org/a")), windowID: window.id),
+            .tabSelected(tab: BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .open, engine: .chromium, url: URL(string: "https://example.org/a"), documentID: tab.documentID), windowID: window.id),
             .spaceSwitched(windowID: window.id, spaceID: secondSpace, personaID: persona, previousSpaceID: space, previousPersonaID: persona),
             .spaceSwitched(windowID: window.id, spaceID: otherPersonaSpace, personaID: otherPersona, previousSpaceID: secondSpace, previousPersonaID: persona),
             .spaceSwitched(windowID: window.id, spaceID: secondSpace, personaID: persona, previousSpaceID: space, previousPersonaID: persona),

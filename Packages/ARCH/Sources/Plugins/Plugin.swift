@@ -126,8 +126,10 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
     public var isSelected: Bool
     /// Where the tab lives, as events name it.
     public var kind: BrowserTabKind
+    /// Arch uses this token to bind a hook to its document. Script values omit it.
+    public var documentID: UUID?
 
-    public init(id: UUID, spaceID: UUID?, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool, kind: BrowserTabKind = .open) {
+    public init(id: UUID, spaceID: UUID?, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool, kind: BrowserTabKind = .open, documentID: UUID? = nil) {
         self.id = id
         self.spaceID = spaceID
         self.title = title
@@ -136,6 +138,7 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
         self.isPinned = isPinned
         self.isSelected = isSelected
         self.kind = kind
+        self.documentID = documentID
     }
 
     /// The name that code gives a tab from `text`: its first line, trimmed and cut to `maximumNameLength` characters, or nil when nothing is left.

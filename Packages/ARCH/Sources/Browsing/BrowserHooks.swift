@@ -54,7 +54,7 @@ final class BrowserHooks: AIHookHost {
         guard let center else { return }
         switch event.payload {
         case .addressChanged(let tab, _):
-            center.scheduler.cancel(subject: tab.id, otherThan: tab.url)
+            center.scheduler.cancel(subject: tab.id, otherThan: tab.url, documentID: tab.documentID)
         case .tabClosed(let tab, _):
             center.scheduler.cancel(subject: tab.id, except: event.id)
         case .downloadFinished(let download):
@@ -70,7 +70,7 @@ final class BrowserHooks: AIHookHost {
         switch event.payload {
         case .pageLoaded(let tab, let isRestore, _):
             guard let url = tab.url else { return nil }
-            return .pageLoaded(AIPageLoad(tabID: tab.id, url: url, isRestore: isRestore))
+            return .pageLoaded(AIPageLoad(tabID: tab.id, url: url, isRestore: isRestore, documentID: tab.documentID))
         case .tabOpened(let tab, _):
             return .tabOpened(AITabOpen(tabID: tab.id, url: tab.url))
         case .downloadFinished(let download):
@@ -114,7 +114,7 @@ final class BrowserHooks: AIHookHost {
 
     /// The load's tab while it is a space's tab that takes a hook's name for the loaded document. A favorite's tab goes by its favorite's name, and a live folder item's tab by its item's title.
     private func unnamedTab(showing load: AIPageLoad) -> Tab? {
-        guard let tab = session?.tabs.first(where: { $0.id == load.tabID }), tab.liveItemID == nil,
+        guard let tab = session?.tabs.first(where: { $0.id == load.tabID }), tab.liveItemID == nil, load.documentID.map({ $0 == tab.documentID }) != false,
               Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.committedURL) else { return nil }
         return tab
     }

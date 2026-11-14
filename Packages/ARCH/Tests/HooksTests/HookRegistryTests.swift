@@ -132,6 +132,24 @@ import Testing
         #expect(await eventually { harness.entries(of: hook.id).map(\.outcome) == [.completed] })
     }
 
+    @Test func aDelayedPageEventCannotStartOnAReloadAtTheSameAddress() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        var hook = instantHook("Delayed", .pageLoaded(loads: .every, includesRestoredTabs: false))
+        hook.timing.delay = .milliseconds(60)
+        try harness.add(hook)
+        var tab = harness.tab("/a")
+        tab.documentID = UUID()
+        harness.load(tab)
+        tab.documentID = UUID()
+        harness.host.show(tab)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(runner.invocations.isEmpty)
+        harness.load(tab, first: false)
+        #expect(await eventually { runner.invocations.count == 1 })
+        #expect(runner.invocations.first?.documentIDs[tab.id] == tab.documentID)
+    }
+
     @Test func aNewerEventCancelsARunningRun() async throws {
         defer { harness.cleanUp() }
         try await harness.start()
