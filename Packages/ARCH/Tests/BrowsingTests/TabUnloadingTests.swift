@@ -2,6 +2,7 @@
 import AppKit
 import ARCHEngine
 import Foundation
+import JavaScriptCore
 import Testing
 @testable import Browsing
 
@@ -361,6 +362,34 @@ import Testing
         let plugin = EnginePageScript(world: "ARCHPlugin.sample", source: "() => {}", injectionTime: .documentEnd, mainFrameOnly: true)
         #expect(TabUnloading.pageScripts(withPluginScripts: [plugin]) == [script, plugin])
         #expect(TabUnloading.pageScripts(withPluginScripts: []) == [script])
+    }
+
+    @Test func restoredFramesReportDraftsInEitherOrderAndAnUntouchedPageDoesNotInheritOne() throws {
+        let js = try #require(JSContext())
+        // Each install gets the page script's own Window and event handlers, sharing only the tab's two messages.
+        js.evaluateScript("""
+        let protectedTab = false;
+        function frame(isMain) {
+          const window = {};
+          window.top = isMain ? window : {};
+          const events = {};
+          const addEventListener = (name, handler) => { events[name] = handler; };
+          (\(TabUnloading.inputScript.source))({send: message => { protectedTab = message === 'typed'; }});
+          return (name, trusted = true) => events[name]?.({ isTrusted: trusted, persisted: true });
+        }
+        const parent = frame(true), child = frame(false);
+        child('input');
+        """)
+        func protected(after events: String) -> Bool {
+            js.evaluateScript(events + "; protectedTab").toBool()
+        }
+        #expect(protected(after: "parent('pagehide', false)"))
+        #expect(!protected(after: "parent('pagehide'); const other = frame(true)"))
+        #expect(protected(after: "other('pagehide'); child('pageshow'); parent('pageshow')"))
+        #expect(protected(after: "parent('pagehide'); other('pageshow'); other('pagehide'); parent('pageshow'); child('pageshow')"))
+        #expect(!protected(after: "parent('pagehide'); other('pageshow')"))
+        #expect(!protected(after: "child('pageshow', false); other('input', false)"))
+        #expect(js.exception == nil)
     }
 
     @Test func theInputScriptsMessagesReadAsEvents() {
