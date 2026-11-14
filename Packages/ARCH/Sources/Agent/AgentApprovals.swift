@@ -194,7 +194,12 @@ public struct AgentApproval: Identifiable {
     func request(_ approval: AgentApproval) async -> AgentApprovalAnswer {
         if Task.isCancelled { return .ended("The client's work in Arch ended.") }
         show(approval)
-        return await answer(of: approval.id)
+        let id = approval.id
+        return await withTaskCancellationHandler {
+            await answer(of: id)
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.finish(id, .ended("The call was cancelled.")) }
+        }
     }
 
     /// Shows a card now and returns the task that waits until it ends, for cards that a page's report opens while the engine waits for its answer.

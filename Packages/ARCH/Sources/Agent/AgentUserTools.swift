@@ -32,13 +32,13 @@ extension AgentToolHost {
                        step: "You shared \(handle) for \(acting ? "reading and acting" : "reading")", decision: card.needsAuthentication(for: answer) ? .approvedWithTouchID : .approved)
     }
 
-    func askUser(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
+    func askUser(_ arguments: [String: AgentJSON], ownerID: UUID, name: String, box: AgentCallBox? = nil) async -> Outcome {
         let question = arguments["question"]?.stringValue ?? ""
         let choices = Self.strings(arguments["choices"]) ?? []
-        let card = AgentApproval(ownerID: grant.id, clientName: grant.client.displayName, isOutsideClient: clientKind == .outside, kind: .question(choices), isSensitive: false,
+        let card = AgentApproval(ownerID: ownerID, clientName: name, isOutsideClient: clientKind == .outside, kind: .question(choices), isSensitive: false,
                                  offers: [.cancel("")], action: "The agent asks you a question", agentSays: question, connectionID: connectionID, createdAt: now(),
                                  deadline: now().addingTimeInterval(approvalWindow))
-        box.approvalID = card.id
+        box?.approvalID = card.id
         let answer = await approvals.request(card)
         guard case .answer(let text) = answer else { return userEnded(answer, ask: "answer", decision: answer == .timedOut ? .timedOut : .denied) }
         return Outcome(result: AgentToolResult(status: .ok, text: "The user answered: \(text)", structured: ["answer": .string(text)]), step: "You answered the agent's question", decision: .approved)

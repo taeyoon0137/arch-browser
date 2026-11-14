@@ -134,6 +134,15 @@ extension AgentAPISession: AgentSessionRunning {
     var reportedTools: [String]
     /// The service's: tells the session's connections that their tools changed, after a mode change.
     var modeDidChange: (() -> Void)?
+    /// Dismiss this session's question cards when the user or runner ends their turn.
+    var dismissQuestions: (() -> Void)?
+    private(set) var acceptsQuestions = false
+
+    func setWaitingForAnswer(_ waiting: Bool) {
+        guard isTurnRunning, !hasEnded, !isTakenOver, acceptsQuestions else { return }
+        if waiting { state = .waitingForUser }
+        else if state == .waitingForUser { state = .running }
+    }
     /// Closes the browser tabs the session still owns before waiting for its model to end.
     var closeOwnedTabs: (() -> Void)?
     /// The service's: what the session did, for the `task/event` notifications of the client that started it.
@@ -283,6 +292,7 @@ extension AgentAPISession: AgentSessionRunning {
         guard runner === self.runner else { return }
         isTurnRunning = false
         queuedMessages = []
+        endCallsOfTheTurn()
         guard let error, !hasEnded else { return }
         var (sentence, action) = describe(error)
         // A conversation never moves to another model, and a new runner would not carry it, so Retry stays for a session no model held.
@@ -330,6 +340,7 @@ extension AgentAPISession: AgentSessionRunning {
         do {
             if isRetry { try runner.retry(message) } else { try runner.send(message) }
             hasSentFirstMessage = true
+            acceptsQuestions = true
             isTurnRunning = true
             state = model == nil ? .starting : .running
         } catch {
@@ -339,6 +350,7 @@ extension AgentAPISession: AgentSessionRunning {
     }
 
     private func turnEnded(_ next: State) {
+        endCallsOfTheTurn()
         isTurnRunning = false
         state = next
         guard !queuedMessages.isEmpty, !hasEnded else { return }
@@ -355,6 +367,9 @@ extension AgentAPISession: AgentSessionRunning {
 
     /// The calls waiting at a gate from the turn that ended go on with a refusal, and none of them runs later, as at a Hand Back after Stop.
     private func endCallsOfTheTurn() {
+        if state == .waitingForUser { state = .running }
+        acceptsQuestions = false
+        dismissQuestions?()
         callEpoch += 1
         ready.release()
         handedBack.release()
@@ -390,7 +405,9 @@ extension AgentAPISession: AgentSessionRunning {
     public func takeOver() {
         guard !hasEnded, !isTakenOver else { return }
         takeoverGeneration += 1
+        if state == .waitingForUser { state = .running }
         isTakenOver = true
+        dismissQuestions?()
         snapshots = AgentSnapshotStore()
         handedBack.close()
     }
@@ -473,7 +490,7 @@ extension AgentAPISession: AgentSessionRunning {
         readerExcerpt = nil
         messageDraft = ""
         queuedMessages = []
-        callEpoch += 1
+        endCallsOfTheTurn()
         taskEvent?(.failed, reason)
         ready.shut()
         handedBack.shut()

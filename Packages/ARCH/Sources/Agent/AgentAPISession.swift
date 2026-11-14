@@ -213,7 +213,7 @@ extension AgentSessionTools {
     // MARK: Results
 
     /// Tools whose results are Arch's own text with no page text, such as the guide, which quotes the untrusted marker.
-    nonisolated static let ownTextTools: Set<String> = ["guide"]
+    nonisolated static let ownTextTools: Set<String> = ["guide", "ask_user"]
     nonisolated static let unreadableResult = "Arch did not send this result: its page text could not be told apart from Arch's own."
     nonisolated static let imageWithoutPage = "Arch did not send this image: the page it shows is not known."
 
