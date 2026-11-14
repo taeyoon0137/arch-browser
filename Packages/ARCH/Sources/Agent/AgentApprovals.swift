@@ -18,7 +18,7 @@ public enum AgentApprovalKind: Equatable, Sendable {
     /// The app session may read the one document the user explicitly chooses.
     case shareSessionTab([AgentTabInfo])
     /// An app session asks the user to open this exact address in a background research tab.
-    case openSessionResearch(URL)
+    case openSessionResearch(URL, source: String? = nil)
     /// A download a page in an agent tab started (P6).
     case download
     /// A link to another app that a page in an agent tab opened (P11), with the app's name.

@@ -388,7 +388,7 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         let entry = try #require(first.tools.first { $0.name == "open_tab" })
         let schema = try JSONDecoder().decode(AgentJSON.self, from: entry.inputSchema)
         #expect(schema == AgentToolCatalog.sessionTool(named: "open_tab")?.inputSchema)
-        #expect(schema["required"] == ["url"] && schema["properties"]?.objectValue?.map(\.key) == ["url"])
+        #expect(schema["required"] == nil && schema["properties"]?.objectValue?.keys.sorted() == ["ref", "tab", "url"])
         #expect(!first.tools.contains { $0.name == "navigate" })
         #expect(AgentToolCatalog.tool(named: "open_tab")?.parameters.map(\.name) == ["url", "ref", "tab", "engine"])
 
@@ -408,6 +408,59 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         }
         #expect(host.openedOwners.map(\.id) == [session.id] && host.shownTabIDs.isEmpty && host.shownPanels.isEmpty)
         #expect(client.requests.count == 2 && host.agentTabs(of: session.id).allSatisfy { $0.spaceID == space.id })
+        await service.deleteSession(session.id)
+    }
+
+    @Test func modelProposesADisplayedLinkAndReceivesOnlyTheNewResearchHandle() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let page = try await FixturePage("form")
+        _ = try await page.evaluate("""
+            document.body.innerHTML = '<a href="/report?edition=one#intro">Report</a> <a href="/report?edition=two#details">Report</a>';
+            """)
+        let client = ScriptedClient { round in
+            switch round {
+            case 0: return roundSteps([toolCall("outline", "snapshot", #"{"tab":"t1"}"#)])
+            case 1: return roundSteps([toolCall("proposal", "open_tab", #"{"tab":"t1","ref":"e2"}"#)])
+            default: return roundSteps(text: "Done.")
+            }
+        }
+        harness.apiClient = client
+        harness.sessionRoute = { .http(pinnedModel: $0) }
+        let host = harness.host, service = try harness.makeService()
+        let persona = FakeHost.defaultPersona.id
+        let space = try #require(host.spaces(in: persona).first)
+        let source = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Shared report", url: page.url, isLoading: false, engine: .webKit)
+        host.tabs = [source]
+        host.userTabIDs = [source.id]
+        host.webContents[source.id] = page.contents
+        let session = try service.startSession(.init(task: "Review a report", personaID: persona, spaceID: space.id,
+                                                     attachedTabIDs: [source.id], mode: .readOnly, model: model, effort: nil))
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        let address = URL(string: "https://fixture.example/report?edition=two#details")!
+        #expect(card.kind == .openSessionResearch(address, source: "t1 [e2] · Report") && card.tabID == source.id)
+        #expect(host.openedOwners.isEmpty && client.requests.count == 2 && session.state == .waitingForUser)
+        let outline = try #require(toolResults(in: client.requests[1].messages.last).first)
+        #expect(outline.callID == "outline" && String(describing: outline.parts).contains("[e2]"))
+        try #require(await service.approvals.answer(card.id, with: .allowOnce))
+        try await waitUntil { client.requests.count == 3 && session.state == .done && host.agentTabs(of: session.id).first?.url == address }
+        let copy = try #require(host.agentTabs(of: session.id).first)
+        let handle = session.handles.tabs.handle(for: copy.id)
+        let receipt = try #require(toolResults(in: client.requests[2].messages.last).first)
+        try #require(receipt.callID == "proposal" && !receipt.isError && receipt.parts.count == 1)
+        guard case .text(let text) = receipt.parts[0] else { Issue.record("Expected a research tab handle."); return }
+        #expect(text == "Opened background research tab " + handle + ".")
+        #expect(host.openedOwners.map(\.id) == [session.id] && host.shownTabIDs.isEmpty && host.shownPanels.isEmpty)
+        #expect(host.researchLoads[copy.id]?(address) == false)
+        let lastStep = session.items.compactMap { if case .step(let step) = $0.kind { return step }; return nil }.last
+        #expect(lastStep?.tabID == copy.id && lastStep?.tabHandle == handle)
+        let entries = service.activity.entries.filter { $0.tool == "open_tab" }
+        #expect(entries.map(\.decision) == [.approved])
+        let activity = String(decoding: try JSONEncoder().encode(entries), as: UTF8.self)
+        for privatePart in ["edition=one", "edition=two", "#details"] {
+            #expect(!client.requests.contains { $0.messages.description.contains(privatePart) } && !activity.contains(privatePart))
+        }
         await service.deleteSession(session.id)
     }
 

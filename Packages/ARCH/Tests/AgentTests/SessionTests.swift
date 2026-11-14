@@ -752,6 +752,57 @@ import UserNotifications
         }
     }
 
+    enum OutlineConsentChange: CaseIterable { case deny, href, document, exclude, takeOver, reattach }
+
+    @Test(arguments: OutlineConsentChange.allCases)
+    func ticketCannotOpenAChangedOrDeclinedOutlineLink(_ change: OutlineConsentChange) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService(), host = harness.host
+        let page = try await FixturePage("form")
+        _ = try await page.evaluate("document.body.innerHTML = '<a href=\"/report?version=one\">Report</a>'")
+        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
+        let source = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Report", url: page.url, isLoading: false, engine: .webKit)
+        host.tabs = [source]
+        host.userTabIDs = [source.id]
+        host.webContents[source.id] = page.contents
+        let (session, runner) = try start(service, harness, attaching: [source.id])
+        let client = try await connectQuestionClient(session, runner, harness)
+        let arguments: [String: AgentJSON] = ["tab": "t1", "ref": "e1"]
+        let unseen = try await client.callTool("open_tab", arguments)
+        try #require(unseen.status == .refused && harness.attentionOwners.isEmpty)
+        let snapshot = try await client.callTool("snapshot", ["tab": "t1"])
+        try #require(snapshot.status == .ok && snapshot.text.contains("[e1]"))
+        let proposal = Task { try await client.callTool("open_tab", arguments) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        let address = URL(string: "https://fixture.example/report?version=one")!
+        try #require(card.kind == .openSessionResearch(address, source: "t1 [e1] · Report") && host.openedOwners.isEmpty)
+        switch change {
+        case .deny: break
+        case .href: _ = try await page.evaluate("document.querySelector('a').href = '/report?version=two'")
+        case .document: host.onPageScript = { host.tabs[0].documentID = UUID() }
+        case .exclude: host.onPageScript = { harness.excludedHosts.value.insert("fixture.example") }
+        case .takeOver:
+            host.onPageScript = {
+                session.takeOver()
+                session.handBack()
+            }
+        case .reattach:
+            service.stopSharing(source.id, with: session)
+            try #require(service.share(source, with: session))
+        }
+        _ = await service.approvals.answer(card.id, with: change == .deny ? .deny : .allowOnce)
+        let result = try await proposal.value
+        switch change {
+        case .deny, .reattach: #expect(result.status == .denied)
+        case .href, .document, .exclude: #expect(result.status == .stale)
+        case .takeOver: #expect(result.status == .refused)
+        }
+        #expect(result.structured?["tab"] == nil && !result.text.contains("version="))
+        #expect(host.openedOwners.isEmpty && host.researchLoads.isEmpty && service.approvals.pending.isEmpty)
+    }
+
     @Test func ticketRefusesUnreviewableResearchAddressesWithoutShowingACard() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -763,6 +814,8 @@ import UserNotifications
         service.sessionQuestionWindow = 0.1
         let refused: [[String: AgentJSON]] = [
             [:], ["url": 17], ["url": .string(url), "engine": "webkit"], ["ref": "e1", "tab": "t1"],
+            ["tab": "t1"], ["ref": "e1"], ["url": .string(url), "tab": "t1"],
+            ["url": .string(url), "ref": "e1", "tab": "t1"],
             ["url": "https://review.example/other?edition=public#summary"],
             ["url": "https://review.example/report?edition=private#summary"],
             ["url": "https://review.example/report?edition=public#other"], ["url": "file:///fixture"],
@@ -1305,7 +1358,7 @@ import UserNotifications
         let guide = try await client.callTool("guide")
         #expect(guide.text == AgentHarness.sessionInstructions)
         let research = try await client.callTool("guide", ["topic": "research"])
-        #expect(research.text.contains("Open in Research Tab") && research.text.contains("tab handle, ref and name") && !research.text.contains("open_tab"))
+        #expect(research.text.contains("Open in Research Tab") && research.text.contains("tab handle, ref and name") && research.text.contains("open_tab"))
         // Raising the mode tells the session's connection. This build serves reading tools only, so the next list is the same and the runner hears of no change; a list that differs from the last one reported reaches it once.
         session.setMode(.askBeforeActing)
         #expect(try await client.receive() == .notification(method: AgentControlMethod.toolsChangedNotification, params: nil))
@@ -1671,6 +1724,8 @@ import UserNotifications
         #expect(!tools.tools.contains("request_tab") && !tools.tools.contains("open_tab"))
         let outsideOpen = try await bound.callTool("open_tab", ["url": "https://research.example/report"])
         #expect(outsideOpen.status == .refused && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
+        let outsideLink = try await bound.callTool("open_tab", ["tab": "t1", "ref": "e1"])
+        #expect(outsideLink.status == .refused && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
         let outsidePick = try await bound.callTool("request_tab", ["access": "read", "reason": "Pick any tab"])
         #expect(outsidePick.status == .refused && service.approvals.pending.isEmpty && session.handles.sharedTabIDs.isEmpty)
         // A space of another Persona is not the grant's.

@@ -700,24 +700,37 @@ import Foundation
 
     func reviewManualResearchPage(_ choice: AgentResearchPage, in session: AgentSession) async -> AgentManualResearchResult {
         guard !Task.isCancelled else { return .unavailable }
-        guard case .outline(let id, _, let address, _, let link) = choice.source else {
-            return openResearchPage(choice, in: session) ? .opened : .unavailable
+        if choice.isOutlineLink {
+            let epoch = session.callEpoch, takeover = session.takeoverGeneration
+            let review = await liveOutlineLink(choice, in: session)
+            guard !Task.isCancelled, session.callEpoch == epoch, session.takeoverGeneration == takeover else { return .unavailable }
+            switch review {
+            case .failure(.unavailable): return .unavailable
+            case .failure(.stale): return .staleLink
+            case .success(let current):
+                if current != choice { return .changed(current) }
+            }
         }
+        return openReviewedResearchTab(choice, in: session) != nil ? .opened : .unavailable
+    }
+
+    private enum OutlineFailure: Error { case unavailable, stale }
+
+    /// Resolve the exact displayed ref again. Only the manual sheet may offer a changed address.
+    private func liveOutlineLink(_ choice: AgentResearchPage, in session: AgentSession) async -> Result<AgentResearchPage, OutlineFailure> {
+        guard case .outline(let id, _, let address, _, let link) = choice.source else { return .failure(.unavailable) }
         let original = choice.originalOutlineChoice ?? choice
         guard manualOutlineLinks(for: session).contains(original), let tab = host.tabs(withIDs: [id]).first,
               let target = AgentRefTarget(link.ref, fingerprint: link.fingerprint),
-              host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return .unavailable }
-        let epoch = session.callEpoch, takeover = session.takeoverGeneration
+              host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return .failure(.unavailable) }
         // Read only the displayed ref. A different href needs a fresh selection and confirmation.
         let check = await toolHost().pageScript(.snapshot(full: false, ref: target, shared: true), in: tab, as: AgentSnapshotReply.self)
-        guard !Task.isCancelled, session.callEpoch == epoch, session.takeoverGeneration == takeover,
-              manualOutlineLinks(for: session).contains(original), host.agentTabs(of: session.id).count < AgentLimits.agentTabs,
-              case .value(let reply) = check, URL(string: reply.url) == address else { return .unavailable }
+        guard !Task.isCancelled, manualOutlineLinks(for: session).contains(original), host.agentTabs(of: session.id).count < AgentLimits.agentTabs,
+              case .value(let reply) = check, URL(string: reply.url) == address else { return .failure(.unavailable) }
         guard reply.stale != true, let current = reply.nodes.first.flatMap(AgentOutlineLink.init),
-              let reviewed = AgentResearchPage(reviewing: current, from: choice) else { return .staleLink }
-        guard session.permits(reviewed, host: host, allowsAI: dependencies.allowsAI) else { return .unavailable }
-        if current != link { return .changed(reviewed) }
-        return openReviewedResearchTab(choice, in: session) != nil ? .opened : .unavailable
+              let reviewed = AgentResearchPage(reviewing: current, from: choice) else { return .failure(.stale) }
+        guard session.permits(reviewed, host: host, allowsAI: dependencies.allowsAI) else { return .failure(.unavailable) }
+        return .success(current == link ? choice : reviewed)
     }
 
     @discardableResult func openResearchPage(_ choice: AgentResearchPage, in session: AgentSession) -> Bool {
@@ -1141,7 +1154,7 @@ import Foundation
 
     private func record(_ call: AgentToolCall, result: AgentToolResult, in session: AgentSession) {
         let tool = AgentToolCatalog.sessionTool(named: call.name)
-        let tabHandle = call.arguments["tab"]?.stringValue ?? result.structured?["tab"]?.stringValue
+        let tabHandle = result.structured?["tab"]?.stringValue ?? call.arguments["tab"]?.stringValue
         session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
         let decision: AgentActivityEntry.Decision
         switch (call.name, result.status) {
@@ -1298,15 +1311,26 @@ import Foundation
         let research: AgentResearchPage?
         let action: String
         if opensResearch {
-            guard let url = call.arguments["url"]?.stringValue,
-                  let choice = researchChoices(for: session).first(where: { $0.url.absoluteString == url }) else {
+            let choice: AgentResearchPage?
+            switch (call.arguments["url"]?.stringValue, call.arguments["tab"]?.stringValue, call.arguments["ref"]?.stringValue) {
+            case (let url?, nil, nil):
+                choice = researchChoices(for: session).first { $0.url.absoluteString == url }
+            case (nil, let tab?, let ref?):
+                choice = manualOutlineLinks(for: session).first { page in
+                    guard case .outline(_, _, _, let handle, let link) = page.source else { return false }
+                    return handle == tab && link.ref == ref
+                }
+            default:
+                return AgentToolResult(status: .error, code: "invalidArguments", text: "Give either url alone or a shared tab and its link ref.")
+            }
+            guard let choice else {
                 return AgentToolResult(status: .refused, code: "notAvailable", text: "The address is unavailable for this session.")
             }
             guard host.agentTabs(of: session.id).count < AgentLimits.agentTabs else {
                 return AgentToolResult(status: .refused, code: "limitReached", text: "The session has reached its tab limit.")
             }
             research = choice
-            kind = .openSessionResearch(choice.url)
+            kind = .openSessionResearch(choice.url, source: choice.outlineLabel)
             action = "Open a background research tab"
         } else {
             let choices = shareableTabs(for: session)
@@ -1320,11 +1344,21 @@ import Foundation
                                  agentSays: call.arguments["reason"]?.stringValue, connectionID: connectionID, createdAt: now,
                                  deadline: now.addingTimeInterval(sessionQuestionWindow))
         let answer = await approvals.request(card)
-        guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
-              session.acceptsQuestions, !session.isTakenOver, !session.hasEnded else { return AgentToolHost.ended.result }
+        func stillRequested() -> Bool {
+            !Task.isCancelled && isConnected() && session.callEpoch == epoch && session.takeoverGeneration == generation
+                && session.acceptsQuestions && !session.isTakenOver && !session.hasEnded
+        }
+        guard stillRequested() else { return AgentToolHost.ended.result }
         if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "The user did not answer the tab request in time.") }
         if let research {
             guard answer == .allowOnce else { return AgentToolResult(status: .denied, text: "No research tab was opened.") }
+            if research.isOutlineLink {
+                let review = await liveOutlineLink(research, in: session)
+                guard stillRequested() else { return AgentToolHost.ended.result }
+                guard case .success(let current) = review, current == research else {
+                    return AgentToolResult(status: .stale, code: "stale", text: "The reviewed link is no longer current. Read a fresh outline before requesting it again.")
+                }
+            }
             guard let tab = openReviewedResearchTab(research, in: session) else {
                 return AgentToolResult(status: .stale, code: "stale", text: "The address is no longer available for this session.")
             }

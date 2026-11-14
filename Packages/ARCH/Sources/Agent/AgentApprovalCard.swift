@@ -44,6 +44,11 @@ struct AgentApprovalCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .accessibilityLabel("The page, with the element marked")
             }
+            if case .openSessionResearch(_, let source?) = approval.kind {
+                Text(verbatim: "Shared outline · " + source)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let exactText {
                 Text(verbatim: exactText)
                     .font(.caption.monospaced())
@@ -76,7 +81,7 @@ struct AgentApprovalCard: View {
     }
 
     private var exactText: String? {
-        if case .openSessionResearch(let url) = approval.kind { return url.absoluteString }
+        if case .openSessionResearch(let url, _) = approval.kind { return url.absoluteString }
         return approval.exactText
     }
 
