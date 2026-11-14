@@ -12,6 +12,8 @@ public struct AIHookStep: Sendable {
     public var feature: AIFeatureID?
     /// The routes in `ai.json` that the step's requests resolve through, such as `hook.tabName` or `tier.fast`. A change to one stops the step while it runs and resumes its owner.
     public var routes: Set<String>
+    /// The route a `perRequest` feature's requests name, such as an agent hook's tier, which the model check needs, since such a feature has a usable model only with a route; nil for a feature with a stored route.
+    public var route: AIRouteChoice?
     /// Measured from the event's first post.
     public var delay: Duration
     public var timeout: Duration
@@ -22,7 +24,7 @@ public struct AIHookStep: Sendable {
     /// Gets the step's one end, before the chain's next step starts.
     public var didEnd: @MainActor @Sendable (AIHookStepOutcome) -> Void
 
-    public init(owner: String, order: Int, feature: AIFeatureID?, routes: Set<String> = [], delay: Duration = .zero, timeout: Duration = .seconds(30),
+    public init(owner: String, order: Int, feature: AIFeatureID?, routes: Set<String> = [], route: AIRouteChoice? = nil, delay: Duration = .zero, timeout: Duration = .seconds(30),
                 mayRun: @escaping @MainActor @Sendable () -> Bool = { true },
                 run: @escaping @Sendable (_ requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async throws -> Void,
                 didEnd: @escaping @MainActor @Sendable (AIHookStepOutcome) -> Void = { _ in }) {
@@ -30,6 +32,7 @@ public struct AIHookStep: Sendable {
         self.order = order
         self.feature = feature
         self.routes = routes
+        self.route = route
         self.delay = delay
         self.timeout = timeout
         self.mayRun = mayRun
@@ -61,7 +64,7 @@ public enum AIHookSkipReason: Sendable {
     case paused
     /// An address of its event is excluded from AI.
     case excludedSite
-    /// Its feature is not a registered automatic feature that is on and has a usable model of its own.
+    /// Its feature is not a registered automatic feature that is on and has a usable model of its own, or through the step's route for a `perRequest` feature.
     case unavailable
     case budgetReached(AIBudget)
 }
@@ -259,13 +262,13 @@ public final class AIHookScheduler: ObservableObject {
         }
     }
 
-    /// Why the step may not start now, or nil when it may. The owner's checks come first; a step with a feature then needs its owner unpaused, the event's addresses open to AI, a registered automatic feature that is on with a usable model of its own, and room in the daily limit for automatic requests and the monthly spending limit.
+    /// Why the step may not start now, or nil when it may. The owner's checks come first; a step with a feature then needs its owner unpaused, the event's addresses open to AI, a registered automatic feature that is on with a usable model of its own, or through the step's route for a `perRequest` feature, and room in the daily limit for automatic requests and the monthly spending limit.
     private func skipReason(for step: AIHookStep, in chain: Chain) -> AIHookSkipReason? {
         guard step.mayRun() else { return .declinedByOwner }
         guard let id = step.feature else { return nil }
         if pausedOwners.contains(step.owner) { return .paused }
         guard chain.urls.allSatisfy(service.settings.allowsAI(on:)) else { return .excludedSite }
-        guard let feature = service.features.first(where: { $0.id == id }), feature.trigger == .automatic, service.isAvailable(id) else { return .unavailable }
+        guard let feature = service.features.first(where: { $0.id == id }), feature.trigger == .automatic, service.isAvailable(id, route: step.route) else { return .unavailable }
         if let budget = service.reachedBudget(for: feature) { return .budgetReached(budget) }
         return nil
     }

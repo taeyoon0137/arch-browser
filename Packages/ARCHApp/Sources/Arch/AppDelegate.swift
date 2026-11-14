@@ -1,4 +1,4 @@
-// Registers the engines, creates the browser session, which opens the browser windows, and the agents' service, and connects the menu bar to them.
+// Registers the engines, creates the browser session, which opens the browser windows, the agents' service, and the hook registry, and connects the menu bar to them.
 import Agent
 import AppKit
 import ARCHEngine
@@ -6,6 +6,7 @@ import ARCHEngineChromium
 import ARCHEngineWebKit
 import Browsing
 import History
+import Hooks
 import Import
 import Plugins
 import Preferences
@@ -16,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private(set) var session: BrowserSession!
     /// The agents' control endpoint and grants, which Settings ▸ AI ▸ Agents shows.
     private var agents: AgentService?
+    /// The hooks of `hooks.json`, which run on the session's browser events in the AI hook center's scheduler.
+    private var hooks: HookRegistry?
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     /// Edit ▸ Undo, and File ▸ Close Tab, Close Other Tabs, and Reopen Last Closed Tab, whose shortcuts, which Settings ▸ Shortcuts can change, the undo close monitor reads.
@@ -63,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                                   version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
         self.agents = agents
         PreferencesWindowController.agents = agents
+        // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain; the script runners come with VII.26 and VII.31.
+        hooks = HookRegistry(directory: supportDirectory, bus: session.events, host: BrowserHookHost(session: session),
+                             javaScript: UnavailableHookScriptRunner(), shell: UnavailableHookScriptRunner())
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.becameActiveAt = Date()
         }

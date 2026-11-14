@@ -1,4 +1,4 @@
-// The shared hook scheduler: steps of one event from several owners in one chain in order, another event replacing the chain once its running step stops, a close keeping its own chain, a new document ending only other documents' chains, canceling an owner, the per-owner pause after three authentication or provider errors with its resume when one of the step's routes changes, and the feature checks for steps with a feature and none for steps without. Every step ends exactly once.
+// The shared hook scheduler: steps of one event from several owners in one chain in order, another event replacing the chain once its running step stops, a close keeping its own chain, a new document ending only other documents' chains, canceling an owner, the per-owner pause after three authentication or provider errors with its resume when one of the step's routes changes, the feature checks for steps with a feature and none for steps without, and a `perRequest` feature's model found only through the step's route. Every step ends exactly once.
 import Foundation
 import Testing
 @testable import AI
@@ -181,6 +181,19 @@ import Testing
         #expect(log.entries.contains("over budget skipped budgetReached"))
     }
 
+    @Test func aPerRequestStepHasAModelOnlyThroughItsRoute() async {
+        // An agent hook's feature, which takes each request's route (docs/hooks.md, Model choice and tiers).
+        let feature = AIFeature(id: AIFeatureID(rawValue: "agentHook.scheduler"), name: "Agent Hook", summary: "", trigger: .automatic, data: .textOnly, routing: .perRequest)
+        service.register(feature)
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: service.settings.providers[0].id, model: "model-a")]), for: .tier(.fast))
+        let elsewhere = URL(string: "https://example.com/")!
+        scheduler.post([step("without route", feature: feature.id), step("empty tier", order: 2_000, feature: feature.id, route: .tier(.deep)),
+                        step("fast tier", order: 3_000, feature: feature.id, route: .tier(.fast))],
+                       kind: "pageLoaded", subject: tab, event: UUID(), document: elsewhere, urls: [elsewhere])
+        #expect(await eventually { log.entries.contains("fast tier finished") })
+        #expect(log.entries == ["without route skipped unavailable", "empty tier skipped unavailable", "start fast tier", "fast tier finished"])
+    }
+
     // MARK: Helpers
 
     typealias Work = @Sendable (_ requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async throws -> Void
@@ -190,10 +203,10 @@ import Testing
     }
 
     /// A step that logs its start and its end.
-    private func step(_ name: String, owner: String = "hook.a", order: Int = 1_000, feature: AIFeatureID? = nil, routes: Set<String> = [], delay: Duration = .zero,
-                      mayRun: Bool = true, work: @escaping Work = { _ in }) -> AIHookStep {
+    private func step(_ name: String, owner: String = "hook.a", order: Int = 1_000, feature: AIFeatureID? = nil, routes: Set<String> = [], route: AIRouteChoice? = nil,
+                      delay: Duration = .zero, mayRun: Bool = true, work: @escaping Work = { _ in }) -> AIHookStep {
         let log = log
-        return AIHookStep(owner: owner, order: order, feature: feature, routes: routes, delay: delay, timeout: .seconds(30), mayRun: { mayRun },
+        return AIHookStep(owner: owner, order: order, feature: feature, routes: routes, route: route, delay: delay, timeout: .seconds(30), mayRun: { mayRun },
                           run: { requestDidEnd in
                               log.record("start \(name)")
                               try await work(requestDidEnd)

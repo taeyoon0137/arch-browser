@@ -1,0 +1,46 @@
+// The browser side of the hook registry (`docs/hooks.md`, Hook registry): the session's Personas and spaces for filters, its tabs as the bus describes them, and a closing tab's last name and address for close runs. It never lists agent tabs.
+import Agent
+import Combine
+import Events
+import Foundation
+import Hooks
+
+@MainActor public final class BrowserHookHost: HookBrowserHost {
+    private unowned let session: BrowserSession
+    public var placesDidChange: (() -> Void)?
+    private var cancellables: Set<AnyCancellable> = []
+
+    public init(session: BrowserSession) {
+        self.session = session
+        // On the next turn, once the session has finished a change that touches both lists, as deleting a Persona does.
+        session.$personas.combineLatest(session.$spaces)
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.placesDidChange?() } }
+            .store(in: &cancellables)
+    }
+
+    public var places: [HookPersonaPlaces] {
+        session.personas.map { persona in
+            HookPersonaPlaces(id: persona.id, name: persona.name, spaces: session.spaces(in: persona.id).map { HookSpace(id: $0.id, name: $0.name) })
+        }
+    }
+
+    public func tab(_ id: UUID) -> BrowserTabRef? {
+        session.allTabs.first { $0.id == id }.map(Self.ref)
+    }
+
+    public func tabs(inPersona id: UUID) -> [BrowserTabRef] {
+        session.tabsInSidebarOrder.filter { $0.personaID == id }.map(Self.ref).filter { $0.kind != .agent }
+    }
+
+    /// The session posts `tabClosed` while it still lists the tab, so during that delivery this is the closing tab's last name and address.
+    public func closingTab(_ id: UUID) -> AgentRunClosedTab? {
+        session.allTabs.first { $0.id == id }.map { AgentRunClosedTab(name: $0.displayTitle, url: $0.url) }
+    }
+
+    /// The tab as `BrowserEventSource` describes it in events.
+    private static func ref(_ tab: Tab) -> BrowserTabRef {
+        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: BrowserEventSource.kind(of: tab), engine: tab.engineKind, url: tab.url)
+    }
+}

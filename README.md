@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Agent`, `AgentControl`, `AI`, `Browsing`, `Events`, `Extensions`, `History`, `Import`, `Plugins`, `Preferences`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Agent`, `AgentControl`, `AI`, `Browsing`, `Events`, `Extensions`, `History`, `Hooks`, `Import`, `Plugins`, `Preferences`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -93,7 +93,7 @@ git config core.hooksPath .githooks
 - [`docs/plugins.md`](./docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](./docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
 - [`docs/agents.md`](./docs/agents.md): the agents design (its control channel library, the endpoint with grants and sealed settings, the runner of sessions on the CLIs, `arch-cli`'s first commands, and `arch-mcp` are built; its harness and skill text is written): sessions using the user's Claude Code or Codex, the local control channel, tools and page snapshots, approvals, harness and skills, `arch-cli`, and `arch-mcp`.
-- [`docs/hooks.md`](./docs/hooks.md): the hooks design (browser events, the shared hook scheduler, and model tiers are built): browser events, hooks that run scripts, agent runs with model tiers and record levels, the agent hook editor with the Tidy Tab Names preset, and events and hooks for outside programs.
+- [`docs/hooks.md`](./docs/hooks.md): the hooks design (browser events, the shared hook scheduler, model tiers, and the hook registry are built): browser events, hooks that run scripts, agent runs with model tiers and record levels, the agent hook editor with the Tidy Tab Names preset, and events and hooks for outside programs.
 - [`docs/import-browsers.md`](./docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 
 <a id="scripts"></a>
@@ -120,8 +120,8 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Events, Extensions, History, Import, Plugins, Preferences, Terminal
-│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AgentTests, AITests, BrowsingTests, EventsTests, ExtensionsTests, HistoryTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
+│   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Events, Extensions, History, Hooks, Import, Plugins, Preferences, Terminal
+│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AgentTests, AITests, BrowsingTests, EventsTests, ExtensionsTests, HistoryTests, HooksTests, ImportTests, PluginsTests, PreferencesTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target, CEF helper executable, and arch-cli
 │   ├── ARCHKit/Sources/
 │   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers
