@@ -1,4 +1,4 @@
-// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab or folder row above the sidebar and the page. Tab and folder rows start their drags in `SpaceTabsView.swift`, favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
+// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab or folder row above the sidebar and the page. Tab and folder rows start their drags in `SpaceTabsView.swift`, where a row held near the list's top or bottom scrolls it (`DragAutoScroll.swift`), favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
 import SwiftUI
 
 /// What a drag in the sidebar lifts.
@@ -51,6 +51,11 @@ struct SidebarReorderHover {
     mutating func moved(into frame: CGRect) {
         destination = frame
     }
+
+    /// The list scrolled `distance` points toward its bottom, or toward its top for a negative distance, under a still pointer. The destination moves with the rows, up in the window as the list scrolls down, so that the row the scroll brings under the pointer can take the slot.
+    mutating func scrolled(by distance: CGFloat) {
+        destination = destination?.offsetBy(dx: 0, dy: -distance)
+    }
 }
 
 /// The dimmed slot follows the pointer without moving a real tab. A drop on the favorites discards
@@ -97,6 +102,24 @@ struct SidebarReorderHover {
               point.y >= divider.maxY, point.y < newTabRow.minY, point.x >= newTabRow.minX, point.x < newTabRow.maxX else { return nil }
         guard let next = openTabs.first(where: { $0.id != tab.id && rowFrames[$0.id].map { $0.maxY > point.y } == true }) else { return .end(pinned: false) }
         return .beside(next.id, folder: nil, pinned: false, after: false)
+    }
+
+    /// The slot a dragged tab moves to with the pointer at `point` in the window, and the frame of the row whose place it takes, which then holds the hysteresis (`SidebarReorderHover.moved(into:)`), or nil while the tab keeps `current`: the end of the list whose closing row is under the pointer (`listEnd`), unless the tab already ends that list; beside the tab row under it (`placement`), but not a collapsed folder's tab, a live folder's, or an agent's tab outside the dragged tab's folder; or under the divider where no row takes it (`unpinning`). `rowFrames` holds the frames of the space's tab rows, `divider` and `newTabRow` those of the rows that end the pinned and open lists, and `list` the visible part of the list.
+    static func next(for tab: Tab, at point: CGPoint, current: SidebarTabSlot?, in spaceID: UUID, tree: FolderTree, rowFrames: [UUID: CGRect],
+                     divider: CGRect?, newTabRow: CGRect?, list: CGRect) -> (slot: SidebarTabSlot, holding: CGRect?)? {
+        if let pinned = listEnd(at: point, divider: divider, newTabRow: newTabRow, list: list), let endFrame = pinned ? divider : newTabRow {
+            if current == nil && tree.tabsOutsideFolders(in: spaceID, pinned: pinned).last?.id == tab.id { return nil }
+            return (.end(pinned: pinned), endFrame)
+        }
+        let tabs = tree.tabs(in: spaceID, pinned: true) + tree.tabs(in: spaceID, pinned: false)
+        if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(point) == true }),
+           let rowFrame = rowFrames[target.id], let slot = rowFrames[tab.id],
+           let placement = placement(beside: target, rowFrame: rowFrame, dragging: tab, slotFrame: slot, current: current, at: point),
+           target.agentOwnerID == nil || target.folderID == tab.folderID {
+            return (placement.slot, placement.takesRowsPlace ? rowFrame : nil)
+        }
+        return unpinning(tab, current: current, at: point, divider: divider, newTabRow: newTabRow,
+                         openTabs: tree.tabsOutsideFolders(in: spaceID, pinned: false), rowFrames: rowFrames).map { ($0, nil) }
     }
 
     /// Move only the dragged row in this render's lists. Its identity stays with the gesture.
@@ -153,6 +176,8 @@ final class SidebarDragState: ObservableObject {
     @Published var targetFolderID: UUID?
     /// Set while a row released over a space's symbol or a folder's row shrinks into it.
     @Published var isEntering = false
+    /// Set while a row released with its slot scrolled out of sight fades out at the list's edge.
+    @Published var isFadingOut = false
     /// Each space page's favorites grid, or its header while there are none, which accepts a tab from the same page.
     var favoriteBarFrames: [UUID: CGRect] = [:]
     @Published var targetFavoriteSpaceID: UUID?
@@ -211,6 +236,7 @@ final class SidebarDragState: ObservableObject {
         targetFolderID = nil
         targetFavoriteSpaceID = nil
         isEntering = false
+        isFadingOut = false
         splitDrop = nil
     }
 
@@ -221,13 +247,18 @@ final class SidebarDragState: ObservableObject {
         return spaceSymbolFrames.first { $0.value.insetBy(dx: -1, dy: -6).contains(point) }?.key
     }
 
-    /// On release, the lifted item returns to its slot, and its shadow fades out before the item reappears there.
-    func settle(into slot: CGRect, ownedBy owner: UUID) {
+    /// On release, the lifted item returns to its slot, and its shadow fades out before the item reappears there. With `list`, the visible part of the slot's list, a slot whose middle lies above or below it takes the item only to that edge of the list, where the item fades out.
+    func settle(into slot: CGRect, within list: CGRect? = nil, ownedBy owner: UUID) {
+        let isHidden = list.map { slot.midY < $0.minY || slot.midY > $0.maxY } ?? false
         withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
             isSettling = true
             frame = slot
+            if isHidden, let list { frame.origin.y = max(list.minY, min(slot.minY, list.maxY - slot.height)) }
         }
-        withAnimation(.easeInOut(duration: Self.liftDuration)) { isLifted = false }
+        withAnimation(.easeInOut(duration: Self.liftDuration)) {
+            isLifted = false
+            if isHidden { isFadingOut = true }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.liftDuration) { self.end(ownedBy: owner) }
     }
 
@@ -278,7 +309,8 @@ struct TabDragLayer: View {
             .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
             // A row released over a space's symbol or a folder's row shrinks into it.
             .scaleEffect(sidebarDrag.isEntering ? 0.2 : 1)
-            .opacity(sidebarDrag.isEntering ? 0 : 1)
+            // A row whose slot is out of sight fades out at the list's edge.
+            .opacity(sidebarDrag.isEntering || sidebarDrag.isFadingOut ? 0 : 1)
             .environment(\.isDraggingTab, true)
             .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
             .offset(x: sidebarDrag.frame.minX, y: sidebarDrag.frame.minY)
