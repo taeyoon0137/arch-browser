@@ -52,6 +52,17 @@ import Testing
         #expect(agentProfile.kept["microphone \(Self.origin)"] == .some(false))
     }
 
+    /// The card and Settings ▸ Websites say that an answer holds in every Persona only while there are several besides the Agents Persona.
+    @Test func theAgentsPersonaDoesNotCountAsAPersonaThatSharesAnswers() throws {
+        let folder = try Folder()
+        let answers = SitePermissionAnswers(store: SitePermissionStore(directory: folder.url), notifications: NotificationAuthorization(system: nil))
+        let main = Persona(id: Persona.defaultID, name: "Personal"), agents = Persona(name: "Agents"), work = Persona(name: "Work")
+        #expect(answers.holdsInSeveralPersonas([main, agents]))
+        answers.agentOnlyPersonaID = agents.id
+        #expect(!answers.holdsInSeveralPersonas([main, agents]))
+        #expect(answers.holdsInSeveralPersonas([main, agents, work]))
+    }
+
     /// The session makes its answers with the Persona that `agent.json` records, before any engine starts, so the profile that a restored favorite's tab starts while the session is created takes nothing.
     @Test func answersMadeWithTheAgentsPersonaGiveItsFirstProfileNothing() throws {
         let folder = try Folder()

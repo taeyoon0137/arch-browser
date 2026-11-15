@@ -977,7 +977,7 @@ final class EngineRuntime {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.personas.count > 1, ask: { makeContent, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.remembersAnswersInSeveralPersonas, ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
@@ -1510,6 +1510,11 @@ final class EngineRuntime {
     var agentOnlyPersonaID: Persona.ID? {
         get { permissionAnswers.agentOnlyPersonaID }
         set { permissionAnswers.agentOnlyPersonaID = Self.agentOnly(newValue) }
+    }
+
+    /// Whether a remembered site answer holds in several Personas, which the permission card and Settings ▸ Websites then say. The Agents Persona does not count.
+    public var remembersAnswersInSeveralPersonas: Bool {
+        permissionAnswers.holdsInSeveralPersonas(personas)
     }
 
     /// The rule of `agentOnlyPersonaID`: the default Persona is never agent-only.
