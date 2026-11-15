@@ -621,9 +621,7 @@ Rules for every tier:
 
 ### Integration handoff
 
-Work in progress at 15:50 KST on November 15. The review of the commits Codex made on November 14 and 15 is merged into `main`: five lanes, for sessions, the sidebar, hooks, sync, and agents, each accepted, rejected, or modified one part of that work at a time, and a review of their merge followed. A session that takes over starts from `main`.
-
-- Before the user's 20:00 KST trial, back up `~/Library/Application Support/Arch`, run `./scripts/install_app.sh`, and restart Arch.
+At 15:37 KST on November 15, `main` at `891689b0` is installed in `/Applications/Arch.app` for the user's 20:00 KST trial, after the build and all 1,865 tests across 18 targets passed. It holds the review of the commits Codex made on November 14 and 15: five lanes, for sessions, the sidebar, hooks, sync, and agents, each accepted, rejected, or modified one part of that work at a time, and a review of their merge followed. The user's data from before the install is in `~/Library/Application Support/Arch Backups/2026-11-15-before-trial`. A session that takes over starts from `main` and from what the user reports from the trial.
 
 Bookmarks, agent tabs, and script hooks now share the same sidebar and event source. The CEF distribution is pinned to `arch-8078-6`.
 
