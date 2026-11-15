@@ -1458,6 +1458,10 @@ final class EngineRuntime {
         plugins.nativeAppGate = nativeMessagingHosts
         engines.plugins = plugins
         engines.webExtensions = webExtensions
+        // Each change of the names reaches the views on the next turn of the run loop, the names of the manager's first list too, so that a tab that showed an extension's page before the runtime named it gets the name, and a view body that makes the runtime publishes nothing while it draws.
+        engines.webExtensionNames = webExtensions.$pageNames
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.extensionNamesDidChange(in: personaID) }
         // Profiles that started before the runtime, as the default Persona's in the primary engine at launch.
         for runtime in engines.runtimes.values {
             if let extensions = runtime.context.extensions { webExtensions.profileDidStart(with: extensions, of: runtime.kind) }
@@ -1476,6 +1480,15 @@ final class EngineRuntime {
     /// The name of the Persona's installed web extension whose page is at `url` (`WebExtensionRuntime.name(ofPageAt:)`), or nil for another address. It makes no runtime, since a Persona without one has no extension's page open.
     func extensionName(ofPageAt url: URL, in personaID: Persona.ID) -> String? {
         personaEngines[personaID]?.webExtensions?.name(ofPageAt: url)
+    }
+
+    /// Has the views that name the Persona's extension pages by their extensions read the names again, after an install, an update that renames an extension, or a removal (`WebExtensionRuntime.pageNames`): the Persona's windows announce a change, which the address pill, a small window's top row, the sidebar's rows, the window's title, and the palette's Go to row and its matches follow, and so does each of the Persona's tabs on a page outside the web schemes, for the views that follow the tab alone, such as the tab switcher's and the palette's rows and floating developer tools.
+    private func extensionNamesDidChange(in personaID: Persona.ID) {
+        for window in windows where window.personaID == personaID { window.objectWillChange.send() }
+        for tab in allTabs where tab.personaID == personaID {
+            guard let scheme = tab.url?.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme) else { continue }
+            tab.objectWillChange.send()
+        }
     }
 
     /// The runtime of the Persona's web extensions, for their actions in the site settings popover.
@@ -1512,6 +1525,7 @@ final class EngineRuntime {
         engines.plugins?.close()
         engines.plugins = nil
         engines.webExtensions = nil
+        engines.webExtensionNames = nil
     }
 
     /// Reloads the Persona's tabs whose pages the plugin's page scripts cover, so that the scripts of a plugin the user just switched on run there.

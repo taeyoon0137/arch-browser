@@ -1114,6 +1114,8 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime, EngineE
     @discardableResult public func performAction(of id: PluginID, for tab: any EngineWebContents) -> Bool
     /// Allows that version on the tab's site, where its engine kept it from running.
     public func grantSiteAccess(of id: PluginID, for tab: any EngineWebContents)
+    /// The name of each installed extension, on or off, by the identifier that its pages' addresses have as their host, a pair's from its version installed first, which `name(ofPageAt:)` reads. An install, an update that renames an extension, and a removal change it, a switch does not, and the session follows it, so that the views that name an extension's page show the new name at once without following the whole runtime.
+    @Published public private(set) var pageNames: [String: String]
     /// The name of the installed extension, on or off, whose page is at `url`, a pair's from its version installed first, for an address outside the web schemes whose host is the identifier the engines know the extension by, which the address pill, a small window's top row, the tab switcher, the palette's Go to row, and the tab's prompts show in place of that identifier, after the extension symbol. A name of nothing but spaces is the identifier (`WebExtensionManifest`). Nil for another address.
     public func name(ofPageAt url: URL) -> String?
 }

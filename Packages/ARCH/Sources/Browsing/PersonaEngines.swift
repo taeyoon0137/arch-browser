@@ -1,5 +1,6 @@
 // Each Persona has its own runtime in each engine and its own plugins, so the session finds a tab's profile and browser by the tab's Persona and engine, and a window's plugins by the window's Persona. Cookies copy between the engines of one Persona and never to another Persona's.
 import ARCHEngine
+import Combine
 import Extensions
 import Foundation
 import Plugins
@@ -13,6 +14,8 @@ final class PersonaEngines {
     var plugins: PluginManager?
     /// The runtime of the Persona's web extensions, which the plugin manager runs them with, made and dropped with it.
     var webExtensions: WebExtensionRuntime?
+    /// The session's subscription to the runtime's names of its extensions' pages (`WebExtensionRuntime.pageNames`), made and dropped with the runtime.
+    var webExtensionNames: AnyCancellable?
 
     init(personaID: Persona.ID, cookieRecord: URL?) {
         self.personaID = personaID
