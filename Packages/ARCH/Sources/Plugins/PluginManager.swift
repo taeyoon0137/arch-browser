@@ -1088,7 +1088,8 @@ public final class PluginManager: ObservableObject {
 
     /// The page scripts of the plugins whose access in the tab still holds, in the order of the list, which the session gives the tab after the Persona's. An access that no longer holds gives none, although `tabPageScripts` keeps it until its next check ends it: so a web contents that a tab gets after unloading or a change of engine, which ends its access, never takes the scripts of that access from a later change to another tab's.
     public func accessPageScripts(forTab id: UUID) -> [EnginePageScript] {
-        guard let tab = personaTabs().first(where: { $0.id == id }) else { return [] }
+        // Most tabs have no access, and the session asks for each tab of the Persona when the Persona's scripts change, so the tabs are read only for one with access.
+        guard siteAccess.values.contains(where: { $0[id] != nil }), let tab = personaTabs().first(where: { $0.id == id }) else { return [] }
         return plugins.flatMap { plugin in siteAccess[plugin.id]?[id].flatMap { holds($0, of: plugin.id, in: tab) ? $0.scripts.map(\.engineScript) : nil } ?? [] }
     }
 
