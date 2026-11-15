@@ -142,8 +142,8 @@ public protocol PluginBrowserHost: AnyObject {
     func webContents(forTab id: UUID) -> (any EngineWebContents)?
     /// The selected tab of the browser window that last became main, a main or a small window, when it is the Persona's and no internal page or the preview panel covers its page; nil otherwise. It can be an agent tab, which the caller leaves out.
     func selectedTab(in persona: PersonaID) -> UUID?
-    /// Opens a tab of the Persona at the address as `PluginContext.openTab(_:_:)` describes, with its events, its selection's, and its first load's carrying `cause`, and returns its identifier; nil when the options name a space that is not the Persona's, or the Persona is gone.
-    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID?
+    /// Opens a tab of the Persona at the address as `PluginContext.openTab(_:_:)` describes, with its events, its selection's, and its first load's carrying `cause`, and returns its identifier. Throws `PluginError.notGranted` when the options name a space that is not the Persona's, and `closed` once the Persona is gone.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID
     /// Closes a tab that `tabs(in:)` lists as `PluginContext.closeTab(_:)` describes, with its event carrying `cause`. Nothing happens for an agent tab or a tab that is gone.
     func closeTab(_ id: UUID, cause: BrowserEventCause)
     /// Selects a tab that `tabs(in:)` lists as `PluginContext.selectTab(_:)` describes, with its event carrying `cause`. Nothing happens for an agent tab or a tab that is gone.

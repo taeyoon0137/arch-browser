@@ -1015,8 +1015,8 @@ public protocol PluginBrowserHost: AnyObject {
     func webContents(forTab id: UUID) -> (any EngineWebContents)?
     /// The selected tab of the window that last became main while it is the Persona's and no internal page or the preview panel covers its page, as `BrowserWindowModel` gives commands their tab; it can be an agent tab, which the manager leaves out.
     func selectedTab(in persona: PersonaID) -> UUID?
-    /// For the tab members of `PluginContext`, with `cause` on the events they post, the opened tab's first load among them: nil from `openTab` for a space that is not the Persona's or a Persona that is gone, and nothing for an agent tab or a tab that is gone. `closeTab` closes with `TabCloseReason.plugin`.
-    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID?
+    /// For the tab members of `PluginContext`, with `cause` on the events they post, the opened tab's first load among them: `openTab` throws `PluginError.notGranted` for a space that is not the Persona's and `closed` for a Persona that is gone, and the others do nothing for an agent tab or a tab that is gone. `closeTab` closes with `TabCloseReason.plugin`.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID
     func closeTab(_ id: UUID, cause: BrowserEventCause)
     func selectTab(_ id: UUID, cause: BrowserEventCause)
     // Not built yet.

@@ -1469,9 +1469,10 @@ public final class PluginManager: ObservableObject {
         return personaTabs().first { $0.id == id }
     }
 
-    /// Opens a tab of the Persona with the plugin as the cause of its events; nil for a space that is not the Persona's, or without the host.
-    fileprivate func openTab(_ url: URL, _ options: PluginOpenTabOptions, by plugin: PluginID) -> UUID? {
-        browserHost?.openTab(url, options, in: persona, cause: Self.cause(plugin))
+    /// Opens a tab of the Persona with the plugin as the cause of its events. Throws as the host does, and `PluginError.closed` without the host.
+    fileprivate func openTab(_ url: URL, _ options: PluginOpenTabOptions, by plugin: PluginID) throws -> UUID {
+        guard let browserHost else { throw PluginError.closed }
+        return try browserHost.openTab(url, options, in: persona, cause: Self.cause(plugin))
     }
 
     /// Closes or selects one of the Persona's tabs that `personaTabs()` lists, with the plugin as the cause of its events. Throws `PluginError.notGranted` for any other tab.
@@ -1787,8 +1788,8 @@ final class ScopedPluginContext: PluginPanelContext {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host()?.isEmpty == false else {
             throw PluginError.invalidAddress(url.absoluteString)
         }
-        guard let manager, let id = manager.openTab(url, options, by: pluginID) else { throw options.spaceID.map(PluginError.notGranted) ?? PluginError.closed }
-        return id
+        guard let manager else { throw PluginError.closed }
+        return try manager.openTab(url, options, by: pluginID)
     }
 
     func closeTab(_ id: PluginTab.ID) throws {

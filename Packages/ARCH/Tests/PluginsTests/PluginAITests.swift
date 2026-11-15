@@ -199,7 +199,7 @@ private final class RecordingHost: PluginBrowserHost {
 
     func webContents(forTab id: UUID) -> (any EngineWebContents)? { nil }
     func selectedTab(in persona: PersonaID) -> UUID? { nil }
-    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID? { nil }
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID { throw PluginError.closed }
     func closeTab(_ id: UUID, cause: BrowserEventCause) {}
     func selectTab(_ id: UUID, cause: BrowserEventCause) {}
 }

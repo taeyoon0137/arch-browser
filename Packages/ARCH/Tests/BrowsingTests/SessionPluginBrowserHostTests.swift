@@ -1,4 +1,4 @@
-// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions): a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes.
+// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions): a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; an open names a space of another Persona as not granted and a deleted Persona as closed.
 import ARCHEngine
 import Events
 import Foundation
@@ -25,7 +25,7 @@ import Testing
         try withSession { session, host in
             let space = try #require(session.spaces.first)
             let file = try #require(URL(string: "https://example.org/a.bin"))
-            let id = try #require(host.openTab(file, PluginOpenTabOptions(select: false), in: space.resolvedPersonaID, cause: cause))
+            let id = try host.openTab(file, PluginOpenTabOptions(select: false), in: space.resolvedPersonaID, cause: cause)
             let opened = try #require(session.tabs.first { $0.id == id })
             #expect(opened.pageDownloads.isOpenedByPlugin)
             #expect(!opened.webContents(opened.webContents, shouldDownload: file, hasPage: false))
@@ -56,6 +56,26 @@ import Testing
             #expect(closes == ["other user false", "theirs plugin true"])
             session.reopenLastClosedTab()
             #expect(session.tabs.contains { $0.id == theirs.id } && !session.tabs.contains { $0.id == mine.id })
+        }
+    }
+
+    /// An open in a space of another Persona is not granted, and one for a Persona that is gone is closed, whether or not it names a space, and neither opens a tab.
+    @Test func anOpenTellsAForeignSpaceFromAPersonaThatIsGone() throws {
+        try withSession { session, host in
+            let home = try #require(session.spaces.first)
+            let work = session.addPersona(named: "Work")
+            let research = try #require(session.spaces(in: work.id).first)
+            let address = try #require(URL(string: "https://example.org/"))
+            let count = session.allTabs.count
+            #expect(throws: PluginError.notGranted(research.id)) {
+                _ = try host.openTab(address, PluginOpenTabOptions(spaceID: research.id, select: false), in: home.resolvedPersonaID, cause: cause)
+            }
+            session.deletePersona(work.id)
+            #expect(throws: PluginError.closed) { _ = try host.openTab(address, PluginOpenTabOptions(select: false), in: work.id, cause: cause) }
+            #expect(throws: PluginError.closed) {
+                _ = try host.openTab(address, PluginOpenTabOptions(spaceID: research.id, select: false), in: work.id, cause: cause)
+            }
+            #expect(session.allTabs.count == count)
         }
     }
 }

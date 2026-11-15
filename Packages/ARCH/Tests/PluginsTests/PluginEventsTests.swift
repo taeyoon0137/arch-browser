@@ -57,10 +57,11 @@ private final class FakeTabsHost: PluginBrowserHost {
         selected[persona]
     }
 
-    /// The tab joins the Persona's tabs in the space the options name, or the Persona's first.
-    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID? {
-        let spaces = spaces[persona] ?? []
-        guard let space = options.spaceID ?? spaces.first, spaces.contains(space) else { return nil }
+    /// The tab joins the Persona's tabs in the space the options name, or the Persona's first. A Persona without spaces is gone.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID {
+        guard let spaces = spaces[persona], let first = spaces.first else { throw PluginError.closed }
+        let space = options.spaceID ?? first
+        guard spaces.contains(space) else { throw PluginError.notGranted(space) }
         let tab = PluginTab(id: UUID(), spaceID: space, title: "", url: url, engine: options.engine ?? .webKit, isPinned: false, isSelected: options.select)
         tabs[persona, default: []].append(tab)
         record(Change(kind: .opened(url, options), tab: tab.id, cause: cause))
@@ -382,6 +383,7 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(throws: PluginError.notGranted(foreign)) { try context.selectTab(foreign) }
         host.spaces[persona] = nil
         #expect(throws: PluginError.closed) { _ = try context.openTab(address, PluginOpenTabOptions()) }
+        #expect(throws: PluginError.closed) { _ = try context.openTab(address, PluginOpenTabOptions(spaceID: space)) }
         #expect(host.changes.count == 3)
 
         // Without `tabs.manage`, nothing changes, while the selected tab still shows.
