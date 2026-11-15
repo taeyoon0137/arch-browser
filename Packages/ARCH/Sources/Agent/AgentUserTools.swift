@@ -133,7 +133,7 @@ extension AgentToolHost {
         }
     }
 
-    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely, and a tab the user shared once the user allows it on P19's card, which is not sensitive, so Allow for This Tab asks for no Touch ID. The allowance lasts while the tab stays shared, so the client's later renames of the tab ask nothing. Any other tab is refused with P17, and a tab on a site excluded from AI with P16. A name belongs to the document the tab has committed: a tab that loads another address answers `stale`, and so does a shared tab whose document ends while its card waits, which withdraws the card. The name's first line is trimmed and cut to 60 characters, and an empty name clears a suggested name, through `BrowserAgentHost`'s suggested names (`AgentTabNaming`) with the grant as the cause.
+    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely, and a tab the user shared once the user allows it on P19's card, which is not sensitive, so Allow for This Tab asks for no Touch ID. The allowance lasts while the tab stays shared, so the client's later renames of the tab ask nothing. Any other tab is refused with P17, and a tab on a site excluded from AI with P16. A name belongs to the document the tab has committed, ignoring the fragment: a tab that loads another address answers `stale`, and so does a shared tab whose document ends or that closes while its card waits, which withdraws the card. After Allow for This Tab, the call renames nothing once it was cancelled, and the tab is checked again: a tab moved into the client's own agent folder renames as its agent tabs do, and any other that left the client is refused with P17. The name's first line is trimmed and cut to 60 characters, and an empty name clears a suggested name, through `BrowserAgentHost`'s suggested names (`AgentTabNaming`) with the grant as the cause.
     func renameTab(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let handle = arguments["tab"]?.stringValue ?? ""
         guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return Self.error("tabNotFound", "This client has no tab \(handle).") }
@@ -170,18 +170,26 @@ extension AgentToolHost {
             card.documentID = tab.documentID
             box.approvalID = card.id
             let answer = await request(card, for: client)
-            if answer == .withdrawn { return stale("\(handle) showed another page before the user answered, so it kept its name.") }
+            if answer == .withdrawn {
+                // The tab's close withdraws the card too.
+                guard let current = host.tabs(withIDs: [id]).first, access(to: current, client, state: state) != .notTheClients else {
+                    return stale("\(handle) closed or left the client before the user answered.")
+                }
+                return stale("\(handle) showed another page before the user answered, so it kept its name.")
+            }
             if var ended = answerOutcome(answer, card: card, handle: handle, client: client) {
                 ended.site = site
                 return ended
             }
             decided = .approved
             state.handles.renamingSharedTabIDs.insert(id)
-            // While the card waited, the tab may have left the client, which ends the allowance, or committed another document.
-            guard let current = host.tabs(withIDs: [id]).first, case .shared = access(to: current, client, state: state) else {
+            // Stop All Agents, a revocation, or the client's leaving while the answer came ends the call before it renames.
+            if Task.isCancelled { return Self.ended }
+            // While the card waited, the tab may have left the client, which ends the allowance, moved into the client's own agent folder, whose tabs rename freely, or committed another document; another fragment of the same document keeps the name's page.
+            guard let current = host.tabs(withIDs: [id]).first, access(to: current, client, state: state) != .notTheClients else {
                 return refused(AgentRule.p17.rawValue, AgentPolicy.entry(.p17).sentence)
             }
-            guard current.documentID == tab.documentID, naming.committedAddress(ofTab: id) == url, AgentRunner.sameDocument(current.url, url) else {
+            guard current.documentID == tab.documentID, AgentRunner.sameDocument(naming.committedAddress(ofTab: id), url), AgentRunner.sameDocument(current.url, url) else {
                 return stale("\(handle) showed another page before the user answered, so it kept its name.")
             }
             guard AgentPolicy.showsTitle(of: url, allowsAI: allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
