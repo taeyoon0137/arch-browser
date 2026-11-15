@@ -19,7 +19,7 @@ extension PluginPageScript {
         (channel) => {
           const covers = \(MatchPattern.javaScriptMatcher);
           if (!covers(location, \(MatchPattern.javaScriptLiteral(matches))) || covers(location, \(MatchPattern.javaScriptLiteral(excludes)))
-            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(PluginPageRun.withinCheck(within))) return;\(Self.onceCheck(key))\(Self.styleLines(styles))
+            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(PluginPageRun.withinCheck(within))) return;\(Self.onceCheck(key))\(Self.styleLines(styles, atStart: runAt == .documentStart))
           ((arch) => {
         \(source)
           })(channel);
@@ -35,19 +35,21 @@ extension PluginPageScript {
         return "\n  if (globalThis[\(literal)]) return;\n  globalThis[\(literal)] = true;"
     }
 
-    /// The lines that add `styles` to the document, each in a `<style>` element at the end of the document's root element, or none without styles. A document without a root element yet, as Chromium's helper may run a document-start script before the parser adds one, gets them once the root appears. At the document's start they come before the page's own styles, which win where both give a property with the same specificity, and at its end after the styles the page has by then. The text goes in as JSON strings through `textContent`, so it never runs as script.
-    private static func styleLines(_ styles: [String]) -> String {
+    /// The lines that add `styles` to the document in `<style>` elements, in their order, or none without styles. With `atStart`, as for a document-start script, they go at the start of the document's root element, before the page's own styles, which win where both give a property with the same specificity, also in a document that has those already, as when a command runs the script at once; otherwise at the root's end, after the styles the page has by then. A document without a root element yet, as Chromium's helper may run a document-start script before the parser adds one, gets them once the root appears, after the script's body has run, and at the root's start all the same, however much of the page the parser has added by then. The text goes in as JSON strings through `textContent`, so it never runs as script.
+    private static func styleLines(_ styles: [String], atStart: Bool) -> String {
         guard !styles.isEmpty else { return "" }
         let literal = String(decoding: (try? JSONEncoder().encode(styles)) ?? Data("[]".utf8), as: UTF8.self)
         return """
 
           ((styles) => {
             const add = (root) => {
+              const sheets = document.createDocumentFragment();
               for (let index = 0; index < styles.length; index++) {
                 const style = document.createElementNS("http://www.w3.org/1999/xhtml", "style");
                 style.textContent = styles[index];
-                root.appendChild(style);
+                sheets.appendChild(style);
               }
+              root.insertBefore(sheets, \(atStart ? "root.firstChild" : "null"));
             };
             if (document.documentElement) return add(document.documentElement);
             const observer = new MutationObserver(() => {
