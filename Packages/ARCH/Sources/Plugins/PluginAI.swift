@@ -77,7 +77,7 @@ final class PluginAIRequests {
         PluginAIClient(requests: self, step: inStep ? step : nil)
     }
 
-    /// Sends the request under the plugin's feature, passes its events on, and reports its end to its step. A stopped step's request never goes out, nor does one with a part of a kind that the plugin does not list, which ends as the service ends it.
+    /// Sends the request under the plugin's feature, passes its events on, and reports its end to its step. A stopped step's request never goes out, nor does one with a part of a kind that the plugin does not list, which ends with the error the service gives a part of a kind its feature does not declare. Neither reaches the service, so neither has an entry in its activity, which Settings ▸ AI ▸ Features reads a plugin's last error from.
     fileprivate func forward(_ request: AIRequest, step: PluginHookStep?, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async {
         guard !hasEnded else { return continuation.finish(throwing: PluginError.stopped) }
         guard step?.isStopped != true else { return continuation.finish(throwing: AIError.cancelled) }

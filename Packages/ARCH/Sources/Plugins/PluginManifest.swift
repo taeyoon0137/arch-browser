@@ -37,7 +37,7 @@ public struct PluginManifest: Hashable, Sendable {
     /// What the plugin does, in one sentence.
     public var summary: String
     public var permissions: Set<PluginPermission>
-    /// The data kinds beyond text that the plugin's AI requests carry, which its `ai` permission lists: `page` for the text of pages that its page calls read, and `selection` for selected text. They come with `ai`, as a web extension's other API permissions come with its install, and the install sheet and Settings state them in one sentence (`aiDataSummary`). Empty without `ai`.
+    /// The data kinds beyond text that the plugin's AI requests carry, which its `ai` permission lists: `page` for page parts, such as of the text that its page calls read, and `selection` for selected text. They name the parts' kinds, not what can reach a model: a plugin with sites can also put the text of their pages into a text part. They come with `ai`, as a web extension's other API permissions come with its install, and the install sheet and Settings state them in one sentence (`aiDataSummary`). Empty without `ai`.
     public var aiDataKinds: Set<AIDataKind>
     /// The pages the plugin may reach. Without `tabs`, the plugin still sees the title and address of a tab whose page they cover.
     public var sites: [MatchPattern]
