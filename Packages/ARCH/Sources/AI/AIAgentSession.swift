@@ -257,7 +257,7 @@ public final class AIAgentSession {
         }
         guard turn.outcome == nil, turn.pendingEnd == nil, !turn.isStopping else { return }
         turn.isStopping = true
-        // Before the message reached the tool, the turn ends at once, also while it waits for a slot of the provider's limiter.
+        // Before the message reached the tool, the turn ends as stopped and starts no process: at once while it waits for a slot of the provider's limiter, and otherwise once the running status command or the probes in progress have finished, whose result is kept.
         guard let process, turn.didStartProcess else {
             turnTask?.cancel()
             return
@@ -427,7 +427,15 @@ public final class AIAgentSession {
         }
         // An automatic feature's turn waits behind the user's requests and gives up after the limiter's wait limit, as its other requests do.
         do {
-            try await limiter.acquire(isUser: feature.trigger == .user) { _ in }
+            // A wait for a slot or for a usage limit's reset, which may be hours away, is said in the panel.
+            try await limiter.acquire(isUser: feature.trigger == .user) { [continuation, name = candidate.provider.name] reason in
+                switch reason {
+                case .rateLimited(let until):
+                    continuation.yield(.notice("\(name) is at its usage limit until \(until.formatted(date: .abbreviated, time: .shortened)). The message starts then; Stop cancels it."))
+                case .queued:
+                    continuation.yield(.notice("Waiting for another request to \(name) to finish."))
+                }
+            }
         } catch {
             self.turn = nil
             // Stop and `end` cancel the wait for a slot.
@@ -468,6 +476,8 @@ public final class AIAgentSession {
             try service.checkDestination(of: candidate.provider, known: request.knownProviders)
             if !signedInChecked.contains(candidate.ref) {
                 let status = try await AIAgentToolStatus.read(kind: kind, executable: tool.executable, environment: tool.environment)
+                // A Stop during the read leaves the sign-in unread, and the probes unstarted.
+                if turn.isStopping || hasEnded { return .finished(.stopped) }
                 if status.isSignedIn == false { return .failed(.authentication(provider)) }
                 signedInChecked.insert(candidate.ref)
             }

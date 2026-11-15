@@ -136,7 +136,7 @@ struct AICommandLineEditor: View {
                 } footer: {
                     formFootnote(draft.agent == nil
                                ? "The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets."
-                               : "The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, Arch's settings, and these variables, such as CLAUDE_CONFIG_DIR or CODEX_HOME when you moved the tool's folder. They are saved in ai.json, so they must not hold secrets. API keys are never passed, so the tool uses its own sign-in.")
+                               : "The tool runs with only HOME, USER, LOGNAME, SHELL, and PATH, with CLAUDE_CONFIG_DIR or CODEX_HOME from your login shell, LANG, TMPDIR, and TERM, Arch's settings, and these variables, which take precedence. They are saved in ai.json, so they must not hold secrets. ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, and CODEX_API_KEY are never passed, so the tool uses its own sign-in.")
                 }
                 if draft.agent == nil {
                     outputSection
