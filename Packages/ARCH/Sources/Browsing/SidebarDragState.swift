@@ -1,4 +1,4 @@
-// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab or folder row above the sidebar and the page. Tab and folder rows start their drags in `SpaceTabsView.swift`, favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
+// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab or folder row above the sidebar and the page. Tab and folder rows start their drags in `SpaceTabsView.swift`, where a row held near the list's top or bottom scrolls it (`DragAutoScroll.swift`), favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
 import SwiftUI
 
 /// What a drag in the sidebar lifts.
@@ -50,6 +50,11 @@ struct SidebarReorderHover {
 
     mutating func moved(into frame: CGRect) {
         destination = frame
+    }
+
+    /// The list scrolled `distance` points toward its bottom, or toward its top for a negative distance, under a still pointer. The destination moves with the rows, up in the window as the list scrolls down, so that the row the scroll brings under the pointer can take the slot.
+    mutating func scrolled(by distance: CGFloat) {
+        destination = destination?.offsetBy(dx: 0, dy: -distance)
     }
 }
 
