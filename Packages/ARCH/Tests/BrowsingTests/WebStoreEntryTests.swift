@@ -43,7 +43,8 @@ import Testing
     @Test func thePopoverRowInstallsOrNamesThePagesExtension() {
         let installed = { (asked: String) in asked == self.id ? "1Password" : nil }
         let row = WebStorePageRow(pageURL: page(id), installedName: installed, reader: reader)
-        #expect(row == .installed("1Password") && row?.title == "\u{201C}1Password\u{201D} is installed.")
+        // The installed extension's row names it alone, as a label; the view adds Installed at the row's end.
+        #expect(row == .installed("1Password") && row?.title == "1Password")
         let install = WebStorePageRow(pageURL: page(otherID), installedName: installed, reader: reader)
         #expect(install == .install(otherID) && install?.title == "Install This Extension\u{2026}")
         // The section's note for the row alone says what the row does, and for an installed extension where to manage it.

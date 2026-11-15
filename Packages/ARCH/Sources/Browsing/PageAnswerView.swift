@@ -147,22 +147,18 @@ struct PageAIOffNotice: View {
     }
 }
 
-/// The site settings popover's switch for AI on the current page's site. It shows while a feature that reads pages can run.
-struct PageAISiteSection: View {
+/// The site settings popover's Allow AI on This Site row in the This Tab group, with its switch. It shows while a feature that reads pages can run, after the engine's row, so it brings the hairline before it. What the switch allows is its help, for the pointer and VoiceOver.
+struct PageAISiteRow: View {
     @ObservedObject var tab: Tab
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
 
     var body: some View {
         if let url = tab.url, PageAssistant.canRead(url), service.isAvailable(.pageReader) || service.isAvailable(.pageQuestion) {
-            SiteSettingsSection(title: "AI", note: "Features such as the page reader can send this site\u{2019}s pages to the models you chose for them.") {
-                HStack {
-                    Text("Allow AI on this site")
-                    Spacer()
-                    Toggle("Allow AI on this site", isOn: Binding(get: { settings.allowsAI(on: url) }, set: { settings.setAllowsAI($0, on: url) }))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                }
+            SiteSettingsDivider()
+            SiteSettingsRow(symbol: "sparkles", title: "Allow AI on This Site", help: "Features such as the page reader can send this site\u{2019}s pages to the models you chose for them.") {
+                Toggle("Allow AI on This Site", isOn: Binding(get: { settings.allowsAI(on: url) }, set: { settings.setAllowsAI($0, on: url) }))
+                    .toggleStyle(.switch)
             }
         }
     }

@@ -10,6 +10,7 @@ struct AddressPillView: View {
     /// `nil` when no tab is open.
     let tab: Tab?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.spaceTheme) private var theme
     @Environment(\.addressPillPull) private var pull
     @State private var isShowingSiteSettings = false
 
@@ -88,9 +89,12 @@ struct AddressPillView: View {
             SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.siteSettingsButtonView))
                 .padding(.trailing, 4)
-                .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
-                    SiteSettingsView(session: session, tab: tab) { isShowingSiteSettings = false }
-                }
+                // The popover has its own background, so it draws in the window's appearance, not the one the sidebar may take for a strong tint, which a popover on the button itself would inherit.
+                .background(Color.clear
+                    .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
+                        SiteSettingsView(session: session, tab: tab) { isShowingSiteSettings = false }
+                    }
+                    .environment(\.colorScheme, theme.colorScheme))
         }
         .font(.system(size: 14))
         .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
@@ -194,7 +198,7 @@ struct AddressPillFrameKey: PreferenceKey {
     }
 }
 
-/// The site settings popover: the engine of the current tab, the actions of its Persona's web extensions, clearing its site's data, whether AI features may send its pages, and the engine for new tabs. While an internal page or the preview panel covers the tab, it shows only the engine for new tabs, as in a window without a tab. A click closes the preview before it reaches the button, but a press through VoiceOver leaves the preview open.
+/// The site settings popover: a header that names the tab's site, then in boxes of rows the current tab's engine with whether AI features may send its pages, the actions of its Persona's web extensions, clearing its site's data, and the engine for new tabs (`SiteSettingsParts.swift`). While an internal page or the preview panel covers the tab, it shows only the engine for new tabs, without a header, as in a window without a tab. A click closes the preview before it reaches the button, but a press through VoiceOver leaves the preview open.
 struct SiteSettingsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -203,74 +207,65 @@ struct SiteSettingsView: View {
     var close: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             if let tab, !windowModel.isSelectedPageCovered {
+                SiteSettingsHeader(tab: tab)
                 TabEngineSection(session: session, tab: tab)
                 if let webExtensions = session.webExtensions(in: tab.personaID) {
                     WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)
                 }
-                SiteSettingsSection(title: "Site Data", note: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.") {
-                    Button("Clear Site Data\u{2026}") {
+                // The card that the row opens says what goes, so this sentence is only the row's help.
+                SiteSettingsGroup("Site Data") {
+                    SiteSettingsRow(symbol: "trash", title: "Clear Site Data\u{2026}", help: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.", role: .destructive, action: {
                         close()
                         windowModel.confirmClearSiteData()
-                    }
+                    })
                     .disabled(!windowModel.canClearSiteData)
                 }
-                PageAISiteSection(tab: tab)
             }
-            SiteSettingsSection(title: "New Tabs", note: "Tabs that a page opens use that page\u{2019}s engine.") {
-                Picker("New Tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
-                    ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
+            SiteSettingsGroup("New Tabs", footnote: "Tabs that a page opens use that page\u{2019}s engine.") {
+                // The group's title says which tabs. “Engine for New Tabs” would leave the picker no room, so only VoiceOver reads it.
+                SiteSettingsRow(symbol: "plus.square.on.square", title: "Engine") {
+                    Picker("Engine for New Tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
+                        ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                 }
             }
         }
-        .padding(16)
-        .frame(width: 280)
+        // The address pill's 14-point font reaches the popover. The rows set their own sizes, and the controls take their control size's.
+        .font(nil)
+        .padding(12)
+        .frame(width: 300)
     }
 }
 
-// Observes the tab so the picker follows the switch.
+/// The This Tab group. It observes the tab so the picker follows the switch.
 struct TabEngineSection: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
 
-    /// WebKit gives the app no public way to let a page show notifications: a page's request is refused without asking the app, so Arch cannot tell whether a page asked, and a WebKit tab's note always says so.
+    /// What switching does, or why the tab uses a temporary engine. WebKit gives the app no public way to let a page show notifications: a page's request is refused without asking the app, so Arch cannot tell whether a page asked, and a WebKit tab's note always says so.
     private var note: String {
         let switching = TemporaryEngineLabel.explanation(for: tab) ?? "Switching loads the page again in the other engine."
         return tab.engineKind == .webKit ? switching + " Websites can\u{2019}t show notifications in WebKit tabs." : switching
     }
 
     var body: some View {
-        SiteSettingsSection(title: "This Tab", note: note) {
-            Picker("This Tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
-                ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
+        SiteSettingsGroup("This Tab", footnote: note) {
+            SiteSettingsRow(symbol: "gearshape.2", title: "Engine") {
+                Picker("Engine for This Tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
+                    ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
+                }
+                .pickerStyle(.segmented)
             }
             if tab.preferredEngine != tab.engineKind {
-                Button("Keep Using \(tab.engineKind.displayName)") {
+                SiteSettingsDivider()
+                SiteSettingsRow(symbol: "checkmark.circle", title: "Keep Using \(tab.engineKind.displayName)", action: {
                     session.switchEngine(of: tab, to: tab.engineKind)
-                }
+                })
             }
-        }
-    }
-}
-
-struct SiteSettingsSection<Content: View>: View {
-    let title: String
-    let note: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-            content
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            Text(note)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            PageAISiteRow(tab: tab)
         }
     }
 }
