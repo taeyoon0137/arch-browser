@@ -1,11 +1,11 @@
-// Site access modes (`docs/plugins.md`, Permissions; Page scripts): a manifest's `siteAccess`, the grant that keeps it in `plugins.json` where builds before it cannot read it, the review's first offer, the sentences and the confirmation for it, and a `whenInvoked` plugin reaching a tab's pages only after one of its commands ran there, on the host of that page, while the tab still showed the document the command ran on: its page scripts run in that page at once, again at a later command, and once in a document, and in the tab's later documents on the host, its page calls, page script values, and the tab's title and address reach it there, and the access ends when the tab commits a document of another host, gets another page, or closes, or the plugin is switched off.
+// Site access modes (`docs/plugins.md`, Permissions; Page scripts): a manifest's `siteAccess`, the grant that keeps it in `plugins.json` where builds before it cannot read it, the review's first offer, the sentences and the confirmation for it, and a `whenInvoked` plugin reaching a tab's pages only after one of its commands ran there, on the host of that page, while the tab still showed the document the command ran on: its page scripts run in that page at once, again at a later command, and once in a document, and in the tab's later documents on the host, its page calls, page script values, and the tab's title and address in calls and events reach it there, and the access ends when the tab commits a document of another host, at the address change that reports it, gets another page, whose scripts leave out the access at once, or closes, or the plugin is switched off or updated.
 import ARCHEngine
 import Events
 import Foundation
 import Testing
 @testable import Plugins
 
-/// Reaches example.org and its subdomains only where the user runs its command, whose invocation it keeps in its storage, and answers its page script's values.
+/// Reaches example.org and its subdomains only where the user runs its command, whose invocation it keeps in its storage, as it keeps the tab's address in the pages' loads it hears of, and answers its page script's values.
 @MainActor
 private final class InvokedPlugin: BuiltInPlugin {
     static let id = PluginID(rawValue: "org.example.invoked")!
@@ -13,7 +13,8 @@ private final class InvokedPlugin: BuiltInPlugin {
     static var manifest: PluginManifest {
         PluginManifest(id: id, name: "Invoked", version: "1", summary: "", sites: sites, siteAccess: .whenInvoked,
                        contributions: PluginContributions(commands: [PluginCommand(id: "go", title: "Go")],
-                                                          pageScripts: [PluginPageScript(matches: sites, source: "globalThis.runs = (globalThis.runs || 0) + 1;")]))
+                                                          pageScripts: [PluginPageScript(matches: sites, source: "globalThis.runs = (globalThis.runs || 0) + 1;")]),
+                       events: [.pageLoaded])
     }
 
     static var isOnByDefault: Bool { true }
@@ -31,6 +32,11 @@ private final class InvokedPlugin: BuiltInPlugin {
 
     func receive(_ message: PluginPageMessage) async throws -> PluginValue? {
         .string("heard")
+    }
+
+    func handle(_ event: PluginEvent) async throws {
+        guard case let .browser(view, _) = event else { return }
+        try context?.storage.setValue(.string(view.tab?.url?.absoluteString ?? "none"), forKey: "loadedAt")
     }
 }
 
@@ -200,8 +206,10 @@ private final class ListedPlugin: BuiltInPlugin {
         }
         await invoke(manager, on: host.tabs[0])
         #expect(manager.tabPageScripts[tab.id] != nil)
-        // A new page, as after unloading or a change of engine.
+        // A new page, as after unloading or a change of engine, takes none of the access's scripts, also before a check ends the access.
         host.pages[tab.id] = ScriptedPage("https://a.example.org/x")
+        #expect(manager.tabPageScripts[tab.id] != nil && manager.accessPageScripts(forTab: tab.id).isEmpty)
+        #expect(manager.pageScripts(forTab: tab.id) == manager.contributions.pageScripts)
         #expect(throws: PluginError.siteNotGranted) { try context.postMessage(.number(1), toTab: tab.id) }
         #expect(manager.tabPageScripts.isEmpty)
         await invoke(manager, on: host.tabs[0])
@@ -228,6 +236,56 @@ private final class ListedPlugin: BuiltInPlugin {
         #expect(await eventually { manager.tabPageScripts.keys.sorted() == [second.id] })
         bus.post(.tabClosed(tab: ref(second), reason: .user))
         #expect(await eventually { manager.tabPageScripts.isEmpty })
+    }
+
+    /// A tab posts `addressChanged` before it takes the new committed address, so the manager checks the event's: a document of another host ends the access at that event, and the tab's events never give it back, as when the tab returns to the host through the back-forward cache.
+    @Test func anAddressChangeToAnotherHostEndsTheAccessAtThatEvent() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        let context = try context(in: manager)
+        let tab = host.show("https://a.example.org/x")
+        await invoke(manager, on: tab)
+        let ref = { (address: String) in BrowserTabRef(id: tab.id, personaID: persona, spaceID: tab.spaceID, kind: .open, engine: .webKit, url: URL(string: address)) }
+        // The tab still shows the earlier document throughout, as it does while it posts the event.
+        bus.post(.addressChanged(tab: ref("https://a.example.org/y"), previousURL: tab.url))
+        #expect(manager.tabPageScripts[tab.id] != nil)
+        bus.post(.addressChanged(tab: ref("https://b.example.org/"), previousURL: URL(string: "https://a.example.org/y")))
+        #expect(manager.tabPageScripts.isEmpty)
+        bus.post(.addressChanged(tab: ref("https://a.example.org/x"), previousURL: URL(string: "https://b.example.org/")))
+        bus.post(.pageLoaded(tab: ref("https://a.example.org/x"), isRestore: false, isFirstLoadAfterOpen: false))
+        #expect(manager.tabPageScripts.isEmpty)
+        await #expect(throws: PluginError.siteNotGranted) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
+    }
+
+    /// The tab's address in an event reaches the plugin only where it has access in the tab.
+    @Test func eventsShowTheTabsAddressOnlyWhereThePluginHasAccess() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        let context = try context(in: manager)
+        let tab = host.show("https://a.example.org/x")
+        let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: tab.spaceID, kind: .open, engine: .webKit, url: tab.url)
+        bus.post(.pageLoaded(tab: ref, isRestore: false, isFirstLoadAfterOpen: false))
+        #expect(await eventually { context.storage.value(forKey: "loadedAt") == .string("none") })
+        await invoke(manager, on: tab)
+        bus.post(.pageLoaded(tab: ref, isRestore: false, isFirstLoadAfterOpen: false))
+        #expect(await eventually { context.storage.value(forKey: "loadedAt") == .string("https://a.example.org/x") })
+    }
+
+    /// An update ends the access, also one that keeps `plugin.json` and the page scripts, since it can change the rest of the plugin's code.
+    @Test func anUpdateEndsTheAccessAlsoWhenItKeepsTheManifest() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        let sites = [try MatchPattern("https://example.org/*")]
+        let files = ["plugin.json": manifest + #", "siteAccess": "whenInvoked", "background": "b.js", "contributes": {"commands": [{"id": "go", "title": "Go"}], "pageScripts": [{"matches": ["https://example.org/*"], "js": ["p.js"]}]}}"#,
+                     "b.js": "", "p.js": ""]
+        let grant = PluginGrant(permissions: [], sites: sites, siteAccess: .whenInvoked)
+        let id = try manager.install(try await manager.stage(try writePackage(files)), grant: grant, isEnabled: true)
+        let tab = host.show("https://example.org/x")
+        let run = Task { await manager.run(PluginCommandRef(plugin: id, command: "go"), PluginInvocation(tab: tab)) }
+        #expect(await eventually { manager.tabPageScripts[tab.id]?.count == 1 })
+        _ = try manager.install(try await manager.stage(try writePackage(files)), grant: grant, isEnabled: true)
+        #expect(manager.tabPageScripts.isEmpty && manager.accessPageScripts(forTab: tab.id).isEmpty)
+        await run.value
     }
 
     @Test func theGrantKeepsItsSiteAccessWhereEarlierBuildsCannotReadIt() throws {

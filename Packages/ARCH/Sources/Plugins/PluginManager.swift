@@ -127,7 +127,7 @@ public final class PluginManager: ObservableObject {
         }
     }
     @Published public private(set) var contributions: PluginContributionIndex
-    /// The page scripts of the plugins that reach their sites `whenInvoked` and have access in a tab, by tab, which the session gives the tab after the Persona's (`pageScripts(forTab:)`). Each runs only on the host of the tab's access, besides its patterns and the granted sites.
+    /// The page scripts of the plugins that reach their sites `whenInvoked` and have access in a tab, by tab, which change as an access begins or ends. Each runs only on the host of the tab's access, besides its patterns and the granted sites. An access that no longer holds stays here until its next check, so the session gives a tab the scripts of `accessPageScripts(forTab:)` after the Persona's.
     @Published public private(set) var tabPageScripts: [UUID: [EnginePageScript]] = [:]
     /// The tabs where each plugin that reaches its sites `whenInvoked` has access, by plugin and tab.
     private var siteAccess: [PluginID: [UUID: TabSiteAccess]] = [:]
@@ -188,7 +188,7 @@ public final class PluginManager: ObservableObject {
         var isActive = false
     }
 
-    /// The access that running one of a `whenInvoked` plugin's commands in a tab gives it: the tab's pages on the host of the document the command ran on, while the tab keeps the page it had then and the plugin the grant and manifest it had then.
+    /// The access that running one of a `whenInvoked` plugin's commands in a tab gives it: the tab's pages on the host of the document the command ran on, while the tab keeps the page it had then and the plugin the install, grant, and manifest it had then.
     private struct TabSiteAccess {
         /// `<scheme>://<host>/*` of the document the command ran on.
         let site: MatchPattern
@@ -196,6 +196,16 @@ public final class PluginManager: ObservableObject {
         weak var contents: (any EngineWebContents)?
         let grant: PluginGrant
         let manifest: PluginManifest
+        /// When the plugin's package was installed, and where, which an update changes also when it keeps `plugin.json` and the page scripts, since it can change the rest of the code.
+        let installedAt: Date?
+        let packageURL: URL?
+        /// The plugin's page scripts as the tab's documents on the site run them, with their own scripts (`accessScripts(of:grant:world:site:)`).
+        let scripts: [(script: PluginPageScript, engineScript: EnginePageScript)]
+
+        /// Whether the access belongs to the plugin as it is installed.
+        func isFor(_ installed: InstalledPlugin) -> Bool {
+            installed.grant == grant && installed.manifest == manifest && installed.installedAt == installedAt && installed.packageURL == packageURL
+        }
     }
 
     /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package, script plugins by the manager and other kinds by their `runtimes`; one whose package or `plugins.json` entry does not read, as one of a kind without a runtime, stays in the file but out of the list. A version whose identifier ends in an engine and that no record pairs, as a build before engine versions leaves it, is paired again with the other plugin of its package's identifier. The runtimes learn the enabled plugins of their kinds at once.
@@ -1071,9 +1081,15 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Site access
 
-    /// The page scripts that a tab's pages run: the Persona's, which every tab runs, then those of the plugins that have access in the tab after one of their commands ran there.
+    /// The page scripts that a tab's pages run: the Persona's, which every tab runs, then those of the plugins that have access in the tab after one of their commands ran there (`accessPageScripts(forTab:)`).
     public func pageScripts(forTab id: UUID) -> [EnginePageScript] {
-        contributions.pageScripts + (tabPageScripts[id] ?? [])
+        contributions.pageScripts + accessPageScripts(forTab: id)
+    }
+
+    /// The page scripts of the plugins whose access in the tab still holds, in the order of the list, which the session gives the tab after the Persona's. An access that no longer holds gives none, although `tabPageScripts` keeps it until its next check ends it: so a web contents that a tab gets after unloading or a change of engine, which ends its access, never takes the scripts of that access from a later change to another tab's.
+    public func accessPageScripts(forTab id: UUID) -> [EnginePageScript] {
+        guard let tab = personaTabs().first(where: { $0.id == id }) else { return [] }
+        return plugins.flatMap { plugin in siteAccess[plugin.id]?[id].flatMap { holds($0, of: plugin.id, in: tab) ? $0.scripts.map(\.engineScript) : nil } ?? [] }
     }
 
     /// Gives a plugin that reaches its sites `whenInvoked` access in the invocation's tab when the user ran the command on a document of one of the Persona's tabs that the granted sites cover: the tab's pages on the host of that document, which run the plugin's page scripts from then on (`tabPageScripts`). The scripts that cover the document also run in it at once, without the user's gesture as a page run, which on WebKit needs the flags for plugins' page runs and otherwise leaves them to the tab's next document on the host. A later command in the tab keeps the access as it is and runs them at once again, so that a document that did not run them, as one that began while the flags switched page runs off, runs them then; each runs once in a document (`accessScripts(of:grant:world:site:)`).
@@ -1088,12 +1104,13 @@ public final class PluginManager: ObservableObject {
             access = current
         } else {
             guard let scheme = document.scheme, let host = document.host(), let site = try? MatchPattern("\(scheme)://\(host)/*") else { return false }
-            access = TabSiteAccess(site: site, contents: contents, grant: installed.grant, manifest: installed.manifest)
+            access = TabSiteAccess(site: site, contents: contents, grant: installed.grant, manifest: installed.manifest, installedAt: installed.installedAt,
+                                   packageURL: installed.packageURL,
+                                   scripts: Self.accessScripts(of: installed.manifest, grant: installed.grant, world: installed.id.pageScriptWorld, site: site))
             siteAccess[installed.id, default: [:]][tab.id] = access
             publishTabPageScripts()
         }
-        for (script, engineScript) in Self.accessScripts(of: access.manifest, grant: access.grant, world: installed.id.pageScriptWorld, site: access.site)
-        where script.covers(document) {
+        for (script, engineScript) in access.scripts where script.covers(document) {
             contents.executeJavaScriptWithoutUserGesture(engineScript.source, inWorld: engineScript.world) { _ in }
         }
         return true
@@ -1120,24 +1137,35 @@ public final class PluginManager: ObservableObject {
         return [access.site]
     }
 
-    /// The plugin's access in `tab`, a tab of the Persona as the browser host gives it, while it holds: the tab keeps the page it had at the command and shows a document on the access's host, and the plugin is enabled with the grant and manifest it had then. Access that no longer holds ends.
+    /// The plugin's access in `tab`, a tab of the Persona as the browser host gives it, while it holds (`holds(_:of:in:)`). Access that no longer holds ends.
     private func currentSiteAccess(of plugin: PluginID, in tab: PluginTab) -> TabSiteAccess? {
         guard let access = siteAccess[plugin]?[tab.id] else { return nil }
-        if let installed = enabledPlugin(plugin), installed.grant == access.grant, installed.manifest == access.manifest,
-           let contents = access.contents, contents === browserHost?.webContents(forTab: tab.id), let document = tab.documentURL, access.site.matches(document) {
-            return access
-        }
+        if holds(access, of: plugin, in: tab) { return access }
         endSiteAccess(of: [plugin], inTab: tab.id)
         return nil
     }
 
-    /// Ends the access that a tab loses with the event: all of it when the tab closes or leaves the Persona's tabs, and otherwise what no longer holds, as once the tab commits a document of another host.
+    /// Whether the access holds in `tab`: the tab keeps the page it had at the command and shows a document on the access's host, and the plugin is enabled as it was installed then, with the grant and manifest it had then.
+    private func holds(_ access: TabSiteAccess, of plugin: PluginID, in tab: PluginTab) -> Bool {
+        guard let installed = enabledPlugin(plugin), access.isFor(installed), let contents = access.contents, contents === browserHost?.webContents(forTab: tab.id),
+              let document = tab.documentURL else { return false }
+        return access.site.matches(document)
+    }
+
+    /// Ends the access that a tab loses with the event: all of it when the tab closes or leaves the Persona's tabs, and otherwise what no longer holds, as once the tab commits a document of another host (`eventTab(_:)`).
     private func endSiteAccess(after event: BrowserEvent) {
         guard let id = event.tab?.id else { return }
         let holders = siteAccess.filter { $0.value[id] != nil }.map(\.key)
         guard !holders.isEmpty else { return }
-        guard event.kind != .tabClosed, let tab = personaTabs().first(where: { $0.id == id }) else { return endSiteAccess(of: holders, inTab: id) }
+        guard event.kind != .tabClosed, let tab = eventTab(event) else { return endSiteAccess(of: holders, inTab: id) }
         for plugin in holders { _ = currentSiteAccess(of: plugin, in: tab) }
+    }
+
+    /// The event's tab as the browser host gives it, showing the document the event is about: the tab posts `addressChanged` before it takes the new committed address, which the event carries.
+    private func eventTab(_ event: BrowserEvent) -> PluginTab? {
+        guard let ref = event.tab, var tab = personaTabs().first(where: { $0.id == ref.id }) else { return nil }
+        if event.kind == .addressChanged { tab.documentURL = ref.url }
+        return tab
     }
 
     private func endSiteAccess(of plugins: [PluginID], inTab id: UUID) {
@@ -1146,12 +1174,12 @@ public final class PluginManager: ObservableObject {
         publishTabPageScripts()
     }
 
-    /// Ends the access of the plugins that are no longer enabled, or whose grant or manifest changed, as at an update, after a change to the list.
+    /// Ends the access of the plugins that are no longer enabled, or no longer as they were installed at the command, as after an update, also one that keeps `plugin.json`, after a change to the list.
     private func pruneSiteAccess() {
         var pruned: [PluginID: [UUID: TabSiteAccess]] = [:]
         for (plugin, tabs) in siteAccess {
             guard let installed = enabledPlugin(plugin) else { continue }
-            let kept = tabs.filter { $0.value.grant == installed.grant && $0.value.manifest == installed.manifest }
+            let kept = tabs.filter { $0.value.isFor(installed) }
             if !kept.isEmpty { pruned[plugin] = kept }
         }
         guard pruned.values.map(\.count).reduce(0, +) != siteAccess.values.map(\.count).reduce(0, +) else { return }
@@ -1159,12 +1187,12 @@ public final class PluginManager: ObservableObject {
         publishTabPageScripts()
     }
 
-    /// Sets `tabPageScripts` from each tab's access, in the order of the plugins in the list (`accessScripts(of:grant:world:site:)`).
+    /// Sets `tabPageScripts` from each tab's access, in the order of the plugins in the list.
     private func publishTabPageScripts() {
         var scripts: [UUID: [EnginePageScript]] = [:]
         for plugin in plugins {
             for (tab, access) in siteAccess[plugin.id] ?? [:] {
-                scripts[tab, default: []] += Self.accessScripts(of: access.manifest, grant: access.grant, world: plugin.id.pageScriptWorld, site: access.site).map(\.engineScript)
+                scripts[tab, default: []] += access.scripts.map(\.engineScript)
             }
         }
         if scripts != tabPageScripts { tabPageScripts = scripts }
@@ -1182,7 +1210,7 @@ public final class PluginManager: ObservableObject {
             if event.cause?.origin == .plugin(id: installed.id.rawValue) { continue }
             let grant = installed.grant
             // Only a plugin that reaches its sites `whenInvoked` needs the tab, whose access its addresses need.
-            let tab = grant.siteAccess == .whenInvoked ? event.tab.flatMap { tab in personaTabs().first { $0.id == tab.id } } : nil
+            let tab = grant.siteAccess == .whenInvoked ? eventTab(event) : nil
             guard let view = event.view(.plugin(tabs: grant.permissions.contains(.tabs), downloads: false, covers: { self.reaches($0, in: tab, of: installed.id, grant: grant) })),
                   eventLimiter.admit(installed.id.rawValue, subject: event.subject, at: Date()) == .allowed else { continue }
             if installed.runsHooks, ai != nil {
