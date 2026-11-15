@@ -41,6 +41,8 @@ public struct PluginManifest: Hashable, Sendable {
     public var aiDataKinds: Set<AIDataKind>
     /// The pages the plugin may reach. Without `tabs`, the plugin still sees the title and address of a tab whose page they cover.
     public var sites: [MatchPattern]
+    /// How the plugin reaches its sites: in every page they cover, or only in a tab where the user runs one of its commands. A web extension's is `listedSites`, since its engines keep its site access.
+    public var siteAccess: SiteAccess
     /// The API permissions of a web extension that no `PluginPermission` stands for, as its manifest names them, such as `storage`. They come with the install, as in other browsers, and the install sheet and Settings list them. Empty for other kinds.
     public var extensionPermissions: [String]
     public var contributions: PluginContributions
@@ -52,8 +54,8 @@ public struct PluginManifest: Hashable, Sendable {
     public var homepage: String?
 
     public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [],
-                sites: [MatchPattern] = [], extensionPermissions: [String] = [], contributions: PluginContributions, events: Set<BrowserEventKind> = [],
-                author: String? = nil, homepage: String? = nil) {
+                sites: [MatchPattern] = [], siteAccess: SiteAccess = .listedSites, extensionPermissions: [String] = [], contributions: PluginContributions,
+                events: Set<BrowserEventKind> = [], author: String? = nil, homepage: String? = nil) {
         self.id = id
         self.name = name
         self.version = version
@@ -61,6 +63,7 @@ public struct PluginManifest: Hashable, Sendable {
         self.permissions = permissions
         self.aiDataKinds = permissions.contains(.ai) ? aiDataKinds : []
         self.sites = sites
+        self.siteAccess = siteAccess
         self.extensionPermissions = extensionPermissions
         self.contributions = contributions
         self.events = events
@@ -150,47 +153,107 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     }
 }
 
+/// How a plugin reaches the pages its granted sites cover (`docs/plugins.md`, Permissions). A grant without sites reaches none either way.
+public enum SiteAccess: String, Hashable, Sendable {
+    /// Every page the sites cover: its page scripts run there, its page calls and page script values reach them, and it sees their tabs' titles and addresses.
+    case listedSites
+    /// Only a tab where the user runs one of the plugin's commands, on the host of the page the command ran on, until the tab commits a document of another host or gets another page, as when it unloads or changes engines. The page scripts run in that page at the command and in the tab's later documents on the host.
+    case whenInvoked
+
+    /// The sentence that the install sheet and Settings show after the sites' for `whenInvoked`, or nil for `listedSites`, whose sites' sentences say it all.
+    public var summary: String? {
+        switch self {
+        case .listedSites: return nil
+        case .whenInvoked: return "Only in a tab where you use one of its commands, until the tab leaves the website"
+        }
+    }
+}
+
 /// What the user granted a plugin: a subset of what its manifest asks for. `PluginContext` checks every call against it.
-public struct PluginGrant: Hashable, Codable, Sendable {
+public struct PluginGrant: Hashable, Sendable {
     public var permissions: Set<PluginPermission>
     public var sites: [MatchPattern]
+    /// How the plugin reaches `sites`: `whenInvoked` when its manifest asks for it or the user chose it at install.
+    public var siteAccess: SiteAccess
 
-    public init(permissions: Set<PluginPermission>, sites: [MatchPattern]) {
+    public init(permissions: Set<PluginPermission>, sites: [MatchPattern], siteAccess: SiteAccess = .listedSites) {
         self.permissions = permissions
         self.sites = sites
+        self.siteAccess = siteAccess
     }
 
     /// Everything the manifest asks for. Built-in plugins get this grant.
     public init(requestedBy manifest: PluginManifest) {
-        self.init(permissions: manifest.permissions, sites: manifest.sites)
+        self.init(permissions: manifest.permissions, sites: manifest.sites, siteAccess: manifest.siteAccess)
     }
 
-    /// What the review of an update to `manifest` offers at first: everything it asks for, except the sites that the installed version asked for and the user left out.
+    /// What the review of a new plugin of `kind` with `manifest` offers at first: everything it asks for, and for a script plugin that asks for every website and has commands to run, its sites only where the user runs one of them, so that such a grant reaches pages one tab at a time unless the user chooses otherwise and confirms it.
+    public init(offeredBy manifest: PluginManifest, kind: PluginKind) {
+        self.init(requestedBy: manifest)
+        if kind == .script, manifest.sites.contains(where: \.coversEverySite), !manifest.contributions.commands.isEmpty { siteAccess = .whenInvoked }
+    }
+
+    /// What the review of an update to `manifest` offers at first: everything it asks for, except the sites that the installed version asked for and the user left out, with the installed grant's site access, or `whenInvoked` when the manifest asks for it.
     public init(updating installed: InstalledPlugin, to manifest: PluginManifest) {
         let leftOut = Set(installed.manifest.sites).subtracting(installed.grant.sites)
-        self.init(permissions: manifest.permissions, sites: manifest.sites.filter { !leftOut.contains($0) })
+        self.init(permissions: manifest.permissions, sites: manifest.sites.filter { !leftOut.contains($0) },
+                  siteAccess: manifest.siteAccess == .whenInvoked ? .whenInvoked : installed.grant.siteAccess)
     }
 
-    /// The grant without what the manifest does not ask for, so that a grant never exceeds the request.
-    func limited(to manifest: PluginManifest) -> PluginGrant {
-        PluginGrant(permissions: permissions.intersection(manifest.permissions), sites: sites.filter(manifest.sites.contains))
+    /// Whether the review, starting from this grant, offers the switch for `whenInvoked` to a plugin of `kind` with `manifest`: a script plugin with sites whose manifest asks for its sites as listed and has commands, without which the switch would leave it no page to reach, or whose grant starts with the switch on, as in an update of a plugin that the user limited and whose new version has no commands, so that the user can switch it off.
+    public func offersSiteAccessSwitch(for manifest: PluginManifest, kind: PluginKind) -> Bool {
+        kind == .script && !manifest.sites.isEmpty && manifest.siteAccess == .listedSites && (!manifest.contributions.commands.isEmpty || siteAccess == .whenInvoked)
     }
 
-    /// Whether the granted sites cover the page at `url`.
+    /// The grant without what the manifest of a plugin of `kind` does not ask for, so that a grant never exceeds the request: a manifest that asks for `whenInvoked` gets no more, and a plugin of a runtime's kind, such as a web extension, whose engines keep its site access, reaches its sites as listed.
+    func limited(to manifest: PluginManifest, kind: PluginKind) -> PluginGrant {
+        PluginGrant(permissions: permissions.intersection(manifest.permissions), sites: sites.filter(manifest.sites.contains),
+                    siteAccess: kind != .script ? .listedSites : manifest.siteAccess == .whenInvoked ? .whenInvoked : siteAccess)
+    }
+
+    /// Whether the granted sites cover the page at `url`. With `whenInvoked`, the plugin reaches it only in a tab where the user ran one of its commands on its host (`PluginManager`).
     func covers(_ url: URL) -> Bool {
         sites.contains { $0.matches(url) }
     }
 
-    /// What the grant lets the plugin do, one sentence for each permission, in a fixed order, and for each site.
+    /// What the grant lets the plugin do, one sentence for each permission, in a fixed order, for each site, and, with `whenInvoked` and sites, for its site access.
     public var summaries: [String] {
-        PluginPermission.allCases.filter(permissions.contains).map(\.summary) + sites.map(\.accessSummary)
+        PluginPermission.allCases.filter(permissions.contains).map(\.summary) + sites.map(\.accessSummary) + siteAccessSummaries
     }
 
-    /// The reason that Touch ID or the login password states before Arch gives the grant to `pluginName`, at install and when a web extension asks while it runs, or nil when the grant needs no confirmation: access to every website and to native apps need it.
+    /// The sentence of the site access after the sites' sentences, for `whenInvoked` with sites.
+    var siteAccessSummaries: [String] {
+        sites.isEmpty ? [] : [siteAccess.summary].compactMap { $0 }
+    }
+
+    /// The reason that Touch ID or the login password states before Arch gives the grant to `pluginName`, at install and when a web extension asks while it runs, or nil when the grant needs no confirmation: access to every website and to native apps need it. A grant of every website with `whenInvoked` reaches a page only after the user runs one of the plugin's commands on it, so it needs none.
     public func confirmationReason(for pluginName: String) -> String? {
-        let access = [sites.contains(where: \.coversEverySite) ? "run scripts on every website" : nil,
+        let access = [siteAccess == .listedSites && sites.contains(where: \.coversEverySite) ? "run scripts on every website" : nil,
                       permissions.contains(.nativeMessaging) ? "exchange messages with apps on this Mac" : nil].compactMap { $0 }
         guard !access.isEmpty else { return nil }
         return "let \u{201C}\(pluginName)\u{201D} \(access.joined(separator: " and "))"
+    }
+}
+
+/// A grant encodes as `plugins.json` keeps it: `{"permissions": […], "sites": […]}`, or with `whenInvoked` its sites under `sitesWhenInvoked` in place of `sites`, so that a build before site access modes, which needs `sites`, keeps such an entry as one it cannot read rather than run the plugin in every page of its sites.
+extension PluginGrant: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case permissions, sites, sitesWhenInvoked
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let permissions = try container.decode(Set<PluginPermission>.self, forKey: .permissions)
+        if let sites = try container.decodeIfPresent([MatchPattern].self, forKey: .sites) {
+            self.init(permissions: permissions, sites: sites)
+        } else {
+            self.init(permissions: permissions, sites: try container.decode([MatchPattern].self, forKey: .sitesWhenInvoked), siteAccess: .whenInvoked)
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(permissions, forKey: .permissions)
+        try container.encode(sites, forKey: siteAccess == .whenInvoked ? .sitesWhenInvoked : .sites)
     }
 }

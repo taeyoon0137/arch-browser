@@ -34,6 +34,7 @@ struct ScriptManifest {
         let summary = try object.string("summary")
         let (permissions, aiDataKinds) = try Self.permissions(object.value("permissions"))
         let sites = try object.strings("sites").map(MatchPattern.init)
+        let siteAccess = try Self.siteAccess(object.optionalString("siteAccess"))
         let events = try object.strings("events").map { name in
             guard let kind = BrowserEventKind(rawValue: name) else { throw invalidManifest("events lists “\(name)”, which is not an event Arch sends") }
             return kind
@@ -44,9 +45,18 @@ struct ScriptManifest {
         try object.finish()
         guard background != nil || contributions.commands.isEmpty else { throw invalidManifest("commands need a background script") }
         guard background != nil || events.isEmpty else { throw invalidManifest("events need a background script") }
+        // Without a command to run, a plugin that reaches its sites only where the user runs one would reach none.
+        guard siteAccess == .listedSites || !contributions.commands.isEmpty else { throw invalidManifest("siteAccess whenInvoked needs contributes.commands") }
         manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, sites: sites,
-                                  contributions: contributions, events: Set(events))
+                                  siteAccess: siteAccess, contributions: contributions, events: Set(events))
         self.background = background
+    }
+
+    /// `siteAccess` is `listedSites`, the default, or `whenInvoked`.
+    private static func siteAccess(_ name: String?) throws -> SiteAccess {
+        guard let name else { return .listedSites }
+        guard let siteAccess = SiteAccess(rawValue: name) else { throw invalidManifest("siteAccess must be listedSites or whenInvoked") }
+        return siteAccess
     }
 
     /// The data kinds beyond text that the `ai` permission may list, those whose content plugins reach: the text of pages through page calls, and selected text through commands.

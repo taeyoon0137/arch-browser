@@ -268,7 +268,8 @@ private struct PluginSection: View {
         let isPair = plugin.counterpart != nil
         let missingEngine = plugins.missingEngine(of: plugin.id)
         let joinCandidates = plugins.joinCandidates(of: plugin.id)
-        let reloadable = plugin.isEnabled && !plugin.manifest.contributions.pageScripts.isEmpty
+        // A plugin that reaches its sites only where the user runs one of its commands runs no page script in a tab before that.
+        let reloadable = plugin.isEnabled && plugin.grant.siteAccess == .listedSites && !plugin.manifest.contributions.pageScripts.isEmpty
         let versionEngines = !isPair && plugin.kind == .webExtension ? plugins.versionEngines(of: plugin.id).filter { $0 != missingEngine } : []
         let canJoin = !isPair && plugin.kind == .webExtension && !joinCandidates.isEmpty
         let separable = versions.first { $0.id != plugin.id }.map { $0.manifest.id != plugin.manifest.id } ?? false

@@ -1,4 +1,4 @@
-// Page scripts on WebKit. Each world becomes a content world of its own, so the page and other worlds cannot see its globals, and a script message handler with reply, added to that world only, carries its channel to the app. `executeJavaScript` runs without a user gesture through a private member behind the private API flags, and otherwise with the gesture WebKit's public evaluation gives; `executeJavaScriptWithoutUserGesture` runs only through that member, behind flags of its own, and otherwise runs nothing.
+// Page scripts on WebKit. Each world becomes a content world of its own, so the page and other worlds cannot see its globals, and a script message handler with reply, added to that world only, carries its channel to the app. `executeJavaScript` runs without a user gesture through a private member behind the private API flags, and otherwise with the gesture WebKit's public evaluation gives; `executeJavaScriptWithoutUserGesture` and `postPageScriptMessage` run only through that member, behind flags of their own, and otherwise run nothing.
 import ARCHEngine
 import ARCHPrivateAPI
 import WebKit
@@ -107,6 +107,9 @@ extension WebKitWebContents {
         userContent.setPageScripts(scripts)
     }
 
+    /// The content controller, which a popup shares with its opener.
+    public var pageScriptListID: ObjectIdentifier { ObjectIdentifier(userContent) }
+
     /// The channel script runs first and defines the channel only where the document has none. The function runs without a user gesture while the private API flags allow it (`WebKitUserGestureAPI`), so that the page's handlers for the events it dispatches get no user activation.
     public func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
         let source = Self.runSource(calling: script)
@@ -132,12 +135,15 @@ extension WebKitWebContents {
         WebKitPageScripts.channelSource + "\n(() => { const result = \(WebKitPageScripts.call(function)); return typeof result === \"string\" ? result : null; })()"
     }
 
-    public func postPageScriptMessage(_ json: String, toWorld world: String) {
-        webView.callAsyncJavaScript("globalThis.__archPageScriptDeliver?.(json)", arguments: ["json": json], in: nil, in: WebKitPageScripts.contentWorld(world))
+    /// Delivers through the evaluation without a user gesture, only while the private API flags allow plugins' page runs, and otherwise delivers nothing: the public `callAsyncJavaScript` runs the listeners with the user's gesture, so a listener's `click()` on a file input opens the chooser. The JSON text reaches the delivery function as a string literal, which `JSON.parse` reads, so its keys stay data.
+    public func postPageScriptMessage(_ json: String, toWorld world: String) throws {
+        guard WebKitUserGestureAPI.allowsPluginRuns else { throw EngineUserGestureError() }
+        let literal = String(decoding: try JSONEncoder().encode(json), as: UTF8.self)
+        WebKitUserGestureAPI.evaluateWithoutUserGesture("globalThis.__archPageScriptDeliver?.(\(literal)); null", in: webView, world: WebKitPageScripts.contentWorld(world)) { _ in }
     }
 }
 
-/// WebKit's evaluation without a user gesture, a private member registered on the flags page with two features: the agents' page script, which falls back to the public evaluation without it, and the scripts that plugins run once in pages, which do not run without it. The public `evaluateJavaScript(_:in:in:completionHandler:)` runs a script as if the user had clicked, so a page's handlers for the events that script dispatches, and the timers they start within a second, get transient user activation, which lets a page write the clipboard or open a share sheet, a passkey prompt, or fullscreen.
+/// WebKit's evaluation without a user gesture, a private member registered on the flags page with two features: the agents' page script, which falls back to the public evaluation without it, and the scripts that plugins run once in pages and the messages they post to page scripts, which neither run nor arrive without it. The public `evaluateJavaScript(_:in:in:completionHandler:)` and `callAsyncJavaScript(_:arguments:in:in:completionHandler:)` run a script as if the user had clicked, so a page's handlers for the events that script dispatches, and the timers they start within a second, get transient user activation, which lets a page write the clipboard or open a share sheet, a passkey prompt, or fullscreen.
 enum WebKitUserGestureAPI {
     static let apiID = "webkit.evaluateWithoutUserGesture"
     static let featureID = "webkit.pageScriptsWithoutUserGesture"
@@ -150,13 +156,13 @@ enum WebKitUserGestureAPI {
             WKWebView.instancesRespond(to: selector)
         })
         flags.register(PrivateAPIFeature(id: featureID, name: "Page scripts without the user's gesture", apiIDs: [apiID]))
-        flags.register(PrivateAPIFeature(id: pluginRunsFeatureID, name: "Scripts that plugins run once in pages", apiIDs: [apiID]))
+        flags.register(PrivateAPIFeature(id: pluginRunsFeatureID, name: "Plugins' page runs and messages", apiIDs: [apiID]))
     }
 
     /// Whether the feature may run now. The flags live on the main thread, where web views run scripts.
     static var isAllowed: Bool { MainActor.assumeIsolated { PrivateAPIFlags.shared.allows(featureID) } }
 
-    /// Whether plugins' page runs may run now.
+    /// Whether plugins' page runs and messages may run now.
     static var allowsPluginRuns: Bool { MainActor.assumeIsolated { PrivateAPIFlags.shared.allows(pluginRunsFeatureID) } }
 
     /// Evaluates `source` in the main frame in `world` with no user gesture, through the member the availability check looked up.

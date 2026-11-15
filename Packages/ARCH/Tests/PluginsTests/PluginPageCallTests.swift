@@ -9,7 +9,7 @@ import WebKit
 @testable import Plugins
 
 /// A page that runs the scripts the engine would run in its main frame in a JavaScriptCore context of its own, with `location` for its address and a channel whose `send` records what the scripts send, and records the values posted to its worlds.
-private final class ScriptedPage: EngineWebContents {
+final class ScriptedPage: EngineWebContents {
     /// The address of the document that scripts run in.
     var address: String
     /// Runs before each script, as a navigation that comes while the engine runs it.
@@ -18,7 +18,7 @@ private final class ScriptedPage: EngineWebContents {
     var fails = false
     /// Whether the engine answers runs at all; WebKit does not while a script loops.
     var answers = true
-    /// Whether the engine could run a script only with the user's gesture, as WebKit while the flags switch plugins' page runs off.
+    /// Whether the engine could run a script or deliver a message only with the user's gesture, as WebKit while the flags switch plugins' page runs off.
     var needsGesture = false
     /// How long the engine takes to answer each run.
     var delay: TimeInterval = 0
@@ -54,7 +54,8 @@ private final class ScriptedPage: EngineWebContents {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { completion(reply) }
     }
 
-    func postPageScriptMessage(_ json: String, toWorld world: String) {
+    func postPageScriptMessage(_ json: String, toWorld world: String) throws {
+        guard !needsGesture else { throw EngineUserGestureError() }
         posts.append((json, world))
     }
 
@@ -116,7 +117,7 @@ private final class ScriptedPage: EngineWebContents {
 }
 
 /// The parts of `location` that the page's check reads, as a browser writes them for `address`.
-private func pageLocation(_ address: String) -> [String: String] {
+func pageLocation(_ address: String) -> [String: String] {
     let url = URL(string: address)!
     let path = url.path()
     return ["protocol": url.scheme!.lowercased() + ":", "hostname": url.host()?.lowercased() ?? "", "pathname": path.isEmpty ? "/" : path, "href": address]
@@ -124,7 +125,7 @@ private func pageLocation(_ address: String) -> [String: String] {
 
 /// The Persona's tabs and their pages, which the tests set.
 @MainActor
-private final class PageHost: PluginBrowserHost {
+final class PageHost: PluginBrowserHost {
     var tabs: [PluginTab] = []
     var pages: [UUID: ScriptedPage] = [:]
 
@@ -267,7 +268,7 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         withExtendedLifetime(unlimited) {}
     }
 
-    /// A run with the user's gesture would give the page's handlers user activation, so an engine that cannot run the script without it runs nothing, as WebKit while the flags switch plugins' page runs off.
+    /// A run or a message with the user's gesture would give the page's handlers user activation, so an engine that cannot run the script or deliver the message without it does neither, as WebKit while the flags switch plugins' page runs off.
     @Test func runsNothingWhereTheEngineWouldGiveTheUsersGesture() async throws {
         let manager = manager()
         let context = try context(PageCallsPlugin.self, in: manager)
@@ -276,6 +277,8 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         page.needsGesture = true
         await #expect(throws: PluginError.pageRunUnavailable) { _ = try await context.runPageScript(.source("ran = true; return 1;"), in: tab.id) }
         #expect(page.worlds.isEmpty && page.context.evaluateScript("typeof ran")?.toString() == "undefined")
+        #expect(throws: PluginError.pageRunUnavailable) { try context.postMessage(.number(1), toTab: tab.id) }
+        #expect(page.posts.isEmpty)
     }
 
     @Test func reportsWhatTheScriptThrew() async throws {

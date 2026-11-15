@@ -78,12 +78,14 @@ public protocol EngineWebContents: AnyObject {
     var pageScriptDelegate: (any EnginePageScriptDelegate)? { get set }
     /// Replaces the scripts that run in each new document, from the next document on. On WebKit, a web contents and those its pages open share one set, so replacing it in one replaces it in all.
     func setPageScripts(_ scripts: [EnginePageScript])
+    /// Names the set of page scripts that `setPageScripts(_:)` replaces: web contents with the same identifier share one, as on WebKit a web contents and those its pages open do.
+    var pageScriptListID: ObjectIdentifier { get }
     /// Calls a JavaScript function expression, such as `(channel) => …`, with the channel of `world` in the main frame's current document, opening one there if the world has none, and passes the string the function returns, or nil for any other value. Fails when the function throws or the main frame has no document to run it in.
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
     /// As `executeJavaScript(_:inWorld:completion:)`, for a function that must run without the user's gesture, which would give the page's handlers for the events it dispatches user activation, as a script that a plugin runs once: an engine that cannot run it so runs nothing and fails with `EngineUserGestureError`. WebKit runs it through its evaluation without a user gesture, a private member, only while the private API flags allow plugins' page runs.
     func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
-    /// Delivers a value, as JSON text, to the listeners of a world's channel in the main frame's current document. Nothing happens without them.
-    func postPageScriptMessage(_ json: String, toWorld world: String)
+    /// Delivers a value, as JSON text, to the listeners of a world's channel in the main frame's current document, without the user's gesture, as a plugin's message: an engine that could deliver it only with the gesture, which would give the listeners and the page's handlers for the events they dispatch user activation, delivers nothing and throws `EngineUserGestureError`. Nothing happens without listeners. WebKit delivers it through its evaluation without a user gesture, only while the private API flags allow plugins' page runs.
+    func postPageScriptMessage(_ json: String, toWorld world: String) throws
     /// Reads the main frame's visible text, up to `limit` characters, with its address, title, language, and selection. Fields and editable areas are never read. Fails with `EngineReadableContentError.unreadable` when the page has no document a script can read.
     func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void)
     func captureViewport(completion: @escaping (NSImage?) -> Void)
@@ -105,6 +107,8 @@ public protocol EngineWebContents: AnyObject {
 public extension EngineWebContents {
     /// A web contents without trusted input, such as a stand-in that has no page yet, offers none.
     var input: (any EngineInput)? { nil }
+    /// A web contents keeps its own page scripts unless its engine shares them.
+    var pageScriptListID: ObjectIdentifier { ObjectIdentifier(self) }
 }
 
 public protocol EngineDevTools: AnyObject {

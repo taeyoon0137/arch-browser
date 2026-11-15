@@ -232,7 +232,7 @@ public struct PluginContributionIndex: Sendable {
     private let commands: [Attributed<PluginCommand>]
     private let menuItems: [Attributed<LocatedEntry>]
     public let sidebarItems: [Attributed<PluginSidebarItem>]
-    /// The page scripts as the engines run them, for every web contents of the Persona. Each runs in its plugin's world, and only in documents whose address one of its patterns and one of the plugin's granted sites cover. A script whose source is not a function body on its own is left out.
+    /// The page scripts as the engines run them, for every web contents of the Persona. Each runs in its plugin's world, and only in documents whose address one of its patterns and one of the plugin's granted sites cover. A script whose source is not a function body on its own is left out, and so are the scripts of a plugin that reaches its sites `whenInvoked`, which run only in the tabs where the user runs one of its commands (`PluginManager.tabPageScripts`).
     public let pageScripts: [EnginePageScript]
 
     /// A menu item with its location.
@@ -271,7 +271,7 @@ public struct PluginContributionIndex: Sendable {
                 return commands.contains { $0.id == id }
             }.map { plugin.attributed($0) }
         }
-        pageScripts = enabled.flatMap { plugin in
+        pageScripts = enabled.filter { $0.grant.siteAccess == .listedSites }.flatMap { plugin in
             plugin.manifest.contributions.pageScripts.compactMap { $0.engineScript(world: plugin.id.pageScriptWorld, sites: plugin.grant.sites) }
         }
     }

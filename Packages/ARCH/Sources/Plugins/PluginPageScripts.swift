@@ -11,21 +11,28 @@ extension PluginID {
 }
 
 extension PluginPageScript {
-    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address as `covers(_:)` and the granted sites do, then runs the script's body with the world's channel as `arch`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
+    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address as `covers(_:)` and the granted sites do, and, with `within`, as one of those patterns does too, as the host of a tab's `whenInvoked` access does, then runs the script's body with the world's channel as `arch`. With `once`, it runs the body only the first time it runs in a frame's world under that key, so a script that a command runs at once in a document that already ran it from the tab's list runs no second time. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
     @MainActor
-    func engineScript(world: String, sites: [MatchPattern]) -> EnginePageScript? {
+    func engineScript(world: String, sites: [MatchPattern], within: [MatchPattern]? = nil, once key: String? = nil) -> EnginePageScript? {
         guard FunctionBodyCheck.shared.accepts(source) else { return nil }
         let guarded = """
         (channel) => {
           const covers = \(MatchPattern.javaScriptMatcher);
           if (!covers(location, \(MatchPattern.javaScriptLiteral(matches))) || covers(location, \(MatchPattern.javaScriptLiteral(excludes)))
-            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))) return;
+            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(PluginPageRun.withinCheck(within))) return;\(Self.onceCheck(key))
           ((arch) => {
         \(source)
           })(channel);
         }
         """
         return EnginePageScript(world: world, source: guarded, injectionTime: runAt, mainFrameOnly: !allFrames)
+    }
+
+    /// The lines that end the function when the frame's world already ran a script under `key` and otherwise mark it, or none without a key.
+    private static func onceCheck(_ key: String?) -> String {
+        guard let key else { return "" }
+        let literal = String(decoding: (try? JSONEncoder().encode(key)) ?? Data("\"\"".utf8), as: UTF8.self)
+        return "\n  if (globalThis[\(literal)]) return;\n  globalThis[\(literal)] = true;"
     }
 }
 
@@ -47,8 +54,8 @@ enum PluginPageRun {
         case outside
     }
 
-    /// The function that the engine calls with the world's channel, made off the main actor, which neither reading a large package file nor parsing it then holds up. Throws `PluginError.invalidPageScript` for a path that names no text file of the package and for a source that is not a function body on its own.
-    static func function(running source: Source, sites: [MatchPattern]) async throws -> String {
+    /// The function that the engine calls with the world's channel, made off the main actor, which neither reading a large package file nor parsing it then holds up, and which runs only where `sites` and, if given, `within` cover the document. Throws `PluginError.invalidPageScript` for a path that names no text file of the package and for a source that is not a function body on its own.
+    static func function(running source: Source, sites: [MatchPattern], within: [MatchPattern]? = nil) async throws -> String {
         try await Task.detached {
             let text: String
             switch source {
@@ -59,16 +66,21 @@ enum PluginPageRun {
                 text = read
             }
             guard FunctionBodyCheck().accepts(text) else { throw PluginError.invalidPageScript("The script does not parse as the body of a function, as a page script must.") }
-            return function(running: text, sites: sites)
+            return function(running: text, sites: sites, within: within)
         }.value
     }
 
-    /// The function for a source that is a function body on its own. Like a page script's guard, it checks the document's `location` against the granted sites first and runs nothing outside them. It returns JSON text: `{"value": …}`, `{"error": text}` with what the body threw, as the bridge describes a listener's, or `{"outside": true}`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it.
-    private static func function(running source: String, sites: [MatchPattern]) -> String {
+    /// The condition that no pattern of `within` covers the document's address, which a guard joins to its check of the sites so that it runs nothing then, or nothing without `within`.
+    static func withinCheck(_ within: [MatchPattern]?) -> String {
+        within.map { " || !covers(location, \(MatchPattern.javaScriptLiteral($0)))" } ?? ""
+    }
+
+    /// The function for a source that is a function body on its own. Like a page script's guard, it checks the document's `location` against the granted sites, and `within` when given, first and runs nothing outside them. It returns JSON text: `{"value": …}`, `{"error": text}` with what the body threw, as the bridge describes a listener's, or `{"outside": true}`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it.
+    private static func function(running source: String, sites: [MatchPattern], within: [MatchPattern]?) -> String {
         """
         (channel) => {
           const covers = \(MatchPattern.javaScriptMatcher);
-          if (!covers(location, \(MatchPattern.javaScriptLiteral(sites)))) return '{"outside":true}';
+          if (!covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(withinCheck(within))) return '{"outside":true}';
           const failed = (text) => JSON.stringify({ error: text });
           let value;
           try {

@@ -110,7 +110,7 @@ Each consumer sees an event through the view its access allows. `BrowserEvent.vi
 | Consumer | Tabs | Downloads | Cause | Events from excluded sites |
 |---|---|---|---|---|
 | Arch's own code (`BrowserHooks`, the registry, the agent service) | Everything | Everything | Everything | Each consumer applies its rule |
-| A hook script or a script plugin | Identifiers, kind, engine, Persona, and space; the address with `tabs`, or when the grant's sites cover the page, as with plugin tabs | With `downloads` (plugins) or `tabs` (hooks): name, type, size, and both addresses; otherwise identifiers only | None | Hooks with `agent` get none (hook decision 14); the others get them as above |
+| A hook script or a script plugin | Identifiers, kind, engine, Persona, and space; the address with `tabs`, or when the grant's sites cover the page, for a plugin with `whenInvoked` only in a tab where it has access, as with plugin tabs | With `downloads` (plugins) or `tabs` (hooks): name, type, size, and both addresses; otherwise identifiers only | None | Hooks with `agent` get none (hook decision 14); the others get them as above |
 | An outside program with the events scope (Outside programs) | Its own agent tabs and tabs shared with it: the tab handle and reduced address (`AgentAddress.reduced`); the user's other tabs in the grant's Persona: a watch ID and host only | Only downloads started by its own agent tabs: name as an untrusted block, type, size, and the source's host | `byThisClient` when its own action causes the event | No host or address, with `excluded: true` |
 
 A hook script's event, with `tabs`:

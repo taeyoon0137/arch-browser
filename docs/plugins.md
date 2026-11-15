@@ -6,7 +6,7 @@
 - A plugin can add sidebar items, palette commands, menu items, keyboard shortcuts, settings, panels, and page scripts that run on both engines. Plugins have more capabilities than browser extensions. Each capability uses the app's own interface.
 - Built-in plugins ship with the app. Later features can ship as built-in plugins and reach the browser only through the plugin API.
 - Installed plugins belong to one Persona. Manifest V3 web extensions are one kind of installed plugin.
-- Plugins use public APIs, with one exception: a script that a plugin runs once in a WebKit page goes through the engine's evaluation without a user gesture, a private member behind a feature flag of its own on `flags://`, and does not run while its flags are off (see Page scripts).
+- Plugins use public APIs, with one exception: a script that a plugin runs once in a WebKit page, and a message that it posts to its page scripts there, go through the engine's evaluation without a user gesture, a private member behind a feature flag of its own on `flags://`, and neither runs nor arrives while its flags are off (see Page scripts).
 
 ## Principles
 
@@ -69,7 +69,7 @@ A script plugin's `plugin.json`:
 | `apiVersion` | The plugin API version the package targets. The app supports versions up to `PluginManifest.apiVersion` |
 | `permissions` | Capabilities from the permission table below |
 | `sites` | Match patterns (see below) for the pages the plugin's page scripts and page calls may reach |
-| `siteAccess` | `listedSites` (every page that matches `sites`) or `whenInvoked` (only the selected tab's site after the user runs one of the plugin's commands there) |
+| `siteAccess` | `listedSites` (every page that matches `sites`, the default) or `whenInvoked` (only a tab where the user runs one of the plugin's commands, on the host of the page it ran on, until the tab leaves that host) |
 | `network` | Hosts the plugin may fetch from through `arch.net.fetch` |
 | `events` | Events that start the plugin's background code |
 | `background` | The background script. A plugin without one can still add page scripts, settings, and panels |
@@ -79,7 +79,7 @@ Symbols use SF Symbols names, so plugins need no image files. A package may stil
 
 ### Keys the script runtime reads
 
-The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions`, `sites`, `events` (the browser event kinds of `docs/hooks.md`, Browser events, which need a background script), and `background`, and these contributions:
+The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions`, `sites`, `siteAccess` (`listedSites`, the default, or `whenInvoked`, which needs commands, since a plugin without one would reach no page), `events` (the browser event kinds of `docs/hooks.md`, Browser events, which need a background script), and `background`, and these contributions:
 
 | Key | Fields |
 |---|---|
@@ -89,7 +89,7 @@ The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions
 | `settings` | `key`, `title`, `help`, `type` (`toggle`, `text`, `number` with optional `min` and `max`, `choice` with its `options`, or `secret`), `default` (false, empty text, the minimum or 0, or the first option when missing; none for a secret) |
 | `pageScripts` | `matches`, `excludes`, `js`, `runAt` (`documentStart`, or `documentEnd` by default), `allFrames` |
 
-- Arch refuses every other key until its implementation reads it, such as `siteAccess`, `network`, `settingsPage`, a command's `takesArgument`, a page script's `css`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, `clipboard`, and `ai`, by name, and `ai` also as an object with one key, `{"ai": ["page", "selection"]}`, that lists the data kinds beyond text that its requests carry: `page` for the text of pages that its page calls read and `selection` for selected text, and no other kind. `events` refuses a kind the bus does not have, and the plugin's own `settingChanged` is not built yet.
+- Arch refuses every other key until its implementation reads it, such as `network`, `settingsPage`, a command's `takesArgument`, a page script's `css`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, `clipboard`, and `ai`, by name, and `ai` also as an object with one key, `{"ai": ["page", "selection"]}`, that lists the data kinds beyond text that its requests carry: `page` for the text of pages that its page calls read and `selection` for selected text, and no other kind. `events` refuses a kind the bus does not have, and the plugin's own `settingChanged` is not built yet.
 - A `name` loses the spaces at either end, so every view shows it alike, and one of nothing but spaces gives the plugin its `id` as its name, which every view then shows, as a web extension takes its identifier. An empty `name` is refused, as empty text in any field is (`name must not be empty`), and as Chromium refuses an extension's empty name.
 - Commands need a background script; panels do not. Menu items name listed commands, and a sidebar item names a listed command or an HTML file of the package, not both. Command and sidebar item identifiers and setting keys are unique.
 - A path names a regular file of the package: names separated by `/`, none empty, `.`, or `..`, and no link leading out of the package. Each file in a page script's `js` becomes a separate page script with the entry's patterns and timing. It must be UTF-8 text that parses as a function body on its own, which both the review and the index check.
@@ -107,7 +107,7 @@ The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions
 
 - Schemes and hosts ignore case; paths do not.
 - Text that breaks these rules throws `PluginError.invalidMatchPattern` with the text.
-- Without `tabs`, a plugin still sees the title and address of a tab whose page its granted sites cover.
+- Without `tabs`, a plugin still sees the title and address of a tab whose page its granted sites cover, and with `whenInvoked` only where it has access in the tab (see Permissions).
 
 ### Shortcuts
 
@@ -144,9 +144,9 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 - WebKit: each script becomes a `WKUserScript` in the plugin's `WKContentWorld.world(name:)`, so the page and other plugins cannot see its globals. Messages from the script go through a `WKScriptMessageHandlerWithReply` added only to that world. Arch reaches the script with `evaluateJavaScript(_:in:in:)` in the same world. A style file becomes a page script in the same world that adds the file's text, passed as a JSON string, in a `<style>` element, so it follows the plugin's script list and its text never runs as script. A page that a tab opens uses the tab's content controller, so the two share one script list.
 - Chromium: CEF 156's public API has no isolated worlds (needs verification). The app passes the scripts to the renderer in `extra_info` when it creates the browser, and in a process message to each frame when they change and to each frame created after a change. CEF does not order that message before the frame's first document. In a renderer process that had none of the browser's frames, such as after a cross-site navigation, the first document may therefore still run the scripts the browser was created with, such as a disabled plugin's (needs verification). The helper's `CefRenderProcessHandler::OnContextCreated` runs them in the page's main world before the page's own scripts. A native function made with `CefV8Value::CreateFunction` carries messages to the browser process as `CefProcessMessage`s. The helper passes it to each world's channel script as an argument, so it never reaches `window`. The channel keeps it, its delivery functions, and the built-ins it calls in a closure. The helper makes each document's channel opener before the page's scripts run, so a channel that `executeJavaScript(_:inWorld:completion:)` opens after the page has run still calls the built-ins as they were before the page ran. Document-end scripts wait for `DOMContentLoaded`.
 - The Chromium difference: the page can see what a plugin's script changes in the DOM and can replace built-ins and DOM methods the script calls later. Through them the page can also see the values the script sends and receives. For example, a `then` getter on `Object.prototype` receives each object or array reply, because a promise reads `then` when it settles with one. A plugin therefore sends a Chromium page script only what the page may see. The channel's closure stays private, so the page cannot send through the channel unless the script hands it over. Plugins treat pages as untrusted on both engines. The app treats every page script message as page input. The difference therefore affects plugin reliability and what a plugin can keep from the page, not app safety. A CEF patch that adds isolated worlds can join Phase VI if a plugin needs one.
-- A script that a plugin runs once with `runPageScript(_:in:)` goes through `executeJavaScriptWithoutUserGesture(_:inWorld:completion:)`, so neither the script nor the page's handlers for the events it dispatches get user activation, which would let them write the clipboard, open a popup, or ask for fullscreen or a passkey without the permissions for them. On WebKit it runs through the evaluation without a user gesture only while the private API flags allow plugins' page runs (`webkit.pluginPageRunsWithoutUserGesture`, a feature flag apart from the agents' page script's); with a flag off, or the member gone, it runs nothing and the call throws `pageRunUnavailable`, since the public evaluation would give it a gesture. Chromium's helper runs it from no user input, which check 76 of `docs/agents.md` is to confirm gives the page no user activation.
-- With `listedSites`, the scripts join every matching tab's script list. With `whenInvoked`, the host runs them in the selected tab's current page through `executeJavaScript(_:inWorld:completion:)` when the user runs one of that plugin's commands there. They stay in that tab's list until it leaves the site.
-- Scripts change from the next document a tab loads. Enabling a plugin does not reload open pages; Settings offers Reload Matching Tabs. Disabling a plugin closes its message channel at once. Running scripts cannot reach it and stop at the next load.
+- A script that a plugin runs once with `runPageScript(_:in:)` goes through `executeJavaScriptWithoutUserGesture(_:inWorld:completion:)`, so neither the script nor the page's handlers for the events it dispatches get user activation, which would let them write the clipboard, open a popup, or ask for fullscreen or a passkey without the permissions for them. On WebKit it runs through the evaluation without a user gesture only while the private API flags allow plugins' page runs (`webkit.pluginPageRunsWithoutUserGesture`, a feature flag apart from the agents' page script's); with a flag off, or the member gone, it runs nothing and the call throws `pageRunUnavailable`, since the public evaluation would give it a gesture. Chromium's helper runs it from no user input, which check 76 of `docs/agents.md` is to confirm gives the page no user activation. A message that a plugin posts with `postMessage(_:toTab:)` reaches its page scripts' `arch.onMessage` listeners through `postPageScriptMessage(_:toWorld:)` the same way: WebKit's public `callAsyncJavaScript` runs the listeners with the user's gesture, so a listener's `click()` on a file input opens the chooser (`WebKitFileChooserTests`), and the WebKit adapter delivers it through the evaluation without a user gesture under the same flag, and with the flag off delivers nothing and the call throws `pageRunUnavailable`; Chromium's helper delivers it from a process message, not from the user's input, which should give the listeners no user activation (needs verification, as check 76 of `docs/agents.md` is for runs).
+- With `listedSites`, the scripts join every matching tab's script list. With `whenInvoked`, they join no tab's list until the user runs one of the plugin's commands in a tab whose document the granted sites cover: the manager then runs those that cover the document in its main frame at once, through `executeJavaScriptWithoutUserGesture(_:inWorld:completion:)` as a page run, which on WebKit needs the flags for plugins' page runs and messages and otherwise leaves them to the next document, and again at each later command in the tab, so that a document that did not run them, as one that began while the flags switched page runs off, runs them then, each script once in a document, and adds them to that tab's list (`PluginManager.tabPageScripts`, which the session gives the tab after the Persona's scripts through `pageScripts(forTab:)`), each with a check of the access's host besides its patterns and the granted sites, before the command runs. They leave the list when the access ends. On WebKit a tab shares its list with the pages it opens, and they with theirs (`pageScriptListID`), so the plugin's scripts in that list would run in those pages' documents on the host too, where they could read the page and hand what they read to the tab with the access, as through the site's storage. A tab whose web contents shares its list with another tab's therefore takes the Persona's scripts only, and its access's scripts run only at the plugin's commands, until the other tab closes; the session sets the lists of tabs with access again whenever a tab joins or leaves. On Chromium a page that a tab opens starts with the tab's scripts, which the bridge passes in its extra info, and takes its own list once it joins the session, which CEF may not order before its first document (needs verification), so that document may run the access's scripts on the host.
+- Scripts change from the next document a tab loads. Enabling a plugin does not reload open pages; Settings offers Reload Matching Tabs for a plugin with `listedSites`. Disabling a plugin closes its message channel at once. Running scripts cannot reach it and stop at the next load.
 - The session gives each web contents it creates for a tab the page scripts of its Persona's enabled plugins, because Chromium receives them only with the browser it creates. A tab also takes its Persona's scripts when it joins the session, since a page that another page opens, such as one the preview panel opens, starts with that page's scripts. When the scripts change, every tab of the Persona takes them. Values the scripts send reach `PluginManager.receive(_:from:)` through their tab, which counts as selected while a window selects it.
 - Messages carry JSON. The app delivers a page message to the plugin only when the sending frame's address still matches the plugin's grant.
 
@@ -167,8 +167,9 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `agent` | Agent runs through `arch.agent.run` within the grant's tools, tab access, record level, limits, and daily count (`docs/hooks.md`, Agent run API). Hook scripts get it from their hook's grant; staging refuses it for installed plugins until their install sheet states that grant | No agent runs |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
-- Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. Once site access modes exist, the user can also switch `siteAccess` to `whenInvoked`, and a manifest that asks for all sites starts with `whenInvoked`; until then an installed plugin's page scripts run in every page its granted sites cover. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for.
-- Granting access to all sites, which a pattern for every host under a top-level domain such as `*://*.com/*` counts as, or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
+- Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. For a script plugin with sites and commands, a switch after them, "Only in a tab where you use one of its commands, until the tab leaves the website", sets `siteAccess` to `whenInvoked`. Without commands, the switch would leave the plugin no page to reach, so it shows only where it starts on, as in an update of a plugin that the user limited, for the user to switch it off (`PluginGrant.offersSiteAccessSwitch(for:kind:)`). A manifest that asks for `whenInvoked` shows the sentence without the switch, and one that asks for every website and has commands starts with it on (`PluginGrant(offeredBy:kind:)`), so that such a grant reaches pages one tab at a time unless the user switches it off and confirms. An update starts as the installed grant reaches its sites, unless its manifest asks for `whenInvoked`. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for: a manifest that asks for `whenInvoked` gets no more, and a web extension, whose engines keep its site access, always gets `listedSites`. `plugins.json` keeps a `whenInvoked` grant's sites under `sitesWhenInvoked` in place of `sites`, so that a build before site access modes keeps the entry as one it cannot read rather than run the plugin in every page of its sites.
+- With `whenInvoked`, running one of the plugin's commands in a tab gives the plugin access there, on the host of the document the command ran on, when the tab is one of its Persona's and the granted sites cover that document: any command, from the palette, a menu, a shortcut, or a sidebar item, on the tab it runs on, which for a tab row's menu need not be the selected tab. The access is for the document the user chose the command on: when the tab shows another document by the time the command runs, as one that the page or one of its scripts loads while its context menu is open, or when no match pattern can name the document's host, as for an IPv6 address or a name with `_`, the command does not run and Arch beeps. Its page scripts run there (see Page scripts), and its page calls, page script values, and the tab's title and address in its calls and events reach it only in that tab, on that host and on the granted sites, frames of another host included. The access ends when the tab commits a document of another host, gets another page, as when it unloads or changes engines, or closes, or when the plugin is switched off, updated, also by an update that keeps `plugin.json`, since it can change the rest of the code, or removed; coming back to the host takes another command. The manager checks the access at each use and at each of the tab's events, which drops the tab's scripts: `addressChanged` by the address it carries, since a tab posts it before it takes that address. Until then a tab whose access no longer holds takes none of its scripts (`PluginManager.accessPageScripts(forTab:)`), so a web contents that the tab gets after unloading never takes them from a later change to another tab's. Settings ▸ Plugins states the mode in the same sentence as the review, after the sites'.
+- Granting access to all sites as listed, which a pattern for every host under a top-level domain such as `*://*.com/*` counts as, or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
 - The data kinds that `ai` lists come with it, as a web extension's other API permissions come with its install: the install sheet and Settings state them in one sentence after the permissions, such as "Send the text of pages and selected text to the AI models you connected" (`PluginManifest.aiDataSummary`), and the review of an update marks it New when the update lists a kind the installed version did not. The kinds name the parts that a request may carry, not what can reach a model: a plugin with `ai` and sites can also put what its page calls read into a text part, so the sentence of `ai` with those of the sites already says that the text of those pages can reach the models.
 - A web extension's `tabs`, `clipboardWrite`, and `nativeMessaging` are Arch's `tabs`, `clipboard`, and `nativeMessaging`. Its other API permissions, such as `storage` or `cookies`, come with the install, as in other browsers: the install sheet and Settings list them in one sentence (`PluginManifest.extensionPermissions`), and only its sites can be left out.
 - Settings ▸ Plugins lists each grant. Revoking any part of it is not built yet; once it is, calls that need a revoked permission get `permissionDenied`, and contributions that need it are hidden.
@@ -436,9 +437,10 @@ public struct PluginManifest: Hashable, Codable, Sendable {
     public var homepage: String?
     /// The browser event kinds that reach `Plugin.handle(_:)` and start the plugin's code.
     public var events: Set<BrowserEventKind>
-    // Not built yet: the version a script plugin's `plugin.json` names, which staging checks against `apiVersion` and keeps nowhere so far, and the fields of site access modes and network hosts.
-    public var apiVersion: Int
+    /// How the plugin reaches its sites; a web extension's is `listedSites`.
     public var siteAccess: SiteAccess
+    // Not built yet: the version a script plugin's `plugin.json` names, which staging checks against `apiVersion` and keeps nowhere so far, and the network hosts.
+    public var apiVersion: Int
     public var network: [String]
 }
 
@@ -463,26 +465,33 @@ public struct MatchPattern: Hashable, Codable, Sendable, CustomStringConvertible
     public var siteName: String { get }
 }
 
-// Not built yet.
-public enum SiteAccess: String, Codable, Sendable {
-    case none, listedSites, whenInvoked
+/// A grant without sites reaches no page either way.
+public enum SiteAccess: String, Hashable, Sendable {
+    case listedSites, whenInvoked
+    /// The sentence that the install sheet and Settings show after the sites' for `whenInvoked`.
+    public var summary: String? { get }
 }
 
 /// What the user granted: a subset of what the manifest asks for.
 public struct PluginGrant: Hashable, Codable, Sendable {
     public var permissions: Set<PluginPermission>
     public var sites: [MatchPattern]
-    public init(permissions: Set<PluginPermission>, sites: [MatchPattern])
+    /// `whenInvoked` when the manifest asks for it or the user chose it at install; `plugins.json` keeps such a grant's sites under `sitesWhenInvoked`.
+    public var siteAccess: SiteAccess
+    public init(permissions: Set<PluginPermission>, sites: [MatchPattern], siteAccess: SiteAccess = .listedSites)
     /// Everything the manifest asks for.
     public init(requestedBy manifest: PluginManifest)
-    /// What the review of an update to `manifest` offers at first: everything it asks for, except the sites that the installed version asked for and the user left out.
+    /// What the review of a new plugin offers at first: everything the manifest asks for, with `whenInvoked` for a script plugin that asks for every website and has commands.
+    public init(offeredBy manifest: PluginManifest, kind: PluginKind)
+    /// What the review of an update to `manifest` offers at first: everything it asks for, except the sites that the installed version asked for and the user left out, with the installed grant's site access unless the manifest asks for `whenInvoked`.
     public init(updating installed: InstalledPlugin, to manifest: PluginManifest)
+    /// Whether the review, starting from this grant, shows the switch for `whenInvoked`: for a script plugin with sites, listed sites in its manifest, and commands, or where the grant starts with it on.
+    public func offersSiteAccessSwitch(for manifest: PluginManifest, kind: PluginKind) -> Bool
     /// One plain sentence for each permission and site, as Settings and the install sheet state the grant.
     public var summaries: [String] { get }
-    /// What Touch ID or the login password states before the grant is given, or nil when it needs no confirmation: every website and native apps need it.
+    /// What Touch ID or the login password states before the grant is given, or nil when it needs no confirmation: every website as listed and native apps need it.
     public func confirmationReason(for pluginName: String) -> String?
-    // Not built yet, with `siteAccess` and `network` in the initializer.
-    public var siteAccess: SiteAccess
+    // Not built yet, with `network` in the initializer.
     public var network: [String]
 }
 ```
@@ -652,10 +661,10 @@ public protocol PluginContext: AnyObject {
     /// The AI interface under the plugin's own feature, `plugin.<id>`, with text and the data kinds that the plugin's `ai` lists, and a request with another kind ends with `blockedByPolicy`: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. A script plugin's panel asks for a client of no step instead (`PluginPanelContext.panelAI()`). Every request stops with `stopped` when the instance stops. A context without AI, such as a hook script's, throws `permissionDenied`.
     func ai() throws -> any AIClient
 
-    // Pages: the tab must be one the plugin reaches (else `notGranted`) and its committed document on the granted sites, and for a plugin with `ai` neither that document nor the address the tab shows on a site excluded from AI (else `siteNotGranted`); a tab without a page to run in throws `noPage`. A context that reaches no page, such as a hook script's, throws `notGranted`.
+    // Pages: the tab must be one the plugin reaches (else `notGranted`) and its committed document on the granted sites, for `whenInvoked` on the host where the user ran one of its commands in the tab, and for a plugin with `ai` neither that document nor the address the tab shows on a site excluded from AI (else `siteNotGranted`); a tab without a page to run in throws `noPage`. A context that reaches no page, such as a hook script's, throws `notGranted`.
     /// Runs the script once in the main frame of the tab's page, in the plugin's world, as the body of a function with the world's channel as `arch`, and returns what the body returns at once as JSON, null for `undefined`, a function, or a symbol. The page's own check runs it only while the granted sites cover the document, and its value or what it threw comes back only while the tab still shows that document and, for a plugin with `ai`, an address off the excluded sites; otherwise it throws `noPage` or `siteNotGranted`. Throws `invalidPageScript` for a script the plugin may not run, `pageScriptFailed` with what the script threw, `pageRunUnavailable` where the tab's engine could run the script only with the user's gesture, `timedOut` for a run that the page leaves unanswered for the hang limit, as while a script loops, and `stopped` for one that the instance's stop ends.
     func runPageScript(_ script: PluginScript, in tab: PluginTab.ID) async throws -> PluginValue
-    /// Delivers the value to the `arch.onMessage` listeners of the plugin's page scripts in the tab's main frame.
+    /// Delivers the value to the `arch.onMessage` listeners of the plugin's page scripts in the tab's main frame, without the user's gesture, and throws `pageRunUnavailable` where the tab's engine could deliver it only with the gesture.
     func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws
 
     // Not built yet.
@@ -818,7 +827,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidPageScript(String)
     /// A script that `runPageScript(_:in:)` ran threw, with what it threw as text, or returned a value that JSON cannot hold.
     case pageScriptFailed(String)
-    /// A page call's engine could run the script only with the user's gesture, so it ran nothing: on WebKit while the flags switch plugins' page runs off.
+    /// A page call's engine could run the script or deliver the message only with the user's gesture, so it did neither: on WebKit while the flags switch plugins' page runs and messages off.
     case pageRunUnavailable
     // Not built yet: a host outside its `network`.
     case networkHostNotGranted(String)
@@ -1006,6 +1015,8 @@ public final class PluginManager: ObservableObject {
     /// In install order, where the remaining version of a pair takes the pair's place.
     @Published public private(set) var plugins: [InstalledPlugin]
     @Published public private(set) var contributions: PluginContributionIndex
+    /// The page scripts of the `whenInvoked` plugins with access in each tab, by tab, each checking the access's host.
+    @Published public private(set) var tabPageScripts: [UUID: [EnginePageScript]]
     /// The pairs whose versions are both listed, in the order the user made them.
     @Published public private(set) var engineVersions: [PluginEngineVersions]
     /// Why the last write of `plugins.json` failed while the file lacks changes of the run, which Settings shows with Try Again; nil once a write succeeds (see Storage).
@@ -1059,13 +1070,15 @@ public final class PluginManager: ObservableObject {
     public func separate(_ id: PluginID) throws
     public func dismissVersionNote(of id: PluginID, for engine: EngineKind)
 
-    /// Runs a command that the enabled plugin contributes, in a pair also one of its other version's that its own lacks while that one is on.
+    /// Runs a command that the enabled plugin contributes, in a pair also one of its other version's that its own lacks while that one is on, after giving a `whenInvoked` plugin access in the invocation's tab.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async
     /// Starts the plugin if needed and asks it for the item's panel. Nil, with a beep, when it offers none.
     public func panel(for item: Attributed<PluginSidebarItem>) async -> NSViewController?
     public func badge(on item: Attributed<PluginSidebarItem>) -> String?
-    /// Whether one of the enabled plugin's page scripts runs at `url`, for Reload Matching Tabs.
+    /// Whether one of the enabled plugin's page scripts runs at `url` in every tab, for Reload Matching Tabs; never for `whenInvoked`.
     public func pageScriptsCover(_ url: URL, of id: PluginID) -> Bool
+    /// The tab's page scripts: `contributions.pageScripts`, then the tab's `tabPageScripts`.
+    public func pageScripts(forTab id: UUID) -> [EnginePageScript]
     /// A message from a page script in `tab`, which the session describes in full; the manager removes what the grant does not cover. Returns the JSON reply, or nil.
     public func receive(_ message: EnginePageScriptMessage, from tab: PluginTab) async -> String?
 
@@ -1177,7 +1190,7 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 - `storage.set(key)` without a value, or with `undefined`, removes the key; `storage.set(key, null)` stores `null`. `secrets.set(key)` and `ui.setBadge(itemId)` without text, or with `null`, delete the secret and the badge.
 - `ai.reply(request)` takes `{instructions, messages, schema, maxOutputTokens}`, of which only `messages` is required: each message is `{role, text}`, or `{role, parts}` with parts of `{type: "text", text}`, `{type: "page", url, title, text}`, and `{type: "selection", url, title, text}`, where `url` and `title` are the page's, with the role `user` or `assistant`, `schema` is a JSON Schema object for a JSON reply, and `maxOutputTokens` is a whole number from 1. It resolves with `{text, finishReason}`, the reason `completed` or `lengthLimit`, and rejects with `permissionDenied` without `ai`, `invalidCall` for a request with another key or value, `blockedByPolicy` for a part of a kind that its `ai` does not list or on a site excluded from AI, or the `AIError` case the request ended with, such as `notConfigured` or `cancelled`.
 - `ai.stream(request, onText)` takes the same request and calls `onText` with each piece of the reply's text as it arrives, waiting for a promise that it returns, so that a panel can show the reply as it comes. It resolves and rejects as `ai.reply` does once the reply ends, and rejects with `invalidCall` without a function for `onText`. When `onText` throws, the request stops and the promise rejects with what it threw. The script fetches each piece with a call that waits for Arch, so for the hang limit its wait for the next piece counts as a wait for an AI reply.
-- `pages.run(tabId, file)` runs a package file in the tab's page as `runPageScript(.file(file), in:)` does and resolves with what the file's body returns at once, or `null`; a script that has to wait sends its result with its world's `arch.send`. It rejects with `notGranted`, `siteNotGranted`, `noPage`, `invalidPageScript`, `pageScriptFailed`, or `pageRunUnavailable`, and with `timedOut` once the page has left the run unanswered for the hang limit, until which its wait counts as a wait for Arch. `pages.post(tabId, message)` reaches the `arch.onMessage` listeners of the plugin's page scripts in the tab's main frame, `null` for a missing message, under the same rules. A hook script's `pages.run` and `post` reject with `notGranted`, since a hook reaches no page.
+- `pages.run(tabId, file)` runs a package file in the tab's page as `runPageScript(.file(file), in:)` does and resolves with what the file's body returns at once, or `null`; a script that has to wait sends its result with its world's `arch.send`. It rejects with `notGranted`, `siteNotGranted`, `noPage`, `invalidPageScript`, `pageScriptFailed`, or `pageRunUnavailable`, and with `timedOut` once the page has left the run unanswered for the hang limit, until which its wait counts as a wait for Arch. `pages.post(tabId, message)` reaches the `arch.onMessage` listeners of the plugin's page scripts in the tab's main frame, `null` for a missing message, under the same rules, and rejects with `notGranted`, `siteNotGranted`, `noPage`, or `pageRunUnavailable`. A hook script's `pages.run` and `post` reject with `notGranted`, since a hook reaches no page.
 - A panel's document gets `arch` without `commands`, `events`, and `pages`, and the bridge refuses its page calls with `invalidCall`, also when it posts them to the message handler itself. Its AI requests and renames belong to no hook step. Closing the panel stops the requests that its calls started, and once its instance stops, its calls reject with `stopped` and the panel closes. The panel stays on its page: `location.reload()` and a link to another document do nothing, while a link to a fragment of the page moves there.
 
 Page scripts get a smaller `arch` in their world: `arch.send(message)` resolves with the plugin's reply, and `arch.onMessage((message) => …)` receives `postMessage(_:toTab:)`.
@@ -1220,12 +1233,14 @@ public var pageScripts: [EnginePageScript]
 var pageScriptDelegate: (any EnginePageScriptDelegate)? { get set }
 /// Replaces the scripts that run in each new document, from the next document on.
 func setPageScripts(_ scripts: [EnginePageScript])
+/// Names the set of scripts that `setPageScripts` replaces: web contents with the same identifier share one, as a WebKit popup and its opener do. By default each has its own.
+var pageScriptListID: ObjectIdentifier { get }
 /// Calls a function expression with a world's channel in the main frame and returns the string it returns.
 func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
 /// As `executeJavaScript`, only without the user's gesture: an engine that cannot run the function so runs nothing and fails with `EngineUserGestureError`.
 func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
-/// Delivers a JSON message to the listeners of a world's channel in the main frame.
-func postPageScriptMessage(_ json: String, toWorld world: String)
+/// Delivers a JSON message to the listeners of a world's channel in the main frame, without the user's gesture: an engine that cannot deliver it so delivers nothing and throws `EngineUserGestureError`.
+func postPageScriptMessage(_ json: String, toWorld world: String) throws
 ```
 
 Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the renderer and answers with a process message, like `readableContent`, because CEF's `ExecuteJavaScript` returns no value.
@@ -1238,6 +1253,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
 5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof, IV.17 the Web Store's client and staging, IV.18 its entry points, IV.19 Chromium's store button, and IV.20 its updates; IV.21 added the password managers' host discovery and proof gate, and IV.22 the install script and the native app status in Settings; IV.17 then added the store's page hosts, and the password managers' checks with the app (IV.13) follow.
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) are built. Script plugin panels and `arch.ai.stream` are built. The page members, `runPageScript(_:in:)` and `postMessage(_:toTab:)` with `arch.pages.run` and `post`, are built, and so are the data kinds that the `ai` permission lists, `page` and `selection`, with page and selection parts in `arch.ai.reply` and `arch.ai.stream`.
+7. Site access modes, `siteAccess` with `whenInvoked` in the manifest, the grant, the review, and Settings, are built. The rest of what the plan's V.11 row lists as not built follows in the row's order.
 
 ## Open decisions
 
@@ -1248,5 +1264,4 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site must use a page script on that site.
 - A plugin with `ai` and page scripts, but no events, has a feature that the user starts, although its page script values can start requests as pages load. Whether such a plugin's feature should be automatic, so that it waits for a model of its own and counts toward the daily limit for automatic requests, is open.
 - A request that a hook listener starts without waiting for it belongs to the listener's step for the pause, but once the listener returns, the step ends while the request runs on: the scheduler no longer stops it, and it can run beside the plugin's next step. Whether a step should wait for such requests or end them is open.
-- Site access defaults to `whenInvoked` when a manifest asks for all sites.
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.
