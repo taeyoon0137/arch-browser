@@ -111,10 +111,10 @@ import Testing
             let file = try #require(URL(string: "https://example.org/a.bin"))
             let id = try host.openTab(file, PluginOpenTabOptions(select: false), in: space.resolvedPersonaID, cause: cause)
             let opened = try #require(session.tabs.first { $0.id == id })
-            #expect(opened.pageDownloads.isOpenedByPlugin)
+            #expect(opened.pageDownloads.isHeldUntilUserActs)
             #expect(!opened.webContents(opened.webContents, shouldDownload: file, hasPage: false))
             let own = session.openTab(url: file, in: space.id, select: false, engine: .webKit)
-            #expect(!own.pageDownloads.isOpenedByPlugin)
+            #expect(!own.pageDownloads.isHeldUntilUserActs)
             #expect(own.webContents(own.webContents, shouldDownload: file, hasPage: false))
         }
     }

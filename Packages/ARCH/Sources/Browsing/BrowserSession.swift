@@ -912,10 +912,12 @@ final class EngineRuntime {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space.
+        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space. A page of a tab that a plugin or a web extension opened, before the user acted in it, opens its tab held as theirs (`PageDownloadGate.holdUntilUserActs()`), so that their own pages cannot download through the tabs they open.
         tab.openNewTab = { [weak self, weak tab] popup, targetURL, disposition in
             guard let self, let tab else { return }
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
+            let isHeld = tab.pageDownloads.isHeldUntilUserActs
+            defer { if isHeld { self.tabs.first { $0.webContents === popup }?.pageDownloads.holdUntilUserActs() } }
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
             let window = self.window(showing: tab)
             if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents, preferredEngine: tab.preferredEngine) }
@@ -1439,7 +1441,7 @@ final class EngineRuntime {
     /// Connects each tab to its Persona's plugins.
     private let pluginPages = PluginPages()
     /// Hosts each Persona's web extensions in the windows and tabs.
-    private let webExtensionHost = SessionWebExtensionHost()
+    let webExtensionHost = SessionWebExtensionHost()
 
     /// A sidebar page can continue displaying its existing plugin rows while it slides offscreen.
     func loadedPlugins(in personaID: Persona.ID) -> PluginManager? {
@@ -2510,10 +2512,11 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
         closeDownloadPagesIfIdle()
     }
 
-    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a card over the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows; a tab that only pointed at the file, or a page without a tab, has nothing to ask about, and an agent tab's download has had the user's answer on the agent's card (rule P6), so no card over a tab that the user may not be looking at holds it. The others go on as `chooseDestination` says.
+    /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a card over the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows. A tab that only pointed at the file downloads as a download of the page that opened it, through that page's gate and with the card over that page's tab, so that a page cannot open file after file in new tabs without asking, as with `window.open`; one that no tab's page opened, as one the user opened, or a page without a tab, has nothing to ask about, and an agent tab's download has had the user's answer on the agent's card (rule P6), so no card over a tab that the user may not be looking at holds it. The others go on as `chooseDestination` says.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
         let choose = { [weak self] in self?.chooseDestination(for: item, in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
-        guard let tab = allTabs.first(where: { $0.webContents === item.webContents }), !tab.isDownloadOnly, tab.agentOwnerID == nil, !admittedDownloads.contains(item) else { return choose() }
+        guard let source = allTabs.first(where: { $0.webContents === item.webContents }), source.agentOwnerID == nil, !admittedDownloads.contains(item),
+              let tab = source.isDownloadOnly ? allTabs.first(where: { $0.webContents === source.opener }) : source, tab.agentOwnerID == nil else { return choose() }
         let decide = { [weak self] (allowed: Bool) in
             guard allowed else {
                 completion(nil)

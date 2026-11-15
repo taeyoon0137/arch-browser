@@ -1,4 +1,4 @@
-// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, a popup shares its opener's page script list, a page script's message reaches the page script delegate of that web contents, and the favicon lookup reads the page's declared icon from a world of the app's own. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
+// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, a page opens a popup only from a user gesture, a popup shares its opener's page script list, a page script's message reaches the page script delegate of that web contents, and the favicon lookup reads the page's declared icon from a world of the app's own. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -59,6 +59,19 @@ import Testing
         #expect(tab.userContent.pageScripts == [script] && other.userContent.pageScripts.isEmpty)
     }
 
+    /// A page opens a window only from a user gesture, as Chromium's pages do: its own script at load opens none, while a script that the app runs with a gesture, as `evaluateJavaScript` does, opens one, which reaches the UI delegate.
+    @Test func aPageOpensAWindowOnlyFromAUserGesture() async throws {
+        let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
+        let recorder = PopupRecorder()
+        tab.uiDelegate = recorder
+        tab.webView.loadHTMLString("<!doctype html><script>document.title = window.open('about:blank') ? 'opened' : 'blocked'</script>", baseURL: nil)
+        #expect(await eventually { tab.webView.title == "blocked" })
+        #expect(recorder.popups.isEmpty)
+        let result = try await tab.webView.evaluateJavaScript("window.open('about:blank') ? 'opened' : 'blocked'") as? String
+        #expect(result == "opened")
+        #expect(recorder.popups.count == 1)
+    }
+
     @Test func aPageScriptMessageReachesItsWebContents() async throws {
         let script = EnginePageScript(world: "test", source: "(channel) => { channel.send({ ready: true }); }", injectionTime: .documentEnd, mainFrameOnly: true)
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration(pageScripts: [script])) as? WebKitWebContents)
@@ -101,6 +114,14 @@ import Testing
         for tab in tabs {
             #expect(tab.bridge == nil)
             #expect(tab.webView.superview == nil)
+        }
+    }
+
+    private final class PopupRecorder: EngineWebContentsUIDelegate {
+        private(set) var popups: [any EngineWebContents] = []
+
+        func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
+            popups.append(newWebContents)
         }
     }
 

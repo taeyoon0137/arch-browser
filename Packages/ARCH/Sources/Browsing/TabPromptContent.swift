@@ -118,7 +118,7 @@ enum TabPromptContent {
 
     // MARK: Downloads
 
-    /// A page's download after its first that no click in the page or load for the user started (`PageDownloadGate`). The identity row names the page as the tab's other cards do (`PromptSiteIdentity.make`): its host, a file's name for a file page, or else this page, never the page's own title. The question is about the page, since an Allow ends when the tab loads another one. Allow waits for the card to arm.
+    /// A page's download after its first that no act of the user's in the page, such as a click, or load for the user started (`PageDownloadGate`). The identity row names the page as the tab's other cards do (`PromptSiteIdentity.make`): its host, a file's name for a file page, or else this page, never the page's own title. The question is about the page, since an Allow ends when the tab loads another one. Allow waits for the card to arm.
     static func pageDownloads(identity: PromptIdentity) -> PromptContent {
         PromptContent(kind: .pageDownloads, identity: identity, glyph: .symbol("arrow.down.circle.fill", tint: .accent, label: "Downloads"),
                       title: "Allow this page to download multiple files?",

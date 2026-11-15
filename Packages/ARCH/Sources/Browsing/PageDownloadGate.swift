@@ -1,4 +1,4 @@
-// When a page may start a download without asking: its first download goes through, and so does one after a click in the page, as when the user clicks a file's link, or one that an address Arch loads for the user starts. Any other download waits until the user answers whether the page may download more files, so that a page cannot fill the downloads folder on its own. An Allow lasts until the tab commits another document. A refusal and the first download last until the gate starts over: at a document the user asked for, by a click in the page or through Arch, or one on another site. A document that the page loads on its own on its site, as by reloading or changing its address, keeps them, so that a page cannot reload itself for another first download. A tab that a plugin opened has no first download until the user clicks in its page or Arch loads an address in it for the user, so that a plugin cannot fill the downloads folder through the tabs it opens.
+// When a page may start a download without asking: its first download goes through, and so does one after the user acts in the page, as when the user clicks a file's link, or one that an address Arch loads for the user starts. The user acts in a page with a click that reaches it, not one on a card or another view over it, and with Return, Enter, or Space while it has the keys, which activate its focused link or button (`BrowserWindowModel.tabOnScreen(at:)` and `tabOnScreen(activatedBy:)`). Any other download waits until the user answers whether the page may download more files, so that a page cannot fill the downloads folder on its own. An Allow lasts until the tab commits another document. A refusal and the first download last until the gate starts over: at a document the user asked for, by acting in the page or through Arch, or one on another site. A document that the page loads on its own on its site, as by reloading or changing its address, keeps them, so that a page cannot reload itself for another first download. A tab that a plugin, such as a web extension, opened, or that a page of such a tab opened before the user acted in it, has no first download until the user acts in its page or Arch loads an address in it for the user, so that a plugin cannot fill the downloads folder through the tabs it opens. A tab that a page opened straight onto a file downloads through the gate of the page's tab (`BrowserSession`), so that a page cannot open file after file in new tabs without asking.
 
 /// One tab's downloads from its current documents. `BrowserSession` admits each download through it and asks with a card over the tab when it says so. The gate returns the decisions for the caller to run, so that none runs while the gate changes.
 struct PageDownloadGate {
@@ -17,7 +17,7 @@ struct PageDownloadGate {
     private var site: String?
     /// Whether the page has started a download since the gate started over.
     private var hasDownloaded = false
-    /// Whether the user clicked in the page since its last download.
+    /// Whether the user acted in the page since its last download.
     private var hasUserInput = false
     /// Set when Arch loads an address in the tab for the user, until the next document or download: a download that the load starts is the user's.
     private var isUserLoad = false
@@ -25,8 +25,8 @@ struct PageDownloadGate {
     private var answer: Bool?
     /// The decisions of the downloads that wait for the answer.
     private var waiting: [(Bool) -> Void] = []
-    /// Set when a plugin opened the tab, until the user clicks in its page or Arch loads an address in it for the user: each document starts over with its first download used, and an address that only points at a file downloads nothing (`Tab.webContents(_:shouldDownload:hasPage:)`).
-    private(set) var isOpenedByPlugin = false
+    /// Set when a plugin opened the tab, as a web extension's `tabs.create` and `windows.create` do, or a page of such a tab opened it, until the user acts in its page or Arch loads an address in it for the user: each document starts over with its first download used, and an address that only points at a file downloads nothing (`Tab.webContents(_:shouldDownload:hasPage:)`).
+    private(set) var isHeldUntilUserActs = false
     /// Counts the times the gate started over, so that an answer to a question asked before decides only the downloads that wait for it.
     private var start = 0
     private var askedStart: Int?
@@ -58,21 +58,21 @@ struct PageDownloadGate {
         return waiting
     }
 
-    /// A click in the page lets it start one more download without asking, and the next document starts over, also in a tab that a plugin opened.
-    mutating func userDidClick() {
+    /// The user acted in the page, as with a click, which lets it start one more download without asking, and the next document starts over, also in a tab that a plugin opened.
+    mutating func userDidAct() {
         hasUserInput = true
-        isOpenedByPlugin = false
+        isHeldUntilUserActs = false
     }
 
     /// Arch loads an address in the tab for the user, as one typed in the palette, Back, or Reload: a download that the load starts goes on without asking, even after a refusal, and the document it loads starts over, also in a tab that a plugin opened.
     mutating func userDidNavigate() {
         isUserLoad = true
-        isOpenedByPlugin = false
+        isHeldUntilUserActs = false
     }
 
-    /// A plugin opened the tab, so every download of its pages asks until the user clicks in a page of the tab or loads an address in it.
-    mutating func pluginDidOpen() {
-        isOpenedByPlugin = true
+    /// A plugin, such as a web extension, opened the tab, or a page of a tab that one opened did before the user acted in it, so every download of its pages asks until the user acts in a page of the tab or loads an address in it.
+    mutating func holdUntilUserActs() {
+        isHeldUntilUserActs = true
         hasDownloaded = true
     }
 
@@ -81,7 +81,7 @@ struct PageDownloadGate {
         if answer == true { answer = nil }
         if isUserLoad || hasUserInput || site != self.site {
             start += 1
-            hasDownloaded = isOpenedByPlugin
+            hasDownloaded = isHeldUntilUserActs
             hasUserInput = false
             answer = nil
         }

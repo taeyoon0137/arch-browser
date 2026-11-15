@@ -935,11 +935,14 @@ import Terminal
             if !closesOrReopens { session.forgetUndoableCloses() }
             return event
         }
-        // A click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page. A click in any page on the window's screen, also in a pane of its split view that the click is about to select, lets that page start one more download without asking.
-        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let session = self?.session, let windowModel = session.window(for: event.window), let tab = windowModel.tabOnScreen(at: event) {
-                if tab === windowModel.selectedTab { session.forgetUndoableCloses() }
-                tab.userDidClickInPage()
+        // A left or right click in the page of a window's selected tab can start an edit there, such as choosing a spelling suggestion, so ⌘Z then undoes in the page. The user acts in a page on the window's screen, also in a pane of its split view that a click is about to select, with any click that reaches the page, not one on a card or another view over it, and with Return, Enter, or Space while the page has the keys, which activate its focused link or button; each act lets that page start one more download without asking (`PageDownloadGate`).
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
+            guard let session = self?.session, let windowModel = session.window(for: event.window) else { return event }
+            if event.type == .keyDown {
+                windowModel.tabOnScreen(activatedBy: event)?.userDidActInPage()
+            } else if let tab = windowModel.tabOnScreen(at: event) {
+                if tab === windowModel.selectedTab, event.type != .otherMouseDown { session.forgetUndoableCloses() }
+                tab.userDidActInPage()
             }
             return event
         }
