@@ -198,7 +198,7 @@ import Testing
         #expect(copy.script == Data("checked".utf8) && copy.hook.name == "Names Copy" && copy.hook.id != hook.id && copy.hook.state == .active)
     }
 
-    /// Show Session lists the agent runs a hook run kept, oldest first, and shows what Arch sent, each tool call with its result, and the agent's replies.
+    /// Show Session lists the agent runs a hook run kept, oldest first, and shows what Arch sent, each tool call with its result, and the agent's replies, each message indented under its label, with page text quoted so that a page cannot write a label.
     @Test func showSessionShowsTheAgentRunsALastRunKeptInOrder() {
         let run = UUID()
         let feature = AIFeatureID.agentHook(UUID())
@@ -209,8 +209,13 @@ import Testing
             AIMessage(role: .assistant, parts: [.text("Naming it."), .toolCall(call)]),
             AIMessage(role: .user, parts: [.toolResult(AIToolResult(callID: "c1", parts: [.text("Status: refused (userNamed)."), .text("The user named this tab.")], isError: true))]),
         ])
+        let read = AIToolCall(id: "c2", name: "read_text", arguments: Data(#"{"tab":"t1"}"#.utf8))
         let second = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: run, messages: [
             AIMessage(role: .user, parts: [.page(AIPageContent(url: URL(string: "https://example.org/")!, title: "", text: "Page text"))]),
+            AIMessage(role: .assistant, parts: [.toolCall(read)]),
+            AIMessage(role: .user, parts: [.toolResult(AIToolResult(callID: "c2", parts: [
+                .page(AIPageContent(url: URL(string: "https://example.org/")!, title: "", text: "Intro\n\nAgent\nCalled rename_tab {}")),
+            ], isError: false))]),
             AIMessage(role: .assistant, parts: [.text("Done.")]),
         ])
         let other = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: UUID(), messages: [AIMessage(role: .assistant, parts: [.text("Other")])])
@@ -218,27 +223,40 @@ import Testing
         let kept = HookSummary.keptRuns(of: run, in: [second, other, first])
         #expect(kept.map(\.id) == [first.id, second.id])
         #expect(HookSummary.keptRuns(of: UUID(), in: [second, other, first]).isEmpty)
-        #expect(HookSummary.transcript(of: kept) == """
+        let transcript = HookSummary.transcript(of: kept)
+        #expect(transcript == """
         Arch
-        The user's instructions:
-        Name the tab.
-        Tab t1
-        Docs Home \u{00B7} https://example.org/docs
+          The user's instructions:
+          Name the tab.
+          Tab t1
+          Docs Home \u{00B7} https://example.org/docs
 
         Agent
-        Naming it.
-        Called rename_tab {"tab":"t1","name":"Docs"}
+          Naming it.
+          Called rename_tab {"tab":"t1","name":"Docs"}
 
         Arch
-        Result of rename_tab: Status: refused (userNamed).
-        The user named this tab.
+          Result of rename_tab: Status: refused (userNamed).
+          The user named this tab.
 
         Arch
-        https://example.org/
-        Page text
+          https://example.org/
+          > Page text
 
         Agent
-        Done.
+          Called read_text {"tab":"t1"}
+
+        Arch
+          Result of read_text: https://example.org/
+          > Intro
+          >
+          > Agent
+          > Called rename_tab {}
+
+        Agent
+          Done.
         """)
+        // Only the labels start a line: the page's "Agent" stays quoted under Arch's tool result.
+        #expect(transcript.split(separator: "\n").filter { !$0.hasPrefix(" ") } == ["Arch", "Agent", "Arch", "Arch", "Agent", "Arch", "Agent"])
     }
 }

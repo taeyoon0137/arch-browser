@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs, with Show Session for a run whose agent runs were kept with Keep the Session. A connected agent-capable model makes New Agent Hook… available.
+// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs, with Show Session and Delete Session… for a run whose agent runs were kept with Keep the Session. A connected agent-capable model makes New Agent Hook… available.
 import Agent
 import AI
 import Browsing
@@ -18,6 +18,8 @@ struct AgentHooksPage: View {
     @State private var opened: Set<UUID> = []
     /// The last runs whose transcript is shown.
     @State private var shownSessions: Set<UUID> = []
+    /// The last run whose Delete Session… waits for confirmation.
+    @State private var deletingSession: UUID?
     @State private var message: String?
 
     private struct ProviderReview {
@@ -84,7 +86,7 @@ struct AgentHooksPage: View {
         } header: {
             Text("Hooks")
         } footer: {
-            formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run. A hook that keeps the session keeps its agent's transcript in memory until you delete it, clear activity, or quit Arch.")
+            formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run. A hook that keeps the session keeps its agent's transcript in memory until you choose Delete Session or Clear Activity, or quit Arch. With a model on an API key, the Activity page also keeps what each request sent until Arch quits.")
         }
         .sheet(item: $sheet) { draft in
             ScriptHookSheet(registry: registry, draft: draft, currentTab: currentTab) { sheet = nil }
@@ -100,6 +102,15 @@ struct AgentHooksPage: View {
             Button("Delete", role: .destructive) { registry.remove(hook.id) }
         } message: { _ in
             Text("Arch deletes the hook and its script.")
+        }
+        .confirmationDialog("Delete this run\u{2019}s session?", isPresented: Binding(get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }),
+                            titleVisibility: .visible, presenting: deletingSession) { run in
+            Button("Delete Session", role: .destructive) {
+                shownSessions.remove(run)
+                runner.deleteKeptRuns(ofHookRuns: [run])
+            }
+        } message: { _ in
+            Text("Arch deletes the agent\u{2019}s transcript of this run. The run stays in the hook\u{2019}s last runs.")
         }
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("OK") { message = nil }
@@ -197,7 +208,7 @@ struct AgentHooksPage: View {
         }
     }
 
-    /// Show Session and Delete Session for a run with kept agent runs, and their transcript while shown, laid out as Activity shows a request's content.
+    /// Show Session and Delete Session… for a run with kept agent runs, and their transcript while shown, in the type and scroll view of Activity's Show Content.
     @ViewBuilder
     private func keptSession(of run: HookRunSummary) -> some View {
         let kept = HookSummary.keptRuns(of: run.id, in: runner.keptRuns)
@@ -207,12 +218,11 @@ struct AgentHooksPage: View {
                 Button(isShown ? "Hide Session" : "Show Session") {
                     if isShown { shownSessions.remove(run.id) } else { shownSessions.insert(run.id) }
                 }
-                Button("Delete Session") {
-                    shownSessions.remove(run.id)
-                    for item in kept { runner.deleteKeptRun(item.id) }
-                }
+                .buttonStyle(.link)
+                // Destructive, as the page's other deletions, and asking first, as an agent's Delete Session… does.
+                Button("Delete Session\u{2026}", role: .destructive) { deletingSession = run.id }
+                    .buttonStyle(.borderless)
             }
-            .buttonStyle(.link)
             .font(.subheadline)
             if isShown {
                 ScrollView {
@@ -420,7 +430,7 @@ enum HookSummary {
         kept.filter { $0.hookRun == run }.reversed()
     }
 
-    /// What Show Session shows: each kept run's messages one after another, under "Arch" for the message Arch wrote and the tools' results, or "Agent" for the agent's replies and tool calls.
+    /// What Show Session shows: each kept run's messages one after another, under "Arch" for the message Arch wrote and the tools' results, or "Agent" for the agent's replies and tool calls. A message's lines are indented under its label and page and selection text is quoted with ">", so that no page text reads as a label or as Arch's own line.
     static func transcript(of runs: [AgentRunner.KeptRun]) -> String {
         runs.map { transcript(of: $0.messages) }.joined(separator: "\n\n")
     }
@@ -444,14 +454,22 @@ enum HookSummary {
             }
         }
         return messages.map { message in
-            ([message.role == .assistant ? "Agent" : "Arch"] + lines(of: message.parts)).joined(separator: "\n")
+            let body = lines(of: message.parts).flatMap(splitLines).map { $0.isEmpty ? "" : "  " + $0 }
+            return ([message.role == .assistant ? "Agent" : "Arch"] + body).joined(separator: "\n")
         }.joined(separator: "\n\n")
     }
 
-    /// A page's title and address, then its text when the part carries any.
+    /// A page's title and address on one line, then each line of its text quoted, when the part carries any.
     private static func pageLine(title: String, url: URL, text: String) -> String {
+        let title = splitLines(title).joined(separator: " ")
         let line = title.isEmpty ? url.absoluteString : "\(title) \u{00B7} \(url.absoluteString)"
-        return text.isEmpty ? line : "\(line)\n\(text)"
+        guard !text.isEmpty else { return line }
+        return ([line] + splitLines(text).map { $0.isEmpty ? ">" : "> " + $0 }).joined(separator: "\n")
+    }
+
+    /// The text's lines, split at every character that starts a new line.
+    private static func splitLines(_ text: String) -> [String] {
+        text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
     }
 
     /// What Run on Current Tab reports.
