@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, an empty name named by the identifier, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -111,10 +111,12 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(try staging.allSatisfy { try FileManager.default.contentsOfDirectory(atPath: $0).isEmpty })
     }
 
-    /// A name of nothing but spaces would show as no name, so the plugin goes by its identifier.
+    /// A name of nothing but spaces would show as no name, so the plugin goes by its identifier. Any other name loses the spaces at either end.
     @Test func namesAPluginWithoutANameByItsIdentifier() async throws {
         let package = try writePackage("blank", ["plugin.json": #"{"id": "org.example.Blank", "name": " ", "version": "1", "apiVersion": 1, "summary": "Blank."}"#])
         #expect(try await manager().stage(package).manifest.name == "org.example.blank")
+        let padded = try writePackage("padded", ["plugin.json": #"{"id": "org.example.Padded", "name": " Padded ", "version": "1", "apiVersion": 1, "summary": "Padded."}"#])
+        #expect(try await manager().stage(padded).manifest.name == "Padded")
     }
 
     @Test func stagesTheFilesThatAIWrote() async throws {

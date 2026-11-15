@@ -1,4 +1,4 @@
-// Web extension manifests: what Arch reads from `manifest.json` for the plugin list and the install sheet, the identifiers it gives extensions, localized names, an empty name named by the identifier, the manifests it refuses, and staging and installing web extensions beside script plugins, which may not take the name of the runtime's file.
+// Web extension manifests: what Arch reads from `manifest.json` for the plugin list and the install sheet, the identifiers it gives extensions, localized names, a name and action title without spaces at either end, an empty name named by the identifier, the manifests it refuses, and staging and installing web extensions beside script plugins, which may not take the name of the runtime's file.
 import Foundation
 @testable import Extensions
 @testable import Plugins
@@ -50,7 +50,7 @@ import Testing
         #expect(localized.contributions.commands.map(\.title) == ["Localized"])
     }
 
-    /// A name of nothing but spaces, as a localized name whose message is empty, would show as no name, so the extension goes by its identifier, and an action title of nothing but spaces by the name.
+    /// A name of nothing but spaces, as a localized name whose message is empty, would show as no name, so the extension goes by its identifier, and an action title of nothing but spaces by the name. Any other name and title lose the spaces at either end.
     @Test func namesAnExtensionWithoutANameByItsIdentifier() throws {
         let spaces = try read(["manifest.json": #"{"manifest_version": 3, "name": "  ", "version": "1", "key": "dGVzdA==", "action": {}}"#], named: "spaces")
         #expect(spaces.name == "jpignaibiiemhngfjkcpokkamffknabf" && spaces.contributions.commands.map(\.title) == ["jpignaibiiemhngfjkcpokkamffknabf"])
@@ -60,8 +60,8 @@ import Testing
         ], named: "empty message")
         let identifier = WebExtensionManifest.extensionID(of: emptyMessage.id)
         #expect(emptyMessage.name == identifier && emptyMessage.contributions.commands.map(\.title) == [identifier])
-        // A name with text keeps its spaces.
-        #expect(try read(["manifest.json": #"{"manifest_version": 3, "name": " Reader ", "version": "1"}"#], named: "padded").name == " Reader ")
+        let padded = try read(["manifest.json": #"{"manifest_version": 3, "name": " Reader ", "version": "1", "action": {"default_title": " Read "}}"#], named: "padded")
+        #expect(padded.name == "Reader" && padded.contributions.commands.map(\.title) == ["Read"])
     }
 
     @Test func readsTheSitesOfWebPagesOnly() throws {

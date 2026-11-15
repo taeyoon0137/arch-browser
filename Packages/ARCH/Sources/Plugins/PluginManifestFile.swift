@@ -25,9 +25,9 @@ struct ScriptManifest {
         guard apiVersion <= PluginManifest.apiVersion else { throw PluginError.unsupportedAPIVersion(apiVersion) }
         let idText = try object.string("id")
         guard let id = PluginID(rawValue: idText) else { throw invalidManifest("id “\(idText)” is not a reverse-DNS identifier") }
-        // A name of nothing but spaces would show as no name, so the plugin goes by its identifier, as a web extension does.
-        let givenName = try object.string("name")
-        let name = givenName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? id.rawValue : givenName
+        // The name loses the spaces at either end, so every view shows it alike, and a name of nothing but spaces, which would show as no name, leaves the plugin to go by its identifier, as a web extension does.
+        let givenName = try object.string("name").trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = givenName.isEmpty ? id.rawValue : givenName
         let version = try object.string("version")
         let summary = try object.string("summary")
         let permissions = try object.strings("permissions").map { name in
