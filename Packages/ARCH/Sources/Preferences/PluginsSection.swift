@@ -238,7 +238,7 @@ private struct PluginList: View {
     }
 }
 
-/// The plugin's switch with its summary, its grant, a newer version from the Web Store with Review Update…, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version…, a menu with From a File… and From the Web Store…, for each engine that runs extensions while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, for a web extension whose grant has `nativeMessaging`, its native app lines, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
+/// The plugin's switch with its summary, its grant, a newer version from the Web Store with Review Update…, its settings, which work while it is on, Reload Matching Tabs for a plugin with page scripts, which start with each page's next load, and Remove… for an installed plugin. An unpaired web extension plugin adds Install <Engine> Version…, a menu with From a File… and From the Web Store…, for each engine that runs extensions but not the plugin while the plugin runs on another, and Join With… while another unpaired one is installed and every engine that a pair divides runs web extensions on this Mac. A pair has one switch for both versions, a row for each version with its access, where it runs, why it is off or could not start, and Remove Version…, Separate Versions unless its versions share an identifier, and Remove…, which removes both. The footer says where the plugin came from, on which engines' tabs a web extension runs, why the plugin cannot run on this Mac, if it cannot, why the manager switched it off, if it did, while it is on, why it could not start on an engine, for a web extension whose grant has `nativeMessaging`, its native app lines, and, while it asks for another engine's version, the note with Install <Engine> Version… and Dismiss.
 private struct PluginSection: View {
     let session: BrowserSession
     @ObservedObject var plugins: PluginManager
@@ -288,10 +288,9 @@ private struct PluginSection: View {
                 PluginSettingRow(plugins: plugins, plugin: plugin.id, setting: setting) { failure = $0.localizedDescription }
             }
             .disabled(!plugin.isEnabled)
-            // The plugin's commands share one row at its trailing end, as the AI pages' commands do. The row shows only with a command, since an empty one would still take a row in the form.
+            // The plugin's commands share one row at its trailing end, as the AI pages' commands do, each at its whole title, and those that do not fit continue on a line below. The row shows only with a command, since an empty one would still take a row in the form.
             if reloadable || !versionEngines.isEmpty || canJoin || separable || removable {
-                HStack {
-                    Spacer()
+                CommandRowLayout {
                     if reloadable {
                         Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
                     }
@@ -389,6 +388,63 @@ private struct PluginSection: View {
     }
 }
 
+/// The commands of a plugin's row at the row's trailing end, each at its ideal width, so that no title is cut, with the system's spacing between neighbors as an `HStack` gives it; a command that does not fit after the others on a line starts the next line, also at the trailing end.
+private struct CommandRowLayout: Layout {
+    private struct Line {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lines = lines(of: subviews, within: proposal.width)
+        let height = lines.reduce(0) { $0 + $1.height } + lineSpacings(between: lines, of: subviews).reduce(0, +)
+        return CGSize(width: proposal.width ?? lines.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let lines = lines(of: subviews, within: bounds.width)
+        let spacings = lineSpacings(between: lines, of: subviews) + [0]
+        var y = bounds.minY
+        for (line, spacing) in zip(lines, spacings) {
+            var x = bounds.maxX - line.width
+            for (position, index) in line.indices.enumerated() {
+                if position > 0 { x += subviews[line.indices[position - 1]].spacing.distance(to: subviews[index].spacing, along: .horizontal) }
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (line.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width
+            }
+            y += line.height + spacing
+        }
+    }
+
+    /// The commands in lines of at most `width`, in their order.
+    private func lines(of subviews: Subviews, within width: CGFloat?) -> [Line] {
+        var lines: [Line] = []
+        var line = Line()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let spacing = line.indices.last.map { subviews[$0].spacing.distance(to: subviews[index].spacing, along: .horizontal) } ?? 0
+            if let width, !line.indices.isEmpty, line.width + spacing + size.width > width {
+                lines.append(line)
+                line = Line()
+            }
+            line.width += (line.indices.isEmpty ? 0 : spacing) + size.width
+            line.height = max(line.height, size.height)
+            line.indices.append(index)
+        }
+        if !line.indices.isEmpty { lines.append(line) }
+        return lines
+    }
+
+    /// The system's spacing between each line and the next, from the first command of each.
+    private func lineSpacings(between lines: [Line], of subviews: Subviews) -> [CGFloat] {
+        zip(lines, lines.dropFirst()).map { above, below in
+            subviews[above.indices[0]].spacing.distance(to: subviews[below.indices[0]].spacing, along: .vertical)
+        }
+    }
+}
+
 /// Check for Updates, with when the Persona's store installs were last checked in this run or why the check failed.
 private struct UpdateCheckRow: View {
     @ObservedObject var webStore: WebStoreInstaller
@@ -441,15 +497,31 @@ private struct UpdateRow: View {
     }
 }
 
-/// What the plugin's grant lets it do.
+/// What the plugin's grant lets it do: a sentence for each permission and each site, or, with more than `InstalledPlugin.listedSiteLimit` sites, one sentence for the sites that names the broadest (`InstalledPlugin.accessBrief`), with every site's sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down while each permission stays in view.
 private struct AccessRow: View {
     let plugin: InstalledPlugin
 
     var body: some View {
-        LabeledContent("Access") {
-            let summaries = plugin.accessSummaries
-            Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
-                .multilineTextAlignment(.trailing)
+        if let brief = plugin.accessBrief {
+            DisclosureGroup {
+                Text(plugin.grant.sites.map(\.accessSummary).joined(separator: "\n"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                LabeledContent("Access") {
+                    Text(brief.joined(separator: "\n"))
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+        } else {
+            LabeledContent("Access") {
+                let summaries = plugin.accessSummaries
+                Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
+                    .multilineTextAlignment(.trailing)
+            }
         }
     }
 }

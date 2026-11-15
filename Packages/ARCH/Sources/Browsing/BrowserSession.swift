@@ -1022,6 +1022,8 @@ final class EngineRuntime {
             guard let self, let tab else { return completion(.dismissed) }
             self.enqueuePrompt(content, for: tab, completion: completion)
         }
+        // The tab's prompts name an extension's page by the extension, as the address pill does.
+        tab.extensionName = { [weak self] url in self?.extensionName(ofPageAt: url, in: personaID) }
         // A page's file chooser opens Arch's panel on both engines, after the tab's prompts before it, as a sheet on the window that shows the tab (`PanePromptLayer`), naming who asks from the engine's report rather than from the tab's address; Cancel, the tab leaving the screen, a closed tab, or quitting gives the page no file.
         tab.chooseFiles = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(nil) }
@@ -1455,6 +1457,11 @@ final class EngineRuntime {
         for runtime in personaEngines.values.compactMap(\.webExtensions) {
             await runtime.takeGatedVersionsOutOfChromium()
         }
+    }
+
+    /// The name of the Persona's installed web extension whose page is at `url` (`WebExtensionRuntime.name(ofPageAt:)`), or nil for another address. It makes no runtime, since a Persona without one has no extension's page open.
+    func extensionName(ofPageAt url: URL, in personaID: Persona.ID) -> String? {
+        personaEngines[personaID]?.webExtensions?.name(ofPageAt: url)
     }
 
     /// The runtime of the Persona's web extensions, for their actions in the site settings popover.

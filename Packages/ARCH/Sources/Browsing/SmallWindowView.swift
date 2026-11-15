@@ -54,11 +54,20 @@ private struct SmallWindowTopRow: View {
     let windowButtons: WindowButtonMetrics
     @State private var isHoveringSite = false
 
-    private var siteName: String {
-        windowModel.internalPage?.address ?? tab.url.map(AddressPillView.siteName(of:)) ?? tab.pageTitle
+    /// The name of the web extension whose page the tab shows (`AddressPillView.extensionName(ofPageAt:in:session:)`), unless an internal page covers it.
+    private var extensionName: String? {
+        guard windowModel.internalPage == nil, let url = tab.url else { return nil }
+        return AddressPillView.extensionName(ofPageAt: url, in: tab, session: session)
+    }
+
+    /// The internal page's address, the name of the extension whose page it is, the page's site, or the page's title without an address.
+    private func siteName(extensionName: String?) -> String {
+        windowModel.internalPage?.address ?? extensionName ?? tab.url.map(AddressPillView.siteName(of:)) ?? tab.pageTitle
     }
 
     var body: some View {
+        let extensionName = self.extensionName
+        let siteName = self.siteName(extensionName: extensionName)
         HStack(spacing: 4) {
             Button { windowModel.focusCommandBar() } label: {
                 HStack(spacing: 6) {
@@ -67,8 +76,8 @@ private struct SmallWindowTopRow: View {
                         TabIconView(tab: tab)
                             .frame(width: 16, height: 16)
                     }
-                    // As wide as the widest of the symbols, the globe, so that the site keeps its place between secure and insecure pages, as in the address pill.
-                    Image(systemName: AddressPillView.symbol(for: tab.url, internalPage: windowModel.internalPage))
+                    // As wide as the globe, the widest of the symbols but the extension's, which takes a point of the spacing on each side, so that the site keeps its place between secure and insecure pages and an extension's, as in the address pill.
+                    Image(systemName: AddressPillView.symbol(for: tab.url, internalPage: windowModel.internalPage, isExtensionPage: extensionName != nil))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 14)
@@ -86,7 +95,7 @@ private struct SmallWindowTopRow: View {
             .buttonStyle(.plain)
             .onHover { isHoveringSite = $0 }
             .help(windowModel.internalPage?.address ?? tab.url?.absoluteString ?? "")
-            .accessibilityLabel(siteName)
+            .accessibilityLabel(extensionName.map(AddressPillView.accessibilityLabel(ofExtensionPage:)) ?? siteName)
             if !windowModel.isSelectedPageCovered {
                 TemporaryEngineLabel(tab: tab)
             }

@@ -59,10 +59,10 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         return engineChecks.values.contains(true) ? nil : "No engine on this Mac runs it."
     }
 
-    /// The engines, in the order of `EngineKind`, for which Settings offers Install <Engine> Version…: each of the engines that a pair divides (`PluginEngineVersions.engines`) that is among `running`, the engines that run the kind on this Mac, while the plugin runs on another engine, whatever the checks found, since an engine may run a package built for the other engine. None in a pair.
+    /// The engines, in the order of `EngineKind`, for which Settings offers Install <Engine> Version…: each of the engines that a pair divides (`PluginEngineVersions.engines`) that is among `running`, the engines that run the kind on this Mac, and on which the plugin does not run, after a refusal, after a failure to start, or before the engine has checked its package, while it runs on another engine. None in a pair, and none for a plugin that runs on every such engine.
     public func versionEngines(among running: Set<EngineKind>) -> [EngineKind] {
         guard counterpart == nil else { return [] }
-        return PluginEngineVersions.engines.filter { engine in running.contains(engine) && engines.contains { $0 != engine } }
+        return PluginEngineVersions.engines.filter { engine in running.contains(engine) && !engines.contains(engine) && engines.contains { $0 != engine } }
     }
 
     /// The engine whose version the plugin asks for, by the rule in Engine versions ▸ Guidance: one of `running` that has a current answer for the package and on which the plugin does not run, a failure to start counting, while it runs on another, and whose note the user has not dismissed. Nil in a pair.
@@ -73,6 +73,15 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     /// What the plugin may do, one sentence each, as Settings states it: its grant, then the API permissions that come with a web extension.
     public var accessSummaries: [String] {
         grant.summaries + [manifest.extensionPermissionsSummary].compactMap { $0 }
+    }
+
+    /// The most sites whose sentences Settings lists among `accessSummaries`; with more, it states them in one (`accessBrief`).
+    public static let listedSiteLimit = 3
+
+    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
+    public var accessBrief: [String]? {
+        guard grant.sites.count > Self.listedSiteLimit, let sites = MatchPattern.briefAccessSummary(of: grant.sites) else { return nil }
+        return PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary) + [sites, manifest.extensionPermissionsSummary].compactMap { $0 }
     }
 }
 
