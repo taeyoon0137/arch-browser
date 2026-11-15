@@ -167,9 +167,9 @@ extension AgentToolHost {
             var card = AgentApproval(ownerID: client.id, clientName: client.name, isOutsideClient: client.isOutsideClient, kind: .renameSharedTab, rules: ask.rules, isSensitive: ask.isSensitive,
                                      offers: [.allowOnTab, .deny, .denyAndStop, .reply("")],
                                      action: (name.isEmpty ? "Clear the suggested name of your tab \(named)" : "Rename your tab \(named)") + (site.map { " on \($0)" } ?? ""),
-                                     tabID: id, tabHandle: handle, site: site, exactText: name.isEmpty ? nil : name, connectionID: connectionID, createdAt: now(),
-                                     deadline: now().addingTimeInterval(approvalWindow))
-            // The user's tab reports no pages, so the card is about its document, whose end withdraws it.
+                                     tabID: id, tabHandle: handle, site: site, exactText: name.isEmpty ? nil : name, connectionID: connectionID,
+                                     document: state.activity(of: id).pages, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
+            // The page count groups the card with the tab's other cards of its page, as theirs do (`stepCard`). The user's tab reports no pages, so the card is about its document, whose end withdraws it.
             card.documentID = tab.documentID
             box.approvalID = card.id
             let answer = await request(card, for: client)
