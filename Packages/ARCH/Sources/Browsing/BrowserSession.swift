@@ -1874,15 +1874,18 @@ final class EngineRuntime {
             tab.takeImport(pinned)
             return tab
         }
-        if !importedTabs.isEmpty {
-            // The hooks post no new tab for them: the event source passes over restored tabs as they join, which `tabs` reports before it changes. Their first load is then the user's, as a closed pinned tab's is: a visit, and a file downloads.
-            importedTabs.forEach { $0.isRestored = true }
-            tabs.append(contentsOf: importedTabs)
-            importedTabs.forEach { $0.isRestored = false }
-        }
+        appendJoiningPins(importedTabs)
         record.update(plan.entry)
         record.removeGoneItems(in: importSidebar)
         return plan.counts
+    }
+
+    /// Appends pinned tabs that join at their saved pages, from browser import or sidebar sync. The hooks post no new tab for them: the event source passes over restored tabs as they join, which `tabs` reports before it changes. Their first load is then the user's, as a closed pinned tab's is: a visit, and a file downloads.
+    private func appendJoiningPins(_ joining: [Tab]) {
+        guard !joining.isEmpty else { return }
+        joining.forEach { $0.isRestored = true }
+        tabs.append(contentsOf: joining)
+        joining.forEach { $0.isRestored = false }
     }
 
     /// The sidebar as the browser import's plan resolves a row against it.
@@ -2199,11 +2202,10 @@ extension BrowserSession {
                     publishedPlacement = true
                 }
             } else {
-                // A pin from another Mac joins as a restored tab, as browser import's do: before the list takes it, so that its tabOpened never posts.
+                // A pin from another Mac joins as browser import's pins do, after the loop (`appendJoiningPins`).
                 let page = UnloadedWebContents(url: incoming.savedPage?.url, title: incoming.savedPage?.title ?? "", engine: incoming.engine, state: nil)
                 tab = makeTab(page, id: incoming.id, spaceID: incoming.spaceID, personaID: incoming.personaID, pinned: true)
                 tab.savedPage = incoming.savedPage
-                tab.opensAsRestored()
                 addedTabs.append(tab)
             }
             if tab.spaceID != incoming.spaceID {
@@ -2223,7 +2225,7 @@ extension BrowserSession {
             tab.pendingSyncEngine = tab.preferredEngine == incoming.engine ? nil : incoming.engine
             appliedTabs.insert(tab.id)
         }
-        if !addedTabs.isEmpty { tabs.append(contentsOf: addedTabs) }
+        appendJoiningPins(addedTabs)
         if let reordered = Self.orderedSynced(personas, by: state.personas.map(\.id)) { personas = reordered }
         if let reordered = Self.orderedSynced(spaces, by: state.spaces.map(\.id)) { spaces = reordered }
         if let reordered = Self.orderedSynced(folders, by: state.folders.map(\.id).filter(appliedFolders.contains)) { folders = reordered }

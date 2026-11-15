@@ -120,7 +120,7 @@ import LiveFolders
     var recordedURL: URL?
     /// The session sets this callback to record a visit to a page, with its title, in its history store.
     var recordVisit: ((URL, String) -> Void)?
-    /// The session sets this for tabs it restores from the saved session, and for the pinned tabs a browser import adds only while they join the list. Closing a pinned tab clears it (`unloadToSavedPage()`).
+    /// The session sets this for tabs it restores from the saved session, and for the pinned tabs that browser import or sidebar sync adds only while they join the list (`BrowserSession.appendJoiningPins(_:)`). Closing a pinned tab clears it (`unloadToSavedPage()`).
     var isRestored = false
     /// The cause of a navigation or new tab that code started, which the event source attaches to the tab's next `addressChanged` events and `pageLoaded`, which uses it up (`docs/hooks.md`, Causes). A load that ends without a `pageLoaded` drops it, and so does a navigation the user starts in the tab from the app.
     var pendingCause: BrowserEventCause?
@@ -221,12 +221,6 @@ import LiveFolders
         folderID = pinned.folderID
         customTitle = pinned.customTitle
         savedPage = SavedPage(url: pinned.url, title: pinned.title)
-    }
-
-    /// Makes a pinned tab that sidebar sync adds at its saved page open as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
-    func opensAsRestored() {
-        isRestored = true
-        recordedURL = savedPage?.url
     }
 
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.

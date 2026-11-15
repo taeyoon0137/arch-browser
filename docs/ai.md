@@ -681,7 +681,7 @@ public enum AIHookEvent: Sendable {
 public struct AIPageLoad: Sendable {
     public var tabID: UUID
     public var url: URL
-    /// The first load of a tab restored from the saved session or of a pinned tab that a browser import opened.
+    /// The first load of a tab restored from the saved session.
     public var isRestore: Bool
 }
 
@@ -702,7 +702,7 @@ public struct AIDownloadFinish: Sendable {
 }
 ```
 
-- `BrowserHooks` in `Browsing` subscribes to the session's browser event bus (`docs/hooks.md`, Browser events), so `BrowserSession` only attaches it, and posts the bus's events under their identifiers with `post(_:event:)`, never for agent tabs. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists, with the file's URL from the session's entry. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- `BrowserHooks` in `Browsing` subscribes to the session's browser event bus (`docs/hooks.md`, Browser events), so `BrowserSession` only attaches it, and posts the bus's events under their identifiers with `post(_:event:)`, never for agent tabs. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists, with the file's URL from the session's entry. A pinned tab that browser import or sidebar sync adds posts no `tabOpened`, and its first load is the user's, without `isRestore` (`docs/import-browsers.md`). A download that started while Settings ▸ General asked where to save each download is named by the user.
 - `AIDownloadInfo` carries the file's name, media type (from its extension), size, source address, and the address of the page the download started from (`EngineDownloadItem.pageURL`), without the page's title. Site exclusions apply to both addresses, so a file from an excluded page reaches no hook even when it comes from another site.
 - `BrowserHooks` ends a tab's chains for other documents when the tab commits another document, ignoring the fragment (`scheduler.cancel(subject:otherThan:)`), ends its chains except the close's own when it closes (`scheduler.cancel(subject:except:)`), and calls `cancel(subject:)` when the user removes a download from the list.
 

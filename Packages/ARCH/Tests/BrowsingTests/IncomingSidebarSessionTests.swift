@@ -130,8 +130,8 @@ import Testing
         }
     }
 
-    /// A pin from another Mac joins as a restored tab, so no `tabOpened` posts for it; a pinned tab whose folder alone changes, which reorders nothing, still shows there at once; and unpinning drops a synced engine that waits.
-    @Test func incomingPinsOpenAsRestoredAndAFolderChangePublishes() async throws {
+    /// A pin from another Mac joins as browser import's pins do, so no `tabOpened` posts for it and its first load is the user's; a pinned tab whose folder alone changes, which reorders nothing, still shows there at once; and unpinning drops a synced engine that waits.
+    @Test func incomingPinsJoinWithoutTabOpenedAndAFolderChangePublishes() async throws {
         try await temporarySession { session, _ in
             let current = session.sidebarSyncState, space = try #require(current.spaces.first)
             var opened: [UUID] = []
@@ -153,6 +153,8 @@ import Testing
             let remote = UUID()
             session.applySidebarSync(state([pin(local.id, in: nil, "about:blank#local"), pin(remote, in: nil, "about:blank#remote")]), deletions: .init())
             #expect(opened == [local.id] && session.tabs.contains { $0.id == remote })
+            let joined = try #require(session.tabs.first { $0.id == remote })
+            #expect(!joined.isRestored && joined.recordedURL == nil)
             var published = 0
             let watch = session.objectWillChange.sink { published += 1 }
             defer { watch.cancel() }

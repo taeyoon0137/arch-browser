@@ -104,7 +104,7 @@ final class BrowserHooks: AIHookHost {
         }
     }
 
-    /// Whether the tab name hook asks for a name for the load's page: not for the first load of a restored tab or of a pinned tab that a browser import opened, so that launching and importing send nothing, and not for a document the tab has a hook's name for already.
+    /// Whether the tab name hook asks for a name for the load's page: not for the first load of a tab restored from the saved session, so that launching sends nothing, and not for a document the tab has a hook's name for already.
     func needsName(_ load: AIPageLoad) -> Bool {
         guard !load.isRestore, let tab = unnamedTab(showing: load) else { return false }
         return tab.suggestedTitle?.isFor(load.url) != true
