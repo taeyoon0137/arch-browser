@@ -425,8 +425,8 @@ struct ScriptHookSheet: View {
                 }
                 Section("Limits") {
                     numberRow("Time limit", value: $draft.seconds, in: 5...600, unit: "seconds")
-                    Stepper("Model rounds · \(draft.rounds)", value: $draft.rounds, in: 1...20)
-                    Stepper("Tool calls · \(draft.toolCalls)", value: $draft.toolCalls, in: 1...50)
+                    numberRow("Model rounds", value: $draft.rounds, in: 1...20, unit: nil)
+                    numberRow("Tool calls", value: $draft.toolCalls, in: 1...50, unit: nil)
                     numberRow("Runs per day", value: $draft.dailyLimit, in: 1...2_000, unit: nil)
                     Stepper("Wait before running · \(draft.delay.formatted()) seconds", value: $draft.delay, in: 0...60, step: 0.5)
                 }
@@ -434,7 +434,7 @@ struct ScriptHookSheet: View {
         }
     }
 
-    /// A number the user can type or step, for a range too wide to step through; Save refuses a typed value outside it.
+    /// A number the user can type or step, since some ranges are too wide to step through; Save refuses a typed value outside the range.
     private func numberRow(_ title: String, value: Binding<Int>, in range: ClosedRange<Int>, unit: String?) -> some View {
         LabeledContent(title) {
             HStack(spacing: 6) {
