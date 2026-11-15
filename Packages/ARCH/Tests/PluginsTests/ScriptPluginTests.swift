@@ -57,6 +57,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             ("not JSON", ["plugin.json": "{"], .invalidPackage("plugin.json is not valid JSON.")),
             ("newer API", ["plugin.json": #"{"apiVersion": 2, "events": ["pageLoaded"]}"#], .unsupportedAPIVersion(2)),
             ("unread key", ["plugin.json": manifest + #", "network": ["example.org"]}"#], .invalidPackage("plugin.json: network is not a field Arch reads.")),
+            ("empty name", ["plugin.json": #"{"id": "org.example.bad", "name": "", "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must not be empty.")),
+            ("name not text", ["plugin.json": #"{"id": "org.example.bad", "name": 1, "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must be text.")),
             ("unknown permission", ["plugin.json": manifest + #", "permissions": ["notifications"]}"#],
              .invalidPackage("plugin.json: permissions lists “notifications”, which Arch does not grant.")),
             ("native messaging", ["plugin.json": manifest + #", "permissions": ["nativeMessaging"]}"#],

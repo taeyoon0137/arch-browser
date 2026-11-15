@@ -219,11 +219,12 @@ private struct ManifestObject {
         return text
     }
 
-    /// Text that is not empty.
+    /// Text that is not empty. Empty text is refused as empty, as an empty `name` is, as Chromium refuses an extension's, while a `name` of nothing but spaces takes the plugin's `id`.
     mutating func optionalString(_ key: String) throws -> String? {
         switch value(key) {
         case nil: return nil
         case let .string(text)? where !text.isEmpty: return text
+        case .string?: throw invalidManifest("\(name(key)) must not be empty")
         default: throw invalidManifest("\(name(key)) must be text")
         }
     }
