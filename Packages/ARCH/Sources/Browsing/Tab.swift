@@ -247,13 +247,13 @@ import LiveFolders
     /// The page's title, or its host if it has no title.
     public var pageTitle: String { Self.pageTitle(title: title, url: url) }
 
-    /// `displayTitle`, with the name of the web extension whose own page the tab shows (`extensionName`), as its options page in a tab, in place of a page title that only repeats the address (`titleRepeatsAddress(_:of:)`), which would show the extension's identifier. A user's name, a hook's name, a live folder item's title, and a page's own title stay. The sidebar's rows, the window's title, the tab switcher, the palette's tab rows, the pane of a tab shown in another window, the Bookmarks menu, and floating developer tools show it; plugins, hooks, agents, and scripts read `displayTitle`.
+    /// `displayTitle`, with the name of the web extension whose own page the tab shows (`extensionName`), as its options page in a tab, in place of a page title that only repeats the address (`titleRepeatsAddress(_:of:)`), which would show the extension's identifier. A user's name, a hook's name, a live folder item's title, and a page's own title stay. The sidebar's rows, the window's title, the tab switcher, the palette's tab rows, the pane of a tab shown in another window, the Bookmarks menu, floating developer tools, Edit Saved Address…, a new favorite, the print job, and the file names of Export as PDF and a capture show it; plugins, hooks, agents, scripts, and the tab close log read `displayTitle`.
     var shownTitle: String {
         guard let name = extensionPageName else { return displayTitle }
         return Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: name, url: url, livePage: liveItemID == nil ? nil : savedPage)
     }
 
-    /// `pageTitle` as `shownTitle` names the page: the extension's name in place of a title that only repeats the address of the extension's page. Renaming the tab to it restores the page's title, as renaming it to `pageTitle` does for any other page (`BrowserWindowModel.renameTab(_:to:)`).
+    /// `pageTitle` as `shownTitle` names the page: the extension's name in place of a title that only repeats the address of the extension's page. Renaming the tab to it restores the page's title, as renaming it to `pageTitle` does for any other page (`BrowserWindowModel.renameTab(_:to:)`). Sharing the page, Now Playing without the page's media metadata, and Use Current Page as Saved Page take it.
     var shownPageTitle: String { extensionPageName ?? pageTitle }
 
     /// The name of the web extension whose own page the tab shows (`extensionName`), while the page's title only repeats its address; nil otherwise.

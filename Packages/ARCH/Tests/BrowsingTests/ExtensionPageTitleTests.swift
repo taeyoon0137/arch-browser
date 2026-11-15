@@ -1,4 +1,4 @@
-// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, and a hook's name stay. Tabs run on stand-ins without a session, with the extension's name from a callback as the session gives it.
+// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, and a hook's name stay, with a rename to that name and a favorite of the page. Tabs run on stand-ins, in a session on a test engine for the rename and the favorite, with the extension's name from a callback as the session gives it.
 import ARCHEngine
 import Foundation
 import Testing
@@ -51,7 +51,8 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
         #expect(!Tab.titleRepeatsAddress("Options", of: options) && !Tab.titleRepeatsAddress("webkit-extension://\(identifier)/other.html", of: options))
     }
 
-    @Test func renamingToTheExtensionsNameKeepsNoName() throws {
+    /// Runs `body` with a session whose first space has a tab on the options page without a title, and a main window on that space.
+    private func withSession(_ body: (BrowserSession, BrowserWindowModel, Tab) throws -> Void) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -62,13 +63,31 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
         let window = BrowserWindowModel(session: session, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let page = session.adopt(UnloadedWebContents(url: options, title: "", engine: .webKit, state: nil), spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false)
         page.extensionName = { $0.host == identifier ? "Reader" : nil }
-        // The rename field starts with the extension's name, so ending it with only a space added changes nothing.
-        window.renameTab(page.id, to: "Reader ")
-        #expect(page.customTitle == nil && page.suggestedTitle == nil)
-        // The name the row shows for the page takes the user's name away, as a page's own title does, so the row follows the extension's name again.
-        window.renameTab(page.id, to: "Mine")
-        #expect(page.customTitle == "Mine")
-        window.renameTab(page.id, to: "Reader")
-        #expect(page.customTitle == nil && page.shownTitle == "Reader")
+        try body(session, window, page)
+    }
+
+    @Test func renamingToTheExtensionsNameKeepsNoName() throws {
+        try withSession { _, window, page in
+            // The rename field starts with the extension's name, so ending it with only a space added changes nothing.
+            window.renameTab(page.id, to: "Reader ")
+            #expect(page.customTitle == nil && page.suggestedTitle == nil)
+            // The name the row shows for the page takes the user's name away, as a page's own title does, so the row follows the extension's name again.
+            window.renameTab(page.id, to: "Mine")
+            #expect(page.customTitle == "Mine")
+            window.renameTab(page.id, to: "Reader")
+            #expect(page.customTitle == nil && page.shownTitle == "Reader")
+        }
+    }
+
+    @Test func aFavoriteOfTheExtensionsPageTakesItsName() throws {
+        try withSession { session, _, page in
+            session.addFavorite(page)
+            let favorite = try #require(session.favorites.last)
+            #expect(favorite.url == options && favorite.title == "Reader")
+            var renamed = favorite
+            renamed.title = "Mine"
+            // Use Current Page as Saved Page takes the page's title as the row names the page.
+            #expect(renamed.usingCurrentPage(of: page, among: session.favorites)?.title == "Reader")
+        }
     }
 }

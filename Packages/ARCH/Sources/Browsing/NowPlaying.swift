@@ -91,9 +91,10 @@ import MediaPlayer
         addCommandTargets()
         let media = tab.webContents.mediaSession
         let metadata = media.metadata
-        let title = metadata.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? tab.pageTitle
-        // The site as the address pill names it; a page without a host, such as a local file, leaves the line out.
-        let artist = metadata.map(\.artist).flatMap { $0.isEmpty ? nil : $0 } ?? tab.url.flatMap { $0.host == nil ? nil : AddressPillView.siteName(of: $0) }
+        // The page's title as the tab's row names the page, with a web extension's name for its page without a title.
+        let title = metadata.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? tab.shownPageTitle
+        // The site as the address pill names it, a web extension's page by the extension; a page without a host, such as a local file, leaves the line out.
+        let artist = metadata.map(\.artist).flatMap { $0.isEmpty ? nil : $0 } ?? tab.url.flatMap { url in url.host == nil ? nil : tab.extensionName?(url) ?? AddressPillView.siteName(of: url) }
         var info: [String: Any] = [MPMediaItemPropertyTitle: title]
         if let artist, !artist.isEmpty { info[MPMediaItemPropertyArtist] = artist }
         if let album = metadata?.album, !album.isEmpty { info[MPMediaItemPropertyAlbumTitle] = album }

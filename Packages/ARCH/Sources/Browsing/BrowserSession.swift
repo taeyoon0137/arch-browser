@@ -773,10 +773,10 @@ final class EngineRuntime {
         return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
     }
 
-    /// Adds the tab's page to the favorites of the tab's Persona, unless it is one of them already.
+    /// Adds the tab's page to the favorites of the tab's Persona, unless it is one of them already, with the title the tab's row shows (`Tab.shownTitle`).
     public func addFavorite(_ tab: Tab) {
         guard canAddFavorite(tab), let url = tab.url else { return }
-        favorites.append(Favorite(url: url, title: tab.displayTitle, personaID: tab.personaID))
+        favorites.append(Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID))
     }
 
     /// Appends, in order, the favorites whose addresses are not favorites of the Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
