@@ -1,5 +1,5 @@
-// The texts of Settings ▸ AI ▸ Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
-import Agent
+// The texts of Settings ▸ AI ▸ Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, Edit… and Duplicate on a script file changed outside Arch, and Show Session's kept runs for a last run with their transcript.
+@testable import Agent
 import AI
 import Events
 import Foundation
@@ -196,5 +196,49 @@ import Testing
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: nil) }
         let copy = try HookScriptActions.copy(of: hook, file: checked)
         #expect(copy.script == Data("checked".utf8) && copy.hook.name == "Names Copy" && copy.hook.id != hook.id && copy.hook.state == .active)
+    }
+
+    /// Show Session lists the agent runs a hook run kept, oldest first, and shows what Arch sent, each tool call with its result, and the agent's replies.
+    @Test func showSessionShowsTheAgentRunsALastRunKeptInOrder() {
+        let run = UUID()
+        let feature = AIFeatureID.agentHook(UUID())
+        let call = AIToolCall(id: "c1", name: "rename_tab", arguments: Data(#"{"tab":"t1","name":"Docs"}"#.utf8))
+        let first = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: run, messages: [
+            AIMessage(role: .user, parts: [.text("The user's instructions:\nName the tab."), .text("Tab t1"),
+                                           .page(AIPageContent(url: URL(string: "https://example.org/docs")!, title: "Docs Home", text: ""))]),
+            AIMessage(role: .assistant, parts: [.text("Naming it."), .toolCall(call)]),
+            AIMessage(role: .user, parts: [.toolResult(AIToolResult(callID: "c1", parts: [.text("Status: refused (userNamed)."), .text("The user named this tab.")], isError: true))]),
+        ])
+        let second = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: run, messages: [
+            AIMessage(role: .user, parts: [.page(AIPageContent(url: URL(string: "https://example.org/")!, title: "", text: "Page text"))]),
+            AIMessage(role: .assistant, parts: [.text("Done.")]),
+        ])
+        let other = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: UUID(), messages: [AIMessage(role: .assistant, parts: [.text("Other")])])
+        // The runner lists its kept runs newest first.
+        let kept = HookSummary.keptRuns(of: run, in: [second, other, first])
+        #expect(kept.map(\.id) == [first.id, second.id])
+        #expect(HookSummary.keptRuns(of: UUID(), in: [second, other, first]).isEmpty)
+        #expect(HookSummary.transcript(of: kept) == """
+        Arch
+        The user's instructions:
+        Name the tab.
+        Tab t1
+        Docs Home \u{00B7} https://example.org/docs
+
+        Agent
+        Naming it.
+        Called rename_tab {"tab":"t1","name":"Docs"}
+
+        Arch
+        Result of rename_tab: Status: refused (userNamed).
+        The user named this tab.
+
+        Arch
+        https://example.org/
+        Page text
+
+        Agent
+        Done.
+        """)
     }
 }

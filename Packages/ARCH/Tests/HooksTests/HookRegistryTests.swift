@@ -700,6 +700,9 @@ import Testing
         let last = try #require(registry.lastRuns[nothing.id]?.first)
         #expect(last.outcome == .completed && last.actions == nil && last.duration == nil)
         #expect(registry.lastRuns[kept.id]?.first?.actions == ["renameTab": 1])
+        // A run's entry and last run carry the run's ID, which the agent runs it keeps name, so that its row offers Show Session.
+        let keptRun = try #require(runner.invocations.first { $0.hook.id == kept.id }?.run)
+        #expect(entries.first?.id == keptRun && registry.lastRuns[kept.id]?.first?.id == keptRun)
         registry.log.saveNow()
         let file = try String(contentsOf: registry.log.fileURL, encoding: .utf8)
         for content in ["Secret", "account", "token", "abc", nothing.id.uuidString] {

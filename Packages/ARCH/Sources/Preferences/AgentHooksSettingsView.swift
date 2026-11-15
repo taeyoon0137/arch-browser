@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
+// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs, with Show Session for a run whose agent runs were kept with Keep the Session. A connected agent-capable model makes New Agent Hook… available.
 import Agent
 import AI
 import Browsing
@@ -8,12 +8,16 @@ import SwiftUI
 
 struct AgentHooksPage: View {
     @ObservedObject var registry: HookRegistry
+    /// The agents' runner, whose kept runs Show Session shows.
+    @ObservedObject var runner: AgentRunner
     @ObservedObject private var aiSettings = AIService.shared.settings
     /// The front main window's selected tab, for Run on Current Tab.
     let currentTab: () -> UUID?
     @State private var sheet: ScriptHookDraft?
     @State private var deleting: Hook?
     @State private var opened: Set<UUID> = []
+    /// The last runs whose transcript is shown.
+    @State private var shownSessions: Set<UUID> = []
     @State private var message: String?
 
     private struct ProviderReview {
@@ -71,13 +75,18 @@ struct AgentHooksPage: View {
             }
             HStack {
                 Spacer()
-                Button("Clear Activity") { registry.clearActivity() }
-                    .disabled(registry.lastRuns.isEmpty && registry.log.entries.isEmpty)
+                Button("Clear Activity") {
+                    registry.clearActivity()
+                    // Without the last runs, no row would reach the kept runs.
+                    for hook in registry.hooks { runner.deleteKeptRuns(of: .agentHook(hook.id)) }
+                    shownSessions = []
+                }
+                .disabled(registry.lastRuns.isEmpty && registry.log.entries.isEmpty)
             }
         } header: {
             Text("Hooks")
         } footer: {
-            formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run.")
+            formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run. A hook that keeps the session keeps its agent's transcript in memory until you delete it, clear activity, or quit Arch.")
         }
         .sheet(item: $sheet) { draft in
             ScriptHookSheet(registry: registry, draft: draft, currentTab: currentTab) { sheet = nil }
@@ -185,6 +194,36 @@ struct AgentHooksPage: View {
                 if let message = run.message {
                     Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 }
+                keptSession(of: run)
+            }
+        }
+    }
+
+    /// Show Session and Delete Session for a run with kept agent runs, and their transcript while shown, laid out as Activity shows a request's content.
+    @ViewBuilder
+    private func keptSession(of run: HookRunSummary) -> some View {
+        let kept = HookSummary.keptRuns(of: run.id, in: runner.keptRuns)
+        if !kept.isEmpty {
+            let isShown = shownSessions.contains(run.id)
+            HStack {
+                Button(isShown ? "Hide Session" : "Show Session") {
+                    if isShown { shownSessions.remove(run.id) } else { shownSessions.insert(run.id) }
+                }
+                Button("Delete Session") {
+                    shownSessions.remove(run.id)
+                    for item in kept { runner.deleteKeptRun(item.id) }
+                }
+            }
+            .buttonStyle(.link)
+            .font(.subheadline)
+            if isShown {
+                ScrollView {
+                    Text(HookSummary.transcript(of: kept))
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 160)
             }
         }
     }
@@ -376,6 +415,45 @@ enum HookSummary {
             case nil: return "Skipped"
             }
         }
+    }
+
+    /// The agent runs a hook run kept, oldest first, from the runner's newest-first list.
+    static func keptRuns(of run: UUID, in kept: [AgentRunner.KeptRun]) -> [AgentRunner.KeptRun] {
+        kept.filter { $0.hookRun == run }.reversed()
+    }
+
+    /// What Show Session shows: each kept run's messages one after another, under "Arch" for the message Arch wrote and the tools' results, or "Agent" for the agent's replies and tool calls.
+    static func transcript(of runs: [AgentRunner.KeptRun]) -> String {
+        runs.map { transcript(of: $0.messages) }.joined(separator: "\n\n")
+    }
+
+    static func transcript(of messages: [AIMessage]) -> String {
+        var toolNames: [String: String] = [:]
+        func lines(of parts: [AIPart]) -> [String] {
+            parts.map { part in
+                switch part {
+                case .text(let text): return text
+                case .page(let page): return pageLine(title: page.title, url: page.url, text: page.text)
+                case .selection(let selection): return "Selection from " + pageLine(title: selection.pageTitle, url: selection.pageURL, text: selection.text)
+                case .file(let file): return "File \(file.name)"
+                case .download(let download): return "Download \(download.filename)"
+                case .toolCall(let call):
+                    toolNames[call.id] = call.name
+                    return "Called \(call.name) \(String(decoding: call.arguments, as: UTF8.self))"
+                case .toolResult(let result):
+                    return "Result of \(toolNames[result.callID] ?? "a tool"): " + lines(of: result.parts).joined(separator: "\n")
+                }
+            }
+        }
+        return messages.map { message in
+            ([message.role == .assistant ? "Agent" : "Arch"] + lines(of: message.parts)).joined(separator: "\n")
+        }.joined(separator: "\n\n")
+    }
+
+    /// A page's title and address, then its text when the part carries any.
+    private static func pageLine(title: String, url: URL, text: String) -> String {
+        let line = title.isEmpty ? url.absoluteString : "\(title) \u{00B7} \(url.absoluteString)"
+        return text.isEmpty ? line : "\(line)\n\(text)"
     }
 
     /// What Run on Current Tab reports.

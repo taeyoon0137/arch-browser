@@ -10,6 +10,8 @@ public final class AgentRunner: ObservableObject {
     public struct KeptRun: Identifiable {
         public let id: UUID
         public let feature: AIFeatureID
+        /// The hook run whose script started it. The hook's row offers Show Session on that run.
+        public let hookRun: UUID?
         public let messages: [AIMessage]
     }
 
@@ -71,7 +73,7 @@ public final class AgentRunner: ObservableObject {
         if let reason = request.grant.refusal(for: options) { return Self.refused("notGranted", reason) }
         let hook: UUID
         switch request.origin {
-        case .hook(let id, _), .test(let id): hook = id
+        case .hook(let id, _), .test(let id, _): hook = id
         case .outsideClient: return Self.refused("notGranted", "Outside programs cannot start this hook run.")
         }
         guard request.feature == .agentHook(hook), case .user = request.promptSource,
@@ -264,7 +266,12 @@ public final class AgentRunner: ObservableObject {
         result.actions = run.actions
         if request.grant.returnsReply, !reply.isEmpty { result.reply = reply }
         if keepsSession, !run.messages.isEmpty {
-            let kept = KeptRun(id: UUID(), feature: request.feature, messages: run.messages)
+            let hookRun: UUID?
+            switch request.origin {
+            case .hook(_, let id), .test(_, let id): hookRun = id
+            case .outsideClient: hookRun = nil
+            }
+            let kept = KeptRun(id: UUID(), feature: request.feature, hookRun: hookRun, messages: run.messages)
             keptRuns.insert(kept, at: 0)
             let expired = Set(keptRuns.filter { $0.feature == request.feature }.dropFirst(20).map(\.id))
             keptRuns.removeAll { expired.contains($0.id) }
@@ -355,7 +362,7 @@ public final class AgentRunner: ObservableObject {
         let id: UUID?
         switch run.request.origin {
         case .hook(let owner, let runID): (hook, id) = (owner, runID)
-        case .test(let owner): (hook, id) = (owner, nil)
+        case .test(let owner, _): (hook, id) = (owner, nil)
         case .outsideClient: return
         }
         activity.recordTool(of: hook, run: id, persona: run.personaID, tool: tool, status: status, cancelled: Task.isCancelled || !run.active, dryRun: run.request.options.dryRun)

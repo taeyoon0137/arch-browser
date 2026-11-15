@@ -995,6 +995,8 @@ public final class HookRegistry: ObservableObject {
     private func record(_ outcome: HookRunOutcome, of run: HookRun, countsAsFailure: Bool = true) {
         guard let hook = hook(withID: run.hookID) else { return }
         var entry = Self.entry(for: hook, event: run.event, outcome: .completed, date: now(), isTest: run.isTest)
+        // The run's ID, which its kept agent runs name, so that the row can offer Show Session on this run.
+        entry.id = run.id
         entry.duration = run.startedAt.map { (ContinuousClock.now - $0).hookSeconds }
         var message: String?
         var failed = false

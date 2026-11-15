@@ -286,7 +286,7 @@ extension PluginValue {
         try #require(requests.count == 1)
         let request = requests[0]
         #expect(request.tabs == [tab.id] && request.allowedTabs == run.tabs && request.documents == run.documents)
-        #expect(request.origin == .test(hook: hook.id) && request.promptSource == .user && request.feature == .agentHook(hook.id))
+        #expect(request.origin == .test(hook: hook.id, run: run.run) && request.promptSource == .user && request.feature == .agentHook(hook.id))
         #expect(request.options.dryRun && request.options.tools == ["rename_tab"] && request.options.tabAccess == .title)
         #expect(request.knownProviders == run.knownProviders && request.grant == grant)
     }

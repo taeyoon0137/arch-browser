@@ -472,6 +472,7 @@ What VII.25 decided while building the registry:
 - Outcomes: `completed`, `failed` with a code, `timedOut`, `cancelled`, and `skipped` with `loop`, `rateLimit`, `dailyLimit`, `budget`, or `dropped`. A hook past a limit logs one skip for it a minute, `rateLimit` and `budget`, or a day, `dailyLimit`.
 - Entries never hold page text, titles, assigned names, prompts, replies, script output, or an address's path or query. The site is the page's registrable domain, as in the agents' log (`AgentActivityEntry.site(of:)`).
 - The hook's `record` decides: Keep the Session and Keep Activity Only log every run; Keep Nothing logs none. `lastRuns` keeps the last 20 runs in memory for Settings, from the log at the first two levels. For Keep Nothing it keeps only the day's run count, failure count, and the last run's or skip's time, outcome, code, and reason, with Arch's own failure sentence, never a script's or a model's words.
+- A run's entry carries the run's ID, which its kept agent runs name; a skip's entry has its own ID.
 - Events matching no hook's filter are not logged.
 
 ## Script runner
@@ -601,7 +602,7 @@ public struct AgentRunGrant: Codable, Hashable, Sendable {
 
 public enum AgentRunOrigin: Hashable, Sendable {
     case hook(UUID, run: UUID)
-    case test(hook: UUID)
+    case test(hook: UUID, run: UUID)
     case outsideClient(grant: UUID)
 }
 
@@ -663,7 +664,7 @@ public enum AgentRunAction: Codable, Hashable, Sendable {
 public final class AgentRunner {
     /// Runs beyond two wait for a slot in arrival order within their time limit.
     public func run(_ request: AgentRunRequest, personaID: UUID, rename: @escaping Rename) async -> AgentRunResult
-    /// Runs kept with Keep the Session, newest first, at most 20 per hook or grant, in memory until deleted or quit.
+    /// Runs kept with Keep the Session, newest first, at most 20 per hook or grant, in memory until deleted or quit; each of a hook's names the hook run that started it.
     @Published public private(set) var keptRuns: [KeptRun]
     public func deleteKeptRun(_ id: UUID)
     /// A removed hook's, or an ended editor test's.
@@ -759,7 +760,7 @@ public final class AgentRunner {
 ### Settings ▸ AI ▸ Hooks
 
 - The page lists every agent and script hook in run order, then Clear Activity. The top has Run Hooks, Allow Shell Scripts, New Agent Hook…, New Script Hook…, and Presets with Tidy Tab Names. New Agent Hook… and the presets appear while a model with `agent` exists; script hooks need no AI.
-- Each row shows the hook's switch, name, situation ("When a new tab loads its first page · Everywhere · All sites"), model ("Fast · model-a"), record ("Keeps nothing"), last run ("2 minutes ago · renamed a tab"), and, for a hook added by an outside program, origin ("Added by Codex · Terminal"). A paused row gives the reason, with Resume, or Review for a changed script or interpreter and for an unknown provider. Edit… of a script changed outside Arch opens Review too, Edit… of a missing script or one that is not text says that Arch cannot read it, and Duplicate takes no changed script, so another program's bytes run only once the user has read and saved them (hook decision 8). Duplicate also refuses an outside program's hook, whose copy would lose the caps of its origin. The row's menu has Edit…, Run on Current Tab, Duplicate, and Delete, which asks first; dragging reorders rows. A row opens to its last runs, with Show Session for a kept run.
+- Each row shows the hook's switch, name, situation ("When a new tab loads its first page · Everywhere · All sites"), model ("Fast · model-a"), record ("Keeps nothing"), last run ("2 minutes ago · renamed a tab"), and, for a hook added by an outside program, origin ("Added by Codex · Terminal"). A paused row gives the reason, with Resume, or Review for a changed script or interpreter and for an unknown provider. Edit… of a script changed outside Arch opens Review too, Edit… of a missing script or one that is not text says that Arch cannot read it, and Duplicate takes no changed script, so another program's bytes run only once the user has read and saved them (hook decision 8). Duplicate also refuses an outside program's hook, whose copy would lose the caps of its origin. The row's menu has Edit…, Run on Current Tab, Duplicate, and Delete, which asks first; dragging reorders rows. A row opens to its last runs. A run whose agent runs were kept with Keep the Session offers Show Session, which shows their transcript under the run, and Delete Session; Clear Activity deletes the kept runs with the last runs.
 - Notices: a file set aside, a key the Keychain did not provide (Try Again), and a file from a newer Arch.
 - `ScriptHookSheet` edits a script hook's situation and its options, Everywhere or places named as Persona rule 7 names them (`BrowserSession.displayedPlace(ofPersona:space:among:)`), sites, engines, tab kinds, of which the last one left on stays on, since an empty set means every kind, and Read Tab Titles and Addresses, which an outside program's hook never offers, and Rename Tabs. Add, or Save for a hook that exists, checks the script with `HookScriptRunner.problem(in:)`. `HookRegistry.scriptFile(of:)` reads the file and pauses an active hook whose file no longer matches its digest with `scriptChanged`, so that Edit… opens Review and Duplicate refuses it. Allow Shell Scripts comes with VII.31.
 

@@ -105,7 +105,7 @@ final class HookScriptContext: PluginAgentContext {
         options.dryRun = options.dryRun || !invocation.appliesActions
         let request = AgentRunRequest(options: options, tabs: tabs, allowedTabs: invocation.tabs, documents: invocation.documents, documentIDs: invocation.documentIDs,
                                       closedTab: options.closedTab == nil ? nil : invocation.closedTab, knownProviders: invocation.knownProviders,
-                                      origin: invocation.isTest ? .test(hook: invocation.hook.id) : .hook(invocation.hook.id, run: invocation.run),
+                                      origin: invocation.isTest ? .test(hook: invocation.hook.id, run: invocation.run) : .hook(invocation.hook.id, run: invocation.run),
                                       promptSource: .user, feature: .agentHook(invocation.hook.id), grant: grant)
         let id = UUID()
         let task = Task { await callAgent(request, invocation) }

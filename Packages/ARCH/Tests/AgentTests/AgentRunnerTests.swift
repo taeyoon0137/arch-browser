@@ -172,7 +172,7 @@ import Testing
 
     @Test func anEditorTestReportsUsageWithoutSpendingTheHooksAutomaticAllowance() async {
         var req = request()
-        req.origin = .test(hook: hook)
+        req.origin = .test(hook: hook, run: UUID())
         let usage = AIUsage(inputTokens: 3, outputTokens: 1)
         let client = ScriptedClient { _ in [.event(.usage(usage)), .event(.finished(.completed))] }
         let runner = runner(client) { Issue.record("A manual test reserved an automatic run."); return false }
@@ -281,8 +281,16 @@ import Testing
         let result = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
         let id = try #require(result.keptRun)
         #expect(result.reply == nil && runner.keptRuns.first?.id == id && client.requests.first?.recordsContent == true)
+        // A kept run names the hook run whose script started it, a test's too, for that run's Show Session.
+        guard case .hook(_, let hookRun) = req.origin else { Issue.record("Expected a hook run"); return }
+        #expect(runner.keptRuns.first?.hookRun == hookRun && runner.keptRuns.first?.messages.count == 2)
+        let testRun = UUID()
+        req.origin = .test(hook: hook, run: testRun)
+        let tested = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        let testedID = try #require(tested.keptRun)
+        #expect(runner.keptRuns.first?.id == testedID && runner.keptRuns.first?.hookRun == testRun)
         runner.deleteKeptRun(id)
-        #expect(runner.keptRuns.isEmpty)
+        #expect(runner.keptRuns.map(\.id) == [testedID])
     }
 
     @Test(arguments: [AgentRunRecord.none, .activity, .session])
@@ -328,7 +336,7 @@ import Testing
         let harness = try Harness()
         defer { harness.cleanUp() }
         var req = request()
-        req.origin = .test(hook: hook)
+        req.origin = .test(hook: hook, run: UUID())
         req.options.record = .activity
         req.options.tools = ["read_text"]
         req.options.tabAccess = .page
