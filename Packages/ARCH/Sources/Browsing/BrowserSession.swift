@@ -890,12 +890,11 @@ final class EngineRuntime {
 
     /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it and `folderID` the folder that holds it, both set before the tab joins the list so that its `tabOpened` event names the opening tab and, for an agent folder, carries the kind `agent`.
     func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil,
-               folderID: UUID? = nil, researchLoad: ((URL) -> Bool)? = nil, preferredEngine: EngineKind? = nil) -> Tab {
+               folderID: UUID? = nil, preferredEngine: EngineKind? = nil) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tab.opener = opener
         tab.folderID = folderID
-        tab.researchLoad = researchLoad
         if let preferredEngine { tab.preferredEngine = preferredEngine }
         tabs.append(tab)
         if select { sidebarTarget().selectTab(tab.id) }
@@ -1818,7 +1817,7 @@ final class EngineRuntime {
     }
 
     /// Opens an agent's tab at `url` in the background, in `engine` or the default engine, in the agent folder of `owner`, which it makes named `folderName` among the open tabs of the space `spaceID` when there is none (docs/agents.md, In the browser ▸ Agent folders). It selects nothing and switches no window's space. Nil when no space has that ID.
-    func openAgentTab(url: URL, engine: EngineKind?, owner: UUID, folderName: String, in spaceID: UUID, researchLoad: ((URL) -> Bool)? = nil) -> Tab? {
+    func openAgentTab(url: URL, engine: EngineKind?, owner: UUID, folderName: String, in spaceID: UUID) -> Tab? {
         let folder: TabFolder
         if let existing = folders.first(where: { $0.agentSessionID == owner }) {
             folder = existing
@@ -1829,13 +1828,6 @@ final class EngineRuntime {
         }
         guard let space = spaces.first(where: { $0.id == folder.spaceID }) else { return nil }
         let preferred = engine ?? defaultEngine
-        if let researchLoad {
-            guard space.id == spaceID else { return nil }
-            let page = makeWebContents(url: URL(string: "about:blank"), engine: preferred, state: nil, in: space.resolvedPersonaID)
-            let tab = adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, researchLoad: researchLoad, preferredEngine: preferred)
-            page.navigationController.load(URLRequest(url: url))
-            return tab
-        }
         let page = makeWebContents(url: url, engine: preferred, state: nil, in: space.resolvedPersonaID)
         return adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, preferredEngine: preferred)
     }

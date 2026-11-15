@@ -270,9 +270,6 @@ import LiveFolders
         pageDownloads.userDidNavigate()
     }
 
-    /// Present only on a research tab the user explicitly opened. Releasing it to the user restores normal navigation.
-    var researchLoad: ((URL) -> Bool)?
-
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
     public var agentOwnerID: UUID? {
         folderID.flatMap { agentOwnerOfFolder?($0) }
@@ -364,10 +361,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
     }
 
-    public func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool {
-        agentOwnerID == nil || researchLoad == nil
-    }
-
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents, targetURL, disposition)
     }
@@ -389,7 +382,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
         if let owner = agentOwnerID {
-            guard researchLoad == nil else { return false }
             guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
                 reportToAgent(.downloadAsked(url))
                 return false
@@ -653,9 +645,6 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
     /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
-        if agentOwnerID != nil, let researchLoad {
-            return action.disposition == .currentTab && researchLoad(action.url) ? .allow : .cancel
-        }
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), let openURLInNewTab {

@@ -191,7 +191,7 @@ import Testing
         main.selectTab(pin.id)
         _ = browser.pageAssistant.openLink(URL(string: "https://fixture.invalid/reader")!, from: pin)
         let readerLink = try #require(main.selectedTab)
-        let research = try #require(browser.openAgentTab(url: address, engine: nil, owner: UUID(), folderName: "Research", in: space.id, researchLoad: { _ in true }))
+        let research = try #require(browser.openAgentTab(url: address, engine: nil, owner: UUID(), folderName: "Research", in: space.id))
         browser.keepTabs(ofFolder: try #require(research.folderID))
         main.selectTab(pin.id)
         pin.openURLInNewTab?(address, false)

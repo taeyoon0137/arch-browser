@@ -42,7 +42,6 @@ import Testing
     var pages: [URL: (title: String, text: String)] = [:]
     /// Server redirects, by the address that answers with the next.
     var redirects: [URL: URL] = [:]
-    var researchLoads: [UUID: @MainActor (URL) -> Bool] = [:]
     /// Addresses whose load never finishes, as a page that keeps loading.
     var hangingAddresses: Set<URL> = []
     /// Addresses whose document commits, so that the tab's address changes, but never finishes loading, as a page that keeps one image request open.
@@ -84,12 +83,6 @@ import Testing
         let tab = AgentTabInfo(id: UUID(), spaceID: owner.spaceID, title: "", url: nil, isLoading: true, engine: engine ?? .webKit, agentOwnerID: owner.id)
         tabs.append(tab)
         load(url, in: tab.id)
-        return tab
-    }
-
-    func openResearchTab(at url: URL, for owner: AgentTabOwner, mayLoad: @escaping @MainActor (URL) -> Bool) -> AgentTabInfo? {
-        guard let tab = openAgentTab(at: url, engine: nil, for: owner) else { return nil }
-        researchLoads[tab.id] = mayLoad
         return tab
     }
 
@@ -158,11 +151,7 @@ import Testing
             MainActor.assumeIsolated {
                 var address = url
                 while true {
-                    if let check = researchLoads[tabID] {
-                        if !check(address) { return stop(tabID) }
-                    } else if let owner, agentTabMayLoad?(owner, tabID, address) == false {
-                        return stop(tabID)
-                    }
+                    if let owner, agentTabMayLoad?(owner, tabID, address) == false { return stop(tabID) }
                     guard let next = redirects[address] else { break }
                     address = next
                 }

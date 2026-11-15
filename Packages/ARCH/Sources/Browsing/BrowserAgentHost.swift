@@ -84,14 +84,6 @@ import Foundation
         return Self.info(of: tab)
     }
 
-    public func openResearchTab(at url: URL, for owner: AgentTabOwner, mayLoad: @escaping @MainActor (URL) -> Bool) -> AgentTabInfo? {
-        guard let tab = session.openAgentTab(url: url, engine: nil, owner: owner.id, folderName: owner.folderName, in: owner.spaceID, researchLoad: { address in
-            MainActor.assumeIsolated { mayLoad(address) }
-        }) else { return nil }
-        follow(tab, owner: owner.id)
-        return Self.info(of: tab)
-    }
-
     public func navigate(_ tabID: UUID, _ navigation: AgentNavigation) {
         guard let tab = agentTab(tabID) else { return }
         let controller = tab.webContents.navigationController
@@ -179,13 +171,12 @@ import Foundation
         let tabID = tab.id
         let observer = tab.$folderID.combineLatest(session.$folders)
             .dropFirst()
-            .sink { [weak self, weak tab] folderID, folders in
+            .sink { [weak self] folderID, folders in
                 guard folders.first(where: { $0.id == folderID })?.agentSessionID != owner else { return }
                 // Published values arrive before storage changes. Deliver the takeover afterwards, even if the user immediately closes their tab.
-                DispatchQueue.main.async { [weak self, weak tab] in
+                DispatchQueue.main.async { [weak self] in
                     MainActor.assumeIsolated {
                         guard let self, self.followed[tabID]?.owner == owner else { return }
-                        tab?.researchLoad = nil
                         self.followed[tabID] = nil
                         self.agentTabDidReport?(owner, tabID, .takenOver)
                     }
@@ -225,7 +216,6 @@ extension BrowserAgentHost: AgentTabMonitor {
 
     nonisolated func agentTabDidClose(_ tab: Tab, owner: UUID) {
         MainActor.assumeIsolated {
-            tab.researchLoad = nil
             guard followed.removeValue(forKey: tab.id) != nil, closingTabID != tab.id else { return }
             agentTabDidReport?(owner, tab.id, .closed)
         }

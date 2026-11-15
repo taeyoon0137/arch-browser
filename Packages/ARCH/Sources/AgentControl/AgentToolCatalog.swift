@@ -282,16 +282,9 @@ public enum AgentToolCatalog {
         AgentToolParameter("access", .choice(["read"]), required: true, "Read-only access."),
     ])
 
-    public static let sessionResearchRequest = AgentTool("open_tab", .navigates, [.waitsForUser], "Asks the user to confirm a background research tab. Give url alone or both tab and ref.", [
-        AgentToolParameter("url", .string, "An exact eligible address from a user message or a shared tab’s address."),
-        ref(required: false, "A link ref displayed in the shared tab’s latest outline."),
-        tab(required: false, "The shared tab whose outline displayed ref."),
-    ])
-
     public static func sessionTool(named name: String) -> AgentTool? {
         switch name {
         case sessionTabRequest.name: return sessionTabRequest
-        case sessionResearchRequest.name: return sessionResearchRequest
         default: return tool(named: name)
         }
     }

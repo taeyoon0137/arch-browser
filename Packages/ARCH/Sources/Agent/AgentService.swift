@@ -724,16 +724,9 @@ import Foundation
     /// Removal works even after the tab closes or becomes ineligible for reading.
     func stopSharing(_ tabID: UUID, with session: AgentSession) {
         guard canEditAttachments(of: session) else { return }
-        let copies = session.researchPages.filter { $0.value.source.attachmentID == tabID }.keys
         session.unshare(tabID: tabID)
-        let owned = Set(host.agentTabs(of: session.id).map(\.id))
-        for id in copies where owned.contains(id) {
-            host.closeAgentTab(id)
-            session.forgetResearchTab(id)
-        }
     }
 
-    /// A read source remains local to its session. Choosing it can only select the same live document.
     /// The tab a read came from while the session may still read it. A `retained` result, one an HTTP model's conversation already holds, outlives Take Over and Hand Back, which only refuse a read in progress.
     func currentReadPage(_ page: AgentReadPage, in session: AgentSession, retained: Bool = false) -> AgentTabInfo? {
         guard canEditAttachments(of: session), retained || (!session.isTakenOver && session.takeoverGeneration == page.takeoverGeneration),
@@ -742,81 +735,11 @@ import Foundation
               tab.url == page.url, tab.isLoaded, tab.agentOwnerID == page.ownerID,
               AgentPolicy.mayRead(tab.url, allowsAI: dependencies.allowsAI) == .allowed else { return nil }
         if page.ownerID == session.id {
-            guard host.agentTabs(of: session.id).contains(where: { $0.id == tab.id }),
-                  session.permitsResearchTab(tab, host: host, allowsAI: dependencies.allowsAI) else { return nil }
+            guard host.agentTabs(of: session.id).contains(where: { $0.id == tab.id }) else { return nil }
         } else {
             guard page.ownerID == nil, !tab.isLiveFolderItem, session.handles.sharedTabIDs.contains(tab.id),
                   host.userTabs(in: session.personaID).contains(where: { $0.id == tab.id }) else { return nil }
         }
-        return tab
-    }
-
-    func researchChoices(for session: AgentSession) -> [AgentResearchPage] {
-        guard canEditAttachments(of: session), !session.isTakenOver else { return [] }
-        return session.researchChoices(host: host, allowsAI: dependencies.allowsAI)
-    }
-
-    func manualOutlineLinks(for session: AgentSession) -> [AgentResearchPage] {
-        guard canEditAttachments(of: session), !session.isTakenOver else { return [] }
-        return session.outlineLinks(host: host, allowsAI: dependencies.allowsAI)
-    }
-
-    func reviewManualResearchPage(_ choice: AgentResearchPage, in session: AgentSession) async -> AgentManualResearchResult {
-        guard !Task.isCancelled else { return .unavailable }
-        if choice.isOutlineLink {
-            let epoch = session.callEpoch, takeover = session.takeoverGeneration
-            let review = await liveOutlineLink(choice, in: session)
-            guard !Task.isCancelled, session.callEpoch == epoch, session.takeoverGeneration == takeover else { return .unavailable }
-            switch review {
-            case .failure(.unavailable): return .unavailable
-            case .failure(.stale): return .staleLink
-            case .success(let current):
-                if current != choice { return .changed(current) }
-            }
-        }
-        return openReviewedResearchTab(choice, in: session) != nil ? .opened : .unavailable
-    }
-
-    private enum OutlineFailure: Error { case unavailable, stale }
-
-    /// Resolve the exact displayed ref again. Only the manual sheet may offer a changed address.
-    private func liveOutlineLink(_ choice: AgentResearchPage, in session: AgentSession) async -> Result<AgentResearchPage, OutlineFailure> {
-        guard case .outline(let id, _, let address, _, let link) = choice.source else { return .failure(.unavailable) }
-        let original = choice.originalOutlineChoice ?? choice
-        guard manualOutlineLinks(for: session).contains(original), let tab = host.tabs(withIDs: [id]).first,
-              let target = AgentRefTarget(link.ref, fingerprint: link.fingerprint),
-              host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return .failure(.unavailable) }
-        // Read only the displayed ref. A different href needs a fresh selection and confirmation.
-        let check = await toolHost().pageScript(.snapshot(full: false, ref: target, shared: true), in: tab, as: AgentSnapshotReply.self)
-        guard !Task.isCancelled, manualOutlineLinks(for: session).contains(original), host.agentTabs(of: session.id).count < AgentLimits.agentTabs,
-              case .value(let reply) = check, URL(string: reply.url) == address else { return .failure(.unavailable) }
-        guard reply.stale != true, let current = reply.nodes.first.flatMap(AgentOutlineLink.init),
-              let reviewed = AgentResearchPage(reviewing: current, from: choice) else { return .failure(.stale) }
-        guard session.permits(reviewed, host: host, allowsAI: dependencies.allowsAI) else { return .failure(.unavailable) }
-        return .success(current == link ? choice : reviewed)
-    }
-
-    @discardableResult func openResearchPage(_ choice: AgentResearchPage, in session: AgentSession) -> Bool {
-        guard !choice.isOutlineLink else { return false }
-        return openReviewedResearchTab(choice, in: session) != nil
-    }
-
-    private func openReviewedResearchTab(_ choice: AgentResearchPage, in session: AgentSession) -> AgentTabInfo? {
-        let choices = choice.isOutlineLink ? manualOutlineLinks(for: session) : researchChoices(for: session)
-        let original = choice.originalOutlineChoice ?? choice
-        guard choices.contains(original), host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return nil }
-        let owner = AgentTabOwner(id: session.id, spaceID: session.spaceID, folderName: session.title)
-        let epoch = session.callEpoch
-        let takeover = session.takeoverGeneration
-        var mayStart = true
-        guard let tab = host.openResearchTab(at: choice.url, for: owner, mayLoad: { [weak self, weak session] url in
-            guard mayStart, let self, let session, self.canEditAttachments(of: session), !session.isTakenOver, session.takeoverGeneration == takeover, session.callEpoch == epoch,
-                  choice.matches(url), session.permits(choice, host: self.host, allowsAI: self.dependencies.allowsAI) else { return false }
-            if choice.isOutlineLink, !self.manualOutlineLinks(for: session).contains(original) { return false }
-            mayStart = false
-            return true
-        }) else { return nil }
-        session.researchPages[tab.id] = choice
         return tab
     }
 
@@ -913,9 +836,6 @@ import Foundation
         session.attachmentDidChange = { [weak approvals, id = session.id] tabID in
             guard let approvals else { return }
             for card in approvals.pending where card.ownerID == id {
-                if case .openSessionResearch = card.kind, card.tabID == tabID {
-                    approvals.withdraw(card.id)
-                }
                 if case .shareSessionTab(let choices) = card.kind, choices.contains(where: { $0.id == tabID }) {
                     approvals.end(card.id, because: "The tabs available to share changed.")
                 }
@@ -1151,7 +1071,7 @@ import Foundation
 
     private func listedTools(for session: AgentSession) -> [String] {
         AgentToolHost.sessionTools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false))
-            .filter { session.origin == .app || ($0.name != "request_tab" && $0.name != "open_tab") }
+            .filter { $0.name != "request_tab" || session.origin == .app }
             .map(\.name)
     }
 
@@ -1221,9 +1141,9 @@ import Foundation
         session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
         let decision: AgentActivityEntry.Decision
         switch (call.name, result.status) {
-        case ("ask_user", .ok), ("request_tab", .ok), ("open_tab", .ok): decision = .approved
-        case ("ask_user", .denied), ("request_tab", .denied), ("open_tab", .denied): decision = .denied
-        case ("ask_user", .timeout), ("request_tab", .timeout), ("open_tab", .timeout): decision = .timedOut
+        case ("ask_user", .ok), ("request_tab", .ok): decision = .approved
+        case ("ask_user", .denied), ("request_tab", .denied): decision = .denied
+        case ("ask_user", .timeout), ("request_tab", .timeout): decision = .timedOut
         case (_, .refused): decision = .refused
         default: decision = .auto
         }
@@ -1345,8 +1265,8 @@ import Foundation
             read = nil
         }
         let result: AgentToolResult
-        if call.name == "request_tab" || call.name == "open_tab" {
-            result = await requestSessionTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
+        if call.name == "request_tab" {
+            result = await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
         } else {
             result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
         }
@@ -1364,84 +1284,28 @@ import Foundation
         return result
     }
 
-    /// A tab request waits for the user to choose the attachment or confirm the reviewed research address.
-    private func requestSessionTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
+    /// The card keeps local titles and addresses. Only the resulting read handle goes to the model.
+    private func requestSharedTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
                                   connectionID: UUID?, isConnected: () -> Bool) async -> AgentToolResult {
         guard canEditAttachments(of: session) else {
-            return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can make this request.")
+            return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can ask to share a tab here.")
         }
-        let opensResearch = call.name == "open_tab"
-        let tool = opensResearch ? AgentToolCatalog.sessionResearchRequest : AgentToolCatalog.sessionTabRequest
-        if let problem = AgentToolHost.problem(with: call.arguments, for: tool) {
+        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.sessionTabRequest) {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }
         guard session.acceptsQuestions, session.isTurnRunning else { return AgentToolHost.ended.result }
+        let choices = shareableTabs(for: session)
+        guard !choices.isEmpty else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
         let now = dependencies.now()
-        let kind: AgentApprovalKind
-        let research: AgentResearchPage?
-        let action: String
-        if opensResearch {
-            let choice: AgentResearchPage?
-            switch (call.arguments["url"]?.stringValue, call.arguments["tab"]?.stringValue, call.arguments["ref"]?.stringValue) {
-            case (let url?, nil, nil):
-                choice = researchChoices(for: session).first { $0.url.absoluteString == url }
-            case (nil, let tab?, let ref?):
-                choice = manualOutlineLinks(for: session).first { page in
-                    guard case .outline(_, _, _, let handle, let link) = page.source else { return false }
-                    return handle == tab && link.ref == ref
-                }
-            default:
-                return AgentToolResult(status: .error, code: "invalidArguments", text: "Give either url alone or a shared tab and its link ref.")
-            }
-            guard let choice else {
-                return AgentToolResult(status: .refused, code: "notAvailable", text: "The address is unavailable for this session.")
-            }
-            guard host.agentTabs(of: session.id).count < AgentLimits.agentTabs else {
-                return AgentToolResult(status: .refused, code: "limitReached", text: "The session has reached its tab limit.")
-            }
-            research = choice
-            kind = .openSessionResearch(choice.url, source: choice.outlineLabel)
-            action = "Open a background research tab"
-        } else {
-            let choices = shareableTabs(for: session)
-            guard !choices.isEmpty else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
-            research = nil
-            kind = .shareSessionTab(choices)
-            action = "Choose a tab for this session to read"
-        }
-        var card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
-                                 kind: kind, isSensitive: false, offers: [.deny], action: action, tabID: research?.source.attachmentID,
-                                 agentSays: call.arguments["reason"]?.stringValue, connectionID: connectionID, createdAt: now,
-                                 deadline: now.addingTimeInterval(sessionQuestionWindow))
-        card.documentID = research?.source.documentID
+        let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
+                                 kind: .shareSessionTab(choices), isSensitive: false, offers: [.deny],
+                                 action: "Choose a tab for this session to read", agentSays: call.arguments["reason"]?.stringValue,
+                                 connectionID: connectionID, createdAt: now, deadline: now.addingTimeInterval(sessionQuestionWindow))
         let answer = await approvals.request(card)
-        func stillRequested() -> Bool {
-            !Task.isCancelled && isConnected() && session.callEpoch == epoch && session.takeoverGeneration == generation
-                && session.acceptsQuestions && !session.isTakenOver && !session.hasEnded
-        }
-        guard stillRequested() else { return AgentToolHost.ended.result }
+        guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
+              session.acceptsQuestions, !session.isTakenOver, !session.hasEnded else { return AgentToolHost.ended.result }
         if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "The user did not answer the tab request in time.") }
-        if let research {
-            if answer == .withdrawn {
-                let reason = research.isOutlineLink ? "The shared document is no longer available. Read a fresh outline before requesting the link again."
-                    : "The shared document is no longer available. Review its current address before requesting it again."
-                return AgentToolResult(status: .stale, code: "stale", text: reason)
-            }
-            guard answer == .allowOnce else { return AgentToolResult(status: .denied, text: "No research tab was opened.") }
-            if research.isOutlineLink {
-                let review = await liveOutlineLink(research, in: session)
-                guard stillRequested() else { return AgentToolHost.ended.result }
-                guard case .success(let current) = review, current == research else {
-                    return AgentToolResult(status: .stale, code: "stale", text: "The reviewed link is no longer current. Read a fresh outline before requesting it again.")
-                }
-            }
-            guard let tab = openReviewedResearchTab(research, in: session) else {
-                return AgentToolResult(status: .stale, code: "stale", text: "The address is no longer available for this session.")
-            }
-            let handle = session.handles.tabs.handle(for: tab.id)
-            return AgentToolResult(status: .ok, text: "Opened background research tab \(handle).", structured: ["tab": .string(handle)])
-        }
-        guard case .shareSessionTab(let choices) = kind, case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
+        guard case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
         guard let choice = choices.first(where: { $0.id == id }), share(choice, with: session) else {
             return AgentToolResult(status: .stale, code: "stale", text: "The reviewed tab changed. No tab was shared.")
         }
@@ -1695,7 +1559,6 @@ import Foundation
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
-        if report == .closed || report == .takenOver { session(withID: ownerID)?.forgetResearchTab(tabID) }
         switch report {
         case .takenOver, .closed, .loaded, .addressChanged:
             if let session = session(withID: ownerID), session.transcript.containsRead(of: tabID) { session.objectWillChange.send() }

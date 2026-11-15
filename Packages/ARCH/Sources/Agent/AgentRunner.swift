@@ -346,7 +346,7 @@ public final class AgentRunner: ObservableObject {
                     && host.userTabs(in: run.personaID).contains { $0.id == id }
             }
             if tool.name == "snapshot" {
-                return await toolHost.snapshot(args, tab: tab, handle: handle, access: .shared, store: run.snapshots, pages: 0, mayRead: mayRead).result
+                return await toolHost.snapshot(args, tab: tab, handle: handle, shared: true, store: run.snapshots, pages: 0, mayRead: mayRead).result
             }
             return await toolHost.readText(args, tab: tab, handle: handle, mayReadTab: mayRead).result
         }

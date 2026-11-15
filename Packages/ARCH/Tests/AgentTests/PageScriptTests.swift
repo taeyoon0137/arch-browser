@@ -14,24 +14,6 @@ import Testing
                             model: nil, effort: nil, scope: scope, attachedTabIDs: [fixture.tabID], tools: [])
     }
 
-    @Test func aResearchCopyKeepsFormValuesOutOfTheSessionOutline() async throws {
-        let fixture = try await PageFixture(shared: true)
-        let session = session(sharing: fixture)
-        let source = try #require(session.researchChoices(host: fixture.host, allowsAI: { _ in true }).first)
-        var copy = try #require(fixture.host.tabs.first)
-        copy.id = UUID()
-        copy.agentOwnerID = session.id
-        fixture.host.tabs.append(copy)
-        fixture.host.webContents[copy.id] = fixture.page.contents
-        session.researchPages[copy.id] = source
-        let handle = session.handles.tabs.handle(for: copy.id)
-        let call = AgentToolCall(name: "snapshot", arguments: ["tab": .string(handle)])
-        let result = await fixture.toolHost.run(call, in: session, searchesHistory: false)
-        #expect(result.status == .ok && result.text.contains("Place order"))
-        #expect(result.text.contains("read-only research tab") && !result.text.contains("shared by the user") && !result.text.contains("(asks the user)"))
-        for value in ["Alex Kim", "Leave at the door", "SAVE10", "Standard"] { #expect(!result.text.contains(value)) }
-    }
-
     @Test func aSharedSessionOutlineRedactsValuesAndScopesRefsAndDiffsToItsDocument() async throws {
         let fixture = try await PageFixture(shared: true)
         let session = session(sharing: fixture)
