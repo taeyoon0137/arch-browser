@@ -51,7 +51,7 @@ import LiveFolders
     /// The name a hook gave the tab's document, shown while the user has not named the tab, or a mark that the user turned it down. Another address clears it once the tab commits it (`committedURL`), even one a single-page site sets within its document, since the name may no longer fit; another fragment does not. The session restores it.
     @Published var suggestedTitle: SuggestedTitle?
     @Published public private(set) var url: URL?
-    /// The address of the document the tab shows, which its events carry and a hook's name goes by. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails, stops, or becomes a download, while Chromium reports an address only once it commits, so `url` counts at once when it changes while the page does not load, and otherwise once the load or its document's load ends.
+    /// The address of the document the tab shows, which its events carry and a hook's name goes by. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails, stops, or becomes a download, so the tab takes a new document's address when the engine commits it, and `url` at once when it changes while the page does not load, as within the document, and otherwise once the load or its document's load ends.
     @Published private(set) var committedURL: URL?
     @Published public private(set) var isLoading: Bool
     @Published public private(set) var canGoBack: Bool
@@ -311,7 +311,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if let originalEngineState, let url, originalEngineState.url != url { self.originalEngineState = nil }
         reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
-        if !webContents.isLoading { commitURL() }
+        if !webContents.isLoading { commit(url) }
         if isPinned, savedPage == nil, let url { savedPage = SavedPage(url: url, title: "") }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
@@ -331,7 +331,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         if !isLoading {
-            commitURL()
+            commit(url)
             didFinishLoad?()
         }
         if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
@@ -345,19 +345,21 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         guard webContents === self.webContents else { return }
         documentID = UUID()
         engineCommittedURL = url
+        // The commit can come long before the load ends, and before the engine reports the address as `url`.
+        if let url = url?.withoutCredentials { commit(url) }
         pageDownloads.documentDidCommit(site: Self.site(of: url))
         didCommitDocument?()
     }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
-        commitURL()
+        commit(url)
         didLoadDocument.send()
         reportToAgent(.loaded(url: webContents.url, title: webContents.title))
     }
 
-    /// Takes `url` as the committed address, then drops a hook's name, or its refusal, that is not for it.
-    private func commitURL() {
-        if committedURL != url { committedURL = url }
-        if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
+    /// Takes `address` as the committed address, then drops a hook's name, or its refusal, that is not for it.
+    private func commit(_ address: URL?) {
+        if committedURL != address { committedURL = address }
+        if let address, let suggested = suggestedTitle, !suggested.isFor(address) { suggestedTitle = nil }
     }
 
     public func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool {

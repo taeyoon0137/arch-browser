@@ -44,7 +44,7 @@ public struct AIRoute: Codable, Sendable, Equatable {
 
 // MARK: - Model tiers and request routes
 
-/// Models the user assigns once in Settings ▸ AI ▸ Model Tiers, so that a caller names the kind of model it needs rather than a model (hook decision 6).
+/// Models the user assigns once in Settings ▸ AI ▸ Features, so that a caller names the kind of model it needs rather than a model (hook decision 6).
 public enum AIModelTier: String, Codable, Hashable, Sendable, CaseIterable {
     case fast
     case standard

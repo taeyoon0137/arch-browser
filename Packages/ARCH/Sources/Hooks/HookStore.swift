@@ -7,7 +7,7 @@ import Foundation
 
 /// What `hooks.json` holds besides the scripts.
 public struct HookSettings: Sendable {
-    /// Settings ▸ AI ▸ Agent Hooks ▸ Run Hooks; on by default.
+    /// Settings ▸ AI ▸ Hooks ▸ Run Hooks; on by default.
     public var runsHooks = true
     /// Allow Shell Scripts; off by default (VII.31).
     public var allowsShellScripts = false
@@ -35,7 +35,7 @@ public struct HookKnownProvider: Codable, Hashable, Sendable {
     }
 }
 
-/// What Settings ▸ AI ▸ Agent Hooks says about the file.
+/// What Settings ▸ AI ▸ Hooks says about the file.
 public enum HookStoreNotice: Equatable, Sendable {
     /// `hooks.json` did not open: its seal did not match, it did not read, its key is gone, or it is an earlier copy put back. It is now `hooks.json.unreadable`, and Arch started with no hooks.
     case setAside

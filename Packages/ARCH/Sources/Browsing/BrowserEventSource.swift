@@ -1,4 +1,4 @@
-// The session's side of the browser event bus (`docs/hooks.md`, The source): follows the session's tabs (the spaces', the favorites', and the small windows'), its windows, and its downloads, and posts every kind of event to the session's bus. The session attaches it once its saved tabs are back, tells it about each close from `closeTab`, and restores windows inside `restoringWindows(_:)`.
+// The session's side of the browser event bus (`docs/hooks.md`, The source): follows the session's tabs (the spaces', the favorites', and the small windows'), its windows, and its downloads, and posts every kind of event to the session's bus. The session attaches it once its saved tabs are back, tells it about each close from `removeTab`, and restores windows inside `restoringWindows(_:)`.
 import ARCHEngine
 import Combine
 import Events

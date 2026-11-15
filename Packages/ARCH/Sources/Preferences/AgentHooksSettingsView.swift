@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Agent Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Agent Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, and every hook in run order. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
+// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, and every hook in run order. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
 import Agent
 import AI
 import Browsing
@@ -263,7 +263,7 @@ enum HookScriptActions {
 
 // MARK: - Texts
 
-/// The sentences Settings ▸ AI ▸ Agent Hooks shows for hooks, their places, their runs, and the notices about `hooks.json`.
+/// The sentences Settings ▸ AI ▸ Hooks shows for hooks, their places, their runs, and the notices about `hooks.json`.
 @MainActor
 enum HookSummary {
     /// The row's lines under the name: the situation, the scope, and the sites; an agent hook's model and record; the last run; and the program that added the hook.

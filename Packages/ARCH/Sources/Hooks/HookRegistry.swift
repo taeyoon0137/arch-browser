@@ -222,7 +222,7 @@ public final class HookRegistry: ObservableObject {
 
     /// In run order.
     @Published public private(set) var hooks: [Hook] = []
-    /// Settings ▸ AI ▸ Agent Hooks ▸ Run Hooks. While it is off, no event reaches a hook; turning it off stops running runs without changing the hooks' states.
+    /// Settings ▸ AI ▸ Hooks ▸ Run Hooks. While it is off, no event reaches a hook; turning it off stops running runs without changing the hooks' states.
     @Published public var runsHooks = true {
         didSet { runsHooksDidChange(from: oldValue) }
     }
