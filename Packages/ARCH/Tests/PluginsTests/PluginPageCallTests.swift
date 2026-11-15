@@ -16,6 +16,8 @@ private final class ScriptedPage: EngineWebContents {
     var onRun: (() -> Void)?
     /// Whether the engine fails each run, as for a page with no document to run in.
     var fails = false
+    /// Whether the engine answers runs at all; WebKit does not while a script loops.
+    var answers = true
     /// How long the engine takes to answer each run.
     var delay: TimeInterval = 0
     private(set) var worlds: [String] = []
@@ -30,12 +32,17 @@ private final class ScriptedPage: EngineWebContents {
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
         worlds.append(world)
         onRun?()
-        guard !fails else { return completion(.failure(CocoaError(.featureUnsupported))) }
-        context.setObject(pageLocation(address), forKeyedSubscript: "location" as NSString)
-        let result = context.evaluateScript("(\(script))(channel)")
-        let reply = result?.isString == true ? result?.toString() : nil
-        guard delay > 0 else { return completion(.success(reply)) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { completion(.success(reply)) }
+        guard answers else { return }
+        let reply: Result<String?, Error>
+        if fails {
+            reply = .failure(CocoaError(.featureUnsupported))
+        } else {
+            context.setObject(pageLocation(address), forKeyedSubscript: "location" as NSString)
+            let result = context.evaluateScript("(\(script))(channel)")
+            reply = .success(result?.isString == true ? result?.toString() : nil)
+        }
+        guard delay > 0 else { return completion(reply) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { completion(reply) }
     }
 
     func postPageScriptMessage(_ json: String, toWorld world: String) {
@@ -156,9 +163,9 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
     private let folder = TemporaryFolder()
     private let host = PageHost()
 
-    private func manager(ai: AIService? = nil) -> PluginManager {
+    private func manager(ai: AIService? = nil, hang: TimeInterval = 10) -> PluginManager {
         PluginManager(persona: UUID(), directory: folder.url, builtIns: [PageCallsPlugin.self, AIPageCallsPlugin.self], secretStore: MemorySecretStore(),
-                      browserHost: host, ai: ai)
+                      scriptLimits: ScriptPluginLimits(hang: hang, idle: 30), browserHost: host, ai: ai)
     }
 
     private func context(_ type: PageCallsPlugin.Type, in manager: PluginManager) throws -> ScopedPluginContext {
@@ -218,6 +225,37 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         page.address = "https://example.org/a"
         page.onRun = { [host] in host.tabs[0].documentID = UUID() }
         await #expect(throws: PluginError.noPage) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
+    }
+
+    /// WebKit waits for a page as long as a script loops in it, so a run waits for the page at most for the hang limit, and the instance's stop ends the wait at once.
+    @Test func aRunThatThePageLeavesUnansweredEnds() async throws {
+        let manager = manager(hang: 0.3)
+        let context = try context(PageCallsPlugin.self, in: manager)
+        let tab = host.show("https://example.org/a")
+        let page = try #require(host.pages[tab.id])
+        page.answers = false
+        let started = ContinuousClock.now
+        await #expect(throws: PluginError.timedOut) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
+        #expect(ContinuousClock.now - started >= .seconds(0.3))
+        // An engine that fails the run once it has waited as long, as Chromium's does, times out too.
+        page.answers = true
+        page.fails = true
+        page.delay = 0.3
+        await #expect(throws: PluginError.timedOut) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
+
+        // The context holds its manager weakly, and this one's limit is one the test does not reach: an engine that fails the run sooner leaves no page, and the context's end ends a run's wait.
+        let unlimited = self.manager(hang: 10)
+        let ending = try self.context(PageCallsPlugin.self, in: unlimited)
+        page.delay = 0.05
+        await #expect(throws: PluginError.noPage) { _ = try await ending.runPageScript(.source("return 1;"), in: tab.id) }
+        page.answers = false
+        let run = Task { try await ending.runPageScript(.source("return 1;"), in: tab.id) }
+        try await Task.sleep(for: .milliseconds(50))
+        let stop = ContinuousClock.now
+        ending.end()
+        await #expect(throws: PluginError.stopped) { _ = try await run.value }
+        #expect(ContinuousClock.now - stop < .seconds(5))
+        withExtendedLifetime(unlimited) {}
     }
 
     @Test func reportsWhatTheScriptThrew() async throws {
@@ -297,7 +335,7 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         let root = folder.url.appendingPathComponent("Packages/PageReader", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let files = [
-            "plugin.json": #"{"id": "org.example.page-reader", "name": "Page Reader", "version": "1", "apiVersion": 1, "summary": "Reads.", "sites": ["https://example.org/*"], "background": "b.js", "contributes": {"commands": [{"id": "read", "title": "Read"}], "sidebarItems": [{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}]}}"#,
+            "plugin.json": #"{"id": "org.example.page-reader", "name": "Page Reader", "version": "1", "apiVersion": 1, "summary": "Reads.", "sites": ["https://example.org/*"], "background": "b.js", "contributes": {"commands": [{"id": "read", "title": "Read"}, {"id": "twice", "title": "Read Twice"}, {"id": "unanswered", "title": "Read and Wait"}], "sidebarItems": [{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}]}}"#,
             "b.js": """
             const outcome = async (attempt) => {
               try {
@@ -317,6 +355,14 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
                 posted: await outcome(() => arch.pages.post(id, { hello: "page" })),
               });
             });
+            arch.commands.onRun("twice", async (invocation) => {
+              const read = () => outcome(() => arch.pages.run(invocation.tab.id, "read.js"));
+              await arch.storage.set("twice", [await read(), await read()]);
+            });
+            arch.commands.onRun("unanswered", async (invocation) => {
+              await arch.storage.set("unanswered", await outcome(() => arch.pages.run(invocation.tab.id, "read.js")));
+              await new Promise(() => {});
+            });
             """,
             "read.js": "return { href: location.href, sends: typeof arch.send };",
             "close.js": "}",
@@ -332,16 +378,17 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         return manager
     }
 
-    private func read(in manager: PluginManager, on tab: PluginTab) async throws -> PluginValue? {
-        await manager.run(PluginCommandRef(plugin: id, command: "read"), PluginInvocation(tab: tab))
-        return manager.makeContext(for: try #require(manager.plugins.first)).storage.value(forKey: "read")
+    /// Runs the command on the tab and returns what it stored under its name.
+    private func run(_ command: String = "read", in manager: PluginManager, on tab: PluginTab) async throws -> PluginValue? {
+        await manager.run(PluginCommandRef(plugin: id, command: command), PluginInvocation(tab: tab))
+        return manager.makeContext(for: try #require(manager.plugins.first)).storage.value(forKey: command)
     }
 
     @Test func theBackgroundScriptRunsPackageFilesInPagesAndPostsToThem() async throws {
         let manager = try await manager()
         defer { manager.close() }
         let tab = host.show("https://example.org/a")
-        #expect(try await read(in: manager, on: tab) == .object([
+        #expect(try await run(in: manager, on: tab) == .object([
             "value": .object(["href": .string("https://example.org/a"), "sends": .string("function")]),
             "missing": .string("invalidPageScript"), "closing": .string("invalidPageScript"), "other": .string("notGranted"), "posted": .string("done"),
         ]))
@@ -350,18 +397,26 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         #expect(page.posts.map(\.json) == [#"{"hello":"page"}"#] && page.posts.map(\.world) == ["ARCHPlugin.org.example.page-reader"])
     }
 
-    /// A page that takes longer than the hang limit to run the script holds up Arch's answer, not the background script. The limit leaves the background document time to load while other tests run.
+    /// Page runs that together take longer than the hang limit hold up Arch's answers, not the background script. The limit leaves the background document time to load while other tests run.
     @Test func aPageRunDoesNotCountTowardTheHangLimit() async throws {
-        let manager = try await manager(hang: 1.5)
+        let manager = try await manager(hang: 3)
         defer { manager.close() }
         let tab = host.show("https://example.org/a")
-        host.pages[tab.id]?.delay = 3
-        guard case let .object(read)? = try await read(in: manager, on: tab) else {
-            Issue.record("The command stored nothing.")
-            return
-        }
-        #expect(read["value"] == .object(["href": .string("https://example.org/a"), "sends": .string("function")]))
-        #expect(manager.plugins.first?.failure == nil)
+        host.pages[tab.id]?.delay = 2
+        let value = PluginValue.object(["href": .string("https://example.org/a"), "sends": .string("function")])
+        #expect(try await run("twice", in: manager, on: tab) == .array([value, value]))
+    }
+
+    /// A run that the page leaves unanswered, as a WebKit page does while a script loops, rejects at the hang limit, after which the background script's own wait counts again: the command that keeps waiting fails at the limit after that.
+    @Test func aRunThatThePageLeavesUnansweredEndsAtTheHangLimit() async throws {
+        let manager = try await manager(hang: 3)
+        defer { manager.close() }
+        let tab = host.show("https://example.org/a")
+        host.pages[tab.id]?.answers = false
+        let started = ContinuousClock.now
+        #expect(try await run("unanswered", in: manager, on: tab) == .string("timedOut"))
+        let waited = ContinuousClock.now - started
+        #expect(waited >= .seconds(6) && waited < .seconds(20), "\(waited)")
     }
 
     @Test func aPanelHasNoPageCalls() async throws {

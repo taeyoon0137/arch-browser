@@ -1249,6 +1249,11 @@ public final class PluginManager: ObservableObject {
         return (tab, document, contents)
     }
 
+    /// How long a page call's run waits for the page's reply: the hang limit, 10 seconds by default, as long as Chromium's engine waits for one.
+    fileprivate var pageRunLimit: Duration {
+        .seconds(scriptLimits.hang)
+    }
+
     /// The source of a script that the plugin runs in a page: a text file of its package, or script text from a built-in plugin. Throws `PluginError.invalidPageScript` for anything else.
     fileprivate func source(of script: PluginScript, for id: PluginID) throws -> String {
         switch script {
@@ -1485,6 +1490,9 @@ final class ScopedPluginContext: PluginPanelContext {
     private let aiRequests: PluginAIRequests?
     private weak var manager: PluginManager?
     private var hasEnded = false
+    /// The page calls' runs that wait for the page's reply, by number, which `end()` ends.
+    private var pageRuns: [Int: CheckedContinuation<String?, any Error>] = [:]
+    private var nextPageRun = 0
 
     init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: ScopedPluginStorage, secrets: ScopedPluginSecrets, ai: PluginAIRequests? = nil) {
         self.manager = manager
@@ -1505,12 +1513,17 @@ final class ScopedPluginContext: PluginPanelContext {
         set { aiRequests?.step = newValue }
     }
 
-    /// Stops the context, its storage, its secrets, and its AI requests from acting for the instance.
+    /// Stops the context, its storage, its secrets, and its AI requests from acting for the instance, and ends the waits of its page runs with `PluginError.stopped`.
     func end() {
         hasEnded = true
         scopedStorage.end()
         scopedSecrets.end()
         aiRequests?.end()
+        let runs = pageRuns.values
+        pageRuns = [:]
+        for run in runs {
+            run.resume(throwing: PluginError.stopped)
+        }
     }
 
     /// Stops the step and the AI requests that belong to it.
@@ -1581,12 +1594,7 @@ final class ScopedPluginContext: PluginPanelContext {
             throw PluginError.invalidPageScript("The script does not parse as the body of a function, as a page script must.")
         }
         let page = try manager.page(of: id, for: grant)
-        // The engine fails a run when the tab's page has no document to run in, as a tab that no window has shown yet.
-        let reply = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String?, any Error>) in
-            page.contents.executeJavaScript(function, inWorld: pluginID.pageScriptWorld) { result in
-                continuation.resume(with: result.mapError { _ in PluginError.noPage })
-            }
-        }
+        let reply = try await run(function, in: page.contents, waitingAtMost: manager.pageRunLimit)
         guard !hasEnded else { throw PluginError.stopped }
         guard let shown = manager.personaTabs().first(where: { $0.id == id }), shown.documentID == page.tab.documentID else { throw PluginError.noPage }
         switch try PluginPageRun.outcome(of: reply) {
@@ -1595,6 +1603,24 @@ final class ScopedPluginContext: PluginPanelContext {
         case let .value(value):
             guard !manager.excludesAI(shown, for: grant) else { throw PluginError.siteNotGranted(shown.url ?? page.document) }
             return value
+        }
+    }
+
+    /// Runs the function in the page's main frame and waits for its reply at most for `limit`: WebKit waits as long as the page runs, also while a script loops in it. A run still unanswered then, or one that the engine fails that late, as Chromium's does once it has waited as long, throws `PluginError.timedOut`; one that the engine fails sooner, as when the tab's page has no document to run in, as a tab that no window has shown yet, throws `noPage`. The wait ends with `stopped` as the context ends.
+    private func run(_ function: String, in contents: any EngineWebContents, waitingAtMost limit: Duration) async throws -> String? {
+        let number = nextPageRun
+        nextPageRun += 1
+        let started = ContinuousClock.now
+        return try await withCheckedThrowingContinuation { continuation in
+            pageRuns[number] = continuation
+            contents.executeJavaScript(function, inWorld: pluginID.pageScriptWorld) { result in
+                let settled = result.mapError { _ in ContinuousClock.now - started < limit ? PluginError.noPage : PluginError.timedOut }
+                Task { @MainActor [weak self] in self?.pageRuns.removeValue(forKey: number)?.resume(with: settled) }
+            }
+            Task { [weak self] in
+                try? await Task.sleep(until: started + limit, clock: .continuous)
+                self?.pageRuns.removeValue(forKey: number)?.resume(throwing: PluginError.timedOut)
+            }
         }
     }
 
