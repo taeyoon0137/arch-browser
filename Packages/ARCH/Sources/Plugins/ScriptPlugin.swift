@@ -1,4 +1,4 @@
-// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, panel, page script value, or event starts, and each panel shows one of its package's HTML files in a web view of the same sandbox while the popover holds it. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted, or the end of its web content process, fails the instance; an instance without calls for the idle limit and without a panel that shows stops. Either way it releases its web view, ends its panels' documents and closes their popovers, and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
+// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, panel, page script value, or event starts, and each panel shows one of its package's HTML files in a web view of the same sandbox while the popover holds it. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted or for a page to run its script, or the end of its web content process, fails the instance; an instance without calls for the idle limit and without a panel that shows stops. Either way it releases its web view, ends its panels' documents and closes their popovers, and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
 import JavaScriptCore
 import WebKit
 
@@ -45,7 +45,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     /// Settles the call that waits for the background document to load.
     private var settleLoad: (@MainActor (Result<Any?, any Error>) -> Void)?
     private var idleStop: Task<Void, Never>?
-    /// The background script's calls that wait for Arch's own answer, an AI request's reply; when the current stretch of such waits began; and how long the earlier stretches lasted. That time does not count toward the hang limit of the script's unanswered calls, and the instance does not stop for being idle meanwhile.
+    /// The background script's calls that wait for Arch's own answer, an AI request's reply or a page call's run; when the current stretch of such waits began; and how long the earlier stretches lasted. That time does not count toward the hang limit of the script's unanswered calls, and the instance does not stop for being idle meanwhile.
     private var archWaits = 0
     private var archWaitBegan: ContinuousClock.Instant?
     private var archWaitedBefore: Duration = .zero
@@ -176,7 +176,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         }
     }
 
-    /// Starts a call that settles through the closure `start` receives, and waits for it at most for the hang limit, not counting the time the background script waits for Arch's answer to an AI request. A call still unsettled then means that the background script hangs: the instance fails, and every waiting call throws `timedOut`.
+    /// Starts a call that settles through the closure `start` receives, and waits for it at most for the hang limit, not counting the time the background script waits for Arch's answer to an AI request or a page call. A call still unsettled then means that the background script hangs: the instance fails, and every waiting call throws `timedOut`.
     private func call(_ start: (@escaping @MainActor (Result<Any?, any Error>) -> Void) -> Void) async throws -> Any? {
         let number = nextCallNumber
         nextCallNumber += 1
@@ -228,7 +228,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         }
     }
 
-    /// Stops the instance once it has gone without calls for the idle limit, unless it is held, waits for Arch's answer to an AI request, or has a panel that shows.
+    /// Stops the instance once it has gone without calls for the idle limit, unless it is held, waits for Arch's answer to an AI request or a page call, or has a panel that shows.
     private func stopWhenIdle() {
         idleStop?.cancel()
         guard waitingCalls.isEmpty, archWaits == 0, webView != nil, !isHeld, !panels.allObjects.contains(where: \.isShown) else { return }

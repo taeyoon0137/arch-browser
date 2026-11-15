@@ -988,7 +988,7 @@ public final class PluginManager: ObservableObject {
     }
 
     /// Whether a plugin with the grant reaches AI and the tab's address or its document's is on a site excluded from AI.
-    private func excludesAI(_ tab: PluginTab, for grant: PluginGrant) -> Bool {
+    fileprivate func excludesAI(_ tab: PluginTab, for grant: PluginGrant) -> Bool {
         excludesAI(tab.url, for: grant) || excludesAI(tab.documentURL, for: grant)
     }
 
@@ -1230,6 +1230,29 @@ public final class PluginManager: ObservableObject {
     /// The Persona's tabs before the grant applies.
     fileprivate func personaTabs() -> [PluginTab] {
         browserHost?.tabs(in: persona) ?? []
+    }
+
+    /// The tab of the Persona that a page call of a plugin with the grant names, before the grant applies, with its document's address and its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted` for a document outside the granted sites, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
+    fileprivate func page(of id: UUID, for grant: PluginGrant) throws -> (tab: PluginTab, document: URL, contents: any EngineWebContents) {
+        guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        guard let document = tab.documentURL else { throw PluginError.noPage }
+        guard grant.covers(document), !excludesAI(tab, for: grant) else { throw PluginError.siteNotGranted(document) }
+        guard let contents = browserHost?.webContents(forTab: id) else { throw PluginError.noPage }
+        return (tab, document, contents)
+    }
+
+    /// The source of a script that the plugin runs in a page: a text file of its package, or script text from a built-in plugin. Throws `PluginError.invalidPageScript` for anything else.
+    fileprivate func source(of script: PluginScript, for id: PluginID) throws -> String {
+        switch script {
+        case let .source(text):
+            guard builtIns[id] != nil else { throw PluginError.invalidPageScript("Only plugins built into Arch run script text in pages.") }
+            return text
+        case let .file(path):
+            guard let package = packages[id], package.kind == .script, let text = package.text(of: path) else {
+                throw PluginError.invalidPageScript("\u{201C}\(path)\u{201D} is not a text file of the plugin\u{2019}s package.")
+            }
+            return text
+        }
     }
 
     /// Renames a tab of the Persona for `document`, or for the document it shows now when that is nil, with the plugin as the cause of the change.
@@ -1539,6 +1562,39 @@ final class ScopedPluginContext: PluginPanelContext {
 
     func panelAI() throws -> any AIClient {
         try aiRequestsInReach().client(inStep: false)
+    }
+
+    /// The script runs in the plugin's world through the tab's page, and its value comes back only while the tab shows the document that the call checked, and for a plugin with `ai` only while the address it shows is not on a site excluded from AI, as a single-page site can move to one within its document.
+    func runPageScript(_ script: PluginScript, in id: PluginTab.ID) async throws -> PluginValue {
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let manager else { throw PluginError.notGranted(id) }
+        let source = try manager.source(of: script, for: pluginID)
+        guard let function = PluginPageRun.function(running: source, sites: grant.sites) else {
+            throw PluginError.invalidPageScript("The script does not parse as the body of a function, as a page script must.")
+        }
+        let page = try manager.page(of: id, for: grant)
+        // The engine fails a run when the tab's page has no document to run in, as a tab that no window has shown yet.
+        let reply = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String?, any Error>) in
+            page.contents.executeJavaScript(function, inWorld: pluginID.pageScriptWorld) { result in
+                continuation.resume(with: result.mapError { _ in PluginError.noPage })
+            }
+        }
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let shown = manager.personaTabs().first(where: { $0.id == id }), shown.documentID == page.tab.documentID else { throw PluginError.noPage }
+        switch try PluginPageRun.outcome(of: reply) {
+        case .outside: throw PluginError.siteNotGranted(shown.url ?? page.document)
+        case let .failed(text): throw PluginError.pageScriptFailed(text)
+        case let .value(value):
+            guard !manager.excludesAI(shown, for: grant) else { throw PluginError.siteNotGranted(shown.url ?? page.document) }
+            return value
+        }
+    }
+
+    func postMessage(_ message: PluginValue, toTab id: PluginTab.ID) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let manager else { throw PluginError.notGranted(id) }
+        let page = try manager.page(of: id, for: grant)
+        page.contents.postPageScriptMessage(String(decoding: try JSONEncoder().encode(message), as: UTF8.self), toWorld: pluginID.pageScriptWorld)
     }
 
     private func aiRequestsInReach() throws -> PluginAIRequests {

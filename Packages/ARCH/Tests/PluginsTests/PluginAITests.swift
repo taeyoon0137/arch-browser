@@ -194,6 +194,8 @@ private final class RecordingHost: PluginBrowserHost {
         renames.append((id, name, document))
         return true
     }
+
+    func webContents(forTab id: UUID) -> (any EngineWebContents)? { nil }
 }
 
 @MainActor

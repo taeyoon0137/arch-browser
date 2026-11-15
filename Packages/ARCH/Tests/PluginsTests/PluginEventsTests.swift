@@ -30,6 +30,8 @@ private final class FakeTabsHost: PluginBrowserHost {
         onRename?(rename)
         return applying
     }
+
+    func webContents(forTab id: UUID) -> (any EngineWebContents)? { nil }
 }
 
 /// Renames tabs on example.org, with nothing to run.
