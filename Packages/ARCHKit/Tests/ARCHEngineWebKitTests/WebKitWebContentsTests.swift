@@ -1,4 +1,4 @@
-// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, a page script's message reaches the page script delegate of that web contents, and the favicon lookup reads the page's declared icon from a world of the app's own. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
+// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, a popup shares its opener's page script list, a page script's message reaches the page script delegate of that web contents, and the favicon lookup reads the page's declared icon from a world of the app's own. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -46,6 +46,17 @@ import Testing
         let popup = WebKitWebContents(parentConfiguration: tab.webView.configuration, extensionBaseURL: nil, context: context)
         #expect((tab.webView as? WebKitWebView)?.contents === tab)
         #expect((popup.webView as? WebKitWebView)?.contents === popup)
+    }
+
+    /// A popup uses its opener's content controller, so the two share one list of page scripts and say so, while another web contents has its own.
+    @Test func aPopupSharesItsOpenersPageScriptList() throws {
+        let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
+        let other = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
+        let popup = WebKitWebContents(parentConfiguration: tab.webView.configuration, extensionBaseURL: nil, context: context)
+        #expect(popup.pageScriptListID == tab.pageScriptListID && other.pageScriptListID != tab.pageScriptListID)
+        let script = EnginePageScript(world: "test", source: "(channel) => {}", injectionTime: .documentEnd, mainFrameOnly: true)
+        popup.setPageScripts([script])
+        #expect(tab.userContent.pageScripts == [script] && other.userContent.pageScripts.isEmpty)
     }
 
     @Test func aPageScriptMessageReachesItsWebContents() async throws {

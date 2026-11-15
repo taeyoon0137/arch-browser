@@ -497,13 +497,17 @@ final class PageDouble: EngineWebContents {
     let closingStopsDownloads = false
     let devTools: (any EngineDevTools)? = nil
     var input: (any EngineInput)?
-    /// The page scripts the page got with its configuration, and from `setPageScripts(_:)` since.
-    private(set) var pageScripts: [EnginePageScript]
+    /// The page scripts the page got with its configuration, and from `setPageScripts(_:)` since, or those of `listOwner`.
+    var pageScripts: [EnginePageScript] { listOwner?.pageScripts ?? ownPageScripts }
+    private var ownPageScripts: [EnginePageScript]
+    /// The page whose script list this one uses, as a WebKit popup uses its opener's, or nil for a list of its own.
+    weak var listOwner: PageDouble?
+    var pageScriptListID: ObjectIdentifier { ObjectIdentifier(listOwner ?? self) }
 
     init(url: URL?, engine: EngineKind = .webKit, pageScripts: [EnginePageScript] = []) {
         self.engineKind = engine
         self.url = url
-        self.pageScripts = pageScripts
+        self.ownPageScripts = pageScripts
     }
 
     /// Starts and finishes a load of `address`, as the engine reports one.
@@ -518,7 +522,9 @@ final class PageDouble: EngineWebContents {
 
     func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {}
     func stopFind() {}
-    func setPageScripts(_ scripts: [EnginePageScript]) { pageScripts = scripts }
+    func setPageScripts(_ scripts: [EnginePageScript]) {
+        if let listOwner { listOwner.setPageScripts(scripts) } else { ownPageScripts = scripts }
+    }
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {}
     func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {}
     func postPageScriptMessage(_ json: String, toWorld world: String) {}

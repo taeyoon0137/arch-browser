@@ -107,6 +107,9 @@ extension WebKitWebContents {
         userContent.setPageScripts(scripts)
     }
 
+    /// The content controller, which a popup shares with its opener.
+    public var pageScriptListID: ObjectIdentifier { ObjectIdentifier(userContent) }
+
     /// The channel script runs first and defines the channel only where the document has none. The function runs without a user gesture while the private API flags allow it (`WebKitUserGestureAPI`), so that the page's handlers for the events it dispatches get no user activation.
     public func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
         let source = Self.runSource(calling: script)
