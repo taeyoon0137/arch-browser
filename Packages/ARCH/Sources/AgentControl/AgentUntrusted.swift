@@ -31,6 +31,26 @@ public enum AgentAddress {
         components.password = nil
         return components.url ?? url
     }
+
+    /// Whether a page name is the page's own address, as an engine titles a page that has none: the address itself, or Chromium's display form, without the scheme and a leading `www.` and with spaces and other characters unescaped. Only an address with a query or fragment matters, since results leave those out. The form is often no valid address, so it is compared as text: by the host, or for a host shown in Unicode, by the query or fragment.
+    public static func isOwnAddress(_ name: String, of url: URL) -> Bool {
+        if name == url.absoluteString { return true }
+        guard url.query != nil || url.fragment != nil, let host = url.host?.lowercased() else { return false }
+        var shown = Substring(name.lowercased())
+        for scheme in ["https://", "http://"] where shown.hasPrefix(scheme) {
+            shown = shown.dropFirst(scheme.count)
+            break
+        }
+        if shown.hasPrefix("www.") { shown = shown.dropFirst(4) }
+        let bareHost = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        if shown.hasPrefix(bareHost) {
+            let rest = shown.dropFirst(bareHost.count)
+            // The host alone carries nothing results leave out, as a sign-in's message that names it.
+            if let next = rest.first, "/:?#".contains(next) { return true }
+        }
+        let parts = [url.query.map { "?" + $0 }, url.fragment.map { "#" + $0 }].compactMap { $0 }
+        return parts.contains { name.contains($0) || ($0.removingPercentEncoding.map(name.contains) ?? false) }
+    }
 }
 
 extension AgentUntrusted {

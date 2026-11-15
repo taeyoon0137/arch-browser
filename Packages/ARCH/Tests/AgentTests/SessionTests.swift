@@ -423,7 +423,7 @@ import UserNotifications
         #expect(service.approvals.pending.isEmpty && session.callsThisSession == 3)
     }
 
-    enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, liveFolderItem, exclude, revoke, takeOver, stop, decline }
+    enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, exclude, revoke, takeOver, stop, decline }
 
     @Test(arguments: ChangeBeforeTabConsent.allCases)
     func aTabRequestCannotShareAfterItsReviewedChoiceChanges(_ change: ChangeBeforeTabConsent) async throws {
@@ -444,12 +444,6 @@ import UserNotifications
         case .navigate: harness.host.tabs[0].url = URL(string: "https://fixture.invalid/new")
         case .close: harness.host.tabs.removeAll()
         case .unload: harness.host.tabs[0].isLoaded = false
-        case .liveFolderItem:
-            harness.host.tabs[0].isLiveFolderItem = true
-            #expect(!service.canReattach(tab, in: session.personaID))
-            let context = AgentComposerContext(personaID: session.personaID, spaceID: session.spaceID, place: "Home", tab: tab)
-            let reviewed = context.sessionStart(task: "Read", mode: .readOnly, allowsAI: { _ in true })
-            #expect(throws: AgentService.SessionError.self) { try service.startSession(reviewed) }
         case .exclude: harness.excludedHosts.value.insert("fixture.invalid")
         case .revoke:
             #expect(service.share(tab, with: session))
@@ -495,7 +489,7 @@ import UserNotifications
         #expect(session.handles.tabs.id(for: "t1") == tab.id)
         let existing = try await client.callTool("request_tab", arguments)
         #expect(service.approvals.pending.isEmpty && session.handles.sharedTabIDs == [tab.id])
-        #expect(existing.status == .denied && existing.structured?["tab"] == nil)
+        #expect(existing.status == .refused && existing.code == "notAvailable" && existing.structured?["tab"] == nil)
         service.stopSharing(tab.id, with: session)
         let secondClient = try TestClient(harness.location)
         _ = try await secondClient.hello(ticket: session.ticket?.text)
@@ -790,7 +784,8 @@ import UserNotifications
         #expect(session.handles.sharedTabIDs == [tabs[0].id])
         host.tabs[1].documentID = UUID()
         #expect(!service.share(choices[1], with: session))
-        host.tabs[2].title = addresses[0]
+        // Chromium titles a page without a title by its address in display form: no scheme or credentials, but the query and fragment.
+        host.tabs[2].title = "docs.example/projects?team=first#one"
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
         #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)

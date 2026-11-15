@@ -109,8 +109,15 @@ struct AgentApprovalCard: View {
                         Text(verbatim: labels[tab.id] ?? tab.attachmentLabel).tag(Optional(tab.id))
                     }
                 }
+                // The chosen tab's full address, which the user reviews before Share.
                 if let selected = tabs.first(where: { $0.id == chosenTab }) {
-                    AgentAttachmentLabel(tab: selected)
+                    Text(verbatim: selected.attachmentAddress ?? selected.attachmentLabel)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
                 }
             }
         default:
@@ -134,11 +141,7 @@ struct AgentApprovalCard: View {
                 AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
                 AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
             case .shareSessionTab, .requestTab:
-                if case .shareSessionTab = approval.kind {
-                    Button("Don\u{2019}t Share") { answer(.deny) }
-                } else {
-                    AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
-                }
+                AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
                 AgentPointerButton(title: "Share", requiresPointer: true) { if let chosenTab { answer(.tab(chosenTab)) } }
                     .disabled(chosenTab == nil)
             default:

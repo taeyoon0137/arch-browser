@@ -296,7 +296,6 @@ import Testing
             AgentTabInfo(id: UUID(), spaceID: fixture.grant.spaceID, title: "Report", url: URL(string: $0), isLoading: false, engine: .webKit)
         }
         fixture.host.tabs = tabs
-        fixture.host.tabs[1].isLiveFolderItem = true
         fixture.host.tabs[4].isLoaded = false
         fixture.host.tabs[5].agentOwnerID = UUID()
         fixture.host.userTabIDs = Set(tabs.map(\.id))

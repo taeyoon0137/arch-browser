@@ -912,7 +912,7 @@ import Foundation
 
     /// Some documents use their own address as the title. Reduce it wherever the browser reports that page name.
     private static func reducedName(_ name: String, url: URL?) -> String {
-        guard let url, name == url.absoluteString else { return name }
+        guard let url, AgentAddress.isOwnAddress(name, of: url) else { return name }
         return AgentAddress.reduced(url).absoluteString
     }
 

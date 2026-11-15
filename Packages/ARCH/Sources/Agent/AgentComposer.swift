@@ -103,7 +103,7 @@ public struct AgentReaderExcerpt: Equatable {
 
     /// The selected tab when it has a document the user can share with this session.
     public func attachableTab(allowsAI: (URL) -> Bool) -> AgentTabInfo? {
-        guard let tab, tab.canAttachToSession(allowsAI: allowsAI) else { return nil }
+        guard let tab, tab.canShareWithAgent(allowsAI: allowsAI) else { return nil }
         return tab
     }
 
@@ -404,7 +404,7 @@ extension AgentTabInfo {
 
     private func attachmentLabel(address: String?) -> String {
         guard let address else { return title.isEmpty ? "Tab" : title }
-        if title.isEmpty || title == url?.host || title == url?.absoluteString { return address }
+        if title.isEmpty || title == url?.host || url.map({ AgentAddress.isOwnAddress(title, of: $0) }) == true { return address }
         return "\(title) · \(address)"
     }
 

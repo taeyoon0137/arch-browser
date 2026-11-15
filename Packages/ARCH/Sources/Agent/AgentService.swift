@@ -701,7 +701,7 @@ import Foundation
     func shareableTabs(for session: AgentSession) -> [AgentTabInfo] {
         guard canEditAttachments(of: session) else { return [] }
         return host.userTabs(in: session.personaID).filter { tab in
-            !session.handles.sharedTabIDs.contains(tab.id) && tab.canAttachToSession(allowsAI: dependencies.allowsAI)
+            !session.handles.sharedTabIDs.contains(tab.id) && tab.canShareWithAgent(allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -712,7 +712,7 @@ import Foundation
     /// The composer may offer its detached tab again only while the originally reviewed document is eligible.
     func canReattach(_ choice: AgentTabInfo, in personaID: UUID) -> Bool {
         host.userTabs(in: personaID).contains {
-            $0.showsSameDocument(as: choice) && $0.canAttachToSession(allowsAI: dependencies.allowsAI)
+            $0.showsSameDocument(as: choice) && $0.canShareWithAgent(allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -739,7 +739,7 @@ import Foundation
         if page.ownerID == session.id {
             guard host.agentTabs(of: session.id).contains(where: { $0.id == tab.id }) else { return nil }
         } else {
-            guard page.ownerID == nil, !tab.isLiveFolderItem, session.handles.sharedTabIDs.contains(tab.id),
+            guard page.ownerID == nil, session.handles.sharedTabIDs.contains(tab.id),
                   host.userTabs(in: session.personaID).contains(where: { $0.id == tab.id }) else { return nil }
         }
         return tab
@@ -784,7 +784,7 @@ import Foundation
         var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
         let attachedIDs = Set(attached)
         let tabs = host.userTabs(in: personaID).filter { tab in
-            attachedIDs.contains(tab.id) && tab.canAttachToSession(allowsAI: dependencies.allowsAI)
+            attachedIDs.contains(tab.id) && tab.canShareWithAgent(allowsAI: dependencies.allowsAI)
         }
         if let reviewed = start.reviewedDocument, !tabs.contains(where: { $0.showsSameDocument(as: reviewed) }) {
             throw SessionError(message: "The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page.")
@@ -1297,7 +1297,8 @@ import Foundation
         }
         guard session.acceptsQuestions, session.isTurnRunning else { return AgentToolHost.ended.result }
         let choices = shareableTabs(for: session)
-        guard !choices.isEmpty else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
+        // No card asked the user, so nothing reads as their refusal.
+        guard !choices.isEmpty else { return AgentToolResult(status: .refused, code: "notAvailable", text: "No other eligible tab is open in this Persona.") }
         let now = dependencies.now()
         let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
                                  kind: .shareSessionTab(choices), isSensitive: false, offers: [.deny],
@@ -1307,6 +1308,7 @@ import Foundation
         guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
               session.acceptsQuestions, !session.isTakenOver, !session.hasEnded else { return AgentToolHost.ended.result }
         if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "The user did not answer the tab request in time.") }
+        if case .ended = answer { return AgentToolResult(status: .stale, code: "stale", text: "The tabs available to share changed. No tab was shared.") }
         guard case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
         guard let choice = choices.first(where: { $0.id == id }), share(choice, with: session) else {
             return AgentToolResult(status: .stale, code: "stale", text: "The reviewed tab changed. No tab was shared.")

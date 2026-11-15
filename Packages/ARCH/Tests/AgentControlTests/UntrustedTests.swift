@@ -26,6 +26,13 @@ import Testing
         #expect(AgentAddress.reduced(URL(string: "https://example.org/search?q=private#top")!).absoluteString == "https://example.org/search")
         #expect(AgentAddress.reduced(URL(string: "https://me:pw@example.org:8443/a/b?x=1")!).absoluteString == "https://example.org:8443/a/b")
         #expect(AgentAddress.reduced(URL(string: "https://example.org/")!).absoluteString == "https://example.org/")
+        // Chromium titles a page without a title by its address in display form, which keeps the query and fragment.
+        let tokenized = URL(string: "https://www.docs.example/report?token=private#details")!
+        #expect(AgentAddress.isOwnAddress("docs.example/report?token=private#details", of: tokenized))
+        #expect(AgentAddress.isOwnAddress("http://docs.example/report?token=private", of: URL(string: "http://docs.example/report?token=private")!))
+        #expect(AgentAddress.isOwnAddress("bücher.example/search?q=two words", of: URL(string: "https://xn--bcher-kva.example/search?q=two%20words")!))
+        #expect(!AgentAddress.isOwnAddress("Report", of: tokenized) && !AgentAddress.isOwnAddress("docs.example", of: tokenized))
+        #expect(!AgentAddress.isOwnAddress("docs.example/report", of: URL(string: "https://docs.example/report")!))
         #expect(AgentAddress.reduced(URL(string: "https://example.org/path?")!).absoluteString == "https://example.org/path")
     }
 
