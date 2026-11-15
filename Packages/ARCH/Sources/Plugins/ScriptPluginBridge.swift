@@ -556,6 +556,7 @@ private extension PluginError {
         case .pageScriptFailed: return "pageScriptFailed"
         case .pageRunUnavailable: return "pageRunUnavailable"
         case .invalidAddress: return "invalidAddress"
+        case .tooManyTabs: return "tooManyTabs"
         }
     }
 }

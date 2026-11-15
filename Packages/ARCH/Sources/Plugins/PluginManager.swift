@@ -168,6 +168,8 @@ public final class PluginManager: ObservableObject {
     private var events: BrowserEventSubscription?
     /// The events each plugin received in the last minute, which loop protection's rate caps (`docs/hooks.md`, Plugins).
     private var eventLimiter = BrowserEventRateLimiter()
+    /// When each plugin opened the tabs it opened in the last minute, which `tabOpenLimit` caps.
+    private var tabOpenings: [PluginID: [Date]] = [:]
     /// The AI interface that the plugins with `ai` send their requests through, whose hook scheduler runs their hooks; without one, they get no AI and their events arrive as for other plugins.
     private let ai: AIService?
     /// The features this manager registered in `ai`, those of its enabled plugins with `ai`, by identifier.
@@ -1469,10 +1471,19 @@ public final class PluginManager: ObservableObject {
         return personaTabs().first { $0.id == id }
     }
 
-    /// Opens a tab of the Persona with the plugin as the cause of its events. Throws as the host does, and `PluginError.closed` without the host.
+    /// A plugin opens at most this many tabs within a minute. Each new tab is an event subject of its own, so the event rate's cap for one subject never stops plugins that open a tab for each other's `tabOpened`, and each tab costs a web content process.
+    static let tabOpenLimit = 10
+
+    /// Opens a tab of the Persona with the plugin as the cause of its events, unless the plugin has opened `tabOpenLimit` tabs within the last minute, which throws `PluginError.tooManyTabs`. Throws as the host does, and `PluginError.closed` without the host.
     fileprivate func openTab(_ url: URL, _ options: PluginOpenTabOptions, by plugin: PluginID) throws -> UUID {
         guard let browserHost else { throw PluginError.closed }
-        return try browserHost.openTab(url, options, in: persona, cause: Self.cause(plugin))
+        let date = Date()
+        let recent = (tabOpenings[plugin] ?? []).filter { date.timeIntervalSince($0) < BrowserEventRateLimiter.window }
+        tabOpenings[plugin] = recent.isEmpty ? nil : recent
+        guard recent.count < Self.tabOpenLimit else { throw PluginError.tooManyTabs }
+        let id = try browserHost.openTab(url, options, in: persona, cause: Self.cause(plugin))
+        tabOpenings[plugin] = recent + [date]
+        return id
     }
 
     /// Closes or selects one of the Persona's tabs that `personaTabs()` lists, with the plugin as the cause of its events. Throws `PluginError.notGranted` for any other tab.

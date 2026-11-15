@@ -406,6 +406,26 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(host.changes.count == 3)
     }
 
+    /// A plugin opens at most 10 tabs within a minute, so that plugins that open a tab for each other's `tabOpened` stop, each tab being an event subject of its own; an open that the host refuses does not count, and another plugin's opens count for it alone.
+    @Test func aPluginOpensAtMostTenTabsWithinAMinute() async throws {
+        let manager = manager(builtIns: [ManagingPlugin.self])
+        let installed = try #require(manager.plugins.first)
+        let space = UUID()
+        host.spaces[persona] = [space]
+        let context = manager.makeContext(for: installed)
+        let address = URL(string: "https://example.org/new")!
+        #expect(throws: PluginError.notGranted(persona)) { _ = try context.openTab(address, PluginOpenTabOptions(spaceID: persona)) }
+        for _ in 0..<PluginManager.tabOpenLimit { _ = try context.openTab(address, PluginOpenTabOptions(select: false)) }
+        #expect(throws: PluginError.tooManyTabs) { _ = try context.openTab(address, PluginOpenTabOptions(select: false)) }
+        #expect(host.changes.count == PluginManager.tabOpenLimit)
+        // A context that the plugin's next instance gets counts the same opens.
+        #expect(throws: PluginError.tooManyTabs) { _ = try manager.makeContext(for: installed).openTab(address, PluginOpenTabOptions()) }
+        var other = installed
+        other.manifest.id = PluginID(rawValue: "org.example.other")!
+        _ = try manager.makeContext(for: other).openTab(address, PluginOpenTabOptions())
+        #expect(host.changes.count == PluginManager.tabOpenLimit + 1)
+    }
+
     /// A script plugin reaches the tab members through `arch.tabs`, and the events of its own opens and closes never reach its listeners, while another tab's do.
     @Test func aScriptPluginManagesTabsThroughArchTabsWithoutHearingItsOwnChanges() async throws {
         let manager = manager()
