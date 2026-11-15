@@ -305,8 +305,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case noListener
     /// A listener of the event threw, or its promise rejected, with what it threw as text, such as an error's message.
     case listenerFailed(String)
-    /// A page call's page, at the address, is outside the plugin's granted sites, or for a plugin with `ai` on a site excluded from AI.
-    case siteNotGranted(URL)
+    /// A page call's page is outside the plugin's granted sites, or for a plugin with `ai` on a site excluded from AI. It names no address, since the grant may keep the page's from the plugin.
+    case siteNotGranted
     /// The script is not one the plugin may run in a page, for the reason the text gives as a sentence: a path that names no text file of its package, a source that does not parse as the body of a function, or script text from a plugin that is not built in.
     case invalidPageScript(String)
     /// The script that the plugin ran in a page threw, with what it threw as text, or returned a value that JSON cannot hold.

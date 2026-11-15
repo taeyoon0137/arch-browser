@@ -203,7 +203,7 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         let unknown = UUID()
         await #expect(throws: PluginError.notGranted(unknown)) { _ = try await context.runPageScript(script, in: unknown) }
         let other = host.show("https://other.example/")
-        await #expect(throws: PluginError.siteNotGranted(URL(string: "https://other.example/")!)) { _ = try await context.runPageScript(script, in: other.id) }
+        await #expect(throws: PluginError.siteNotGranted) { _ = try await context.runPageScript(script, in: other.id) }
         // The engine has committed no document yet.
         var blank = host.show("https://example.org/b")
         blank.documentURL = nil
@@ -228,7 +228,7 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         let tab = host.show("https://example.org/a")
         let page = try #require(host.pages[tab.id])
         page.address = "https://other.example/"
-        await #expect(throws: PluginError.siteNotGranted(URL(string: "https://example.org/a")!)) { _ = try await context.runPageScript(.source("ran = true; return 1;"), in: tab.id) }
+        await #expect(throws: PluginError.siteNotGranted) { _ = try await context.runPageScript(.source("ran = true; return 1;"), in: tab.id) }
         #expect(page.context.evaluateScript("typeof ran")?.toString() == "undefined")
 
         page.address = "https://example.org/a"
@@ -314,8 +314,8 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         let withoutAI = try context(PageCallsPlugin.self, in: manager)
         let local = host.show("http://localhost:8080/")
         let localURL = URL(string: "http://localhost:8080/")!
-        await #expect(throws: PluginError.siteNotGranted(localURL)) { _ = try await withAI.runPageScript(.source("return 1;"), in: local.id) }
-        #expect(throws: PluginError.siteNotGranted(localURL)) { try withAI.postMessage(.string("hi"), toTab: local.id) }
+        await #expect(throws: PluginError.siteNotGranted) { _ = try await withAI.runPageScript(.source("return 1;"), in: local.id) }
+        #expect(throws: PluginError.siteNotGranted) { try withAI.postMessage(.string("hi"), toTab: local.id) }
         #expect(host.pages[local.id]?.worlds == [] && host.pages[local.id]?.posts.isEmpty == true)
         #expect(try await withoutAI.runPageScript(.source("return 1;"), in: local.id) == .number(1))
 
@@ -323,8 +323,14 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         let open = host.show("https://example.org/a")
         let index = host.tabs.count - 1
         host.pages[open.id]?.onRun = { [host] in host.tabs[index].url = localURL }
-        await #expect(throws: PluginError.siteNotGranted(localURL)) { _ = try await withAI.runPageScript(.source("return 1;"), in: open.id) }
+        await #expect(throws: PluginError.siteNotGranted) { _ = try await withAI.runPageScript(.source("return 1;"), in: open.id) }
         #expect(try await withoutAI.runPageScript(.source("return 1;"), in: open.id) == .number(1))
+        // What a script throws can hold the page's text as well.
+        let throwing = PluginScript.source(#"throw new Error("the page's text");"#)
+        host.tabs[index].url = URL(string: "https://example.org/a")
+        await #expect(throws: PluginError.siteNotGranted) { _ = try await withAI.runPageScript(throwing, in: open.id) }
+        #expect(host.pages[open.id]?.worlds.count == 3)
+        await #expect(throws: PluginError.pageScriptFailed("the page's text")) { _ = try await withoutAI.runPageScript(throwing, in: open.id) }
     }
 
     @Test func postsValuesToThePluginsPageScripts() throws {
@@ -334,7 +340,7 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         try context.postMessage(.object(["n": .number(1)]), toTab: tab.id)
         #expect(host.pages[tab.id]?.posts.map(\.json) == [#"{"n":1}"#] && host.pages[tab.id]?.posts.map(\.world) == ["ARCHPlugin.org.example.page-calls"])
         let other = host.show("https://other.example/")
-        #expect(throws: PluginError.siteNotGranted(URL(string: "https://other.example/")!)) { try context.postMessage(.null, toTab: other.id) }
+        #expect(throws: PluginError.siteNotGranted) { try context.postMessage(.null, toTab: other.id) }
         let unknown = UUID()
         #expect(throws: PluginError.notGranted(unknown)) { try context.postMessage(.null, toTab: unknown) }
         context.end()

@@ -653,7 +653,7 @@ public protocol PluginContext: AnyObject {
     func ai() throws -> any AIClient
 
     // Pages: the tab must be one the plugin reaches (else `notGranted`) and its committed document on the granted sites, and for a plugin with `ai` neither that document nor the address the tab shows on a site excluded from AI (else `siteNotGranted`); a tab without a page to run in throws `noPage`. A context that reaches no page, such as a hook script's, throws `notGranted`.
-    /// Runs the script once in the main frame of the tab's page, in the plugin's world, as the body of a function with the world's channel as `arch`, and returns what the body returns at once as JSON, null for `undefined`, a function, or a symbol. The page's own check runs it only while the granted sites cover the document, and its value comes back only while the tab still shows that document and, for a plugin with `ai`, an address off the excluded sites; otherwise it throws `noPage` or `siteNotGranted`. Throws `invalidPageScript` for a script the plugin may not run, `pageScriptFailed` with what the script threw, `pageRunUnavailable` where the tab's engine could run the script only with the user's gesture, `timedOut` for a run that the page leaves unanswered for the hang limit, as while a script loops, and `stopped` for one that the instance's stop ends.
+    /// Runs the script once in the main frame of the tab's page, in the plugin's world, as the body of a function with the world's channel as `arch`, and returns what the body returns at once as JSON, null for `undefined`, a function, or a symbol. The page's own check runs it only while the granted sites cover the document, and its value or what it threw comes back only while the tab still shows that document and, for a plugin with `ai`, an address off the excluded sites; otherwise it throws `noPage` or `siteNotGranted`. Throws `invalidPageScript` for a script the plugin may not run, `pageScriptFailed` with what the script threw, `pageRunUnavailable` where the tab's engine could run the script only with the user's gesture, `timedOut` for a run that the page leaves unanswered for the hang limit, as while a script loops, and `stopped` for one that the instance's stop ends.
     func runPageScript(_ script: PluginScript, in tab: PluginTab.ID) async throws -> PluginValue
     /// Delivers the value to the `arch.onMessage` listeners of the plugin's page scripts in the tab's main frame.
     func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws
@@ -812,8 +812,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case noListener
     /// A listener of the event threw, or its promise rejected, with what it threw as text.
     case listenerFailed(String)
-    /// A page call's page is outside the plugin's sites, or for a plugin with `ai` on a site excluded from AI.
-    case siteNotGranted(URL)
+    /// A page call's page is outside the plugin's sites, or for a plugin with `ai` on a site excluded from AI. It names no address, which the grant may keep from the plugin.
+    case siteNotGranted
     /// A script that `runPageScript(_:in:)` may not run: no text file of the package, not a function body, or script text from a plugin that is not built in.
     case invalidPageScript(String)
     /// A script that `runPageScript(_:in:)` ran threw, with what it threw as text, or returned a value that JSON cannot hold.

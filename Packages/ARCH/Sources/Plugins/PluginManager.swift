@@ -1240,13 +1240,13 @@ public final class PluginManager: ObservableObject {
         browserHost?.tabs(in: persona) ?? []
     }
 
-    /// The tab of the Persona that a page call of a plugin with the grant names, before the grant applies, with its document's address and its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted` for a document outside the granted sites, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
-    fileprivate func page(of id: UUID, for grant: PluginGrant) throws -> (tab: PluginTab, document: URL, contents: any EngineWebContents) {
+    /// The tab of the Persona that a page call of a plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document outside the granted sites, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
+    fileprivate func page(of id: UUID, for grant: PluginGrant) throws -> (tab: PluginTab, contents: any EngineWebContents) {
         guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
         guard let document = tab.documentURL else { throw PluginError.noPage }
-        guard grant.covers(document), !excludesAI(tab, for: grant) else { throw PluginError.siteNotGranted(document) }
+        guard grant.covers(document), !excludesAI(tab, for: grant) else { throw PluginError.siteNotGranted }
         guard let contents = browserHost?.webContents(forTab: id) else { throw PluginError.noPage }
-        return (tab, document, contents)
+        return (tab, contents)
     }
 
     /// How long a page call's run waits for the page's reply: the hang limit, 10 seconds by default, as long as Chromium's engine waits for one.
@@ -1585,7 +1585,7 @@ final class ScopedPluginContext: PluginPanelContext {
         try aiRequestsInReach().client(inStep: false)
     }
 
-    /// The script runs in the plugin's world through the tab's page, and its value comes back only while the tab shows the document that the call checked, and for a plugin with `ai` only while the address it shows is not on a site excluded from AI, as a single-page site can move to one within its document.
+    /// The script runs in the plugin's world through the tab's page, and its value or what it threw comes back only while the tab shows the document that the call checked, and for a plugin with `ai` only while the address it shows is not on a site excluded from AI, as a single-page site can move to one within its document.
     func runPageScript(_ script: PluginScript, in id: PluginTab.ID) async throws -> PluginValue {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { throw PluginError.notGranted(id) }
@@ -1597,12 +1597,12 @@ final class ScopedPluginContext: PluginPanelContext {
         let reply = try await run(function, in: page.contents, waitingAtMost: manager.pageRunLimit)
         guard !hasEnded else { throw PluginError.stopped }
         guard let shown = manager.personaTabs().first(where: { $0.id == id }), shown.documentID == page.tab.documentID else { throw PluginError.noPage }
+        // What the script returned or threw can hold the page's text.
+        guard !manager.excludesAI(shown, for: grant) else { throw PluginError.siteNotGranted }
         switch try PluginPageRun.outcome(of: reply) {
-        case .outside: throw PluginError.siteNotGranted(shown.url ?? page.document)
+        case .outside: throw PluginError.siteNotGranted
         case let .failed(text): throw PluginError.pageScriptFailed(text)
-        case let .value(value):
-            guard !manager.excludesAI(shown, for: grant) else { throw PluginError.siteNotGranted(shown.url ?? page.document) }
-            return value
+        case let .value(value): return value
         }
     }
 
