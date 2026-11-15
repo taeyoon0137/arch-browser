@@ -29,7 +29,7 @@ struct AISettingsView: View {
 
     /// The agents' service, whose page shows only when the app shell set one.
     let agents: AgentService?
-    /// The hook registry, whose page shows only when the app shell set one.
+    /// The hook registry. Its page shows only when the app shell set both it and the agents' service, whose runner keeps the hooks' agent runs.
     let hooks: HookRegistry?
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings
@@ -40,7 +40,7 @@ struct AISettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("Page", selection: $navigation.page) {
-                ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || hooks != nil) }, id: \.self) { Text($0.rawValue) }
+                ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || (hooks != nil && agents != nil)) }, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -64,7 +64,9 @@ struct AISettingsView: View {
                         AgentSettingsPage(service: agents, activity: agents.activity, hookName: { id in hooks?.hooks.first { $0.id == id }?.name })
                     }
                 case .agentHooks:
-                    if let hooks { AgentHooksPage(registry: hooks, currentTab: { PreferencesWindowController.session?.lastMainWindow?.selectedTabID }) }
+                    if let hooks, let agents {
+                        AgentHooksPage(registry: hooks, runner: agents.runs, currentTab: { PreferencesWindowController.session?.lastMainWindow?.selectedTabID })
+                    }
                 }
             }
             .formStyle(.grouped)

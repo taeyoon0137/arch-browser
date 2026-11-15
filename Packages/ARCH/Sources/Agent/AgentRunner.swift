@@ -10,6 +10,8 @@ public final class AgentRunner: ObservableObject {
     public struct KeptRun: Identifiable {
         public let id: UUID
         public let feature: AIFeatureID
+        /// The hook run whose script started it. The hook's row offers Show Session on that run.
+        public let hookRun: UUID?
         public let messages: [AIMessage]
     }
 
@@ -30,6 +32,8 @@ public final class AgentRunner: ObservableObject {
     private var slotsInUse = 0
     /// Each waiting run's continuation, which takes nil with the slot, or the result of a run that ended while it waited.
     private var slotWaiters: [(id: UUID, continuation: CheckedContinuation<AgentRunResult?, Never>)] = []
+    /// How many times each feature's kept runs were deleted with `deleteKeptRuns(of:)`. A run keeps its session only if the count has not changed since the run was requested.
+    private var endings: [AIFeatureID: Int] = [:]
 
     init(host: any AgentBrowserHost, client: any AIClient, activity: AgentActivityLog? = nil,
          resolve: @escaping (AIFeatureID, AIRouteChoice) throws -> [AIModelRef],
@@ -52,8 +56,17 @@ public final class AgentRunner: ObservableObject {
 
     public func deleteKeptRun(_ id: UUID) { keptRuns.removeAll { $0.id == id } }
 
-    /// Deletes the kept runs of a hook that is gone, or of an editor test's feature once the test ends.
-    public func deleteKeptRuns(of feature: AIFeatureID) { keptRuns.removeAll { $0.feature == feature } }
+    /// Deletes the kept runs of a removed hook, or of an editor test's feature once the test ends. A run of the feature that is still ending keeps nothing.
+    public func deleteKeptRuns(of feature: AIFeatureID) {
+        endings[feature, default: 0] += 1
+        keptRuns.removeAll { $0.feature == feature }
+    }
+
+    /// Deletes the kept runs of these hook runs: Delete Session, and runs that left their hook's last runs.
+    public func deleteKeptRuns(ofHookRuns runs: Set<UUID>) { keptRuns.removeAll { $0.hookRun.map(runs.contains) ?? false } }
+
+    /// Clear Activity in Settings ▸ AI ▸ Hooks, which empties every row's last runs.
+    public func deleteAllKeptRuns() { keptRuns.removeAll() }
 
     public func cancelAll() {
         for run in running.values {
@@ -67,11 +80,12 @@ public final class AgentRunner: ObservableObject {
 
     public func run(_ request: AgentRunRequest, personaID: UUID, rename: @escaping Rename) async -> AgentRunResult {
         if Task.isCancelled { return AgentRunResult(status: .cancelled) }
+        let ending = endings[request.feature, default: 0]
         let options = request.options
         if let reason = request.grant.refusal(for: options) { return Self.refused("notGranted", reason) }
         let hook: UUID
         switch request.origin {
-        case .hook(let id, _), .test(let id): hook = id
+        case .hook(let id, _), .test(let id, _): hook = id
         case .outsideClient: return Self.refused("notGranted", "Outside programs cannot start this hook run.")
         }
         guard request.feature == .agentHook(hook), case .user = request.promptSource,
@@ -117,7 +131,7 @@ public final class AgentRunner: ObservableObject {
         }
 
         let id = UUID()
-        let execution = Execution(request: request, personaID: personaID, tabs: selected, closed: closed, rename: rename)
+        let execution = Execution(request: request, personaID: personaID, tabs: selected, closed: closed, ending: ending, rename: rename)
         let cli = usesCLI == true
         let task = Task { await self.perform(execution, models: models, cli: cli) }
         execution.task = task
@@ -180,6 +194,8 @@ public final class AgentRunner: ObservableObject {
         let personaID: UUID
         let tabs: [AgentTabInfo]
         let closed: AgentRunClosedTab?
+        /// The feature's deletion count when the run was requested.
+        let ending: Int
         let rename: Rename
         var actions: [AgentRunAction] = []
         let snapshots = AgentSnapshotStore()
@@ -192,11 +208,12 @@ public final class AgentRunner: ObservableObject {
         /// Whether a call may still act for the run: neither Stop All Agents nor the time limit ended it, its caller has not cancelled it, and the calling task is not cancelled. A request queued on the main actor before the run's task takes its cancel sees it here.
         var isLive: Bool { active && task?.isCancelled != true && !Task.isCancelled }
 
-        init(request: AgentRunRequest, personaID: UUID, tabs: [AgentTabInfo], closed: AgentRunClosedTab?, rename: @escaping Rename) {
+        init(request: AgentRunRequest, personaID: UUID, tabs: [AgentTabInfo], closed: AgentRunClosedTab?, ending: Int, rename: @escaping Rename) {
             self.request = request
             self.personaID = personaID
             self.tabs = tabs
             self.closed = closed
+            self.ending = ending
             self.rename = rename
         }
 
@@ -263,8 +280,14 @@ public final class AgentRunner: ObservableObject {
         }
         result.actions = run.actions
         if request.grant.returnsReply, !reply.isEmpty { result.reply = reply }
-        if keepsSession, !run.messages.isEmpty {
-            let kept = KeptRun(id: UUID(), feature: request.feature, messages: run.messages)
+        // A run that was still ending when its hook was removed or its editor test ended keeps nothing.
+        if keepsSession, endings[request.feature, default: 0] == run.ending, !run.messages.isEmpty {
+            let hookRun: UUID?
+            switch request.origin {
+            case .hook(_, let id), .test(_, let id): hookRun = id
+            case .outsideClient: hookRun = nil
+            }
+            let kept = KeptRun(id: UUID(), feature: request.feature, hookRun: hookRun, messages: run.messages)
             keptRuns.insert(kept, at: 0)
             let expired = Set(keptRuns.filter { $0.feature == request.feature }.dropFirst(20).map(\.id))
             keptRuns.removeAll { expired.contains($0.id) }
@@ -355,7 +378,7 @@ public final class AgentRunner: ObservableObject {
         let id: UUID?
         switch run.request.origin {
         case .hook(let owner, let runID): (hook, id) = (owner, runID)
-        case .test(let owner): (hook, id) = (owner, nil)
+        case .test(let owner, _): (hook, id) = (owner, nil)
         case .outsideClient: return
         }
         activity.recordTool(of: hook, run: id, persona: run.personaID, tool: tool, status: status, cancelled: Task.isCancelled || !run.active, dryRun: run.request.options.dryRun)

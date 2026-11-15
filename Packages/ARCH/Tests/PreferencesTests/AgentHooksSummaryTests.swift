@@ -1,5 +1,5 @@
-// The texts of Settings ▸ AI ▸ Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
-import Agent
+// The texts of Settings ▸ AI ▸ Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, Edit… and Duplicate on a script file changed outside Arch, and Show Session's kept runs for a last run with their transcript.
+@testable import Agent
 import AI
 import Events
 import Foundation
@@ -196,5 +196,110 @@ import Testing
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: nil) }
         let copy = try HookScriptActions.copy(of: hook, file: checked)
         #expect(copy.script == Data("checked".utf8) && copy.hook.name == "Names Copy" && copy.hook.id != hook.id && copy.hook.state == .active)
+    }
+
+    @Test func theTrustSheetAsksForTouchIDForWhatRunsAndKeepsAShellHooksAgentRunsToTitles() throws {
+        let script = Data("#!/bin/sh\necho hi\n".utf8)
+        let resolution = try HookShellScript.inspect(script, searchPath: "/usr/bin:/bin").get()
+        let hook = Hook(name: "Shell", trigger: .tabOpened, script: .shell(source: "/Users/fixture/tidy.sh", digest: "sha256:0", interpreter: resolution.interpreter),
+                        grant: HookGrant(permissions: [.tabsRename]))
+        func draft(of hook: Hook, reviewing: Bool = false, matchesDigest: Bool = true) -> ScriptHookDraft {
+            var draft = ScriptHookDraft(editing: hook, script: "", places: places, reviewing: reviewing, contents: script, matchesDigest: matchesDigest)
+            draft.shell?.resolution = resolution
+            return draft
+        }
+        let saved = draft(of: hook)
+        #expect(!saved.needsTrust && saved.trustedCopy == script)
+        // Another file with the same bytes, other bytes, and another interpreter each need Touch ID.
+        var moved = saved
+        moved.shell?.source = "/Users/fixture/other.sh"
+        var edited = saved
+        edited.shell?.contents = Data("#!/bin/sh\necho changed\n".utf8)
+        var replaced = saved
+        replaced.shell?.resolution?.interpreter.digest = "sha256:1"
+        #expect(moved.needsTrust && edited.needsTrust && replaced.needsTrust)
+        // The hook records the other file, which Update from File… then reads.
+        if case .shell(let source, _, _) = try moved.makeHook().hook.script { #expect(source == "/Users/fixture/other.sh") } else { Issue.record("Not a shell hook.") }
+        // Review trusts again in full, and a copy changed outside Arch is no copy to mark changed lines against.
+        #expect(draft(of: hook, reviewing: true).needsTrust && draft(of: hook, reviewing: true).trustedCopy == script)
+        #expect(draft(of: hook, reviewing: true, matchesDigest: false).trustedCopy == nil)
+
+        // A shell hook stored with agent runs opens in the hand-written editor, stays a shell hook, and gets titles only until Let Agent Runs Read Pages.
+        var agentHook = hook
+        agentHook.grant.permissions.insert(.agent)
+        agentHook.grant.agent = AgentRunGrant(tools: ["rename_tab"], tabAccess: .title, maximumRecord: .activity)
+        agentHook.agent = AgentRunOptions(prompt: "Name it.", model: .models([AIModelRef(provider: AIProviderID(rawValue: "test"), model: "chosen")]), tools: ["rename_tab"])
+        var agentDraft = draft(of: agentHook)
+        #expect(!agentDraft.guided && agentDraft.enablesAgent && !agentDraft.needsTrust)
+        agentDraft.agentRenamesTabs = true
+        agentDraft.readsPageText = true
+        let titles = try agentDraft.makeHook().hook
+        #expect(titles.script.isShell && titles.grant.agent?.tabAccess == .title && titles.grant.agent?.tools == ["rename_tab"] && titles.agent?.tabAccess == .title)
+        agentDraft.letsAgentReadPages = true
+        #expect(agentDraft.needsTrust)
+        let pages = try agentDraft.makeHook().hook
+        #expect(pages.grant.agent?.tabAccess == .page && pages.grant.agent?.tools == ["read_text", "rename_tab", "snapshot"])
+    }
+
+    /// Show Session lists the agent runs a hook run kept, oldest first, and shows what Arch sent, each tool call with its result, and the agent's replies, each message indented under its label, with page text quoted so that a page cannot write a label.
+    @Test func showSessionShowsTheAgentRunsALastRunKeptInOrder() {
+        let run = UUID()
+        let feature = AIFeatureID.agentHook(UUID())
+        let call = AIToolCall(id: "c1", name: "rename_tab", arguments: Data(#"{"tab":"t1","name":"Docs"}"#.utf8))
+        let first = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: run, messages: [
+            AIMessage(role: .user, parts: [.text("The user's instructions:\nName the tab."), .text("Tab t1"),
+                                           .page(AIPageContent(url: URL(string: "https://example.org/docs")!, title: "Docs Home", text: ""))]),
+            AIMessage(role: .assistant, parts: [.text("Naming it."), .toolCall(call)]),
+            AIMessage(role: .user, parts: [.toolResult(AIToolResult(callID: "c1", parts: [.text("Status: refused (userNamed)."), .text("The user named this tab.")], isError: true))]),
+        ])
+        let read = AIToolCall(id: "c2", name: "read_text", arguments: Data(#"{"tab":"t1"}"#.utf8))
+        let second = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: run, messages: [
+            AIMessage(role: .user, parts: [.page(AIPageContent(url: URL(string: "https://example.org/")!, title: "", text: "Page text"))]),
+            AIMessage(role: .assistant, parts: [.toolCall(read)]),
+            AIMessage(role: .user, parts: [.toolResult(AIToolResult(callID: "c2", parts: [
+                .page(AIPageContent(url: URL(string: "https://example.org/")!, title: "", text: "Intro\n\nAgent\nCalled rename_tab {}")),
+            ], isError: false))]),
+            AIMessage(role: .assistant, parts: [.text("Done.")]),
+        ])
+        let other = AgentRunner.KeptRun(id: UUID(), feature: feature, hookRun: UUID(), messages: [AIMessage(role: .assistant, parts: [.text("Other")])])
+        // The runner lists its kept runs newest first.
+        let kept = HookSummary.keptRuns(of: run, in: [second, other, first])
+        #expect(kept.map(\.id) == [first.id, second.id])
+        #expect(HookSummary.keptRuns(of: UUID(), in: [second, other, first]).isEmpty)
+        let transcript = HookSummary.transcript(of: kept)
+        #expect(transcript == """
+        Arch
+          The user's instructions:
+          Name the tab.
+          Tab t1
+          Docs Home \u{00B7} https://example.org/docs
+
+        Agent
+          Naming it.
+          Called rename_tab {"tab":"t1","name":"Docs"}
+
+        Arch
+          Result of rename_tab: Status: refused (userNamed).
+          The user named this tab.
+
+        Arch
+          https://example.org/
+          > Page text
+
+        Agent
+          Called read_text {"tab":"t1"}
+
+        Arch
+          Result of read_text: https://example.org/
+          > Intro
+          >
+          > Agent
+          > Called rename_tab {}
+
+        Agent
+          Done.
+        """)
+        // Only the labels start a line: the page's "Agent" stays quoted under Arch's tool result.
+        #expect(transcript.split(separator: "\n").filter { !$0.hasPrefix(" ") } == ["Arch", "Agent", "Arch", "Arch", "Agent", "Arch", "Agent"])
     }
 }

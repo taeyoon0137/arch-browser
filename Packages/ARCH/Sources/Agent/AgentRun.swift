@@ -191,8 +191,8 @@ public struct AgentRunGrant: Codable, Hashable, Sendable {
 /// Who asked for a run.
 public enum AgentRunOrigin: Hashable, Sendable {
     case hook(UUID, run: UUID)
-    /// The editor's Test or a hook row's Run on Current Tab.
-    case test(hook: UUID)
+    /// The editor's Test or a hook row's Run on Current Tab, with the test's hook run.
+    case test(hook: UUID, run: UUID)
     case outsideClient(grant: UUID)
 }
 

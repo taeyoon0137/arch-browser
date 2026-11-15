@@ -9,7 +9,7 @@ import Foundation
 public struct HookSettings: Sendable {
     /// Settings ▸ AI ▸ Hooks ▸ Run Hooks; on by default.
     public var runsHooks = true
-    /// Allow Shell Scripts; off by default (VII.31).
+    /// Allow Shell Scripts; off by default.
     public var allowsShellScripts = false
     /// The providers Arch saw the user set up (`docs/hooks.md`, Known providers).
     public var knownProviders: [HookKnownProvider] = []

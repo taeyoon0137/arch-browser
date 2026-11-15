@@ -21,6 +21,8 @@ import Terminal
     private var agents: AgentService?
     /// The hooks of `hooks.json`, which run on the session's browser events in the AI hook center's scheduler.
     private var hooks: HookRegistry?
+    /// Runs the shell hooks' trusted scripts, whose processes end at quit.
+    private var shellHooks: ShellHookRunner?
     private var sync: SyncController?
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
@@ -139,7 +141,7 @@ import Terminal
         PreferencesWindowController.agents = agents
         session.agents = agents
         session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
-        // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain. JavaScript hooks run in the plugin sandbox; the shell runner comes with VII.31.
+        // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain. JavaScript hooks run in the plugin sandbox, and shell hooks run their trusted copies with the bundle's tools first on PATH, binding `arch-cli` through the agents' socket.
         let settings = AIService.shared.settings
         let scriptHost = session.pluginBrowserHost
         let javaScript = HookScriptRunner(host: scriptHost, allowsAI: { settings.allowsAI(on: $0) }) { request, invocation in
@@ -147,12 +149,16 @@ import Terminal
                 scriptHost.renameTab(tab, to: name, showing: document, cause: invocation.cause, applying: applying)
             }
         }
+        let shell = ShellHookRunner(host: scriptHost, allowsAI: { settings.allowsAI(on: $0) }, channel: agents, helpers: HookShellScript.appHelpers)
+        self.shellHooks = shell
         let hooks = HookRegistry(directory: supportDirectory, bus: session.events, host: BrowserHookHost(session: session),
-                                 javaScript: javaScript, shell: UnavailableHookScriptRunner())
+                                 javaScript: javaScript, shell: shell)
         self.hooks = hooks
         PreferencesWindowController.hooks = hooks
         agents.didStopAll = { [weak hooks] in hooks?.stopAgentHooks() }
         hooks.featureDidEnd = { [weak agents] in agents?.runs.deleteKeptRuns(of: $0) }
+        hooks.runsDidLeave = { [weak agents] in agents?.runs.deleteKeptRuns(ofHookRuns: $0) }
+        hooks.activityDidClear = { [weak agents] in agents?.runs.deleteAllKeptRuns() }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.becameActiveAt = Date() }
             Task { @MainActor [weak self] in await self?.sync?.refreshIfRequested() }
@@ -303,6 +309,7 @@ import Terminal
         session?.finishWritesAtQuit()
         session?.history.finishWrites()
         agents?.stop()
+        shellHooks?.endAll()
     }
 
     // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.

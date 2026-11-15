@@ -5,6 +5,12 @@ import Foundation
 import Testing
 @testable import Agent
 
+/// Lets a scripted step reach the runner that it runs under.
+@MainActor
+private final class RunnerBox {
+    var runner: AgentRunner?
+}
+
 @MainActor
 @Suite struct AgentRunnerTests {
     let host = FakeHost()
@@ -172,7 +178,7 @@ import Testing
 
     @Test func anEditorTestReportsUsageWithoutSpendingTheHooksAutomaticAllowance() async {
         var req = request()
-        req.origin = .test(hook: hook)
+        req.origin = .test(hook: hook, run: UUID())
         let usage = AIUsage(inputTokens: 3, outputTokens: 1)
         let client = ScriptedClient { _ in [.event(.usage(usage)), .event(.finished(.completed))] }
         let runner = runner(client) { Issue.record("A manual test reserved an automatic run."); return false }
@@ -281,7 +287,42 @@ import Testing
         let result = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
         let id = try #require(result.keptRun)
         #expect(result.reply == nil && runner.keptRuns.first?.id == id && client.requests.first?.recordsContent == true)
+        // A kept run names the hook run whose script started it, a test's too, for that run's Show Session.
+        guard case .hook(_, let hookRun) = req.origin else { Issue.record("Expected a hook run"); return }
+        #expect(runner.keptRuns.first?.hookRun == hookRun && runner.keptRuns.first?.messages.count == 2)
+        let testRun = UUID()
+        req.origin = .test(hook: hook, run: testRun)
+        let tested = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        let testedID = try #require(tested.keptRun)
+        #expect(runner.keptRuns.first?.id == testedID && runner.keptRuns.first?.hookRun == testRun)
         runner.deleteKeptRun(id)
+        #expect(runner.keptRuns.map(\.id) == [testedID])
+    }
+
+    /// A run that is still ending when its hook is removed, or its editor test ends, keeps no session, while later runs of the feature do. Delete Session, a run that left its row's last runs, and Clear Activity delete kept runs too.
+    @Test func aRunEndingAfterItsFeatureEndedKeepsNoSession() async throws {
+        var req = request()
+        req.options.record = .session
+        let feature = req.feature
+        let box = RunnerBox()
+        let client = ScriptedClient { number in
+            let ends: [ClientStep] = number == 0 ? [.perform { await MainActor.run { box.runner?.deleteKeptRuns(of: feature) } }] : []
+            return [.event(.text("reply"))] + ends + [.event(.finished(.completed))]
+        }
+        let runner = runner(client)
+        box.runner = runner
+        let ended = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        #expect(ended.status == .completed && ended.keptRun == nil && runner.keptRuns.isEmpty)
+        let later = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        let first = try #require(later.keptRun)
+        let secondRun = UUID()
+        req.origin = .hook(hook, run: secondRun)
+        let another = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        let second = try #require(another.keptRun)
+        #expect(runner.keptRuns.map(\.id) == [second, first])
+        runner.deleteKeptRuns(ofHookRuns: [secondRun])
+        #expect(runner.keptRuns.map(\.id) == [first])
+        runner.deleteAllKeptRuns()
         #expect(runner.keptRuns.isEmpty)
     }
 
@@ -328,7 +369,7 @@ import Testing
         let harness = try Harness()
         defer { harness.cleanUp() }
         var req = request()
-        req.origin = .test(hook: hook)
+        req.origin = .test(hook: hook, run: UUID())
         req.options.record = .activity
         req.options.tools = ["read_text"]
         req.options.tabAccess = .page

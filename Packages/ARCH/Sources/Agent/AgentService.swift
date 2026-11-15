@@ -31,6 +31,8 @@ import Foundation
     @Published public private(set) var sessions: [AgentSession] = []
     public let activity: AgentActivityLog
     private var hookCLIs: [UUID: AgentHookCLIRun] = [:]
+    /// Shell hook runs by their run's ID, whose `arch-cli` presents `ARCH_HOOK_TICKET` (`docs/hooks.md`, Shell scripts).
+    private var shellHookRuns: [UUID: ShellHookRunAccess] = [:]
     private var runObserver: AnyCancellable?
     private var runService: AgentRunner?
     public var runs: AgentRunner {
@@ -321,7 +323,7 @@ import Foundation
     func updateListening() {
         // A grant sheet open when outside access goes off closes without a decline.
         if !acceptsOutsideClients { dependencies.prompt.cancelAll() }
-        let isNeeded = acceptsOutsideClients || sessionsNeedChannel || !hookCLIs.isEmpty
+        let isNeeded = acceptsOutsideClients || sessionsNeedChannel || !hookCLIs.isEmpty || !shellHookRuns.isEmpty
         if isNeeded, endpoint == nil {
             guard let location = dependencies.location else {
                 channelProblem = "The home folder's path is too long for the agent socket, and so is the temporary folder's."
@@ -1047,23 +1049,28 @@ import Foundation
         binding.finish()
         hookCLIs.removeValue(forKey: binding.id)
         for connection in connections.values where connection.sessionID == binding.id { endpoint?.close(connection.id) }
-        if !acceptsOutsideClients, !sessionsNeedChannel, hookCLIs.isEmpty { updateListening() }
+        if !acceptsOutsideClients, !sessionsNeedChannel, hookCLIs.isEmpty, shellHookRuns.isEmpty { updateListening() }
     }
 
-    /// A ticket binds the connection to its session only when it matches one, compared with every session's in constant time, and the session's running CLI process is an ancestor of the peer by process ID and start time. A ticket used from outside that tree is refused, logged, and noted in the session.
+    /// A ticket binds the connection to its session only when it matches one, compared with every session's and every hook run's in constant time, and the session's running CLI process, or the shell hook run's script process, is an ancestor of the peer by process ID and start time. Only `arch-mcp` presents a session's ticket and only `arch-cli` a shell hook run's. A ticket used from outside that tree is refused, logged, and noted in the session.
     private func bind(_ connection: ClientConnection, _ requestID: AgentRPCID, hello: AgentHello, ticket: String) {
         var matched: AgentSession?
         for session in sessions where session.ticket?.matches(ticket) == true && matched == nil { matched = session }
         var hookRun: AgentHookCLIRun?
         for binding in hookCLIs.values where binding.ticket.matches(ticket) && hookRun == nil { hookRun = binding }
-        let process = hookRun?.liveProcess ?? matched.flatMap { $0.hasEnded ? nil : $0.liveProcess }
-        let id = hookRun?.id ?? matched?.id
-        guard hello.client == .mcp, let id, let process,
+        var shellRun: (id: UUID, access: ShellHookRunAccess)?
+        for (id, access) in shellHookRuns where access.ticket.matches(ticket) && shellRun == nil { shellRun = (id, access) }
+        let process = hookRun?.liveProcess ?? shellRun?.access.process ?? matched.flatMap { $0.hasEnded ? nil : $0.liveProcess }
+        let id = hookRun?.id ?? shellRun?.id ?? matched?.id
+        let presenter: AgentControl.AgentClientKind = shellRun == nil ? .mcp : .cli
+        guard hello.client == presenter, let id, let process,
               AgentProcessAncestry.isProcess(connection.peer.processID, descendedFrom: process, records: dependencies.processRecord) else {
             if let session = matched, !session.hasEnded, hello.client == .mcp { session.noteForeignTicketUse() }
             activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, sessionID: id, clientName: hello.client.rawValue,
                                                outcome: id == nil ? "the ticket names no session" : "the ticket's program is not the session's"))
-            return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: "No agent session in Arch has this ticket for this program."))
+            // Only a shell hook's run gives `arch-cli` a ticket.
+            let message = hello.client == .cli ? "No hook run in Arch has this ticket for this program." : "No agent session in Arch has this ticket for this program."
+            return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: message))
         }
         connection.hello = hello
         connection.sessionID = id
@@ -1098,6 +1105,24 @@ import Foundation
     private func toolsDidChange(forSession id: UUID) {
         for connection in connections.values where connection.stage == .ready && connection.sessionID == id {
             endpoint?.send(.notification(method: AgentControlMethod.toolsChangedNotification, params: nil), to: connection.id)
+        }
+    }
+
+    /// A shell hook run's call, which the run's handler answers with the hook's grant and the run's tabs.
+    private func callShellHook(_ run: ShellHookRunAccess, params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "This connection already runs \(AgentLimits.callsPerConnection) calls."))
+        }
+        guard let call = try? params?.decode(as: AgentToolCall.self) else {
+            return replyError(connection, requestID, .invalidParams("tools/call needs a tool's name and its arguments."))
+        }
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            let result = run.tools.contains(call.name) ? await run.call(call)
+                : AgentToolResult(status: .refused, code: "notGranted", text: "This hook's run cannot call \(call.name).")
+            guard !running.isCancelled, connections[connection.id] != nil else { return }
+            reply(connection, requestID, Self.json(result))
         }
     }
 
@@ -1420,6 +1445,7 @@ import Foundation
                 if let hook = hookCLIs[sessionID] {
                     return reply(connection, requestID, Self.json(AgentToolList(tools: hook.tools.map(\.name))))
                 }
+                if let run = shellHookRuns[sessionID] { return reply(connection, requestID, Self.json(AgentToolList(tools: run.tools))) }
                 guard let session = session(withID: sessionID) else { return closeConnection(connection) }
                 return reply(connection, requestID, Self.json(AgentToolList(tools: listTools(for: session))))
             }
@@ -1429,6 +1455,7 @@ import Foundation
         case (.ready, AgentControlMethod.toolsCall):
             if let sessionID = connection.sessionID {
                 if let hook = hookCLIs[sessionID] { return callHook(hook, params: params, on: connection, requestID: requestID) }
+                if let run = shellHookRuns[sessionID] { return callShellHook(run, params: params, on: connection, requestID: requestID) }
                 guard let session = session(withID: sessionID) else { return closeConnection(connection) }
                 return sessionCall(params, of: session, on: connection, requestID: requestID)
             }
@@ -1464,6 +1491,12 @@ import Foundation
         }
         if let ticket = hello.ticket {
             return bind(connection, requestID, hello: hello, ticket: ticket)
+        }
+        // A shell hook's run reaches Arch only through its ticket, so a command in the run that dropped `ARCH_HOOK_TICKET`, as `env -i` does, never becomes an outside client shown as Arch's terminal.
+        if let run = shellHookRun(containing: connection.peer.processID) {
+            activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, sessionID: run, clientName: hello.client.rawValue,
+                                               outcome: "a program in a hook's run presented no ticket"))
+            return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: "Programs in a hook's run reach Arch only with the run's ticket."))
         }
         guard acceptsOutsideClients else {
             return refuse(connection, requestID, AgentRefusal(reason: .outsideAccessOff, message: "Outside access is off. Turn on Allow Outside Clients in Settings \u{25B8} AI \u{25B8} Agents."))
@@ -1707,6 +1740,62 @@ extension AIFeature {
     public static let agent = AIFeature(id: .agent, name: "Agent Tasks",
                                         summary: "Runs browser sessions on your connected model with Arch’s tools and permissions.",
                                         trigger: .user, data: AIDataScope(kinds: [.page, .selection, .file]), requirements: [.agent])
+}
+
+// MARK: - Shell hook runs
+
+/// A shell hook run's access to Arch through `arch-cli` (`docs/hooks.md`, Shell scripts ▸ Acting): the run's ticket, which the script's environment carries as `ARCH_HOOK_TICKET`, binds a connection only from the run's script process or its descendants, and only while the run lasts. The socket listens meanwhile, as for an in-app session on a CLI. `Hooks` runs the scripts and answers their calls; `AgentService` keeps the tickets and binds the connections.
+@MainActor
+public protocol AgentHookRunChannel: AnyObject {
+    /// Opens the run's access and returns its ticket: its connections list `tools`, and `call` answers each of their calls to one of them.
+    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String
+    /// The run's script process started; connections bind only from it and its descendants.
+    func hookRun(_ run: UUID, didStart processID: pid_t)
+    /// The run ended: its ticket binds nothing more, and its connections close.
+    func closeHookRun(_ run: UUID)
+}
+
+/// A shell hook run as the service keeps it.
+@MainActor
+private final class ShellHookRunAccess {
+    let ticket = AgentSessionTicket.make()
+    let tools: [String]
+    let call: @MainActor (AgentToolCall) async -> AgentToolResult
+    /// The script process, as it was right after it started.
+    var process: AgentProcessRecord?
+
+    init(tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
+        self.tools = tools
+        self.call = call
+    }
+}
+
+extension AgentService {
+    /// The shell hook run whose script process is the peer or one of its ancestors, by process ID and start time.
+    func shellHookRun(containing processID: pid_t) -> UUID? {
+        shellHookRuns.first { _, access in
+            access.process.map { AgentProcessAncestry.isProcess(processID, descendedFrom: $0, records: dependencies.processRecord) } ?? false
+        }?.key
+    }
+}
+
+extension AgentService: AgentHookRunChannel {
+    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
+        let access = ShellHookRunAccess(tools: tools, call: call)
+        shellHookRuns[run] = access
+        if endpoint == nil { updateListening() }
+        return access.ticket.text
+    }
+
+    public func hookRun(_ run: UUID, didStart processID: pid_t) {
+        shellHookRuns[run]?.process = dependencies.processRecord(processID)
+    }
+
+    public func closeHookRun(_ run: UUID) {
+        guard shellHookRuns.removeValue(forKey: run) != nil else { return }
+        for connection in connections.values where connection.sessionID == run { endpoint?.close(connection.id) }
+        if !acceptsOutsideClients, !sessionsNeedChannel, hookCLIs.isEmpty, shellHookRuns.isEmpty { updateListening() }
+    }
 }
 
 extension AgentService: AgentEndpointDelegate {

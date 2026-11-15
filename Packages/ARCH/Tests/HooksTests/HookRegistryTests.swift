@@ -700,13 +700,19 @@ import Testing
         let last = try #require(registry.lastRuns[nothing.id]?.first)
         #expect(last.outcome == .completed && last.actions == nil && last.duration == nil)
         #expect(registry.lastRuns[kept.id]?.first?.actions == ["renameTab": 1])
+        // A run's entry and last run carry the run's ID, which the agent runs it keeps name, so that its row offers Show Session.
+        let keptRun = try #require(runner.invocations.first { $0.hook.id == kept.id }?.run)
+        #expect(entries.first?.id == keptRun && registry.lastRuns[kept.id]?.first?.id == keptRun)
         registry.log.saveNow()
         let file = try String(contentsOf: registry.log.fileURL, encoding: .utf8)
         for content in ["Secret", "account", "token", "abc", nothing.id.uuidString] {
             #expect(!file.contains(content))
         }
+        // Clear Activity tells the app shell, which deletes the kept agent runs that no row reaches any more.
+        var cleared = 0
+        registry.activityDidClear = { cleared += 1 }
         registry.clearActivity()
-        #expect(registry.log.entries.isEmpty && registry.lastRuns.isEmpty)
+        #expect(registry.log.entries.isEmpty && registry.lastRuns.isEmpty && cleared == 1)
     }
 
     /// Keep Nothing keeps a failure's code with Arch's own sentence, and a skip, in memory and logs neither.
@@ -722,11 +728,16 @@ import Testing
         harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
         #expect(await eventually { registry.lastRuns[failing.id]?.last?.code == "notConfigured" })
         #expect(registry.lastRuns[failing.id]?.last?.message == "Assign a model to the Deep tier in Settings ▸ AI.")
+        var left: [Set<UUID>] = []
+        registry.runsDidLeave = { left.append($0) }
         harness.bus.post(.tabSelected(tab: tab, windowID: UUID()))
         #expect(await eventually { registry.lastRuns[daily.id]?.last?.outcome == .completed })
+        let completed = try #require(registry.lastRuns[daily.id]?.last?.id)
         harness.bus.post(.tabSelected(tab: tab, windowID: UUID()))
         #expect(await eventually { registry.lastRuns[daily.id]?.last?.reason == .dailyLimit })
         #expect(registry.log.entries.isEmpty)
+        // The skip replaced the run, so the app shell hears that the run left, to delete any agent runs it kept.
+        #expect(left == [[completed]])
     }
 
     @Test func aRegistryWithoutHooksWritesNothing() async throws {

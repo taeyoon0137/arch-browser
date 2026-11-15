@@ -94,12 +94,13 @@ enum CLICommands {
 
     // MARK: - Connecting
 
-    /// Connects, checks that the socket is Arch's, says `hello`, and runs `body` on the connection with Arch's answer. Client errors print their sentence and exit with their code.
+    /// Connects, checks that the socket is Arch's, says `hello`, and runs `body` on the connection with Arch's answer. Inside a shell hook's run, `hello` presents the run's ticket from `ARCH_HOOK_TICKET`, which binds the connection to the run or is refused, never falling back to a grant. Client errors print their sentence and exit with their code.
     private static func withConnection(_ body: (AgentControlConnection, AgentHelloAnswer) throws -> AgentExitCode) -> AgentExitCode {
         do {
             guard let location = AgentSocketLocation.forClient() else { throw AgentClientError.noSocketLocation }
             let connection = try AgentControlConnection(location: location, check: AgentControlConnection.archCheck())
-            let answer = try connection.hello(AgentHello(client: .cli, version: clientVersion))
+            let ticket = ProcessInfo.processInfo.environment[AgentControlProtocol.hookTicketVariable].flatMap { $0.isEmpty ? nil : $0 }
+            let answer = try connection.hello(AgentHello(client: .cli, version: clientVersion, ticket: ticket))
             return try body(connection, answer)
         } catch let error as AgentClientError {
             printError(error.message)
@@ -268,7 +269,7 @@ enum CLICommands {
         let access: String
         switch answer.status {
         case .bound:
-            access = "This connection belongs to an agent session in Arch."
+            access = "This connection belongs to an agent session or a hook's run in Arch."
         case .granted(let grant):
             // A Persona's place reads as "Persona / Space".
             access = "Grant: \(grant.level.title) in \(grant.space.map { "\(grant.persona) / \($0)" } ?? "the \(grant.persona) Persona"), \(expiryText(grant.expiry))."

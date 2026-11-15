@@ -116,7 +116,7 @@ let package = Package(
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "HistoryTests", dependencies: ["History"], path: "Packages/ARCH/Tests/HistoryTests"),
-        // `Fixtures` holds the hook scripts that the JavaScript runner's tests run.
+        // `Fixtures` holds the hook scripts that the JavaScript and shell runners' tests run.
         .testTarget(name: "HooksTests", dependencies: ["Hooks"], path: "Packages/ARCH/Tests/HooksTests", resources: [.copy("Fixtures")]),
         // Links SQLite to build its synthetic databases.
         .testTarget(name: "ImportTests", dependencies: ["Import", "Browsing", "History"], path: "Packages/ARCH/Tests/ImportTests", linkerSettings: [.linkedLibrary("sqlite3")]),
