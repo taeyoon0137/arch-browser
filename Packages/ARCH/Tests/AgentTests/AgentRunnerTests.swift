@@ -17,7 +17,7 @@ import Testing
         host.tabs = [AgentTabInfo(id: tab, spaceID: nil, title: "Title", url: page, isLoading: false, engine: .webKit)]
         host.userTabIDs = [tab]
         return AgentRunRequest(options: AgentRunOptions(prompt: "Name it", model: .tier(.fast), tools: ["rename_tab"], limits: AgentRunLimits(rounds: 1), dryRun: true),
-                               tabs: [tab], allowedTabs: [tab], documents: [tab: page], documentIDs: [tab: host.tabs[0].documentID], knownProviders: [provider.id: AgentRunRequest.destination(of: provider)],
+                               tabs: [tab], allowedTabs: [tab], documents: [tab: page], documentIDs: [tab: host.tabs[0].documentID], knownProviders: [provider.id: provider.hookDestination],
                                origin: .hook(hook, run: UUID()), promptSource: .user, feature: .agentHook(hook), grant: AgentRunGrant(tools: ["rename_tab"]))
     }
 
@@ -332,7 +332,7 @@ import Testing
         let preset = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/fixture/codex"))
         let model = AIModelRef(provider: preset.id, model: "chosen")
         var req = request()
-        req.knownProviders = [preset.id: AgentRunRequest.destination(of: preset)]
+        req.knownProviders = [preset.id: preset.hookDestination]
         req.options.record = .activity
         req.options.tools = ["read_text"]
         req.options.tabAccess = .page
@@ -378,7 +378,7 @@ import Testing
         let model = AIModelRef(provider: preset.id, model: "chosen")
         var req = request()
         req.options.record = level
-        req.knownProviders = [preset.id: AgentRunRequest.destination(of: preset)]
+        req.knownProviders = [preset.id: preset.hookDestination]
         let client = ScriptedClient { _ in [] }
         let runner = AgentRunner(host: host, client: client, activity: service.activity, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
         runner.startCLI = { try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4) }
@@ -423,18 +423,25 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: harness.location.path))
     }
 
-    @Test func stopAllCancelsBothRunsAndTheThirdIsRefusedAtCapacity() async throws {
+    /// Hooks that fire together wait for one of the two slots instead of failing, and Stop All Agents ends the waiting runs too.
+    @Test func aThirdRunWaitsForASlotAndStopAllCancelsEveryRun() async throws {
         let req = request()
         let client = ScriptedClient { _ in [.hold] }
         let runner = runner(client)
         let first = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
         let second = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
         try await waitUntil { client.requests.count == 2 }
-        let third = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
-        #expect(third.code == "busy")
-        runner.cancelAll()
+        let third = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
+        let fourth = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(client.requests.count == 2)
+        first.cancel()
         #expect(await first.value.status == .cancelled)
-        #expect(await second.value.status == .cancelled)
-        try await waitUntil { client.terminations == 2 }
+        try await waitUntil { client.requests.count == 3 }
+        runner.cancelAll()
+        for run in [second, third, fourth] {
+            #expect(await run.value.status == .cancelled)
+        }
+        #expect(client.requests.count == 3)
     }
 }

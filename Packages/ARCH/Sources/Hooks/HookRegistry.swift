@@ -235,6 +235,8 @@ public final class HookRegistry: ObservableObject {
     @Published public private(set) var notice: HookStoreNotice?
     /// Whether `hooks.json` has been read. Until then no event reaches a hook and no change is accepted.
     @Published public private(set) var isReady = false
+    /// A hook's feature ended: the hook was removed, or an editor test of edited settings ended. The app shell deletes the feature's kept runs.
+    public var featureDidEnd: ((AIFeatureID) -> Void)?
     public let log: HookRunLog
 
     private let store: HookStore
@@ -416,6 +418,7 @@ public final class HookRegistry: ObservableObject {
         cancelRuns(of: hook)
         store.removeScripts(of: id)
         ai.unregister(.agentHook(id))
+        featureDidEnd?(.agentHook(id))
         lastRuns[id] = nil
         dayCounts[id] = nil
         failureCounts[id] = nil
@@ -469,6 +472,8 @@ public final class HookRegistry: ObservableObject {
         let ids = Set(reviewed.map(\.id))
         knownProviders.removeAll { ids.contains($0.id) }
         knownProviders += reviewed
+        // A hook that stays paused, as one left without a place, still keeps the approval.
+        persist()
         resume(id)
     }
 
@@ -928,7 +933,12 @@ public final class HookRegistry: ObservableObject {
         draftOwner[preview.id] = draft.id
         defer {
             draftOwner[preview.id] = nil
-            if let saved = hook(withID: preview.id) { register(saved) } else { ai.unregister(.agentHook(preview.id)) }
+            if let saved = hook(withID: preview.id) {
+                register(saved)
+            } else {
+                ai.unregister(.agentHook(preview.id))
+                featureDidEnd?(.agentHook(preview.id))
+            }
         }
         return await test(preview, script: script, onTab: tabID, applying: applying)
     }
@@ -1013,7 +1023,8 @@ public final class HookRegistry: ObservableObject {
             pauseHook(hook.id, .unknownProvider, stopping: true)
             return
         }
-        guard countsAsFailure else { return }
+        // The agent runs' daily count, which `ai-usage.json` keeps across launches, says so in the row without pausing the hook.
+        guard countsAsFailure, entry.code != "dailyRuns" else { return }
         let count = (failureCounts[hook.id] ?? 0) + 1
         failureCounts[hook.id] = count
         if count >= Self.failuresBeforePause { pauseHook(hook.id, .failures) }

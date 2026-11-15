@@ -19,7 +19,7 @@ public struct HookSettings: Sendable {
     public init() {}
 }
 
-/// A provider the user set up while Arch ran: its identifier and destination, an HTTP provider's base address or a command-line tool's executable path with the digest of its preset, arguments, and environment (`AgentRunRequest.destination(of:)`).
+/// A provider the user set up while Arch ran: its identifier and destination, an HTTP provider's base address or a command-line tool's executable path with the digest of its preset, arguments, and environment (`AIProviderConfiguration.hookDestination`).
 public struct HookKnownProvider: Codable, Hashable, Sendable {
     public var id: AIProviderID
     public var destination: String
@@ -31,7 +31,7 @@ public struct HookKnownProvider: Codable, Hashable, Sendable {
 
     /// The provider as `hooks.json` records it.
     public init(_ provider: AIProviderConfiguration) {
-        self.init(id: provider.id, destination: AgentRunRequest.destination(of: provider))
+        self.init(id: provider.id, destination: provider.hookDestination)
     }
 }
 

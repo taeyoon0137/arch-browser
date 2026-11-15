@@ -143,11 +143,8 @@ struct AgentHooksPage: View {
                     let providers = registry.providersForReview(of: hook.id)
                     guard !providers.isEmpty else { return registry.resume(hook.id) }
                     let settings = AIService.shared.settings
-                    let destinations = providers.map { item in
-                        let name = settings.providers.first { $0.id == item.id }?.name ?? item.id.rawValue
-                        return "\(name) — \(item.destination)"
-                    }
-                    providerReview = ProviderReview(hook: hook.id, providers: providers, description: destinations.joined(separator: "\n"))
+                    let described = providers.map { item in settings.providers.first { $0.id == item.id }.map(HookSummary.review(of:)) ?? item.id.rawValue }
+                    providerReview = ProviderReview(hook: hook.id, providers: providers, description: ([HookSummary.reviewIntro] + described).joined(separator: "\n\n"))
                 }
             case .user, .needsNewerArch:
                 EmptyView()
@@ -395,6 +392,24 @@ enum HookSummary {
             case .timedOut: return "\(name) ran out of time."
             case .cancelled: return "\(name) was stopped."
             }
+        }
+    }
+
+    /// What the provider review says first: the settings came from outside Settings ▸ AI ▸ Providers.
+    static let reviewIntro = "Arch did not see these provider settings set up in Settings ▸ AI ▸ Providers, so another program may have changed them. The hook sends nothing until you allow them. Allow only settings you recognize."
+
+    /// A provider as its review shows it, from its settings now: an HTTP provider's base address, or a command-line tool's executable, arguments, and environment, which can send its requests elsewhere, with the values of variables whose names suggest a secret hidden. The digest that `hooks.json` records changes with any of them, so it would show nothing to compare.
+    static func review(of provider: AIProviderConfiguration) -> String {
+        switch provider.kind {
+        case .http(let http):
+            return "\(provider.name) \u{2014} \(http.baseURL.absoluteString)"
+        case .commandLine(let tool):
+            var lines = ["\(provider.name) \u{2014} " + ([tool.executable.path] + tool.arguments).joined(separator: " ")]
+            for (name, value) in tool.environment.sorted(by: { $0.key < $1.key }) {
+                let secret = ["KEY", "TOKEN", "SECRET"].contains { name.uppercased().contains($0) }
+                lines.append("\(name)=\(secret ? "\u{2022}\u{2022}\u{2022}\u{2022}" : value)")
+            }
+            return lines.joined(separator: "\n")
         }
     }
 

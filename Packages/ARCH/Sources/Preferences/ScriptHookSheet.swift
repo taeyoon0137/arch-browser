@@ -179,6 +179,8 @@ struct ScriptHookDraft: Identifiable {
         }
         guard let agentModel else { throw HookRegistryError.invalidAgentOptions("Choose the model for this hook.") }
         var grant = hook.grant.agent ?? AgentRunGrant(tools: [], maximumRecord: .none)
+        // The agent runs' daily count agrees with the hook's, so that the runner does not refuse runs the registry starts.
+        grant.runsPerDay = min(max(hook.timing.runsPerDay, 1), 2_000)
         let previouslyGranted = grant.tools
         if agentRenamesTabs { grant.tools.insert("rename_tab") } else { grant.tools.remove("rename_tab") }
         if readsPageText { grant.tools.insert("read_text") } else { grant.tools.remove("read_text") }
@@ -375,7 +377,7 @@ struct ScriptHookSheet: View {
                     }
                     ForEach(refs, id: \.self) { model in
                         if let provider = aiSettings.providers.first(where: { $0.id == model.provider }) {
-                            let destination = AgentRunRequest.destination(of: provider)
+                            let destination = provider.hookDestination
                             Text("\(aiSettings.title(of: model)) · \(destination)").font(.caption).textSelection(.enabled)
                             if case .commandLine = provider.kind { Text("Each run starts the signed-in command-line tool and can take a few seconds.").font(.caption) }
                         }

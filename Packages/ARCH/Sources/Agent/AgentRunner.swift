@@ -25,6 +25,11 @@ public final class AgentRunner: ObservableObject {
     var finishCLI: ((AgentHookCLIRun) -> Void)?
     @Published public private(set) var isRunning = false
     private var running: [UUID: (execution: Execution, task: Task<AgentRunResult, Never>)] = [:]
+    /// Runs at once; more wait for a slot in arrival order.
+    static let maximumRunning = 2
+    private var slotsInUse = 0
+    /// Each waiting run's continuation, which takes nil with the slot, or the result of a run that ended while it waited.
+    private var slotWaiters: [(id: UUID, continuation: CheckedContinuation<AgentRunResult?, Never>)] = []
 
     init(host: any AgentBrowserHost, client: any AIClient, activity: AgentActivityLog? = nil,
          resolve: @escaping (AIFeatureID, AIRouteChoice) throws -> [AIModelRef],
@@ -47,11 +52,17 @@ public final class AgentRunner: ObservableObject {
 
     public func deleteKeptRun(_ id: UUID) { keptRuns.removeAll { $0.id == id } }
 
+    /// Deletes the kept runs of a hook that is gone, or of an editor test's feature once the test ends.
+    public func deleteKeptRuns(of feature: AIFeatureID) { keptRuns.removeAll { $0.feature == feature } }
+
     public func cancelAll() {
         for run in running.values {
             run.execution.active = false
             run.task.cancel()
         }
+        let waiting = slotWaiters
+        slotWaiters.removeAll()
+        for waiter in waiting { waiter.continuation.resume(returning: AgentRunResult(status: .cancelled)) }
     }
 
     public func run(_ request: AgentRunRequest, personaID: UUID, rename: @escaping Rename) async -> AgentRunResult {
@@ -68,6 +79,10 @@ public final class AgentRunner: ObservableObject {
               (options.closedTab == nil) == (request.closedTab == nil), let knownProviders = request.knownProviders else {
             return Self.refused("notGranted", "The requested tabs or caller are outside this hook's grant.")
         }
+        // A run beyond two waits for a slot within its time limit, so that hooks that fire together do not fail.
+        let waitStarted = ContinuousClock.now
+        if let ended = await takeSlot(within: options.limits.timeout) { return ended }
+        defer { releaseSlot() }
         let requested = Set(request.tabs)
         let open = host.userTabs(in: personaID).filter { requested.contains($0.id) && $0.agentOwnerID == nil }
         guard Set(open.map(\.id)) == requested else { return Self.refused("notGranted", "A requested tab is no longer in the hook's Persona.") }
@@ -84,7 +99,7 @@ public final class AgentRunner: ObservableObject {
         guard !models.isEmpty else { return Self.refused("noModel", "The selected route has no usable model.") }
         var usesCLI: Bool?
         for model in models {
-            guard let configuration = provider(model.provider), knownProviders[model.provider] == AgentRunRequest.destination(of: configuration) else {
+            guard let configuration = provider(model.provider), knownProviders[model.provider] == configuration.hookDestination else {
                 return Self.refused("unknownProvider", "Review the provider for this hook before running it.")
             }
             let cli: Bool
@@ -97,7 +112,6 @@ public final class AgentRunner: ObservableObject {
             if let usesCLI, usesCLI != cli { return Self.refused("mixedRoute", "Choose models on API providers or CLI presets for this hook.") }
             usesCLI = cli
         }
-        guard running.count < 2 else { return Self.refused("busy", "Two agent runs are already in progress.") }
         if case .hook = request.origin, !reserve(request.feature, request.grant.runsPerDay) {
             return Self.refused("dailyRuns", "This hook reached its daily run limit.")
         }
@@ -108,8 +122,9 @@ public final class AgentRunner: ObservableObject {
         let task = Task { await self.perform(execution, models: models, cli: cli) }
         running[id] = (execution, task)
         isRunning = true
+        let remaining = options.limits.timeout - (ContinuousClock.now - waitStarted)
         let timeout = Task {
-            try await Task.sleep(for: options.limits.timeout)
+            try await Task.sleep(for: remaining)
             execution.timedOut = true
             execution.active = false
             task.cancel()
@@ -121,6 +136,29 @@ public final class AgentRunner: ObservableObject {
         }
         let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         return result
+    }
+
+    /// Takes a slot at once while fewer than two runs hold one, or waits for one in arrival order; nil once the slot is the run's, or the result of a run that its time limit, its caller, or Stop All Agents ended first.
+    private func takeSlot(within limit: Duration) async -> AgentRunResult? {
+        if slotsInUse < Self.maximumRunning { slotsInUse += 1; return nil }
+        let id = UUID()
+        let timer = Task { try await Task.sleep(for: limit); self.withdrawWaiter(id, with: AgentRunResult(status: .timedOut, code: "timeout")) }
+        defer { timer.cancel() }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { slotWaiters.append((id, $0)) }
+        } onCancel: {
+            Task { @MainActor in self.withdrawWaiter(id, with: AgentRunResult(status: .cancelled)) }
+        }
+    }
+
+    private func withdrawWaiter(_ id: UUID, with result: AgentRunResult) {
+        guard let index = slotWaiters.firstIndex(where: { $0.id == id }) else { return }
+        slotWaiters.remove(at: index).continuation.resume(returning: result)
+    }
+
+    /// Hands the slot to the first waiting run, or frees it.
+    private func releaseSlot() {
+        if slotWaiters.isEmpty { slotsInUse -= 1 } else { slotWaiters.removeFirst().continuation.resume(returning: nil) }
     }
 
     private static func refused(_ code: String, _ message: String) -> AgentRunResult {

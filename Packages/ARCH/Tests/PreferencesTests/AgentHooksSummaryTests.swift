@@ -27,6 +27,8 @@ import Testing
         try draft.configureAgent(in: &hook)
         #expect(hook.agent?.model == draft.agentModel)
         #expect(hook.grant.agent?.tools.isEmpty == true && hook.agent?.tabAccess == .title)
+        // The agent runs' daily count agrees with the hook's.
+        #expect(hook.grant.agent?.runsPerDay == hook.timing.runsPerDay)
         draft.agentRenamesTabs = true
         draft.readsPageText = true
         try draft.configureAgent(in: &hook)
@@ -145,6 +147,16 @@ import Testing
             draft.setIncludes(kind, true)
         }
         #expect(draft.tabKinds.isEmpty)
+    }
+
+    /// A command-line provider's review shows what its digest stands for, so that a proxy another program added shows, without secret values.
+    @Test func aProvidersReviewShowsItsInvocationWithoutSecrets() {
+        let tool = AICommandLineConfiguration(executable: URL(fileURLWithPath: "/opt/homebrew/bin/claude"), arguments: ["-p"],
+                                              environment: ["HTTPS_PROXY": "http://proxy.example:8080", "API_TOKEN": "abc123"])
+        let text = HookSummary.review(of: AIProviderConfiguration(name: "Claude Code", kind: .commandLine(tool)))
+        #expect(text == "Claude Code \u{2014} /opt/homebrew/bin/claude -p\nAPI_TOKEN=\u{2022}\u{2022}\u{2022}\u{2022}\nHTTPS_PROXY=http://proxy.example:8080")
+        let http = AIProviderConfiguration(name: "Test", kind: .http(AIHTTPConfiguration(format: .chatCompletions, baseURL: URL(string: "https://models.example.test/v1")!)))
+        #expect(HookSummary.review(of: http) == "Test \u{2014} https://models.example.test/v1")
     }
 
     @Test func aScriptChangedOutsideArchOpensOnlyForReviewAndIsNotCopied() throws {

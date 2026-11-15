@@ -424,6 +424,22 @@ import Testing
         #expect(registry.hooks[0].state == .active)
     }
 
+    /// The agent runs' daily count, which `ai-usage.json` keeps across launches, can run out before the hook's own; such runs fail without pausing the hook.
+    @Test func runsTheAgentsDailyCountRefusesDoNotPauseTheHook() async throws {
+        defer { harness.cleanUp() }
+        try await harness.start()
+        let hook = try harness.add(instantHook("Agent", .tabOpened))
+        runner.behaviors[hook.id] = .failCode("dailyRuns")
+        for count in 1...HookRegistry.failuresBeforePause {
+            let tab = harness.tab()
+            harness.host.show(tab)
+            harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
+            #expect(await eventually { harness.entries(of: hook.id).count == count })
+        }
+        #expect(harness.entries(of: hook.id).allSatisfy { $0.code == "dailyRuns" })
+        #expect(registry.hooks[0].state == .active)
+    }
+
     @Test func theSchedulersPauseFollowsTheHookAndItsTiersRouteChangeResumesItAlsoAfterARelaunch() async throws {
         defer { harness.cleanUp() }
         try await harness.start()

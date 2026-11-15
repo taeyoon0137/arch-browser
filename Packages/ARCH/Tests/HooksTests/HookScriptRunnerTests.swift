@@ -295,6 +295,17 @@ extension PluginValue {
         #expect(calls == 1)
     }
 
+    /// An agent run that Stop All Agents cancelled is no failure of the hook's run, so it counts toward no pause.
+    @Test func aCancelledAgentRunIsNoFailureOfTheHooksRun() async throws {
+        defer { harness.cleanUp() }
+        let tab = harness.tab("/article", id: Probe.covered)
+        let options = AgentRunOptions(prompt: "Inspect", model: .tier(.fast), tools: [])
+        let hook = instantHook("Inspect", pageLoads, grant: HookGrant(permissions: [.agent], agent: AgentRunGrant(tools: [])), agent: options)
+        let script = #"arch.events.on("pageLoaded", async (event) => { await arch.agent.run(event.hook.agent); });"#
+        let runner = HookScriptRunner(host: plugins, allowsAI: { _ in true }) { _, _ in AgentRunResult(status: .cancelled) }
+        #expect(await runner.run(invocation(of: hook, script: script, loading: tab)).actions == [])
+    }
+
     // MARK: Events and tabs
 
     @Test func aScriptInTheSandboxReceivesItsEventAndWithoutTabsNoTitlesOrAddresses() async throws {
