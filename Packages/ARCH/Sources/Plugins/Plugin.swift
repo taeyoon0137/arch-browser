@@ -17,7 +17,7 @@ public protocol Plugin: AnyObject {
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
     /// The panel of one of the plugin's sidebar items whose action is `.panel`. The manager asks each time the item opens it, and the popover holds it while it shows. A panel that can end while it shows conforms to `PluginEndingPanel`.
     func panel(for sidebarItemID: String) -> NSViewController?
-    /// An event of a kind the manifest's `events` lists. The manager starts the plugin for it and ignores what it throws; a hook script's run ends when it returns and fails when it throws, a script plugin's with `PluginError.noListener` or `listenerFailed` for its listeners.
+    /// An event of a kind the manifest's `events` lists, or a change the user made to one of its settings when the manifest asks for those. The manager starts the plugin for it and ignores what it throws; a hook script's run ends when it returns and fails when it throws, a script plugin's with `PluginError.noListener` or `listenerFailed` for its listeners.
     func handle(_ event: PluginEvent) async throws
 }
 
@@ -206,10 +206,17 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
 public enum PluginEvent: Sendable {
     /// A bus event as the receiver's grant lets it see it (`BrowserEvent.view(_:)`), with members that the sender adds to its JSON, such as a hook script's `hook`.
     case browser(BrowserEventScriptView, extra: [String: PluginValue] = [:])
+    /// The user changed the plugin's setting `key` in Settings ▸ Plugins, which reaches a plugin whose manifest asks for its setting changes (`PluginManifest.receivesSettingChanges`). The plugin reads the new value with `PluginContext.setting(_:)`, or a secret setting's with `secrets`.
+    case settingChanged(key: String)
 
-    public var kind: BrowserEventKind {
+    /// The name of a setting change's kind, which `plugin.json`'s `events` lists and `arch.events.on` takes.
+    static let settingChangedKind = "settingChanged"
+
+    /// The bus kind of a browser event; nil for a setting change, which comes from Settings rather than the bus.
+    public var kind: BrowserEventKind? {
         switch self {
         case .browser(let view, _): return view.kind
+        case .settingChanged: return nil
         }
     }
 }

@@ -1,4 +1,4 @@
-// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, one of its page scripts sends it a value, or an event its manifest lists arrives from the Persona's browser events, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, keeps two web extension plugins that are versions of one extension as a pair with one engine each, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes. It registers the AI feature of each enabled plugin with `ai` and runs the listeners of those with events as steps of the shared hook scheduler.
+// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, one of its page scripts sends it a value, an event its manifest lists arrives from the Persona's browser events, or the user changes one of its settings while its manifest asks for that, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, keeps two web extension plugins that are versions of one extension as a pair with one engine each, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes. It registers the AI feature of each enabled plugin with `ai` and runs the bus event listeners of those with bus events as steps of the shared hook scheduler.
 import AI
 import AppKit
 import ARCHEngine
@@ -176,6 +176,8 @@ public final class PluginManager: ObservableObject {
     private static let liveManagers = NSHashTable<PluginManager>.weakObjects()
     /// Each plugin's hook steps, which run one at a time.
     private var hookQueues: [PluginID: PluginHookQueue] = [:]
+    /// The setting changes that wait to settle before their plugins hear of them, by plugin and setting key.
+    private var settingChanges: [PluginID: [String: PendingSettingChange]] = [:]
     /// The order of plugin hooks in an event's chain: after the AI hook center's built-in hooks, at 100, and before the hook registry's, from 1,000.
     static let hookOrder = 200
 
@@ -186,6 +188,14 @@ public final class PluginManager: ObservableObject {
         let activation: Task<Void, any Error>
         /// Whether the activation succeeded, after which uses reach the plugin without waiting.
         var isActive = false
+    }
+
+    /// Changes to one setting that have not settled yet.
+    private struct PendingSettingChange {
+        /// The setting's value before the first of them, or nil for a secret setting.
+        let before: PluginValue?
+        /// Tells the plugin once they have settled; the next change cancels it.
+        let delivery: Task<Void, Never>
     }
 
     /// The access that running one of a `whenInvoked` plugin's commands in a tab gives it: the tab's pages on the host of the document the command ran on, while the tab keeps the page it had then and the plugin the install, grant, and manifest it had then.
@@ -1303,11 +1313,13 @@ public final class PluginManager: ObservableObject {
         return stored
     }
 
-    /// nil restores the default. Throws as `PluginStorage.setValue(_:forKey:)` does, since setting values share the plugin's storage, and `PluginError.closed` once the manager is closed.
+    /// nil restores the default. Throws as `PluginStorage.setValue(_:forKey:)` does, since setting values share the plugin's storage, and `PluginError.closed` once the manager is closed. A plugin that asks for its setting changes hears of it (`settingDidChange(_:of:from:)`).
     public func setValue(_ value: PluginValue?, of setting: PluginSetting, for id: PluginID) throws {
         guard !isClosed else { throw PluginError.closed }
         objectWillChange.send()
+        let before = self.value(of: setting, for: id)
         try storage(for: id).setSettingValue(value, forKey: setting.key)
+        settingDidChange(setting, of: id, from: before)
     }
 
     /// Whether the Keychain holds a value for a secret setting. It reads only whether the item exists, so macOS does not ask for the keychain password.
@@ -1315,18 +1327,39 @@ public final class PluginManager: ObservableObject {
         try secrets(for: id).containsSecret(forKey: setting.key)
     }
 
-    /// nil deletes the Keychain item. Throws as `PluginSecrets.setSecret(_:forKey:)` does, and `PluginError.closed` once the manager is closed.
+    /// nil deletes the Keychain item. Throws as `PluginSecrets.setSecret(_:forKey:)` does, and `PluginError.closed` once the manager is closed. A plugin that asks for its setting changes hears of it once the Keychain has the change.
     public func setSecret(_ secret: String?, of setting: PluginSetting, for id: PluginID) async throws {
         guard !isClosed else { throw PluginError.closed }
         try await secrets(for: id).setSecret(secret, forKey: setting.key)
         // Settings reads whether the item exists once the write is done.
         objectWillChange.send()
+        settingDidChange(setting, of: id, from: nil)
     }
 
     /// The setting `key` of the plugin's manifest, as `PluginContext.setting(_:)` reads it.
     fileprivate func setting(_ key: String, of id: PluginID) -> PluginValue? {
         guard let setting = plugins.first(where: { $0.id == id })?.manifest.contributions.settings.first(where: { $0.key == key }) else { return nil }
         return value(of: setting, for: id)
+    }
+
+    /// How long a setting's changes settle before its plugin hears of them, so that a text field, which writes at each keystroke, tells the plugin once: as long as the plugin's storage changes settle before they reach the file.
+    static let settingChangeDelay: Duration = .milliseconds(500)
+
+    /// Tells the plugin, as `PluginEvent.settingChanged`, of a change the user made to one of its settings, once the setting's changes have settled for `settingChangeDelay`, while the plugin is enabled, its runtime can run it, and its manifest asks for its setting changes and still lists the setting, starting the plugin first if it has not started, as an event does. Nothing reaches it when the value is back where it was before the first of those changes; `before` is that value, or nil for a secret setting, whose value the manager does not read, so that each of its changes counts. The user makes every change, so loop protection's rate does not apply, and a plugin with `ai` hears of it outside the hook scheduler, as it runs a command.
+    private func settingDidChange(_ setting: PluginSetting, of id: PluginID, from before: PluginValue?) {
+        guard enabledPlugin(id)?.manifest.receivesSettingChanges == true else { return }
+        let first = settingChanges[id]?[setting.key]?.before ?? before
+        settingChanges[id]?[setting.key]?.delivery.cancel()
+        let delivery = Task { [weak self] in
+            try? await Task.sleep(for: Self.settingChangeDelay)
+            guard let self, !Task.isCancelled else { return }
+            settingChanges[id]?[setting.key] = nil
+            guard !isClosed, let installed = enabledPlugin(id), installed.manifest.receivesSettingChanges,
+                  installed.manifest.contributions.settings.contains(where: { $0.key == setting.key }),
+                  first == nil || value(of: setting, for: id) != first else { return }
+            try? await start(installed)?.handle(.settingChanged(key: setting.key))
+        }
+        settingChanges[id, default: [:]][setting.key] = PendingSettingChange(before: first, delivery: delivery)
     }
 
     // MARK: Running plugins

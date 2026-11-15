@@ -1,4 +1,4 @@
-// A plugin's AI (`docs/plugins.md`, AI hooks and plugins that AI writes): its own feature, `plugin.<id>`, which the manager registers while the plugin is enabled with `ai`; the client through which its requests go out under that feature; and its hooks, the event listeners of a plugin with `ai` and events, which run one at a time as steps of the shared hook scheduler under that feature (`docs/hooks.md`, Plugins).
+// A plugin's AI (`docs/plugins.md`, AI hooks and plugins that AI writes): its own feature, `plugin.<id>`, which the manager registers while the plugin is enabled with `ai`; the client through which its requests go out under that feature; and its hooks, the bus event listeners of a plugin with `ai` and bus events, which run one at a time as steps of the shared hook scheduler under that feature (`docs/hooks.md`, Plugins).
 import AI
 import Foundation
 
@@ -12,7 +12,7 @@ extension AIFeature {
 }
 
 extension InstalledPlugin {
-    /// Whether the plugin's event listeners run as hooks on the shared hook scheduler under its AI feature: its grant has `ai`, and its manifest lists events. Other plugins' listeners get events as they arrive.
+    /// Whether the plugin's bus event listeners run as hooks on the shared hook scheduler under its AI feature: its grant has `ai`, and its manifest lists bus kinds in `events`. Its `settingChanged` listeners run outside the scheduler, and other plugins' listeners get events as they arrive.
     public var runsHooks: Bool {
         grant.permissions.contains(.ai) && !manifest.events.isEmpty
     }
