@@ -68,12 +68,13 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         session.events.withCause(cause) { select(tab, in: session) }
     }
 
-    /// Selects the tab in a window of its Persona only, so that a window of another Persona keeps its Persona / Space, which selecting a favorite's tab of another Persona would change: the window of the Persona that shows it, else the front main window on its space, else the front main window of its Persona, which then shows the tab's space, or for a favorite's tab stays on its own. None selects it without such a window.
+    /// Selects the tab in a window of its Persona only, so that a window of another Persona keeps its Persona / Space, which selecting a favorite's tab of another Persona would change: the window of the Persona that shows it, else the front main window on its space, else the front main window of its Persona, which then shows the tab's space, or for a favorite's tab stays on its own. None selects it without such a window. A window that has the tab selected already stays as it is, so that the internal page, palette, or find bar that the user has open there stays.
     private func select(_ tab: Tab, in session: BrowserSession) {
         let window = session.windows.first { $0.personaID == tab.personaID && $0.shows(tab) }
             ?? session.windows.first { $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
             ?? session.windows.first { $0.kind == .main && $0.personaID == tab.personaID }
-        window?.selectTab(tab.id)
+        guard let window, window.selectedTabID != tab.id else { return }
+        window.selectTab(tab.id)
     }
 
     /// An open tab other than an agent tab, a favorite's among them.

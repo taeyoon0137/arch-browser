@@ -1,4 +1,4 @@
-// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions): a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; an open names a space of another Persona as not granted and a deleted Persona as closed.
+// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions): a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; an open names a space of another Persona as not granted and a deleted Persona as closed; and a selection of the tab that a window has selected already leaves the window's internal page and palette.
 import ARCHEngine
 import Events
 import Foundation
@@ -76,6 +76,26 @@ import Testing
                 _ = try host.openTab(address, PluginOpenTabOptions(spaceID: research.id, select: false), in: work.id, cause: cause)
             }
             #expect(session.allTabs.count == count)
+        }
+    }
+
+    /// A plugin's selection of the tab that the window has selected already leaves the internal page and the palette that the user has open there, while one of another tab selects it as any selection does.
+    @Test func selectingTheSelectedTabLeavesTheWindowAsItIs() throws {
+        try withSession { session, host in
+            let space = try #require(session.spaces.first)
+            let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            defer { session.windowWillClose(window) }
+            let shown = session.openTab(url: URL(string: "https://example.org/shown"), in: space.id, select: false, engine: .webKit)
+            let other = session.openTab(url: URL(string: "https://example.org/other"), in: space.id, select: false, engine: .webKit)
+            window.selectTab(shown.id)
+            window.showCommandPalette(.newTab)
+            window.submitCommandPalette("flags://")
+            window.showCommandPalette(.newTab)
+            #expect(window.internalPage != nil && window.commandPaletteMode == .newTab)
+            host.selectTab(shown.id, cause: cause)
+            #expect(window.selectedTabID == shown.id && window.internalPage != nil && window.commandPaletteMode == .newTab)
+            host.selectTab(other.id, cause: cause)
+            #expect(window.selectedTabID == other.id && window.internalPage == nil && window.commandPaletteMode == nil)
         }
     }
 }
