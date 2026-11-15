@@ -168,7 +168,7 @@ extension PluginValue {
                               documents: documents ?? [tab.id: tab.url!], closedTab: nil, knownProviders: [:], requestDidEnd: { _ in })
     }
 
-    @Test func theEnabledTidyPresetRunsItsGeneratedFirstLoadScriptOncePerEngine() async throws {
+    @Test func theTidyPresetRunsItsGeneratedFirstLoadScriptOncePerEngine() async throws {
         defer { harness.cleanUp() }
         var requests: [AgentRunRequest] = []
         let real = HookScriptRunner(host: plugins, allowsAI: { _ in true }) { request, _ in
@@ -179,8 +179,8 @@ extension PluginValue {
         let recording = RecordingRunner(real)
         harness.javaScriptRunner = recording
         let registry = try await harness.start()
+        _ = registry
         let preset = try harness.add(HookPresets.tidyTabNames, script: AgentHookTemplate.script(for: .pageLoaded))
-        registry.resume(preset.id)
         var web = harness.tab("/web")
         web.documentID = UUID()
         var chromium = harness.tab("/chromium", kind: .pinned)
@@ -197,6 +197,32 @@ extension PluginValue {
         #expect(requests.allSatisfy { $0.options == preset.agent && $0.knownProviders?[harness.provider.id] == HookKnownProvider(harness.provider).destination })
         #expect(recording.outcomes.allSatisfy { $0.actions?.count == 1 })
         #expect(harness.entries(of: preset.id).isEmpty)
+    }
+
+    /// The generated close and space-switch scripts call no agent while no tab is left to act on, so the last tab's close or a switch to an empty space costs no run and fails nothing.
+    @Test func theGeneratedScriptsCallNoAgentWithoutATabToActOn() async throws {
+        defer { harness.cleanUp() }
+        var calls = 0
+        let recording = RecordingRunner(HookScriptRunner(host: plugins, allowsAI: { _ in true }) { _, _ in
+            calls += 1
+            return AgentRunResult(status: .refused, code: "P16")
+        })
+        harness.javaScriptRunner = recording
+        let registry = try await harness.start()
+        let options = AgentRunOptions(prompt: "Name the tabs.", model: .tier(.fast), tools: ["rename_tab"])
+        var close = instantHook("Close", .tabClosed(reasons: []))
+        AgentHookTemplate.configure(&close, options: options, dailyLimit: 20, delay: .zero, generated: true)
+        let only = harness.tab("/only")
+        harness.host.show(only)
+        let closed = await registry.testDraft(close, script: Data(AgentHookTemplate.script(for: .tabClosed).utf8), onTab: only.id, applying: false)
+        guard case .finished(.completed) = closed else { Issue.record("The close script failed: \(closed)"); return }
+        var switched = instantHook("Switch", .spaceSwitched(personaChangesOnly: false))
+        AgentHookTemplate.configure(&switched, options: options, dailyLimit: 20, delay: .zero, generated: true)
+        try harness.add(switched, script: AgentHookTemplate.script(for: .spaceSwitched))
+        harness.bus.post(.spaceSwitched(windowID: UUID(), spaceID: HookIDs.home, personaID: HookIDs.persona, previousSpaceID: HookIDs.work, previousPersonaID: HookIDs.persona))
+        try #require(await eventually(within: .seconds(20)) { recording.outcomes.count == 2 })
+        #expect(recording.outcomes.allSatisfy { $0.actions == [] })
+        #expect(calls == 0)
     }
 
     @Test func theGeneratedCloseScriptPreviewsOnlyTheTabsLeftInTheSpace() async throws {

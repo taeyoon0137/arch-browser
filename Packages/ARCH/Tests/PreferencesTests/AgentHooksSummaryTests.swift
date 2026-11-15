@@ -68,6 +68,8 @@ import Testing
         #expect(hook.grant.agent?.minimumRecord == .activity && hook.grant.agent?.maximumRecord == .activity)
         #expect(hook.agent?.limits == hook.grant.agent?.limits && hook.agent?.limits.rounds == 1)
         #expect(hook.timing.runsPerDay == 11 && hook.grant.agent?.runsPerDay == 11)
+        // The hook's timeout starts before its script and the agent run, so it leaves the run its whole limit.
+        #expect(hook.timing.timeout == .seconds(15))
         #expect(bytes == Data(AgentHookTemplate.script(for: .tabClosed).utf8))
         draft.editGeneratedScript()
         draft.script = "const mine = true;"
@@ -75,18 +77,20 @@ import Testing
         draft.readsTabs = true
         let custom = try draft.makeHook()
         #expect(custom.script == Data(draft.script.utf8) && custom.hook.grant.permissions == [.tabs, .agent])
-        draft.generated = true
+        // Agent runs off leave the edited script without the agent, and restoring Arch's script, which runs one, turns them back on.
+        draft.enablesAgent = false
+        let off = try draft.makeHook().hook
+        #expect(!off.grant.permissions.contains(.agent) && off.grant.agent == nil && off.agent == nil)
+        draft.restoreGeneratedScript()
         let restored = try draft.makeHook()
         #expect(restored.script == Data(AgentHookTemplate.script(for: .tabSelected).utf8) && restored.hook.grant.permissions == [.agent])
     }
 
     @Test func thePresetOpensAsANewEditableDraftAndTheTabNamesWarningFollowsTheTwoLoadEvents() throws {
         let preset = HookPresets.tidyTabNames
-        var draft = ScriptHookDraft(editing: preset, script: AgentHookTemplate.script(for: .pageLoaded), places: places, reviewing: false, isNew: true)
-        #expect(draft.stored == nil && draft.guided && draft.generated && !draft.startsEnabled)
+        let draft = ScriptHookDraft(editing: preset, script: AgentHookTemplate.script(for: .pageLoaded), places: places, reviewing: false, isNew: true)
+        #expect(draft.stored == nil && draft.guided && draft.generated)
         #expect(draft.agentModel == .tier(.fast) && draft.agentRenamesTabs && !draft.readsPageText)
-        #expect(try draft.makeHook().hook.state == .paused(.user))
-        draft.startsEnabled = true
         let saved = try draft.makeHook().hook
         #expect(saved.id == preset.id && saved.origin == .preset("tidyTabNames") && saved.state == .active)
         #expect(saved.trigger == preset.trigger && saved.filter.tabKinds == [.open, .pinned] && saved.agent == preset.agent)
@@ -96,6 +100,20 @@ import Testing
             #expect(!TabNamesWarning.applies(renames: true, kind: kind, tabNames: AIRoute(isEnabled: false)))
             #expect(!TabNamesWarning.applies(renames: false, kind: kind, tabNames: AIRoute(isEnabled: true)))
         }
+    }
+
+    /// A hand-written script hook with agent runs opens in the guided editor, which still lets the user turn the runs off.
+    @Test func aHandWrittenAgentScriptHookCanTurnItsAgentRunsOff() throws {
+        var hook = Hook(name: "Mine", trigger: .tabOpened, script: .javaScript(digest: "", generated: false))
+        let grant = AgentRunGrant(tools: ["rename_tab"], maximumRecord: .none)
+        hook.grant = HookGrant(permissions: [.agent, .tabsRename], agent: grant)
+        hook.agent = AgentRunOptions(prompt: "Name it.", model: .tier(.fast), tools: ["rename_tab"])
+        var draft = ScriptHookDraft(editing: hook, script: "arch.events.on(\"tabOpened\", async () => {});", places: places, reviewing: false)
+        #expect(draft.guided && !draft.generated && draft.enablesAgent)
+        draft.enablesAgent = false
+        let saved = try draft.makeHook().hook
+        #expect(saved.grant.permissions == [.tabsRename] && saved.grant.agent == nil && saved.agent == nil)
+        #expect(ScriptHookDraft.label(of: .spaceDeleted) == "Its Persona is deleted" && !ScriptHookDraft.offeredCloseReasons.contains(.hook))
     }
 
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {

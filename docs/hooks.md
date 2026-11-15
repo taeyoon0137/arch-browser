@@ -522,12 +522,12 @@ arch.events.on("pageLoaded", async (event) => {
 });
 ```
 
-The template for "A tab closes" passes the closed tab as data and the tabs left in its space as the run's tabs:
+The template for "A tab closes" passes the closed tab as data and the tabs left in its space as the run's tabs, and runs no agent when none is left, as the template for "You switch spaces" does for an empty space:
 
 ```js
 arch.events.on("tabClosed", async (event) => {
   const left = (await arch.tabs.list()).filter((tab) => tab.spaceId === event.tab.spaceId);
-  await arch.agent.run({ ...event.hook.agent, closedTab: event.tab.id, tabs: left.map((tab) => tab.id) });
+  if (left.length) await arch.agent.run({ ...event.hook.agent, closedTab: event.tab.id, tabs: left.map((tab) => tab.id) });
 });
 ```
 
@@ -774,11 +774,11 @@ The sheet provides these sections:
 2. When: the situation in plain words: "A new tab opens", "A tab loads a page" (with "Only a new tab's first page", "Each new address", or "Every load"), "A tab's address changes" (with "Only a new site" or "Any change"), "A tab's title changes" (with "The page's title", "Your names", and "Names from hooks and agents"), "You select a tab", "A tab closes" (with its reasons), "A download finishes", and "You switch spaces" (with "Only when the Persona changes").
 3. Where: Everywhere, or "Persona / Space" entries; Sites: All Sites, Only These Sites, or All Sites Except These, as `AISitePattern` entries; Engines: Both, WebKit, or Chromium; Tabs: open tabs, pinned tabs, favorites' tabs, and small windows' tabs.
 4. Agent: the instructions, with a placeholder example, and the switches Read Page Text and Read Page Outline (Read Text of the Tabs Left and Read Outlines of the Tabs Left for "A tab closes"). Without either the editor says that the model receives titles and reduced addresses; with Read Page Text it says that the model may read page text on the allowed tabs, and with either that sites excluded from AI are skipped; with Read Page Outline it says that outlines hold headings, labels, and links, not the page's text, with form values hidden. For "A tab closes", the agent gets the closed tab's last title and address as data and the tabs left in its space as the tabs it may act on (Closed tabs).
-5. Model: Fast, Standard, or Deep, or A Specific Model… with connected models that have `agent`; below it, the resolved model, "Choose a model for the Fast tier" with the tier's menu inline when empty, and the note for a CLI model.
+5. Model: the Use menu lists Fast, Standard, and Deep, then each connected model that has `agent`; below it, each resolved model with its provider's destination, "Choose a model for the Fast tier" with the tier's menu inline when empty, and the note for a CLI model.
 6. Record: Keep the Session, Keep Activity Only, or Keep Nothing, each with one sentence from Record levels.
 7. Allowed Actions: Rename the Tab, or Rename the Tabs Left for "A tab closes". The list grows with the run tools.
-8. Limits: Time Limit, Rounds, Runs per Day, which sets both the hook's daily count and its agent runs', and Wait Before Running.
-9. Test on Current Tab: runs the hook once on the front window's selected tab; a close hook treats that tab as closed without closing it (Closed tabs). It reports actions without applying them unless Apply Changes is checked. The sheet shows the result until it closes: what would change, the agent's reply, the model, tokens, and time. A test counts toward usage, not the hook's daily count, and is logged with `test` at the first two record levels.
+8. Limits: Time Limit, which the hook's timeout exceeds by 5 seconds, Model Rounds, Tool Calls, Runs per Day, which sets both the hook's daily count and its agent runs', and Wait Before Running. Time Limit and Runs per Day take a typed number beside their steppers.
+9. Test on Current Tab: runs the hook once on the front window's selected tab; a close hook treats that tab as closed without closing it (Closed tabs). It reports actions without applying them unless Apply Changes is checked. The sheet shows the result until it closes: what would change, the agent's reply, the model, tokens, and time. A test counts toward usage, not the hook's daily count. The editor's test is not logged; a row's Run on Current Tab is logged with `test` at the first two record levels. The test is not offered while the sheet reviews a script changed outside Arch, or while agent runs are off.
 10. Script: Show Script reveals the generated script, read-only; Edit Script makes it the user's (`generated` false). The editor then edits the situation and agent block but no longer writes the script. Restore Arch's Script writes the template again. The syntax check runs when the user saves an edited script.
 11. Save: writes the hook with a grant derived exactly from its options, `agent` with the options' tools, tab access, record, limits, and runs per day, and registers its feature. An edited script calling `arch.tabs` needs `tabs` or `tabs.rename`, which the Script section then offers as checkboxes. The user's edits in Arch need no Touch ID, as switching on Tab Names needs none.
 
@@ -799,18 +799,10 @@ The sheet provides these sections:
 
 Instructions: "Give this browser tab a short name that tells it apart from other tabs: at most four words, in the language of its title. Use the title and address in the tab block, and drop site names, slogans, counters, and separators unless the name needs them. Call rename_tab once with the name. If the title is already short and clear, do not call it."
 
-- Choosing Presets ▸ Tidy Tab Names opens a new, editable draft with Enable this hook when saved off. Add saves it paused unless the user turns that switch on. The saved hook also has its own switch in the list. Opening and canceling a preset installs nothing. When the Fast tier is empty, the Model section asks for its model inline.
+- Choosing Presets ▸ Tidy Tab Names opens the editor with each choice filled in for the user to see before saving. Opening and canceling a preset installs nothing. When the Fast tier is empty, the Model section asks for its model inline.
 - Tab Names (`hook.tabName`, Settings ▸ AI ▸ Features) is an AI hook: a plain model request without tools on every new document of a tab, with up to 2,000 characters of page text, under its own stored route. It and Tidy Tab Names both set the suggested name, so both send a request on a new tab's first page. Both run in that load's chain, Tab Names first (The shared scheduler), so the name Tidy Tab Names gives wins. Arch does not merge them. Whenever an active hook renames on `tabOpened` or `pageLoaded` while Tab Names is on, the editor and hook's row say "Tab Names also names tabs. Turn on one of them." with Turn Off Tab Names.
 - Which to turn on: Tidy Tab Names for the user's case of new tabs only, a fast model, no page text, and no record. Tab Names remains for naming every page a tab loads from its text.
 - The preset is data, `HookPresets.tidyTabNames`. Once saved it is an ordinary hook that the user can edit, duplicate, or delete.
-
-### Bundle checks 89 and 90
-
-In an isolated profile, a signed debug build opened New Agent Hook… and the preset from Settings. A loopback server served the fixture pages and streamed a Chat Completions response that requested one `rename_tab` call. The editor showed the Fast tier’s model and endpoint, revealed its generated script, accepted a script edit, and restored Arch’s template. The title-only preview reported the suggested name. With Apply Changes on, the editor reported the rename.
-
-For the saves and relaunch, the same build used a fixture seal store under that profile in place of the login Keychain. The hand-created hook saved with the preset’s instructions, model, record level, grant, trigger, limits, tab kinds, and script digest. The preset saved paused and started after its row switch was turned on. A dry run left the fixture tab’s original title intact, and Apply Changes renamed it. A new WebKit tab and a new Chromium tab each issued exactly one model request with only `rename_tab`. Reopening the saved session issued no request and kept the suggested name. Keep Nothing left no `hooks-activity.json`. The built-in Tab Names warning and its Turn Off action worked in the editor and on the active row, preserving the feature’s model choice.
-
-The real-provider part of check 90 remains. Run it with a connected API-key account, then the user’s Claude Code and Codex, and verify CLI process cleanup and Codex thread retention after each turn. Production Keychain persistence was outside these isolated checks.
 
 ## Outside programs
 
