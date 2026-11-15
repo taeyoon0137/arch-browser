@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, with the actions' trusted input in `AgentTrustedInput.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; an in-app session's calls run on the same path with its site scope (P13), its own agent folder, and its cards in its panel. An outside client's call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result. A session's call waits on its card instead.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, with the actions' trusted input in `AgentTrustedInput.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with an outside client's `rename_tab` (P19), with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; an in-app session's calls run on the same path with its site scope (P13), its own agent folder, and its cards in its panel. An outside client's call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result. A session's call waits on its card instead.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -176,6 +176,7 @@ import Foundation
         case "ask_user": return await askUser(arguments, client, box: box)
         case "request_approval": return await requestApproval(arguments, client, state: state, box: box)
         case "hand_to_user": return await handToUser(arguments, client, state: state, box: box)
+        case "rename_tab" where client.session == nil: return await renameTab(arguments, client, state: state, box: box)
         case "guide": return Outcome(result: AgentHarness.guideResult(arguments: arguments, inSession: client.session != nil))
         default: return Self.notAvailable("This build of Arch does not run \(tool.name) yet.")
         }
@@ -845,6 +846,7 @@ import Foundation
         if isShared, tab.agentOwnerID != nil {
             state.handles.sharedTabIDs.removeAll { $0 == tab.id }
             state.handles.actingSharedTabIDs.remove(tab.id)
+            state.handles.renamingSharedTabIDs.remove(tab.id)
         }
         if tab.agentOwnerID == client.id { return .agentTab }
         guard isShared, tab.agentOwnerID == nil else { return .notTheClients }

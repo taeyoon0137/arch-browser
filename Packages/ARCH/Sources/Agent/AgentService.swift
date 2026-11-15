@@ -41,7 +41,8 @@ import Foundation
         didSet { grantsInForceDidChange() }
     }
     private var runObserver: AnyCancellable?
-    private var runService: AgentRunner?
+    /// The agent runner, made at first use; tests give their own, over a scripted model.
+    var runService: AgentRunner?
     public var runs: AgentRunner {
         if let runService { return runService }
         let runner = AgentRunner(host: host, ai: .shared, activity: activity)
@@ -2097,9 +2098,8 @@ extension AgentService {
         }
     }
 
-    /// An outside client's call: `watch_events` reads the grant's event buffer here, with the tool host's argument check and daily count, and every other tool runs in the tool host.
+    /// An outside client's call: `watch_events` reads the grant's event buffer here, with the tool host's argument check and daily count, and every other tool, `rename_tab` with P19's card among them, runs in the tool host.
     private func runOutsideCall(_ call: AgentToolCall, for grant: AgentGrant, connectionID: UUID, callID: Int?) async -> AgentToolHost.Outcome {
-        if call.name == AgentToolCatalog.renameTab.name { return renameTab(call, for: grant) }
         guard call.name == AgentToolCatalog.watchEvents.name else {
             return await toolHost(connectionID: connectionID, callID: callID).run(call, for: grant, state: state(for: grant))
         }
@@ -2114,50 +2114,9 @@ extension AgentService {
     }
 }
 
-// MARK: - Outside programs' runs and renames
+// MARK: - Outside programs' runs
 
 extension AgentService {
-    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely for the document it has committed, `stale` while it loads another address, with the first line of the name trimmed and cut to 60 characters and an empty name clearing a suggested name, through `BrowserAgentHost`'s suggested names. A tab the user shared would ask once per tab, which this build does not ask yet, so it is refused; any other tab is refused with P17, and a tab on a site excluded from AI with P16.
-    private func renameTab(_ call: AgentToolCall, for grant: AgentGrant) -> AgentToolHost.Outcome {
-        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.renameTab) { return AgentToolHost.error("invalidArguments", problem) }
-        let state = state(for: grant)
-        guard state.countCall(at: dependencies.now()) else {
-            return AgentToolHost.error("limitReached", "This client made \(AgentToolHost.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.")
-        }
-        let handle = call.arguments["tab"]?.stringValue ?? ""
-        guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return AgentToolHost.error("tabNotFound", "This client has no tab \(handle).") }
-        let access: AgentTabAccess
-        if tab.agentOwnerID == grant.id {
-            access = .agentTab
-        } else if tab.agentOwnerID == nil, state.handles.sharedTabIDs.contains(id) {
-            access = .shared(acting: state.handles.actingSharedTabIDs.contains(id))
-        } else {
-            access = .notTheClients
-        }
-        func refused(_ code: String, _ text: String) -> AgentToolHost.Outcome {
-            AgentToolHost.Outcome(result: AgentToolResult(status: .refused, code: code, text: text, structured: ["rule": .string(code)]))
-        }
-        switch AgentPolicy.renameDecision(client: .outside, tab: access, allowedOnce: false) {
-        case .refuse(let rule, let sentence): return refused(rule?.rawValue ?? AgentPolicy.wouldAskCode, sentence)
-        case .ask: return refused(AgentRule.p19.rawValue, "Renaming a tab the user shared asks the user first, which this build of Arch does not ask yet. Rename your own agent tabs.")
-        default: break
-        }
-        guard let naming = host as? AgentTabNaming else { return AgentToolHost.notAvailable("This build of Arch cannot name tabs.") }
-        // A name belongs to the document the tab has committed, which a tab that loads another address is leaving.
-        guard let url = naming.committedAddress(ofTab: id), AgentRunner.sameDocument(tab.url, url) else {
-            return AgentToolHost.Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "\(handle) is loading another page. Rename it once the page has loaded.", structured: ["tab": .string(handle)]))
-        }
-        guard AgentPolicy.showsTitle(of: url, allowsAI: dependencies.allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
-        let given = call.arguments["name"]?.stringValue ?? ""
-        let name = String(given.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces).prefix(60)).trimmingCharacters(in: .whitespaces)
-        guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: grant.id, applying: true) else {
-            return refused("userNamed", "The user's own name for this tab, or a name the user turned down, keeps the tab's name.")
-        }
-        let text = name.isEmpty ? "Cleared the suggested name of \(handle)." : "Suggested the name \u{201C}\(name)\u{201D} for \(handle)."
-        return AgentToolHost.Outcome(result: AgentToolResult(status: .ok, text: text, structured: ["tab": .string(handle), "name": .string(name), "applied": true]),
-                                     site: AgentActivityEntry.site(of: url), step: name.isEmpty ? "Cleared the name of \(handle)" : "Named \(handle) \u{201C}\(name)\u{201D}")
-    }
-
     /// `agent/run` from an outside client with Start Agent Tasks, asked for a grant first as a tool call is: one run under `agentRun` with `AgentRunGrant.forClient(_:)`, recorded with its model and outcome in the activity log, whose tool calls the runner records too. The client's connection closing cancels it.
     private func runAgent(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard let identity = connection.identity else { return }
@@ -2215,7 +2174,7 @@ extension AgentService {
         }
     }
 
-    /// The run of an outside client's options: its tabs by the client's handles, or else every agent tab of the client and tab shared with it, the Standard tier, Keep Activity Only, tab access `title` with `rename_tab` or `page` with the read tools too, and the program's label.
+    /// The run of an outside client's options: its tabs by the client's handles, or else every agent tab of the client and tab shared with it, the Standard tier, Keep Activity Only, tab access `title` with `rename_tab` or `page` with the read tools too, and the program's label. The shared tabs the user let the client rename on P19's card rename in the run too.
     private func outsideRun(_ given: [String: AgentJSON], for grant: AgentGrant, identity: AgentClientIdentity, run: UUID) async -> AgentRunResult {
         func refused(_ code: String, _ message: String) -> AgentRunResult { AgentRunResult(status: .refused, code: code, message: message) }
         var fields = given
@@ -2252,6 +2211,7 @@ extension AgentService {
         var request = AgentRunRequest(options: options, tabs: ids, allowedTabs: Set(reachable.map(\.id)), documents: documents, documentIDs: documentIDs, knownProviders: nil,
                                       origin: .outsideClient(grant: grant.id, run: run), promptSource: .program(name: identity.displayName), feature: .agentRun, grant: .forClient(grant))
         request.sharedTabs = Set(shared.map(\.id)).intersection(ids)
+        request.renamingSharedTabs = state.handles.renamingSharedTabIDs.intersection(request.sharedTabs)
         let naming = host as? AgentTabNaming
         return await runs.run(request, personaID: grant.personaID) { id, name, document, applying in
             naming?.suggestName(name, forTab: id, showing: document, byGrant: grant.id, applying: applying) ?? false

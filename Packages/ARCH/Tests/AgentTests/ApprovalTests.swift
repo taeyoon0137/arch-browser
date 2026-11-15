@@ -1,4 +1,4 @@
-// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, also before its document finishes, denial on timeout, Touch ID for outside clients' sensitive Allow and Share, the warning line on cards whose text names a secret, ended cards leaving memory, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download, file chooser, or link to another app opens, one download card and one file chooser card per tab, a file chooser's panel on the window of the card the user answered and a result that names no file, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit, a client's `tools/cancel` of a call and of an `approval_wait`, which withdraws the card of the call it waits on, the connected state of a grant allowed after its only call was cancelled, and the activity log and panel step of a call that goes on after `approvalPending`; and the posted-click check on a real button.
+// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, also before its document finishes, denial on timeout, Touch ID for outside clients' sensitive Allow and Share, and none for P19's Allow for This Tab, which answers the tab's other rename cards, the warning line on cards whose text names a secret, ended cards leaving memory, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download, file chooser, or link to another app opens, one download card and one file chooser card per tab, a file chooser's panel on the window of the card the user answered and a result that names no file, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit, a client's `tools/cancel` of a call and of an `approval_wait`, which withdraws the card of the call it waits on, the connected state of a grant allowed after its only call was cancelled, and the activity log and panel step of a call that goes on after `approvalPending`; and the posted-click check on a real button.
 import AgentControl
 import AppKit
 import ARCHEngine
@@ -38,6 +38,27 @@ import Testing
         approvals.end(because: "Arch quit.")
         #expect(await tasks[3].value == .ended("Arch quit."))
         #expect(approvals.outcomes[sensitive.id] == .ended("Arch quit."))
+    }
+
+    /// P19's card (docs/agents.md, Rules): Allow for This Tab, which is not sensitive, counts without Touch ID and answers the client's other waiting rename cards of that tab, never another tab's.
+    @Test func allowForThisTabAnswersTheTabsOtherRenameCardsWithoutTouchID() async {
+        let approvals = AgentApprovals()
+        let authenticator = FakeAuthenticator()
+        approvals.authenticator = authenticator
+        let tab = UUID()
+        func rename(_ tabID: UUID) -> AgentApproval {
+            AgentApproval(ownerID: Self.owner, clientName: "claude in Terminal", isOutsideClient: true, kind: .renameSharedTab, rules: [.p19], isSensitive: false,
+                          offers: [.allowOnTab, .deny, .denyAndStop, .reply("")], action: "Rename your tab \u{201C}Inbox\u{201D} on mail.example", tabID: tabID,
+                          site: "mail.example", exactText: "Mail", createdAt: Date(), deadline: Date().addingTimeInterval(60))
+        }
+        let first = rename(tab), second = rename(tab), elsewhere = rename(UUID())
+        let tasks = [await Self.open(first, in: approvals), await Self.open(second, in: approvals), await Self.open(elsewhere, in: approvals)]
+        #expect(await approvals.answer(first.id, with: .allowOnTab))
+        #expect(await tasks[0].value == .allowOnTab && AgentApprovalAnswer.allowOnTab.allows)
+        #expect(await tasks[1].value == .allowOnTab)
+        #expect(approvals.pending.map(\.id) == [elsewhere.id] && authenticator.count == 0)
+        approvals.end(because: "Arch quit.")
+        #expect(await tasks[2].value == .ended("Arch quit."))
     }
 
     @Test func aCardIsWithdrawnWhenItsPageMovesOnAndDeniedWhenNobodyAnswers() async throws {

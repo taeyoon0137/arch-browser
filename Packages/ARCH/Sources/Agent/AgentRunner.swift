@@ -465,9 +465,9 @@ public final class AgentRunner: ObservableObject {
             return await toolHost.readText(args, tab: tab, handle: handle, mayReadTab: mayRead).result
         }
         guard let name = args["name"]?.stringValue else { return response("invalidArguments", error: true) }
-        // Rule P19 for an outside client's run: its own agent tabs rename freely, and a shared tab would ask, which a run cannot.
+        // Rule P19 for an outside client's run: its own agent tabs rename freely, and so does a shared tab the user let the client rename; another shared tab would ask, which a run cannot.
         if case .outsideClient = run.request.origin, run.request.sharedTabs.contains(id),
-           case .refuse = AgentPolicy.renameDecision(client: .run, tab: .shared(acting: false), allowedOnce: false) {
+           case .refuse = AgentPolicy.renameDecision(client: .run, tab: .shared(acting: false), allowedOnce: run.request.renamingSharedTabs.contains(id)) {
             return AgentToolResult(status: .refused, code: AgentPolicy.wouldAskCode, text: AgentPolicy.wouldAskSentence)
         }
         let firstLine = name.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces)

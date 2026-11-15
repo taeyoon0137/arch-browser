@@ -1,4 +1,4 @@
-// A card in the agent panel (docs/agents.md, Approval interface): it leads with the facts the host computed (the step in a sentence, the tab and site, the element marked on a capture of the viewport, and the exact text or address that would be sent), then the agent's own words under "The agent says:". A card whose agent text names a secret leads with Arch's warning. No card has a default button, so Return and Space answer none; on a sensitive card, Allow, and Share and Done, take only a pointer click on the button that no other program posted, and for outside clients Allow on a sensitive card and Share take Touch ID or the login password as well (`AgentApprovals.answer(_:with:)`).
+// A card in the agent panel (docs/agents.md, Approval interface): it leads with the facts the host computed (the step in a sentence, the tab and site, the element marked on a capture of the viewport, and the exact text, address, or tab name that would be sent), then the agent's own words under "The agent says:". A card whose agent text names a secret leads with Arch's warning, and P19's card for a tab the user shared says what Allow for This Tab lets the client do. No card has a default button, so Return and Space answer none; on a sensitive card, Allow, and Share and Done, take only a pointer click on the button that no other program posted, and for outside clients Allow on a sensitive card and Share take Touch ID or the login password as well (`AgentApprovals.answer(_:with:)`).
 import AgentControl
 import AppKit
 import Darwin
@@ -107,6 +107,11 @@ struct AgentApprovalCard: View {
                 .foregroundStyle(.secondary)
             TextField("A note for the agent (optional)", text: $written, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
+        case .renameSharedTab:
+            Text(verbatim: "Allow for This Tab lets \(approval.clientName) rename this tab again without asking. A name you give the tab yourself always stays.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         case .shareSessionTab(let tabs), .requestTab(let tabs, _):
             if tabs.isEmpty {
                 Text("No eligible tabs to share in this Persona.")

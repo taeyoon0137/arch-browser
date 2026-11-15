@@ -1,4 +1,4 @@
-// The tools that wait for the user (docs/agents.md, Tools ▸ Catalog; Approval interface): `request_tab`, `ask_user`, `request_approval` (P15), and `hand_to_user`, each a card in the agent panel, and the cards for a download (P6), a file chooser (P7), or a link to another app (P11) that a page in an agent tab starts. The agent's words on a card are marked as the agent's, and a card whose words name a secret leads with Arch's warning. The user's answers are the user's own words and reach the agent as they are.
+// The tools that wait for the user (docs/agents.md, Tools ▸ Catalog; Approval interface): `request_tab`, `ask_user`, `request_approval` (P15), and `hand_to_user`, each a card in the agent panel, an outside client's `rename_tab`, whose first rename of a tab the user shared asks on P19's card, and the cards for a download (P6), a file chooser (P7), or a link to another app (P11) that a page in an agent tab starts. The agent's words on a card are marked as the agent's, and a card whose words name a secret leads with Arch's warning. The user's answers are the user's own words and reach the agent as they are.
 import AgentControl
 import AppKit
 import ARCHEngine
@@ -131,6 +131,67 @@ extension AgentToolHost {
             outcome.site = site
             return outcome
         }
+    }
+
+    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely, and a tab the user shared once the user allows it on P19's card, which is not sensitive, so Allow for This Tab asks for no Touch ID. The allowance lasts while the tab stays shared, so the client's later renames of the tab ask nothing. Any other tab is refused with P17, and a tab on a site excluded from AI with P16. A name belongs to the document the tab has committed: a tab that loads another address answers `stale`, and so does a shared tab whose document ends while its card waits, which withdraws the card. The name's first line is trimmed and cut to 60 characters, and an empty name clears a suggested name, through `BrowserAgentHost`'s suggested names (`AgentTabNaming`) with the grant as the cause.
+    func renameTab(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
+        let handle = arguments["tab"]?.stringValue ?? ""
+        guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return Self.error("tabNotFound", "This client has no tab \(handle).") }
+        func refused(_ code: String, _ text: String) -> Outcome {
+            Outcome(result: AgentToolResult(status: .refused, code: code, text: text, structured: ["rule": .string(code), "tab": .string(handle)]))
+        }
+        func stale(_ text: String) -> Outcome {
+            Outcome(result: AgentToolResult(status: .stale, code: "stale", text: text, structured: ["tab": .string(handle)]))
+        }
+        let tabAccess = access(to: tab, client, state: state)
+        let decision = AgentPolicy.renameDecision(client: client.kind, tab: tabAccess, allowedOnce: state.handles.renamingSharedTabIDs.contains(id))
+        if case .refuse(let rule, let sentence) = decision { return refused(rule?.rawValue ?? AgentPolicy.wouldAskCode, sentence) }
+        guard let naming = host as? AgentTabNaming else { return Self.notAvailable("This build of Arch cannot name tabs.") }
+        // A name belongs to the document the tab has committed, which a tab that loads another address is leaving.
+        guard let url = naming.committedAddress(ofTab: id), AgentRunner.sameDocument(tab.url, url) else {
+            return stale("\(handle) is loading another page. Rename it once the page has loaded.")
+        }
+        guard AgentPolicy.showsTitle(of: url, allowsAI: allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
+        let given = arguments["name"]?.stringValue ?? ""
+        let name = String(given.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces).prefix(60)).trimmingCharacters(in: .whitespaces)
+        let site = AgentActivityEntry.site(of: url)
+        var decided: AgentActivityEntry.Decision?
+        if case .ask(let ask) = decision {
+            // The tab's title is the page's, so it stands on one line in quotes whose closing quote inside is doubled, cut as other names a page gives are.
+            let title = Self.oneLine(tab.title).trimmingCharacters(in: .whitespaces)
+            let cut = title.count > AgentLimits.pageNameCharacters ? String(title.prefix(AgentLimits.pageNameCharacters)) + "\u{2026}" : title
+            let named = title.isEmpty ? handle : "\u{201C}\(Self.quoted(cut))\u{201D}"
+            var card = AgentApproval(ownerID: client.id, clientName: client.name, isOutsideClient: client.isOutsideClient, kind: .renameSharedTab, rules: ask.rules, isSensitive: ask.isSensitive,
+                                     offers: [.allowOnTab, .deny, .denyAndStop, .reply("")],
+                                     action: (name.isEmpty ? "Clear the suggested name of your tab \(named)" : "Rename your tab \(named)") + (site.map { " on \($0)" } ?? ""),
+                                     tabID: id, tabHandle: handle, site: site, exactText: name.isEmpty ? nil : name, connectionID: connectionID, createdAt: now(),
+                                     deadline: now().addingTimeInterval(approvalWindow))
+            // The user's tab reports no pages, so the card is about its document, whose end withdraws it.
+            card.documentID = tab.documentID
+            box.approvalID = card.id
+            let answer = await request(card, for: client)
+            if answer == .withdrawn { return stale("\(handle) showed another page before the user answered, so it kept its name.") }
+            if var ended = answerOutcome(answer, card: card, handle: handle, client: client) {
+                ended.site = site
+                return ended
+            }
+            decided = .approved
+            state.handles.renamingSharedTabIDs.insert(id)
+            // While the card waited, the tab may have left the client, which ends the allowance, or committed another document.
+            guard let current = host.tabs(withIDs: [id]).first, case .shared = access(to: current, client, state: state) else {
+                return refused(AgentRule.p17.rawValue, AgentPolicy.entry(.p17).sentence)
+            }
+            guard current.documentID == tab.documentID, naming.committedAddress(ofTab: id) == url, AgentRunner.sameDocument(current.url, url) else {
+                return stale("\(handle) showed another page before the user answered, so it kept its name.")
+            }
+            guard AgentPolicy.showsTitle(of: url, allowsAI: allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
+        }
+        guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: client.id, applying: true) else {
+            return refused("userNamed", "The user's own name for this tab, or a name the user turned down, keeps the tab's name.")
+        }
+        let text = name.isEmpty ? "Cleared the suggested name of \(handle)." : "Suggested the name \u{201C}\(name)\u{201D} for \(handle)."
+        return Outcome(result: AgentToolResult(status: .ok, text: text, structured: ["tab": .string(handle), "name": .string(name), "applied": true]),
+                       site: site, step: name.isEmpty ? "Cleared the name of \(handle)" : "Named \(handle) \u{201C}\(name)\u{201D}", decision: decided)
     }
 
     /// What `request_approval`'s kinds ask for, in the card's sentence.

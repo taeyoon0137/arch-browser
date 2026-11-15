@@ -239,6 +239,8 @@ public struct AgentRunRequest: Sendable {
     public var grant: AgentRunGrant
     /// For an outside client's run, the run tabs the user shared with the client; the others are its agent tabs.
     public var sharedTabs: Set<UUID> = []
+    /// The shared run tabs the user let the client rename on P19's card, which the run renames without asking.
+    public var renamingSharedTabs: Set<UUID> = []
 
     public init(options: AgentRunOptions, tabs: [UUID], allowedTabs: Set<UUID>?, documents: [UUID: URL] = [:], documentIDs: [UUID: UUID] = [:], closedTab: AgentRunClosedTab? = nil,
                 knownProviders: [AIProviderID: String]?, origin: AgentRunOrigin, promptSource: AgentRunPromptSource, feature: AIFeatureID, grant: AgentRunGrant) {
@@ -347,16 +349,6 @@ extension AgentPolicy {
         return decision
     }
 
-    /// Rule P19 for `rename_tab`: a session's or an outside client's own agent tab renames freely, a tab the user shared asks once per tab, and any other tab is refused with P17. A run renames its run tabs without asking, which for an outside client's run are its own agent tabs and the tabs shared with it, so a shared tab not yet allowed once is refused with `wouldAsk`.
-    public static func renameDecision(client: AgentClientKind, tab: AgentTabAccess, allowedOnce: Bool) -> AgentDecision {
-        switch tab {
-        case .notTheClients: return .refuse(.p17, entry(.p17).sentence)
-        case .agentTab: return .allow
-        case .shared:
-            let decision: AgentDecision = allowedOnce ? .allow : .ask(AgentAsk(rules: [.p19], isSensitive: false))
-            return client == .run ? runDecision(decision) : decision
-        }
-    }
 }
 
 /// Suggested names for agent tabs, which `BrowserAgentHost` gives under the AI hooks' rules (hook decision 13) for `rename_tab` from outside clients and their runs. A protocol beside `AgentBrowserHost`, so that a host without it gives no names and the tool refuses.

@@ -179,7 +179,7 @@ enum AgentRuleOutcome: Equatable {
 public enum AgentPolicy {
     // MARK: The table
 
-    /// P1 to P18, in order.
+    /// P1 to P19, in order.
     public static let table: [AgentRuleEntry] = [
         AgentRuleEntry(rule: .p1, trigger: "Typing or pressing keys into a password, credential, one-time-code, or payment field, or a field whose label names a secret", effect: .refuses,
                        sentence: "Agents never type credentials, codes, or card details. Use hand_to_user."),
@@ -295,6 +295,17 @@ public enum AgentPolicy {
         case .actInAgentTabs:
             guard client == .inApp, !step.siteInScope else { return .allow }
             return allowances.site ? .allow : .ask(AgentAsk(rules: step.tool == "type" ? [.p14] : [], isSensitive: false, offersSite: true))
+        }
+    }
+
+    /// Rule P19 for `rename_tab`, in every mode, since a name changes no page: a session's or an outside client's own agent tab renames freely, a tab the user shared asks once per tab on a card that is not sensitive, after which `allowedOnce` holds for the tab, and any other tab is refused with P17. A run renames its run tabs without asking, which for an outside client's run are its own agent tabs and the tabs shared with it, so a shared tab not yet allowed once is refused with `wouldAsk`.
+    public static func renameDecision(client: AgentClientKind, tab: AgentTabAccess, allowedOnce: Bool) -> AgentDecision {
+        switch tab {
+        case .notTheClients: return .refuse(.p17, entry(.p17).sentence)
+        case .agentTab: return .allow
+        case .shared:
+            let decision: AgentDecision = allowedOnce ? .allow : .ask(AgentAsk(rules: [.p19], isSensitive: false))
+            return client == .run ? runDecision(decision) : decision
         }
     }
 

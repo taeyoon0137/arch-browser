@@ -1,4 +1,4 @@
-// Outside clients' agent runs and renames (`docs/hooks.md`, arch-cli agent run and rename; Tools): `AgentRunGrant.forClient(_:)` from the client's grant; a run on the client's agent tabs and the tabs shared with it under `agentRun`, renaming its own agent tab, refusing a shared tab's rename with `wouldAsk`, logging each tool call under the grant with its tab's site and the run's ID, a dry run's rename as previewed, and counting toward the grant's runs a day but not its 2,000 calls; `rename_tab` from the client under P19, refusing a shared tab, a tab that is no longer the client's, a site excluded from AI, and a tab loading another address; and `agent/run`, which needs Start Agent Tasks and a tab and names renamed tabs by the client's handles.
+// Outside clients' agent runs and renames (`docs/hooks.md`, arch-cli agent run and rename; Tools): `AgentRunGrant.forClient(_:)` from the client's grant; a run on the client's agent tabs and the tabs shared with it under `agentRun`, renaming its own agent tab, refusing a shared tab's rename with `wouldAsk` until the user allowed the tab on P19's card, logging each tool call under the grant with its tab's site and the run's ID, a dry run's rename as previewed, and counting toward the grant's runs a day but not its 2,000 calls; `rename_tab` from the client under P19, refusing a tab that is no longer the client's, a site excluded from AI, and a tab loading another address, and asking once on P19's card, without Touch ID, before it renames a tab the user shared, a card that the tab's next document withdraws; and `agent/run`, which needs Start Agent Tasks and a tab, renames a shared tab the user allowed, and names renamed tabs by the client's handles.
 import AgentControl
 import AI
 import ARCHEngine
@@ -145,24 +145,94 @@ extension FakeHost: AgentTabNaming {
         #expect(try await client.callTool("rename_tab", ["tab": .string(handle), "name": "Docs"]).code == AgentRule.p17.rawValue)
     }
 
-    @Test func renameTabRefusesATabTheUserSharedUnderP19() async throws {
+    /// Shares the user's tab with the client through `request_tab`, answering its card with Share, and returns the client's handle for it.
+    private func share(_ tab: AgentTabInfo, _ service: AgentService, _ client: TestClient, _ harness: Harness) async throws -> String {
+        harness.host.tabs.append(tab)
+        harness.host.userTabIDs.insert(tab.id)
+        let request = Task { try await client.callTool("request_tab", ["reason": "Name the inbox", "access": "read"]) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        #expect(await service.approvals.answer(card.id, with: .tab(tab.id)))
+        return try #require(try await request.value.structured?["tab"]?.stringValue)
+    }
+
+    /// The card a `rename_tab` call of the client opens.
+    private func renameCard(_ handle: String, _ name: String, _ service: AgentService, _ client: TestClient) async throws -> (AgentApproval, Task<AgentToolResult, any Error>) {
+        let call = Task { try await client.callTool("rename_tab", ["tab": .string(handle), "name": .string(name)]) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        return (try #require(service.approvals.pending.first), call)
+    }
+
+    @Test func renameTabAsksOnceOnP19sCardBeforeRenamingATabTheUserShared() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
         let (service, client) = try await connected(harness)
         _ = try await client.callTool("list_spaces")
         let grant = try #require(service.grants.first)
-        let userTab = AgentTabInfo(id: UUID(), spaceID: grant.spaceID, title: "Inbox", url: URL(string: "https://mail.example/inbox"), isLoading: false, engine: .webKit)
-        harness.host.tabs.append(userTab)
-        harness.host.userTabIDs = [userTab.id]
-        let request = Task { try await client.callTool("request_tab", ["reason": "Name the inbox", "access": "read"]) }
-        try await waitUntil { !service.approvals.pending.isEmpty }
-        let card = try #require(service.approvals.pending.first)
-        #expect(await service.approvals.answer(card.id, with: .tab(userTab.id)))
-        let shared = try await request.value
-        let handle = try #require(shared.structured?["tab"]?.stringValue)
-        let refused = try await client.callTool("rename_tab", ["tab": .string(handle), "name": "Mail"])
-        #expect(refused.status == .refused && refused.code == AgentRule.p19.rawValue)
+        let userTab = AgentTabInfo(id: UUID(), spaceID: grant.spaceID, title: "Inbox (3)", url: URL(string: "https://mail.example/inbox"), isLoading: false, engine: .webKit)
+        let handle = try await share(userTab, service, client, harness)
+        let prompts = harness.authenticator.count
+
+        // The card is P19's own, not sensitive, with the tab's title and site, and the name as its exact text.
+        var (card, call) = try await renameCard(handle, "Mail", service, client)
+        #expect(card.kind == .renameSharedTab && card.rules == [.p19] && !card.isSensitive && !card.needsAuthentication(for: .allowOnTab))
+        #expect(card.offers == [.allowOnTab, .deny, .denyAndStop, .reply("")] && AgentApprovalAnswer.allowOnTab.title(site: card.site) == "Allow for This Tab")
+        #expect(card.action == "Rename your tab \u{201C}Inbox (3)\u{201D} on mail.example" && card.exactText == "Mail")
+        #expect(card.tabID == userTab.id && card.tabHandle == handle && card.site == "mail.example")
+        #expect(await service.approvals.answer(card.id, with: .deny))
+        #expect(try await call.value.status == .denied)
         #expect(suggestedNames[userTab.id] == nil)
+
+        // The tab's next document withdraws the card, and the name, which was for the page it left, is not given.
+        (card, call) = try await renameCard(handle, "Mail", service, client)
+        harness.host.userDocumentDidEnd?(userTab.id, userTab.documentID)
+        #expect(try await call.value.status == .stale)
+        #expect(suggestedNames[userTab.id] == nil)
+
+        // Allow for This Tab names the tab without Touch ID, and the client's later renames of the tab ask nothing.
+        (card, call) = try await renameCard(handle, "Mail", service, client)
+        #expect(await service.approvals.answer(card.id, with: .allowOnTab))
+        let named = try await call.value
+        #expect(named.status == .ok && named.structured?["name"] == "Mail")
+        #expect(suggestedNames[userTab.id] == .some("Mail") && harness.authenticator.count == prompts)
+        #expect(service.activity.entries.last { $0.tool == "rename_tab" }?.decision == .approved)
+        let later = try await client.callTool("rename_tab", ["tab": .string(handle), "name": "Inbox"])
+        #expect(later.status == .ok && service.approvals.pending.isEmpty && suggestedNames[userTab.id] == .some("Inbox"))
+        #expect(service.activity.entries.last { $0.tool == "rename_tab" }?.decision == .auto)
+    }
+
+    /// Gives the service a runner over a scripted model that renames `t1` to "Named" in each run's first request and finishes in its second, and returns the model.
+    private func scriptedRuns(_ service: AgentService, _ harness: Harness) -> ScriptedClient {
+        let model = ScriptedClient { index in
+            index.isMultiple(of: 2) ? [.event(.toolCall(AIToolCall(id: "r\(index)", name: "rename_tab", arguments: Data(#"{"tab":"t1","name":"Named"}"#.utf8)))), .event(.finished(.toolUse))]
+                : [.event(.text("Done.")), .event(.finished(.completed))]
+        }
+        let provider = provider
+        service.runService = AgentRunner(host: harness.host, client: model, activity: service.activity, resolve: { _, _ in [AIModelRef(provider: provider.id, model: "selected")] },
+                                         provider: { $0 == provider.id ? provider : nil }, allowsAI: { _ in true }, reserve: { _, _ in true })
+        return model
+    }
+
+    @Test func agentRunRenamesASharedTabOnlyOnceTheUserAllowedIt() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let (service, client) = try await connected(harness, scopes: AgentGrantScopes(startTasks: true))
+        _ = scriptedRuns(service, harness)
+        _ = try await client.callTool("list_spaces")
+        let grant = try #require(service.grants.first)
+        let userTab = AgentTabInfo(id: UUID(), spaceID: grant.spaceID, title: "Inbox", url: URL(string: "https://mail.example/inbox"), isLoading: false, engine: .webKit)
+        let shared = try await share(userTab, service, client, harness)
+        // Before the user allows the tab on P19's card, the run's rename would ask, which a run cannot.
+        let refused = try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": [.string(shared)]])
+        #expect(refused["status"] == "completed" && refused["actions"] == [])
+        #expect(suggestedNames[userTab.id] == nil)
+        #expect(service.activity.entries.last { $0.tool == "rename_tab" }?.rule == AgentPolicy.wouldAskCode)
+        let (card, call) = try await renameCard(shared, "Mail", service, client)
+        #expect(await service.approvals.answer(card.id, with: .allowOnTab))
+        #expect(try await call.value.status == .ok)
+        let allowed = try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": [.string(shared)]])
+        #expect(allowed["status"] == "completed" && allowed["actions"] == [["renamedTab": ["tab": .string(shared), "name": "Named"]]])
+        #expect(suggestedNames[userTab.id] == .some("Named"))
     }
 
     @Test func agentRunNamesRenamedTabsByTheClientsHandles() async throws {

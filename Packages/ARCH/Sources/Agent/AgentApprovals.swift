@@ -1,4 +1,4 @@
-// The cards that wait for the user (docs/agents.md, Permissions, approvals, and injection defenses ▸ Approval interface): the steps a rule or the mode asks about, `request_approval`, `ask_user`, `hand_to_user`, `request_tab`, and the downloads, links to other apps, and file choosers that pages in agent tabs start. Each card waits until the user answers in Arch's own interface, its time runs out, its page moves on, or the client's work ends; an unanswered card is a denial. Several cards can wait per client, grouped by page: Allow on This Page and Allow on <site> answer the other cards of that page or site that offer them. A sensitive card of an outside client asks for Touch ID or the login password before Allow counts.
+// The cards that wait for the user (docs/agents.md, Permissions, approvals, and injection defenses ▸ Approval interface): the steps a rule or the mode asks about, `request_approval`, `ask_user`, `hand_to_user`, `request_tab`, an outside client's first rename of a tab the user shared (P19), and the downloads, links to other apps, and file choosers that pages in agent tabs start. Each card waits until the user answers in Arch's own interface, its time runs out, its page moves on, or the client's work ends; an unanswered card is a denial. Several cards can wait per client, grouped by page: Allow on This Page, Allow on <site>, and Allow for This Tab answer the other cards of that page, site, or tab that offer them. A sensitive card of an outside client asks for Touch ID or the login password before Allow counts.
 import AgentControl
 import AppKit
 import Foundation
@@ -23,6 +23,8 @@ public enum AgentApprovalKind: Equatable, Sendable {
     case externalApp(String)
     /// A file chooser that a page in an agent tab opened (P7).
     case fileChooser
+    /// An outside client's first rename of a tab the user shared with it (P19), with the name as the card's exact text.
+    case renameSharedTab
 }
 
 /// How a card ended.
@@ -31,6 +33,8 @@ public enum AgentApprovalAnswer: Equatable, Sendable {
     case allowOnPage
     case allowOnSite
     case allowDownloadsFromSite
+    /// P19's allowance: the client renames this shared tab from now on without asking.
+    case allowOnTab
     case deny
     case denyAndStop
     /// An instruction in place of yes or no.
@@ -54,7 +58,7 @@ public enum AgentApprovalAnswer: Equatable, Sendable {
     /// Whether the answer lets the step go ahead.
     public var allows: Bool {
         switch self {
-        case .allowOnce, .allowOnPage, .allowOnSite, .allowDownloadsFromSite: return true
+        case .allowOnce, .allowOnPage, .allowOnSite, .allowDownloadsFromSite, .allowOnTab: return true
         default: return false
         }
     }
@@ -66,6 +70,7 @@ public enum AgentApprovalAnswer: Equatable, Sendable {
         case .allowOnPage: return "Allow on This Page"
         case .allowOnSite: return "Allow on \(site ?? "This Site") for This Session"
         case .allowDownloadsFromSite: return "Allow Downloads from This Site for This Session"
+        case .allowOnTab: return "Allow for This Tab"
         case .deny: return "Deny"
         case .denyAndStop: return "Deny and Stop"
         case .reply: return "Reply\u{2026}"
@@ -250,7 +255,7 @@ public struct AgentApproval: Identifiable {
         return groups
     }
 
-    /// The user's answer from a card, in the window that shows the card. Allow on a sensitive card of an outside client counts only after Touch ID or the login password; a failure leaves the card waiting. Allow on This Page, on <site>, and Allow Downloads also answer the other waiting cards of that page or site that offer the same. Says whether the answer counted.
+    /// The user's answer from a card, in the window that shows the card. Allow on a sensitive card of an outside client counts only after Touch ID or the login password; a failure leaves the card waiting. Allow on This Page, on <site>, Allow Downloads, and Allow for This Tab also answer the other waiting cards of that page, site, or tab that offer the same. Says whether the answer counted.
     @discardableResult
     public func answer(_ id: UUID, with answer: AgentApprovalAnswer, in window: NSWindow? = nil) async -> Bool {
         guard let approval = cards[id], isPending(id) else { return false }
@@ -265,6 +270,7 @@ public struct AgentApproval: Identifiable {
             switch answer {
             case .allowOnPage: return other.tabID != nil && other.tabID == approval.tabID && other.document == approval.document
             case .allowOnSite, .allowDownloadsFromSite: return other.site != nil && other.site == approval.site
+            case .allowOnTab: return other.tabID != nil && other.tabID == approval.tabID
             default: return false
             }
         }
