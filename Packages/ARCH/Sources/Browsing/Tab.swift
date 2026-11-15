@@ -408,7 +408,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         requestPermission(request, completion)
     }
 
-    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again, and a tab that a plugin opened onto a file, before the user clicked in it or loaded an address there, downloads nothing and closes at once (`PageDownloadGate.isOpenedByPlugin`). An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
+    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again, and a tab that a plugin or a web extension opened onto a file, before the user clicked in it or loaded an address there, downloads nothing and closes at once (`PageDownloadGate.isOpenedByPlugin`). An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
         if let owner = agentOwnerID {
             guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
