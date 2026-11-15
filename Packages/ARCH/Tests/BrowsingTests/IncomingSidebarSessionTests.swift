@@ -37,6 +37,39 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.unreadable.json").path) == unreadable)
     }
 
+    /// `session.json` has a private feed's folder as an ordinary folder, as a build that could not keep its live configuration has it, while `live-folders.json` and the Keychain still hold the folder's entry and address. A newer build's file being read, or a copy of one newer than the file, keeps both for the copy; otherwise registering removes them.
+    @Test(arguments: [
+        (SessionSnapshot.currentVersion + 1, [], true),
+        (SessionSnapshot.currentVersion, [SessionSnapshot.currentVersion + 1], true),
+        (SessionSnapshot.currentVersion, [], false),
+        (SessionSnapshot.currentVersion, [SessionSnapshot.currentVersion], false),
+    ] as [(Int, [Int], Bool)])
+    func aNewerBuildsCopyKeepsTheEntryAndKeychainItemOfALiveFolderTheFileLacks(file version: Int, copies: [Int], keeps: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let space = UUID(), folder = UUID(), feed = try #require(URL(string: "https://fixture.invalid/feed?key=fixture"))
+        let snapshot = SessionSnapshot(version: version, spaces: [Space(id: space, name: "Personal")], currentSpaceID: space, favorites: [], tabs: [],
+                                       folders: [TabFolder(id: folder, spaceID: space, name: "Feed", isPinned: true)])
+        try JSONEncoder().encode(snapshot).write(to: directory.appendingPathComponent("session.json"))
+        for copy in copies { try Data("a copy".utf8).write(to: directory.appendingPathComponent("session-v\(copy).json")) }
+        let stored = LiveFolderStore(fileURL: directory.appendingPathComponent(LiveFolderStore.fileName))
+        stored.update(folder) { $0.dismiss("item") }
+        stored.saveNow()
+        let addresses = InMemoryLiveFolderKeychain()
+        try await addresses.setAddress(feed, for: folder, folderName: "Feed")
+
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory, addresses: addresses)
+        // This write is queued after the initial registration's cleanup.
+        try await session.liveFolderService.setPrivateAddress(feed, for: UUID(), folderName: "New feed")
+
+        #expect(session.folders.map(\.id) == [folder] && session.folders.allSatisfy { $0.live == nil })
+        #expect(try await addresses.address(for: folder) == (keeps ? feed : nil))
+        #expect((session.liveFolderService.store.folders[folder] != nil) == keeps)
+    }
+
     @Test func anUnavailableChromiumProfileFallsBackOnlyForThatPersonaAndRecovers() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

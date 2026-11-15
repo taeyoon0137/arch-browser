@@ -266,8 +266,36 @@ final class SessionStore {
     /// Where `load()` sets aside a file that does not decode. While a file is there, the live folders' service keeps the entries and Keychain items of the folders it may hold (`LiveFolderService(keepsUnknownFolders:)`).
     private var unreadableFileURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("session.unreadable.json") }
 
-    /// Read at startup so a session still awaiting backup also keeps its live folders' local data.
-    var keepsUnknownLiveFolders: Bool { pendingBackup != nil || FileManager.default.fileExists(atPath: unreadableFileURL.path) }
+    /// The version of the file that `load()` returned, 1 for a file without one, or nil when it returned none.
+    private var loadedVersion: Int?
+
+    /// Read at startup so a session still awaiting backup also keeps its live folders' local data, and so does one beside a newer build's copy (`hasNewerCopy`), whose live folders this build, or an older one that saved over the newer build's file, may not have kept.
+    var keepsUnknownLiveFolders: Bool {
+        pendingBackup != nil || FileManager.default.fileExists(atPath: unreadableFileURL.path) || hasNewerCopy
+    }
+
+    /// Whether the folder holds a `session-v<version>.json` copy newer than this build or than the file that `load()` read; without a file read, only one newer than this build counts. That holds from the launch that reads a newer build's file and leaves the copy, and while builds older than the copy save over the file. Once a build at least as new as the copy has saved, the next launch keeps nothing for it. A folder that cannot be listed counts as holding one, since a Keychain item that the copy needs cannot be brought back.
+    private var hasNewerCopy: Bool {
+        let version = min(loadedVersion ?? SessionSnapshot.currentVersion, SessionSnapshot.currentVersion)
+        let names: [String]
+        do {
+            names = try FileManager.default.contentsOfDirectory(atPath: fileURL.deletingLastPathComponent().path)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return false
+        } catch {
+            return true
+        }
+        return names.contains { Self.copyVersion(ofFileNamed: $0).map { $0 > version } ?? false }
+    }
+
+    /// The version in a copy's name, `session-v<version>.json`, or nil for any other name.
+    private static func copyVersion(ofFileNamed name: String) -> Int? {
+        let prefix = "session-v", suffix = ".json"
+        guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return nil }
+        let digits = name.dropFirst(prefix.count).dropLast(suffix.count)
+        guard !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int(digits)
+    }
 
     /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that cannot be read or does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
     func load() -> SessionSnapshot? {
@@ -285,7 +313,8 @@ final class SessionStore {
             return nil
         }
         let directory = fileURL.deletingLastPathComponent()
-        if let version = try? JSONDecoder().decode(SavedVersion.self, from: data).version, version > SessionSnapshot.currentVersion {
+        let savedVersion = try? JSONDecoder().decode(SavedVersion.self, from: data).version
+        if let version = savedVersion, version > SessionSnapshot.currentVersion {
             let backup = directory.appendingPathComponent("session-v\(version).json")
             do {
                 try Self.write(data, to: backup)
@@ -304,6 +333,7 @@ final class SessionStore {
             }
             return nil
         }
+        loadedVersion = savedVersion ?? 1
         return snapshot.mappingPageState(seal.open).normalized()
     }
 

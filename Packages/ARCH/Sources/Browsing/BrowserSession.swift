@@ -161,7 +161,7 @@ final class EngineRuntime {
         let loaded = store.load()
         needsFullSidebarSync = loaded?.needsFullSidebarSync == true || loaded == nil
         let snapshot = loaded ?? SessionSnapshot.empty.normalized()
-        // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
+        // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, or a newer build's `session-v<version>.json` copy is newer than this build or the loaded file, the live folders of that file or copy keep their entries and Keychain items for it.
         let keepsUnknownLiveFolders = store.keepsUnknownLiveFolders
         liveFolderService = LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)),
                                               addresses: liveFolderAddresses, keepsUnknownFolders: keepsUnknownLiveFolders)

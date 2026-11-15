@@ -52,7 +52,7 @@ public final class LiveFolderService {
     /// Whether registering keeps the store entries and Keychain items of folders that no register of this run listed, removing only those of folders that a register listed and a later one leaves out or lists as no private feed's.
     private let keepsUnknownFolders: Bool
 
-    /// With `keepsUnknownFolders`, as while the session has set aside a file that did not decode, the folders of that file keep their read state and private addresses for a repaired file to bring back.
+    /// With `keepsUnknownFolders`, as while the session has set aside a file that did not decode or keeps a newer build's copy of its file, whose live folders this build or an older one may not have kept, the folders of that file or copy keep their read state and private addresses for a repaired or restored file to bring back.
     public init(store: LiveFolderStore, addresses: any LiveFolderAddressStore = LiveFolderKeychain(), fetchers: any LiveFolderFetching = LiveFolderFetchers(),
                 isLowPowerMode: @escaping () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled }, now: @escaping () -> Date = Date.init, keepsUnknownFolders: Bool = false) {
         self.store = store

@@ -420,6 +420,74 @@ import Testing
         #expect(try #require(folder.store.load()).tabs.isEmpty)
     }
 
+    /// The version of the file that `load()` reads, nil for a file without one, the versions of the copies beside it, and whether the live folders' service then keeps the entries and Keychain items of folders that the file does not have as live folders.
+    @Test(arguments: [
+        // A newer build's file, which leaves its copy as it loads.
+        (SessionSnapshot.currentVersion + 1, [], true),
+        // This build's file beside a newer build's copy, as once this build has saved over the newer file.
+        (SessionSnapshot.currentVersion, [SessionSnapshot.currentVersion + 1], true),
+        // An older build's file beside a copy of this build's version, as when this build returns after the older one saved.
+        (SessionSnapshot.currentVersion - 1, [SessionSnapshot.currentVersion], true),
+        // A file without a version is version 1.
+        (nil, [2], true),
+        (nil, [1], false),
+        // Copies of an equal or older version.
+        (SessionSnapshot.currentVersion, [SessionSnapshot.currentVersion, SessionSnapshot.currentVersion - 1], false),
+        (SessionSnapshot.currentVersion - 1, [SessionSnapshot.currentVersion - 1], false),
+    ] as [(Int?, [Int], Bool)])
+    func aNewerCopyKeepsTheLiveFoldersThatTheFileLacks(file version: Int?, copies: [Int], keeps: Bool) throws {
+        let folder = try SessionFolder()
+        for copy in copies { try folder.write("a copy", to: "session-v\(copy).json") }
+        // Names that are no copies count for nothing.
+        for name in ["session-v.json", "session-v+99.json", "session-v99x.json", "session-vlater.json"] { try folder.write("not a copy", to: name) }
+        try folder.write(version.map { version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#($0),"#) } ?? version1File)
+        let store = folder.store
+        _ = try #require(store.load())
+        #expect(store.keepsUnknownLiveFolders == keeps)
+    }
+
+    /// A copy keeps the live folders until a build at least as new as the copy has saved: this build over an older file, never over a newer one.
+    @Test(arguments: [(SessionSnapshot.currentVersion - 1, false), (SessionSnapshot.currentVersion + 1, true)])
+    func aCopyKeepsTheLiveFoldersUntilABuildAsNewHasSaved(file version: Int, keepsAfterSaving: Bool) throws {
+        let folder = try SessionFolder()
+        if version < SessionSnapshot.currentVersion { try folder.write("a copy", to: "session-v\(SessionSnapshot.currentVersion).json") }
+        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(version),"#))
+        let store = folder.store
+        var snapshot = try #require(store.load())
+        #expect(store.keepsUnknownLiveFolders)
+        // As the session's snapshots are.
+        snapshot.version = SessionSnapshot.currentVersion
+        try store.saveNow(snapshot).get()
+        let next = folder.store
+        _ = try #require(next.load())
+        #expect(next.keepsUnknownLiveFolders == keepsAfterSaving)
+    }
+
+    @Test func withoutAFileOnlyACopyNewerThanThisBuildKeepsTheLiveFolders() throws {
+        let folder = try SessionFolder()
+        try folder.write("a copy", to: "session-v\(SessionSnapshot.currentVersion).json")
+        var store = folder.store
+        #expect(store.load() == nil)
+        #expect(!store.keepsUnknownLiveFolders)
+        try folder.write("a copy", to: "session-v\(SessionSnapshot.currentVersion + 1).json")
+        store = folder.store
+        #expect(store.load() == nil)
+        #expect(store.keepsUnknownLiveFolders)
+    }
+
+    /// Search permission without read permission: the file reads, but the folder's names do not, so a copy may be there.
+    @Test func aFolderWhoseNamesCannotBeReadKeepsTheLiveFolders() throws {
+        let folder = try SessionFolder()
+        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(SessionSnapshot.currentVersion),"#))
+        try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.url.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.url.path) }
+        let store = folder.store
+        _ = try #require(store.load())
+        #expect(store.keepsUnknownLiveFolders)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.url.path)
+        #expect(!store.keepsUnknownLiveFolders)
+    }
+
     @Test func unreadableFilesMoveAside() throws {
         let folder = try SessionFolder()
         let unreadable = version8File + "x"

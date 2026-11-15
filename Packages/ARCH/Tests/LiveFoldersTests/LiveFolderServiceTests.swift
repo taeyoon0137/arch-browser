@@ -357,6 +357,35 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         #expect(service.store.folders[unknown] != nil && service.store.folders[mine] == nil)
     }
 
+    /// As while the session keeps a newer build's copy: no change of the registered folders reaches a folder that no register listed, and the next launch without the flag removes it.
+    @Test func aFolderThatNoRegisterListedKeepsItsEntryAndAddressThroughOtherFoldersChanges() async throws {
+        let keychain = InMemoryLiveFolderKeychain()
+        let unknown = UUID(), mine = UUID(), other = UUID()
+        try await keychain.setAddress(URL(string: "https://tracker.example.org/feed.atom?token=abc123")!, for: unknown, folderName: "In the copy")
+        let fileURL = try temporaryDirectory().appendingPathComponent(LiveFolderStore.fileName)
+        let store = LiveFolderStore(fileURL: fileURL)
+        store.update(unknown) { $0.dismiss("a") }
+        let service = LiveFolderService(store: store, addresses: keychain, fetchers: StubFetchers(), isLowPowerMode: { false }, keepsUnknownFolders: true)
+        let made = try LiveFolderSource.makeFeed(address: URL(string: "https://tracker.example.org/mine.atom?token=def456")!)
+        let whole = try #require(made.keychainAddress)
+        // A private feed is added and stops being private, another folder's source changes, and both go.
+        try await service.setPrivateAddress(whole, for: mine, folderName: "Mine")
+        service.register([mine: LiveFolderConfiguration(source: made.source), other: feedConfiguration])
+        service.register([mine: feedConfiguration, other: LiveFolderConfiguration(source: .gitHub(search: GitHubSearch(kind: .assignedIssues)))])
+        service.register([:])
+        // This write is queued after the cleanups.
+        let later = UUID()
+        try await service.setPrivateAddress(whole, for: later, folderName: "Later")
+        #expect(keychain.folders == [unknown, later])
+        #expect(Set(service.store.folders.keys) == [unknown])
+
+        service.stop()
+        let next = LiveFolderService(store: LiveFolderStore(fileURL: fileURL), addresses: keychain, fetchers: StubFetchers(), isLowPowerMode: { false })
+        next.register([:])
+        #expect(await waitUntil { keychain.folders == [later] })
+        #expect(next.store.folders.isEmpty)
+    }
+
     @Test func aFetchThatQuittingCancelsRecordsNoAttempt() async throws {
         let fetchers = StubFetchers(delay: .seconds(5))
         let service = try service(fetchers)
