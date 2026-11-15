@@ -76,7 +76,7 @@ extension Tab {
 
     /// These live pages count as active when the timer archives tabs and when a saved sidebar is restored.
     var hasActivityToPreserve: Bool {
-        hasTypedInput || isCapturingMedia || hasPlayingMedia || webContents.isInPictureInPicture
+        hasTypedInput || webContents.isCapturingMedia || hasPlayingMedia || webContents.isInPictureInPicture
     }
 }
 

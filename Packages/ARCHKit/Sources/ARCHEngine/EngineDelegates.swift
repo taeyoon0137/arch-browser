@@ -119,8 +119,6 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents)
     /// `isAudible` changed.
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
-    /// `isCapturingMedia` changed.
-    func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents)
     /// Consulted before creating any child web contents, including a script's blank window.
     func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition)
@@ -162,7 +160,6 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
-    func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents) {}
     func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool { true }
     func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
     func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {}

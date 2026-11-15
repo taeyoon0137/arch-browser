@@ -303,20 +303,6 @@ import Testing
 
     // MARK: What keeps a tab loaded
 
-    @Test func aTabFollowsItsPagesCaptureAndAStandInCapturesNothing() {
-        let (tab, page) = tab(at: elsewhere, title: "Call", pinned: true)
-        page.isCapturingMedia = true
-        tab.webContentsDidChangeMediaCapture(page)
-        #expect(tab.isCapturingMedia)
-        page.isCapturingMedia = false
-        tab.webContentsDidChangeMediaCapture(page)
-        #expect(!tab.isCapturingMedia)
-        page.isCapturingMedia = true
-        tab.webContentsDidChangeMediaCapture(page)
-        _ = tab.unloadKeepingPage()
-        #expect(!tab.isCapturingMedia && !tab.webContents.isCapturingMedia)
-    }
-
     @Test func backgroundDraftAndMediaSurviveTimedArchivingAndImmediateRelaunch() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -335,7 +321,6 @@ import Testing
         draft.webContents(page, didReceive: inputMessage("\"typed\"", mainFrame: false)) { _ in }
         let (capture, cameraPage) = openBackgroundPage()
         cameraPage.isCapturingMedia = true
-        capture.webContentsDidChangeMediaCapture(cameraPage)
         let (radio, audioPage) = openBackgroundPage()
         audioPage.isAudible = true
         radio.webContentsDidChangeAudibleState(audioPage)
@@ -353,13 +338,12 @@ import Testing
         session.archiveInactiveTabs()
         #expect(Set(session.tabs.map(\.id)) == active)
         #expect(!session.tabs.contains { $0 === idle || $0 === unloaded })
-        #expect(draft.hasTypedInput && capture.isCapturingMedia)
+        #expect(draft.hasTypedInput && capture.webContents.isCapturingMedia)
         #expect(draft.lastActivatedAt > .distantPast && capture.lastActivatedAt > .distantPast)
 
         // Once the activity ends, these same tabs become eligible after the next idle period.
         draft.webContents(page, didReceive: inputMessage("\"start\"")) { _ in }
         cameraPage.isCapturingMedia = false
-        capture.webContentsDidChangeMediaCapture(cameraPage)
         audioPage.isAudible = false
         radio.webContentsDidChangeAudibleState(audioPage)
         videoPage.isInPictureInPicture = false

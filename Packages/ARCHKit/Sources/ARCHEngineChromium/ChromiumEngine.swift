@@ -797,12 +797,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         chromiumMediaSession.update(document: frame, report: media)
     }
     public func cefBrowserDidChangeMediaAccess(video: Bool, audio: Bool) {
-        setCapturingMedia(video || audio)
-    }
-    private func setCapturingMedia(_ isCapturing: Bool) {
-        guard isCapturingMedia != isCapturing else { return }
-        isCapturingMedia = isCapturing
-        uiDelegate?.webContentsDidChangeMediaCapture(self)
+        isCapturingMedia = video || audio
     }
 
     /// The video plays in the system's window from a layer below the page. The window's return button asks the UI delegate to show the page.
@@ -862,7 +857,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     public func cefBrowserRenderProcessDidTerminate() {
         // The page's frames never report their media again, and its capture streams ended with its process.
         chromiumMediaSession.removeAllDocuments()
-        setCapturingMedia(false)
+        isCapturingMedia = false
         isLoading = false
         uiDelegate?.webContentsDidChangeLoadingState(self)
         uiDelegate?.webContentsProcessDidTerminate(self)

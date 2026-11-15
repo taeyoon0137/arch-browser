@@ -59,8 +59,6 @@ import LiveFolders
     @Published public private(set) var favicon: NSImage?
     /// Whether the page plays sound, for a speaker badge on its row.
     @Published public private(set) var isAudible = false
-    /// Whether the page uses the camera or the microphone, which keeps the tab loaded (bookmark rule 5).
-    @Published public private(set) var isCapturingMedia = false
     /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). Another web contents starts without.
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
@@ -316,7 +314,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
-    public func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents) { isCapturingMedia = webContents.isCapturingMedia }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {
         if agentOwnerID == nil || researchLoad == nil { requestActivation?() }
@@ -419,7 +416,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
         isAudible = replacement.isAudible
-        isCapturingMedia = replacement.isCapturingMedia
         hasTypedInput = false
         answersBeforeUnloadWithStay = false
         hasCrashed = false

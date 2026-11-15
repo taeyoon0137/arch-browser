@@ -149,7 +149,7 @@ struct SidebarSection: View {
             }
 
             Section {
-                // A saved delay outside the choices, such as 5, stays listed and selected. The session archives nothing for 0 or less.
+                // In both pickers a saved delay outside the choices, such as 5, stays listed and selected. 0 or less archives or unloads nothing.
                 Picker("Archive unpinned tabs", selection: Binding(get: { max(archiveAfterHours, 0) }, set: { archiveAfterHours = $0 })) {
                     ForEach(Set([0, 1, 12, 24, 168, max(archiveAfterHours, 0)]).sorted(), id: \.self) { hours in
                         Text(Self.title(for: hours)).tag(hours)
@@ -159,12 +159,14 @@ struct SidebarSection: View {
                 formFootnote("Unpinned tabs not selected for this long move to the closed list.")
             }
             Section {
-                Stepper(value: $unloadAfterHours, in: 0...168) {
-                    Text(unloadAfterHours == 0 ? "Unload pinned tabs and favorites: Never" : "Unload pinned tabs and favorites after \(unloadAfterHours) hours")
+                Picker("Unload pinned tabs and favorites", selection: Binding(get: { max(unloadAfterHours, 0) }, set: { unloadAfterHours = $0 })) {
+                    ForEach(Set([0, 1, 12, 24, 168, max(unloadAfterHours, 0)]).sorted(), id: \.self) { hours in
+                        Text(Self.title(for: hours)).tag(hours)
+                    }
                 }
             } footer: {
                 // The longer footer wraps through the shared footnote style. Never also keeps every page when the Mac runs low on memory (`TabUnloading.tabsToUnload`).
-                if unloadAfterHours == 0 {
+                if unloadAfterHours <= 0 {
                     formFootnote("Tabs keep their pages until you close them, also when the Mac runs low on memory.")
                 } else {
                     formFootnote("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play audio or video with sound, show a video in picture in picture, use the camera or microphone, hold text you typed, or may post notifications stay loaded; sound that a page makes in other ways, as many games do, does not keep it loaded.")

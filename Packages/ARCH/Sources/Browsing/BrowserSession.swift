@@ -1049,7 +1049,7 @@ final class EngineRuntime {
         window.selectTab(tab.id)
     }
 
-    /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start, or for a tab without its page: only a tab that no window has shown since launch lacks one, and the site settings popover offers the switch for a shown tab only.
+    /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start, or for a tab without its page: a tab that no window has shown since launch or whose page unloaded lacks one, and the site settings popover offers the switch for a shown tab only.
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
         tab.pendingSyncEngine = nil
         guard tab.isLoaded, allTabs.contains(where: { $0 === tab }) else { return }
@@ -2251,7 +2251,7 @@ extension BrowserSession {
         if tab.agentOwnerID != nil { exclusions.insert(.agent) }
         if tab.hasPlayingMedia { exclusions.insert(.media) }
         if page.isInPictureInPicture { exclusions.insert(.pictureInPicture) }
-        if tab.isCapturingMedia { exclusions.insert(.capture) }
+        if tab.webContents.isCapturingMedia { exclusions.insert(.capture) }
         if tab.hasTypedInput { exclusions.insert(.typedInput) }
         if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin) == .allow {
             exclusions.insert(.notifications)

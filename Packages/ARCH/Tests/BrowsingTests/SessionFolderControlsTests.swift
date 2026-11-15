@@ -229,7 +229,7 @@ import Testing
         let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let favorite = Favorite(url: URL(string: "https://fixture.invalid/favorite")!, title: "Notes", personaID: home.resolvedPersonaID)
         browser.addFavorites([favorite], in: home.resolvedPersonaID)
-        #expect(browser.openTab(ofFavorite: favorite) == nil)
+        #expect(browser.favoriteTabs[favorite.id] == nil)
         let page = browser.openTab(for: favorite)
         let selected = browser.openTab(url: URL(string: "https://fixture.invalid/selected"), in: home.id, select: false)
         window.selectTab(selected.id)
@@ -247,7 +247,7 @@ import Testing
         window.hideAgentPanel()
         browser.closeFavorite(favorite)
         window.askAgentAboutSidebarTab(page, reviewed: reviewed)
-        #expect(window.agentPanel == nil && browser.openTab(ofFavorite: favorite) == nil)
+        #expect(window.agentPanel == nil && browser.favoriteTabs[favorite.id] == nil)
     }
 
     @Test func reopeningThePanelKeepsItsUnsentDraftAndReviewedTabInTheSameWindow() throws {

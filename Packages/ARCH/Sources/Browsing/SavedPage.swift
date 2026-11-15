@@ -141,11 +141,6 @@ extension BrowserSession {
         return favorites.first { $0.id == id }
     }
 
-    /// The favorite's tab while it is open. A tab saved from the last session counts once the favorite's first click opens it.
-    func openTab(ofFavorite favorite: Favorite) -> Tab? {
-        favoriteTabs[favorite.id]
-    }
-
     /// The address the tab returns to: a pinned tab's saved page, or a favorite's address for its tab (bookmark rule 2). Nil for any other tab.
     func savedAddress(of tab: Tab) -> URL? {
         tab.savedPage?.url ?? favorite(ofTab: tab)?.url
@@ -187,10 +182,5 @@ extension BrowserSession {
     /// Whether `favorite` can take `url` as its address: no other favorite of its Persona has it, since a Persona's favorites come once per address (`addFavorite(_:)`).
     nonisolated static func canUse(_ url: URL, asAddressOf favorite: Favorite, among favorites: [Favorite]) -> Bool {
         !favorites.contains { $0.id != favorite.id && $0.resolvedPersonaID == favorite.resolvedPersonaID && $0.url == url }
-    }
-
-    /// Copy Address: puts the address on the pasteboard as a URL and as text.
-    static func copyAddress(_ url: URL) {
-        Tab.copyToPasteboard(url)
     }
 }

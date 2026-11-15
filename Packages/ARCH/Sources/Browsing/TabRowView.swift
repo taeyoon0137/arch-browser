@@ -59,7 +59,7 @@ struct TabRowView: View {
                     } else if !tab.isPinned {
                         TabRowButton(symbol: "xmark", label: "Close Tab", help: "Close Tab") { session.requestCloseTab(tab) }
                     } else if tab.isLoaded {
-                        TabRowButton(symbol: "minus", label: "Unload Tab", help: "Unload") { session.requestCloseTab(tab) }
+                        TabRowButton(symbol: "minus", label: "Unload Tab", help: "Unload Tab") { session.requestCloseTab(tab) }
                     }
                 }
             } else if commandKey.showsShortcuts, let number = windowModel.shortcutNumber(for: tab) {
@@ -134,7 +134,7 @@ struct TabRowView: View {
             Button("Edit Saved Address\u{2026}") { windowModel.promptToEditSavedAddress(of: tab) }
         }
         SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
-        Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
+        Button("Copy Address") { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
         Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
         Divider()
         TabFolderItems(session: session, windowModel: windowModel, tab: tab)
@@ -175,7 +175,7 @@ private struct LiveItemTabItems: View {
             windowModel.selectTab(tab.id)
             windowModel.renamingTabID = tab.id
         }
-        Button("Copy Address") { tab.url.map(BrowserSession.copyAddress) }.disabled(tab.url == nil)
+        Button("Copy Address") { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
         if session.isOffSavedPage(tab) {
             Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
         }
