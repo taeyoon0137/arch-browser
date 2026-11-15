@@ -394,7 +394,7 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(throws: PluginError.permissionDenied(.renameTabs)) { _ = try limited.renameTab(other.id, to: "Name") }
         host.selected[persona] = other.id
         #expect(try limited.selectedTab()?.id == other.id)
-        #expect(PluginGrant(requestedBy: installed.manifest).summaries.first == "Open, close, and select your tabs, and suggest names for them")
+        #expect(PluginGrant(requestedBy: installed.manifest).summaries.first == "Open any website in your tabs, signed in as you, and close, select, and suggest names for your tabs")
 
         context.end()
         #expect(throws: PluginError.stopped) { _ = try context.selectedTab() }
