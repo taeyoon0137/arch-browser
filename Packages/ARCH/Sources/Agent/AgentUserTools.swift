@@ -133,7 +133,7 @@ extension AgentToolHost {
         }
     }
 
-    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely, and a tab the user shared once the user allows it on P19's card, which is not sensitive, so Allow for This Tab asks for no Touch ID. The allowance lasts while the tab stays shared, so the client's later renames of the tab ask nothing. Any other tab is refused with P17, and a tab on a site excluded from AI with P16. A name belongs to the document the tab has committed, ignoring the fragment: a tab that loads another address answers `stale`, and so does a shared tab whose document ends or that closes while its card waits, which withdraws the card. After Allow for This Tab, the call renames nothing once it was cancelled, and the tab is checked again: a tab moved into the client's own agent folder renames as its agent tabs do, and any other that left the client is refused with P17. The name's first line is trimmed and cut to 60 characters, and an empty name clears a suggested name, through `BrowserAgentHost`'s suggested names (`AgentTabNaming`) with the grant as the cause.
+    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely, and a tab the user shared once the user allows it on P19's card, which is not sensitive, so Allow for This Tab asks for no Touch ID. The allowance lasts while the tab stays shared, so the client's later renames of the tab ask nothing. Any other tab is refused with P17, and a tab on a site excluded from AI with P16. A name the tab would not take, since the user named the tab or turned the name down, answers `userNamed` without a card. A name belongs to the document the tab has committed, ignoring the fragment: a tab that loads another address answers `stale`, and so does a shared tab whose document ends or that closes while its card waits, which withdraws the card. After Allow for This Tab, the call renames nothing once it was cancelled, and the tab is checked again: a tab moved into the client's own agent folder renames as its agent tabs do, and any other that left the client is refused with P17. The name's first line is trimmed and cut to 60 characters, and an empty name clears a suggested name, through `BrowserAgentHost`'s suggested names (`AgentTabNaming`) with the grant as the cause.
     func renameTab(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let handle = arguments["tab"]?.stringValue ?? ""
         guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return Self.error("tabNotFound", "This client has no tab \(handle).") }
@@ -143,6 +143,7 @@ extension AgentToolHost {
         func stale(_ text: String) -> Outcome {
             Outcome(result: AgentToolResult(status: .stale, code: "stale", text: text, structured: ["tab": .string(handle)]))
         }
+        var userNamed: Outcome { refused("userNamed", "The user's own name for this tab, or a name the user turned down, keeps the tab's name.") }
         let tabAccess = access(to: tab, client, state: state)
         let decision = AgentPolicy.renameDecision(client: client.kind, tab: tabAccess, allowedOnce: state.handles.renamingSharedTabIDs.contains(id))
         if case .refuse(let rule, let sentence) = decision { return refused(rule?.rawValue ?? AgentPolicy.wouldAskCode, sentence) }
@@ -157,6 +158,8 @@ extension AgentToolHost {
         let site = AgentActivityEntry.site(of: url)
         var decided: AgentActivityEntry.Decision?
         if case .ask(let ask) = decision {
+            // A card asks only for a name the tab would take, which the user's own name or a refused name rules out.
+            guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: client.id, applying: false) else { return userNamed }
             // The tab's title is the page's, so it stands on one line in quotes whose closing quote inside is doubled, cut as other names a page gives are.
             let title = Self.oneLine(tab.title).trimmingCharacters(in: .whitespaces)
             let cut = title.count > AgentLimits.pageNameCharacters ? String(title.prefix(AgentLimits.pageNameCharacters)) + "\u{2026}" : title
@@ -194,9 +197,7 @@ extension AgentToolHost {
             }
             guard AgentPolicy.showsTitle(of: url, allowsAI: allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
         }
-        guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: client.id, applying: true) else {
-            return refused("userNamed", "The user's own name for this tab, or a name the user turned down, keeps the tab's name.")
-        }
+        guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: client.id, applying: true) else { return userNamed }
         let text = name.isEmpty ? "Cleared the suggested name of \(handle)." : "Suggested the name \u{201C}\(name)\u{201D} for \(handle)."
         return Outcome(result: AgentToolResult(status: .ok, text: text, structured: ["tab": .string(handle), "name": .string(name), "applied": true]),
                        site: site, step: name.isEmpty ? "Cleared the name of \(handle)" : "Named \(handle) \u{201C}\(name)\u{201D}", decision: decided)
