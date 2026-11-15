@@ -211,11 +211,10 @@ struct AgentHooksPage: View {
                     ScrollView {
                         Text(output)
                             .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxHeight: 120)
+                    .frame(maxHeight: 160)
                 }
                 keptSession(of: run)
             }
@@ -314,7 +313,8 @@ enum HookScriptActions {
     /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest. Refused for a file that is missing or not text, which an empty editor would replace unseen. A shell script's bytes go to the trust sheet as they are.
     static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) throws -> ScriptHookDraft {
         guard let file, let script = String(data: file.contents, encoding: .utf8) else { throw Refusal(sentence: "Arch cannot read the script of \u{201C}\(hook.name)\u{201D}.") }
-        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || !file.matchesDigest, contents: hook.script.isShell ? file.contents : nil)
+        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || !file.matchesDigest, contents: hook.script.isShell ? file.contents : nil,
+                               matchesDigest: file.matchesDigest)
     }
 
     /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch, and for an outside program's hook, whose copy would lose the caps of its origin.

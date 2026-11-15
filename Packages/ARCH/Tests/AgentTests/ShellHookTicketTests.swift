@@ -63,6 +63,30 @@ import Testing
         try await waitUntil { !harness.socketExists }
     }
 
+    @Test func aProgramInARunThatDroppedTheTicketIsNoOutsideClient() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let run = UUID()
+        _ = service.openHookRun(run, tools: ["list_tabs"]) { _ in AgentToolResult(status: .ok, text: "") }
+        harness.addProcess(Self.scriptProcess, parent: 1, start: Self.scriptStart)
+        service.hookRun(run, didStart: Self.scriptProcess)
+        // A command of the script that cleared ARCH_HOOK_TICKET, as `env -i arch-cli tabs` does, is refused with Allow Outside Clients on.
+        harness.addProcess(getpid(), parent: 777)
+        harness.addProcess(777, parent: Self.scriptProcess)
+        await #expect(throws: AgentClientError.refused(AgentRefusal(reason: .ticket, message: "Programs in a hook's run reach Arch only with the run's ticket."))) {
+            try await TestClient(harness.location).hello()
+        }
+        #expect(service.activity.entries.last?.event == .refusedPeer && service.activity.entries.last?.sessionID == run)
+        #expect(harness.prompt.requests.isEmpty)
+        // Outside the run's tree, and once the run ends, the same program is an outside client again.
+        harness.addProcess(777, parent: 1)
+        #expect(try await TestClient(harness.location).hello().status == .noGrant)
+        harness.addProcess(777, parent: Self.scriptProcess)
+        service.closeHookRun(run)
+        #expect(try await TestClient(harness.location).hello().status == .noGrant)
+    }
+
     @Test func aRunsConnectionOutlastsOutsideAccessAndItsTicketDiesWithTheRun() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }

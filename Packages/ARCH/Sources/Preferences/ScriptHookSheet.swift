@@ -25,6 +25,8 @@ struct ShellScriptChoice: Equatable {
 
 /// What the user last trusted of a shell hook, so that a save that changes none of it asks for no Touch ID.
 struct ShellTrust: Equatable {
+    /// The file's path, so that another file with the same bytes is trusted as a new file, which Update from File… then reads.
+    var source: String
     var contents: Data
     var interpreter: HookInterpreter
     var readsPages: Bool
@@ -87,6 +89,8 @@ struct ScriptHookDraft: Identifiable {
     /// Let Agent Runs Read Pages on the trust sheet, off by default.
     var letsAgentReadPages = false
     var trusted: ShellTrust?
+    /// Arch's copy as the user trusted it last, which Update from File… and Choose Another File… mark changed lines against; nil for a new hook, and for a copy that changed outside Arch, which is no longer the trusted one.
+    var trustedCopy: Data?
 
     init(new places: [HookPersonaPlaces], guided: Bool = false) {
         id = UUID()
@@ -103,8 +107,8 @@ struct ScriptHookDraft: Identifiable {
         if guided { name = "New Agent Hook" }
     }
 
-    /// `contents` is a shell script's file, whose bytes the trust sheet shows and copies as they are.
-    init(editing hook: Hook, script: String, places: [HookPersonaPlaces], reviewing: Bool, isNew: Bool = false, contents: Data? = nil) {
+    /// `contents` is a shell script's file, whose bytes the trust sheet shows and copies as they are, and `matchesDigest` whether it is still the copy the user trusted.
+    init(editing hook: Hook, script: String, places: [HookPersonaPlaces], reviewing: Bool, isNew: Bool = false, contents: Data? = nil, matchesDigest: Bool = true) {
         id = hook.id
         stored = isNew ? nil : hook
         isReview = reviewing
@@ -113,7 +117,8 @@ struct ScriptHookDraft: Identifiable {
         kind = hook.trigger.kind
         self.script = script
         origin = hook.origin
-        guided = hook.agent != nil && !hook.origin.isOutsideProgram
+        // The guided editor writes Arch's JavaScript, so a shell hook stays in the hand-written one.
+        guided = hook.agent != nil && !hook.origin.isOutsideProgram && !hook.script.isShell
         if case .javaScript(_, let isGenerated) = hook.script { generated = isGenerated && !reviewing }
         agentRecord = hook.agent?.record ?? hook.record
         if let limits = hook.agent?.limits {
@@ -166,16 +171,18 @@ struct ScriptHookDraft: Identifiable {
             let bytes = contents ?? Data(script.utf8)
             shell = ShellScriptChoice(source: source, contents: bytes)
             letsAgentReadPages = hook.grant.agent?.tabAccess == .page
+            if matchesDigest { trustedCopy = bytes }
             // A script under review is trusted again in full.
-            if !reviewing { trusted = ShellTrust(contents: bytes, interpreter: interpreter, readsPages: letsAgentReadPages) }
+            if !reviewing { trusted = ShellTrust(source: source, contents: bytes, interpreter: interpreter, readsPages: letsAgentReadPages) }
         }
     }
 
-    /// Whether saving needs Touch ID: a new shell script, other bytes or another interpreter than the user trusted, or agent runs that now read pages.
+    /// Whether saving needs Touch ID: a new shell script, another file, other bytes or another interpreter than the user trusted, or agent runs that now read pages.
     var needsTrust: Bool {
         guard isShell, let shell else { return false }
         guard let trusted, let interpreter = shell.resolution?.interpreter else { return true }
-        return trusted.contents != shell.contents || trusted.interpreter != interpreter || (enablesAgent && letsAgentReadPages && !trusted.readsPages)
+        return trusted.source != shell.source || trusted.contents != shell.contents || trusted.interpreter != interpreter
+            || (enablesAgent && letsAgentReadPages && !trusted.readsPages)
     }
 
     var scriptText: String { guided && generated ? AgentHookTemplate.script(for: kind) : script }
@@ -395,8 +402,10 @@ struct ScriptHookSheet: View {
     @State private var testResult: String?
     @State private var problem: String?
     @State private var resolving: Task<Void, Never>?
-    /// Touch ID or the login password is being asked for.
-    @State private var isTrusting = false
+    /// Asks for Touch ID or the login password, then saves; a sheet that closes meanwhile saves nothing.
+    @State private var trusting: Task<Void, Never>?
+
+    private var isTrusting: Bool { trusting != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -430,8 +439,10 @@ struct ScriptHookSheet: View {
                     Text(problem).font(.callout).foregroundStyle(.red).lineLimit(3)
                 }
                 Spacer()
+                // While Touch ID is asked for, the answer decides; Cancel would leave a save behind.
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(isTrusting)
                 Button(saveTitle) { save() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(testing != nil || isTrusting || draft.name.trimmingCharacters(in: .whitespaces).isEmpty || routeProblem != nil
@@ -444,16 +455,26 @@ struct ScriptHookSheet: View {
         .onDisappear {
             testing?.cancel()
             resolving?.cancel()
+            trusting?.cancel()
         }
         .onChange(of: draft.kind) { oldKind, newKind in
             // An untouched template follows the situation.
             if draft.script == ScriptHookDraft.template(for: oldKind) { draft.script = ScriptHookDraft.template(for: newKind) }
         }
+        .onChange(of: draft.isShell) { _, isShell in
+            // A shell script starts no agent runs yet, so a new shell hook gets no agent grant.
+            if isShell { draft.enablesAgent = false }
+        }
     }
 
     @ViewBuilder private var agentSettings: some View {
         Section("Agent") {
-            if !draft.guided || !draft.generated { Toggle("Allow Agent Runs", isOn: $draft.enablesAgent) }
+            if draft.isShell && !draft.enablesAgent {
+                // A shell script has no command that starts an agent run until `arch-cli agent run` exists, so its hook offers none; one stored with agent runs can still turn them off.
+                Text("Shell scripts cannot start agent runs yet.").font(.caption)
+            } else if !draft.guided || !draft.generated {
+                Toggle("Allow Agent Runs", isOn: $draft.enablesAgent)
+            }
             if draft.enablesAgent {
                 TextField("Instructions", text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language."), axis: .vertical)
                 if draft.isShell {
@@ -593,7 +614,7 @@ struct ScriptHookSheet: View {
         }
         if let shell = draft.shell {
             if let problem = shell.problem {
-                Text(problem).font(.caption).foregroundStyle(.red)
+                Text(problem).font(.callout).foregroundStyle(.red)
             } else if let resolution = shell.resolution {
                 LabeledContent("Interpreter") {
                     Text(resolution.interpreter.path).font(.caption.monospaced()).textSelection(.enabled)
@@ -657,12 +678,12 @@ struct ScriptHookSheet: View {
         }
     }
 
-    /// Reads the file and resolves its interpreter. A hook that has a copy marks the lines that differ from the copy the user trusted last.
+    /// Reads the file and resolves its interpreter. A hook whose copy is still the one the user trusted marks the lines that differ from it.
     private func loadShellFile(at url: URL) {
         do {
             let data = try HookShellScript.read(fileAt: url)
             var choice = ShellScriptChoice(source: url.path, contents: data)
-            if draft.stored != nil, let previous = draft.trusted?.contents ?? draft.shell?.contents {
+            if let previous = draft.trustedCopy {
                 let changes = HookShellScript.changes(from: String(decoding: previous, as: UTF8.self), to: choice.text)
                 choice.changedLines = changes.changed
                 choice.removedLines = changes.removed
@@ -865,10 +886,11 @@ struct ScriptHookSheet: View {
         do {
             let (hook, data) = try draft.makeHook()
             guard draft.needsTrust else { return try commit(hook, data, trusted: false) }
-            isTrusting = true
-            Task { @MainActor in
-                defer { isTrusting = false }
-                guard await AgentDeviceOwnerAuthentication().authenticate(reason: "trust the shell script of the hook \u{201C}\(hook.name)\u{201D}") else {
+            trusting = Task { @MainActor in
+                defer { trusting = nil }
+                let trusted = await AgentDeviceOwnerAuthentication().authenticate(reason: "trust the shell script of the hook \u{201C}\(hook.name)\u{201D}")
+                guard !Task.isCancelled else { return }
+                guard trusted else {
                     problem = "Arch did not trust the script."
                     return
                 }

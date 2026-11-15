@@ -198,6 +198,49 @@ import Testing
         #expect(copy.script == Data("checked".utf8) && copy.hook.name == "Names Copy" && copy.hook.id != hook.id && copy.hook.state == .active)
     }
 
+    @Test func theTrustSheetAsksForTouchIDForWhatRunsAndKeepsAShellHooksAgentRunsToTitles() throws {
+        let script = Data("#!/bin/sh\necho hi\n".utf8)
+        let resolution = try HookShellScript.inspect(script, searchPath: "/usr/bin:/bin").get()
+        let hook = Hook(name: "Shell", trigger: .tabOpened, script: .shell(source: "/Users/fixture/tidy.sh", digest: "sha256:0", interpreter: resolution.interpreter),
+                        grant: HookGrant(permissions: [.tabsRename]))
+        func draft(of hook: Hook, reviewing: Bool = false, matchesDigest: Bool = true) -> ScriptHookDraft {
+            var draft = ScriptHookDraft(editing: hook, script: "", places: places, reviewing: reviewing, contents: script, matchesDigest: matchesDigest)
+            draft.shell?.resolution = resolution
+            return draft
+        }
+        let saved = draft(of: hook)
+        #expect(!saved.needsTrust && saved.trustedCopy == script)
+        // Another file with the same bytes, other bytes, and another interpreter each need Touch ID.
+        var moved = saved
+        moved.shell?.source = "/Users/fixture/other.sh"
+        var edited = saved
+        edited.shell?.contents = Data("#!/bin/sh\necho changed\n".utf8)
+        var replaced = saved
+        replaced.shell?.resolution?.interpreter.digest = "sha256:1"
+        #expect(moved.needsTrust && edited.needsTrust && replaced.needsTrust)
+        // The hook records the other file, which Update from File… then reads.
+        if case .shell(let source, _, _) = try moved.makeHook().hook.script { #expect(source == "/Users/fixture/other.sh") } else { Issue.record("Not a shell hook.") }
+        // Review trusts again in full, and a copy changed outside Arch is no copy to mark changed lines against.
+        #expect(draft(of: hook, reviewing: true).needsTrust && draft(of: hook, reviewing: true).trustedCopy == script)
+        #expect(draft(of: hook, reviewing: true, matchesDigest: false).trustedCopy == nil)
+
+        // A shell hook stored with agent runs opens in the hand-written editor, stays a shell hook, and gets titles only until Let Agent Runs Read Pages.
+        var agentHook = hook
+        agentHook.grant.permissions.insert(.agent)
+        agentHook.grant.agent = AgentRunGrant(tools: ["rename_tab"], tabAccess: .title, maximumRecord: .activity)
+        agentHook.agent = AgentRunOptions(prompt: "Name it.", model: .models([AIModelRef(provider: AIProviderID(rawValue: "test"), model: "chosen")]), tools: ["rename_tab"])
+        var agentDraft = draft(of: agentHook)
+        #expect(!agentDraft.guided && agentDraft.enablesAgent && !agentDraft.needsTrust)
+        agentDraft.agentRenamesTabs = true
+        agentDraft.readsPageText = true
+        let titles = try agentDraft.makeHook().hook
+        #expect(titles.script.isShell && titles.grant.agent?.tabAccess == .title && titles.grant.agent?.tools == ["rename_tab"] && titles.agent?.tabAccess == .title)
+        agentDraft.letsAgentReadPages = true
+        #expect(agentDraft.needsTrust)
+        let pages = try agentDraft.makeHook().hook
+        #expect(pages.grant.agent?.tabAccess == .page && pages.grant.agent?.tools == ["read_text", "rename_tab", "snapshot"])
+    }
+
     /// Show Session lists the agent runs a hook run kept, oldest first, and shows what Arch sent, each tool call with its result, and the agent's replies, each message indented under its label, with page text quoted so that a page cannot write a label.
     @Test func showSessionShowsTheAgentRunsALastRunKeptInOrder() {
         let run = UUID()

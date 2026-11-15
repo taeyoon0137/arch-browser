@@ -1492,6 +1492,12 @@ import Foundation
         if let ticket = hello.ticket {
             return bind(connection, requestID, hello: hello, ticket: ticket)
         }
+        // A shell hook's run reaches Arch only through its ticket, so a command in the run that dropped `ARCH_HOOK_TICKET`, as `env -i` does, never becomes an outside client shown as Arch's terminal.
+        if let run = shellHookRun(containing: connection.peer.processID) {
+            activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, sessionID: run, clientName: hello.client.rawValue,
+                                               outcome: "a program in a hook's run presented no ticket"))
+            return refuse(connection, requestID, AgentRefusal(reason: .ticket, message: "Programs in a hook's run reach Arch only with the run's ticket."))
+        }
         guard acceptsOutsideClients else {
             return refuse(connection, requestID, AgentRefusal(reason: .outsideAccessOff, message: "Outside access is off. Turn on Allow Outside Clients in Settings \u{25B8} AI \u{25B8} Agents."))
         }
@@ -1761,6 +1767,15 @@ private final class ShellHookRunAccess {
     init(tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
         self.tools = tools
         self.call = call
+    }
+}
+
+extension AgentService {
+    /// The shell hook run whose script process is the peer or one of its ancestors, by process ID and start time.
+    func shellHookRun(containing processID: pid_t) -> UUID? {
+        shellHookRuns.first { _, access in
+            access.process.map { AgentProcessAncestry.isProcess(processID, descendedFrom: $0, records: dependencies.processRecord) } ?? false
+        }?.key
     }
 }
 
