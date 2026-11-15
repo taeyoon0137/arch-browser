@@ -198,7 +198,6 @@ Scope filters, Persona checks, and a hook script's Persona treat `spaceSwitched`
 ```swift
 @MainActor
 public final class BrowserEventBus {
-    /// Nonisolated, so that the session, which is not isolated yet, can make it with itself.
     public nonisolated init()
     /// The cause of the innermost enclosing `withCause` block, which code that starts a change finishing later keeps for its events.
     public var currentCause: BrowserEventCause? { get }
