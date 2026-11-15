@@ -241,7 +241,10 @@ import Testing
 
     func setAgentOnlyPersona(_ id: UUID?) { agentOnlyPersonaID = id }
 
-    func windowForSheet() -> NSWindow? { nil }
+    /// The front main window, which the fake host has only when a test gives it one.
+    var sheetWindow: NSWindow?
+
+    func windowForSheet() -> NSWindow? { sheetWindow }
 
     func deletePersona(_ id: UUID) {
         personas.removeAll { $0.id == id }
@@ -250,7 +253,6 @@ import Testing
     }
 }
 
-/// A runner on a CLI that records what the session sends and emits the events a test gives it.
 /// Arch's panel for a file chooser as the tests see it: the windows it showed on, the answer the test gives in it, and what the page received.
 @MainActor final class FakeChooserPanel {
     private(set) var windows: [NSWindow] = []
@@ -278,6 +280,7 @@ import Testing
     }
 }
 
+/// A runner on a CLI that records what the session sends and emits the events a test gives it.
 @MainActor final class FakeRunner: AgentCommandLineRunning {
     let request: AIAgentSessionRequest
     let events: AsyncThrowingStream<AIAgentEvent, any Error>

@@ -256,8 +256,11 @@ public enum AgentPolicy {
         case .agentTab, .shared(acting: true): break
         }
         if let element = step.element {
-            // A click on a file input runs as other clicks do, and the chooser it opens asks under P7; no tool writes a file input's value.
-            if element.isFileInput, step.tool == "type" { return .refuse(.p7, fileInputSentence) }
+            // No tool writes a file input's value. In an agent tab, a click on one runs as other clicks do, and a chooser it opens asks under P7; in a tab the user shared, a chooser would open the user's own panel without a P7 card, so a click or a press that activates one is refused.
+            if element.isFileInput {
+                if step.tool == "type" { return .refuse(.p7, fileInputSentence) }
+                if case .shared = step.tab, step.tool == "click" || (step.tool == "press" && pressActivates(step.text, on: element)) { return .refuse(.p7, sharedFileInputSentence) }
+            }
             if isChallenge(element) { return .refuse(.p18, entry(.p18).sentence) }
             if step.entersText, element.valueClass == .hidden { return .refuse(.p1, entry(.p1).sentence) }
         }
@@ -291,7 +294,7 @@ public enum AgentPolicy {
         }
     }
 
-    /// Whether `press` presses Enter or Space, with or without modifiers, on an element other than a text field or a select: a page's own key handlers can act on such a key as on a click, untrusted events too, on any element, such as a menu item or a tab, so the step counts as a click on it for P3, P4, and P5, and on a file input as a click whose chooser P7 asks about. P4 reads a generic element's name only when it is labeled, since the script names only some roles by their text.
+    /// Whether `press` presses Enter or Space, with or without modifiers, on an element other than a text field or a select: a page's own key handlers can act on such a key as on a click, untrusted events too, on any element, such as a menu item or a tab, so the step counts as a click on it for P3, P4, and P5, and on a file input as a click, whose chooser P7 asks about in an agent tab and which P7 refuses in a tab the user shared. P4 reads a generic element's name only when it is labeled, since the script names only some roles by their text.
     static func pressActivates(_ keys: String?, on element: AgentElementFacts) -> Bool {
         guard let key = keys?.split(separator: "+", omittingEmptySubsequences: false).last, ["Enter", "Space", " "].contains(String(key)) else { return false }
         return !element.isEditable && !element.isSelect && !["textbox", "searchbox", "combobox", "listbox", "spinbutton", "slider"].contains(element.role)
@@ -426,6 +429,9 @@ public enum AgentPolicy {
     /// P8's sentence for the event.
     static let permissionSentence = entry(.p8).sentence
 
-    /// P7's refusal of `type` into a file input, whose value would name a file.
-    static let fileInputSentence = "Agents never name a file for a file input. Click it, and Arch asks the user, who picks the file in Arch's panel."
+    /// P7's refusal of `type` into a file input, whose value would name a file. The agents' DOM click on a file input opens no chooser while the page script runs without a user gesture (docs/agents.md, Actions), so the sentence sends the step to the user.
+    static let fileInputSentence = "Agents never name a file for a file input. Hand the tab to the user with hand_to_user; a file chooser the page opens asks the user, who picks in Arch's panel."
+
+    /// P7's refusal of a click on a file input in a tab the user shared.
+    static let sharedFileInputSentence = "In a tab the user shared, the user picks files. Hand the step to the user with hand_to_user."
 }

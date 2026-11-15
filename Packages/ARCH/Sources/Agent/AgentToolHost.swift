@@ -248,7 +248,7 @@ import Foundation
         }
         return [
             "Reading and navigating in your own agent tabs run without asking. \(interactions)",
-            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, every action in a tab the user shared, and a page's file chooser ask the user, who picks files in Arch; you learn only how many.",
+            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, every action in a tab the user shared, and a page's file chooser ask the user. For a form that needs a file, use hand_to_user: the user picks files in Arch, and you learn only how many.",
         ]
     }
 
@@ -1378,7 +1378,7 @@ extension AgentToolHost {
         }
         return [
             "Reading runs without asking, and so does following a link by its ref. An address you write opens without asking only when a page or the user showed it, when it is the search engine's results address, or when it is the bare origin of a site in scope; any other address asks the user in every mode, and so does a redirect of it to a site outside the scope. \(interactions)",
-            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, and a page's file chooser ask the user, who picks files in Arch; you learn only how many. The tabs the user shared are for reading only.",
+            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, and a page's file chooser ask the user. For a form that needs a file, use hand_to_user: the user picks files in Arch, and you learn only how many. The tabs the user shared are for reading only.",
         ]
     }
 

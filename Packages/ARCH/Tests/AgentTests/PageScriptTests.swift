@@ -1,4 +1,4 @@
-// The agents' page script in WebKit web views without a window over a non-persistent store, through the tool host, on the fixture pages (docs/agents.md, Page snapshots and refs; Tests ▸ Page scripts): roles, names, refs and fingerprints, stale refs after a DOM change and a navigation, hidden elements, open shadow roots, same-origin frames, other sites' frames listed, each redaction rule and the personal class, no values in shared tabs, extension frames left out, the boxes and a screenshot with a filled password field painted over, fields and frames inside aria-hidden and inert subtrees painted over, every field painted over in a shared tab, which no step moves before the user decides, annotations, a page that replaced built-ins, actionability and covers, typing into a framework-style controlled input, selects, Enter submission with the form's default button, no user activation in the page's handlers, the element facts the rules read, a search form's hidden input, a page that changes before its document finishes, captures that do not answer, no full-page screenshot of a Chromium page with boxes, a call stopped before its card, cuts, and the diff.
+// The agents' page script in WebKit web views without a window over a non-persistent store, through the tool host, on the fixture pages (docs/agents.md, Page snapshots and refs; Tests ▸ Page scripts): roles, names, refs and fingerprints, stale refs after a DOM change and a navigation, hidden elements, open shadow roots, same-origin frames, other sites' frames listed, each redaction rule and the personal class, no values in shared tabs, extension frames left out, the boxes, a file input that holds files among them, and a screenshot with a filled password field painted over, fields and frames inside aria-hidden and inert subtrees painted over, every field painted over in a shared tab, which no step moves before the user decides, annotations, a page that replaced built-ins, actionability and covers, typing into a framework-style controlled input, selects, Enter submission with the form's default button, no user activation in the page's handlers, the element facts the rules read, a search form's hidden input, a page that changes before its document finishes, captures that do not answer, no full-page screenshot of a Chromium page with boxes, a call stopped before its card, cuts, and the diff.
 import AgentControl
 import AppKit
 import Foundation
@@ -179,7 +179,7 @@ import Testing
         #expect(lines.contains("  - frame \u{201C}Payments\u{201D} (another site; not read)"))
         #expect(!text.contains("4111"))
         // The policy's annotations: file inputs, CAPTCHAs, and controls that read as a step that cannot be undone.
-        #expect(lines.contains("  - button \u{201C}Receipt\u{201D} [e15] (the user picks files)"))
+        #expect(lines.contains("  - button \u{201C}Receipt\u{201D} [e15] (hand to the user for files)"))
         #expect(lines.contains("  - checkbox \u{201C}I'm not a robot\u{201D} [e16] not checked (CAPTCHA: hand to the user)"))
         #expect(lines.contains("    - button \u{201C}Accept\u{201D} [e22] (asks the user)"))
         #expect(lines.contains("  - button \u{201C}Remove item\u{201D} [e27] (asks the user)"))
@@ -269,6 +269,11 @@ import Testing
         #expect(boxes.viewport == AgentSize(w: 1024, h: 768))
         #expect(Set(boxes.boxes.map(\.kind)) == ["hidden", "personal", "frame", "extension"])
         #expect(boxes.boxes.filter { $0.kind == "frame" }.count == 1 && boxes.boxes.filter { $0.kind == "extension" }.count == 1)
+        // A file input that holds the files the user picked is painted over too, since the engine's control shows their names (P7).
+        _ = try await fixture.page.evaluate("const t = new DataTransfer(); t.items.add(new File(['x'], 'scan-2026.pdf')); document.querySelector('[name=receipt]').files = t.files; 0")
+        guard case .value(let picked) = await fixture.toolHost.pageScript(.boxes(shared: false), in: tab, as: AgentBoxesReply.self) else { Issue.record("The boxes did not read."); return }
+        #expect(picked.boxes.filter { $0.kind == "file" }.count == 1 && picked.boxes.count == boxes.boxes.count + 1)
+        _ = try await fixture.page.evaluate("document.querySelector('[name=receipt]').value = ''; 0")
         let shot = await fixture.call("screenshot", ["tab": "t1", "area": "viewport"])
         #expect(shot.status == .ok, "\(shot.text)")
         #expect(shot.text.hasPrefix("t1: a screenshot of the viewport, 1,568 \u{00D7} 1,176 pixels, JPEG. Arch painted over"))

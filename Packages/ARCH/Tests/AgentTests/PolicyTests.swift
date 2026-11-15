@@ -93,7 +93,7 @@ import Testing
 
     static let fileInput = AgentElementFacts(tag: "input", role: "button", name: "Receipt", inputType: "file", isFileInput: true)
 
-    /// P7's rows: a page's file chooser asks on a card that is not sensitive, in every mode and for both client kinds, whatever started it; a click on a file input, or Enter or Space on it, runs as the mode decides for any click, since its chooser asks; and `type`, which would name a file, is refused in every mode.
+    /// P7's rows: a page's file chooser asks on a card that is not sensitive, in every mode and for both client kinds, whatever started it; a click on a file input in an agent tab, or Enter or Space on it, runs as the mode decides for any click, since its chooser asks; in a tab the user shared, whose chooser would be the user's own, such a click is refused; and `type`, which would name a file, is refused in every mode.
     @Test func fileChoosersAskAndFileInputsClickAsTheModeDecides() {
         let typing = AgentPolicyStep.interaction(AgentInteraction(tool: "type", element: Self.fileInput, text: "/etc/hosts", pageHost: "shop.example"))
         for client in AgentClientKind.allCases {
@@ -105,6 +105,12 @@ import Testing
             #expect(Expected(AgentPolicy.decide(click, client: client, mode: .readOnly)) == .readOnly)
             #expect(Expected(AgentPolicy.decide(click, client: client, mode: .askBeforeActing)) == .asks([]))
             #expect(Expected(AgentPolicy.decide(click, client: client, mode: .actInAgentTabs)) == .allow)
+            let shared = AgentTabAccess.shared(acting: true)
+            #expect(Expected(AgentPolicy.decide(Self.click(Self.fileInput, tab: shared), client: client, mode: .actInAgentTabs)) == .refused(.p7))
+            let press = AgentInteraction(tool: "press", tab: shared, element: Self.fileInput, text: "Space", pageHost: "shop.example")
+            #expect(Expected(AgentPolicy.decide(.interaction(press), client: client, mode: .askBeforeActing)) == .refused(.p7))
+            let hover = AgentInteraction(tool: "hover", tab: shared, element: Self.fileInput, pageHost: "shop.example")
+            #expect(Expected(AgentPolicy.decide(.interaction(hover), client: client, mode: .askBeforeActing)) == .asksSensitive([.p12]))
         }
         #expect(AgentPolicy.entry(.p7).effect == .asks(sensitive: false) && !AgentPolicy.sensitiveRules.contains(.p7))
     }

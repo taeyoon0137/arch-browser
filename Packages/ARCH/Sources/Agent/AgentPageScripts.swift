@@ -103,7 +103,7 @@ enum AgentPageOperation: Encodable {
     case snapshot(full: Bool, ref: AgentRefTarget?, shared: Bool)
     /// The facts of an element, or of the focused element without a ref, and whether an action can reach it. With `scroll`, it scrolls into view first and must be on top at its center; without, the page stays where it is and only a detached, hidden, or disabled element is named.
     case element(AgentRefTarget?, scroll: Bool)
-    /// The boxes a screenshot paints over, and the viewport and page sizes; in a tab the user shared, every field's box too.
+    /// The boxes a screenshot paints over, file inputs that hold files among them, and the viewport and page sizes; in a tab the user shared, every field's box too.
     case boxes(shared: Bool)
     case act(AgentPageAction)
 
@@ -204,7 +204,7 @@ struct AgentBoxesReply: Decodable, Equatable {
         var y: Double
         var w: Double
         var h: Double
-        /// `hidden`, `personal`, `frame` (another site's), `extension`, or `shared` (any other field of a tab the user shared).
+        /// `hidden`, `personal`, `frame` (another site's), `extension`, `shared` (any other field of a tab the user shared), or `file` (a file input that holds files, whose control shows their names).
         var kind: String
     }
 
@@ -675,6 +675,8 @@ enum AgentPageScripts {
           const cls = valueClassOf(el, nameOf(el, roleOf(el)));
           if (cls) add(el, offset, cls);
           else if (op.shared && (isEditable(el) || tagOf(el) === "select")) add(el, offset, "shared");
+          // The engine's control draws the names of the files the user picked (P7).
+          else if (typeOf(el) === "file" && el.files && el.files.length) add(el, offset, "file");
         },
         otherFrame(el, depth, frame, offset) { add(el, offset, "frame"); },
         extensionFrame(el, frame, offset) { add(el, offset, "extension"); },

@@ -1,4 +1,4 @@
-// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), hands every file chooser to the agents' service before any panel and ends it with no file when its page moves on, its tab closes, or Arch quits (P7), and asks the agent monitor about each navigation (P16).
+// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), hands every file chooser to the agents' service before any panel and ends it with no file when its page moves on, its engine changes, its tab closes, or Arch quits (P7), and asks the agent monitor about each navigation (P16).
 import AppKit
 import Combine
 import Agent
@@ -176,7 +176,7 @@ import Testing
         #expect(!source.isLoaded && ended[source.id] == [initial, reloaded])
     }
 
-    /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts and reaches the agents' service first through `BrowserAgentHost`, with who asks as Arch's panel names it. The service's denial, a new document, quitting, the tab's close, and a session without the service's callback give the page no file, and the user's own tab still queues Arch's panel.
+    /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts and reaches the agents' service first through `BrowserAgentHost`, with who asks as Arch's panel names it. The service's denial, a new document, quitting, a change of engine, the tab's close, and a session without the service's callback give the page no file, and the user's own tab still queues Arch's panel.
     @Test func anAgentTabsFileChooserReachesTheServiceBeforeAnyPanelAndEndsWithItsPage() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentChooserTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -214,17 +214,24 @@ import Testing
         session.isQuitting = true
         #expect(quitting.hasEnded && replies == [nil, nil, nil, nil])
         session.isQuitting = false
+        // A change of the tab's engine ends one.
+        registry.register(SessionTestEngine(kind: .chromium))
+        _ = session.runtime(for: .chromium, in: space.resolvedPersonaID)
+        tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
+        let switching = try #require(handed.last?.chooser)
+        session.switchEngine(of: tab, to: .chromium)
+        #expect(tab.engineKind == .chromium && switching.hasEnded && replies == [nil, nil, nil, nil, nil])
         // The tab's close ends one, and its late answer reaches no page.
         tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
         let closing = try #require(handed.last?.chooser)
         host.closeAgentTab(tab.id)
-        #expect(closing.hasEnded && replies == [nil, nil, nil, nil, nil])
+        #expect(closing.hasEnded && replies == [nil, nil, nil, nil, nil, nil])
         closing.deny()
-        #expect(replies.count == 5 && handed.count == 4)
+        #expect(replies.count == 6 && handed.count == 5)
         // The user's own tab queues Arch's panel among its prompts and asks no service.
         let userTab = session.openTab(url: URL(string: "https://example.org/mine")!, in: space.id, select: false)
         userTab.webContents(userTab.webContents, runFileChooser: request) { _ in }
-        #expect(session.prompts.hasPrompt(for: userTab.id) && handed.count == 4)
+        #expect(session.prompts.hasPrompt(for: userTab.id) && handed.count == 5)
         session.prompts.dismiss(tabID: userTab.id)
     }
 

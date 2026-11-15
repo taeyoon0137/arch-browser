@@ -1,4 +1,4 @@
-// What the tool host keeps for one grant, or for one in-app session, for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, the calls that still run, which a Stop cancels, and the calls that wait for the user past the first answer.
+// What the tool host keeps for one grant, or for one in-app session, for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, the calls that still run, which a Stop cancels, the calls that wait for the user past the first answer, and each tab's file chooser.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -179,6 +179,8 @@ struct AgentTabActivity: Equatable {
     var downloadSites: Set<String> = []
     /// Downloads the user allowed once, by address, until they start.
     var allowedDownloads: Set<URL> = []
+    /// The latest file chooser of each agent tab that got a P7 card; until it ends, its card waits or Arch's panel shows for it, and the tab's other choosers get no file.
+    var fileChoosers: [UUID: AgentFileChooser] = [:]
     /// The forms the client typed into, per tab, on the page of that count (P5).
     var typedForms: [UUID: (page: Int, keys: Set<String>)] = [:]
     /// Calls that answered `approvalPending`, by their handle.

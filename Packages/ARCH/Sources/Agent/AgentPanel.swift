@@ -178,7 +178,7 @@ public struct AgentSessionPanel: View {
 
     // MARK: Transcript
 
-    /// Every card the session waits on shows inline after the transcript: its steps, addresses (P13), questions, tab requests, and the downloads and links to other apps its pages start.
+    /// Every card the session waits on shows inline after the transcript: its steps, addresses (P13), questions, tab requests, and the downloads, links to other apps, and file choosers its pages start.
     private var transcript: some View {
         let cards = approvals.pending.filter { $0.ownerID == session.id }
         return ScrollViewReader { proxy in

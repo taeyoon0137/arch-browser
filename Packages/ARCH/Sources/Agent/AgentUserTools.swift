@@ -204,12 +204,12 @@ extension AgentToolHost {
         }
     }
 
-    /// P7: a card about a file chooser that a page in an agent tab opened, whatever started it: a trusted click, a DOM `click()`, or the page's own script after an earlier activation. It comes before any panel, in every mode, one at a time per tab, and names who asks as Arch's panel does, from the request's origins and never from the tab's address, what the page asks for, and its accepted types. Allow Once opens Arch's panel as a sheet on the window of the card that the user answered, or else the front main window, and the page receives only what the user picks there. Deny, Deny and Stop, Stop, the card's timeout, a new page, and the tab's close give the page no file. The agent learns that the page asked, then only how many items the user chose, or that the user cancelled, never a name or a path.
+    /// P7: a card about a file chooser that a page in an agent tab opened, whatever started it: a trusted click, a DOM `click()`, or the page's own script after an earlier activation. It comes before any panel, in every mode, and one chooser at a time per tab, while its card waits or Arch's panel shows for it. It names who asks as Arch's panel does, from the request's origins and never from the tab's address, what the page asks for, and its accepted types. Allow Once opens Arch's panel as a sheet on the window of the card that the user answered, or else the front main window, and the page receives only what the user picks there. Deny, Deny and Stop, and the card's timeout give the page no file, and so do Stop and Take Over while the card waits. `Browsing` ends the chooser with no file at a new document, a change of engine, the tab's close, and quit, also while its panel shows (`AgentFileChooser.end()`), so a load or an address change within the document leaves the card waiting. The agent learns that the page asked, then only how many items the user chose, or that the user cancelled, never a name or a path.
     func askAboutFileChooser(_ chooser: AgentFileChooser, in tabID: UUID, of ownerID: UUID, state: AgentGrantState?, client: AgentToolClient?) {
         guard let state, let client, host.tabs(withIDs: [tabID]).first?.agentOwnerID == ownerID,
               case .ask(let ask) = AgentPolicy.decide(.fileChooser, client: client.kind, mode: client.level) else { return chooser.deny() }
         let handle = state.handles.tabs.handle(for: tabID)
-        guard !approvals.pending.contains(where: { $0.kind == .fileChooser && $0.tabID == tabID }) else {
+        guard state.fileChoosers[tabID].map(\.hasEnded) ?? true else {
             chooser.deny()
             return state.record(.decided("A page in \(handle) opened another file chooser while one waits for the user, so Arch gave it no file."), tab: tabID)
         }
@@ -219,25 +219,38 @@ extension AgentToolHost {
         }
         let request = chooser.request
         state.record(.fileChooserAsked(request.mode), tab: tabID)
+        state.fileChoosers[tabID] = chooser
+        // No document number: `Browsing` ends the chooser, and with it the card, when the tab commits another document.
         var card = AgentApproval(ownerID: ownerID, clientName: client.name, isOutsideClient: client.isOutsideClient, kind: .fileChooser, rules: ask.rules, isSensitive: ask.isSensitive,
-                                 offers: [.allowOnce, .deny, .denyAndStop], action: "\(Self.chooserAction(request.mode, asker: chooser.asker)) in \(handle)", tabID: tabID, tabHandle: handle,
-                                 site: (request.origin ?? request.pageOrigin)?.host?.lowercased(), document: state.activity(of: tabID).pages, createdAt: now(),
-                                 deadline: now().addingTimeInterval(approvalWindow))
+                                 offers: [.allowOnce, .deny, .denyAndStop], action: "\(Self.chooserAction(request.mode, asker: chooser.asker)) (\(handle))", tabID: tabID, tabHandle: handle,
+                                 site: (request.origin ?? request.pageOrigin)?.host?.lowercased(), createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         card.exactTextNote = Self.chooserNote(request)
         let cardID = card.id
         let host = host
         let stopClient = stopClient
         let approvals = approvals
+        let release = { if state.fileChoosers[tabID] === chooser { state.fileChoosers[tabID] = nil } }
         chooser.didEnd = { [weak approvals] in approvals?.withdraw(cardID) }
         approvals.open(card, onAnswerInWindow: { answer, window in
-            guard answer.allows, let window = window ?? host.windowForSheet(), !chooser.hasEnded else {
+            let ended = chooser.hasEnded
+            guard answer.allows, !ended, let window = window ?? host.windowForSheet() else {
                 if answer == .denyAndStop { stopClient?(ownerID) }
-                let denied = answer == .deny || answer == .denyAndStop
                 chooser.deny()
-                return state.record(.decided(denied ? "The user did not allow the file chooser in \(handle), so the page received no file (P7)."
-                                                    : "The file chooser in \(handle) ended without the user's answer, so the page received no file (P7)."), tab: tabID)
+                release()
+                let sentence: String
+                if answer == .deny || answer == .denyAndStop {
+                    sentence = "The user did not allow the file chooser in \(handle), so the page received no file (P7)."
+                } else if answer.allows, !ended {
+                    sentence = "The user allowed the file chooser in \(handle), but no window could show Arch's panel, so the page received no file (P7)."
+                } else {
+                    sentence = "The file chooser in \(handle) ended without the user's answer, so the page received no file (P7)."
+                }
+                return state.record(.decided(sentence), tab: tabID)
             }
-            chooser.choose(on: window) { chosen in state.record(.fileChooserEnded(request.mode, chosen: chosen), tab: tabID) }
+            chooser.choose(on: window) { chosen in
+                release()
+                state.record(.fileChooserEnded(request.mode, chosen: chosen), tab: tabID)
+            }
         })
     }
 
@@ -254,14 +267,14 @@ extension AgentToolHost {
     /// How many accepted types a P7 card lists.
     static let listedChooserTypes = 8
 
-    /// A P7 card's note: the types the page accepts, what a folder gives it, the name it suggests for saving, and what the agent learns. It lists the types only when each has a declared file type, as the panel offers them (`allowedContentTypes`), so that no page text reaches the card as a type.
+    /// A P7 card's note: the types the page accepts, what a folder gives it, the name it suggests for saving, and what the agent learns. It lists the types only when each has a declared file type, as the panel offers them (`allowedContentTypes`), so that no page text reaches the card as a type. The request has no types when the page accepts any file, and also when the engine cannot tell, as WebKit cannot with its private API flag off.
     static func chooserNote(_ request: EngineFileChooserRequest) -> String {
         var sentences: [String] = []
         switch request.mode {
         case .openFile, .openFiles:
             let types = request.acceptedTypes
             if types.isEmpty {
-                sentences.append("The page names no file types, so the panel offers every file.")
+                sentences.append("Arch has no file types from the page, so the panel offers every file.")
             } else if request.allowedContentTypes == nil {
                 sentences.append("The page names file types that macOS does not know, so the panel offers every file.")
             } else {
@@ -270,13 +283,26 @@ extension AgentToolHost {
             }
         case .openFolder: sentences.append("The page receives every file in the folder.")
         case .save:
-            // The page chooses the name, which is cut as other names a page gives are.
-            if let name = request.suggestedName {
+            // The page chooses the name, which shows on one line and is cut as other names a page gives are.
+            if let name = request.suggestedName.map({ oneLine($0).trimmingCharacters(in: .whitespaces) }), !name.isEmpty {
                 let cut = name.count > AgentLimits.pageNameCharacters ? String(name.prefix(AgentLimits.pageNameCharacters)) + "\u{2026}" : name
                 sentences.append("The page suggests the name \u{201C}\(quoted(cut))\u{201D}.")
             }
         }
         sentences.append("You pick in Arch's panel. The agent learns only how many items you chose.")
         return sentences.joined(separator: " ")
+    }
+
+    /// Text a page chose, as one line in the card's own words: control characters and line and paragraph separators become spaces, and format characters, such as bidirectional overrides, are dropped, so that the text cannot break the card's sentence or reorder it.
+    static func oneLine(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .control, .lineSeparator, .paragraphSeparator: scalars.append(" ")
+            case .format: continue
+            default: scalars.append(scalar)
+            }
+        }
+        return String(scalars)
     }
 }

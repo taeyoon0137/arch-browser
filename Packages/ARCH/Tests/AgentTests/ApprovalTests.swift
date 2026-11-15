@@ -394,7 +394,7 @@ import Testing
         let card = try await fixture.waitForCard()
         #expect(panel.windows.isEmpty && panel.received.isEmpty)
         #expect(card.kind == .fileChooser && card.rules == [.p7] && !card.isSensitive && !card.needsAuthentication && card.offers == [.allowOnce, .deny, .denyAndStop])
-        #expect(card.action == "Choose files for \(asker) in \(handle)" && card.site == "upload.example" && card.tabID == tabID && card.tabHandle == handle)
+        #expect(card.action == "Choose files for \(asker) (\(handle))" && card.site == "upload.example" && card.tabID == tabID && card.tabHandle == handle)
         #expect(card.exactText == nil && card.exactTextNote == "The page accepts image/*, .pdf. You pick in Arch's panel. The agent learns only how many items you chose.")
         // Another chooser while the card waits gets no file and no card of its own.
         let second = FakeChooserPanel()
@@ -403,6 +403,10 @@ import Testing
         // Allow Once opens Arch's panel on the window of the card the user answered, and the page receives only the files the user picked there.
         #expect(await fixture.toolHost.approvals.answer(card.id, with: .allowOnce, in: window))
         #expect(panel.windows == [window] && panel.received.isEmpty)
+        // Another chooser while Arch's panel shows gets no file and no card either: one chooser at a time per tab.
+        let during = FakeChooserPanel()
+        fixture.host.chooseFiles(request, asker: asker, in: tabID, panel: during)
+        #expect(during.received == [nil] && during.windows.isEmpty && fixture.toolHost.approvals.pending.isEmpty)
         panel.pick(picked + [URL(string: "https://elsewhere.example/a.png")!])
         #expect(panel.received == [picked])
         let first = await fixture.call("list_tabs")
@@ -416,32 +420,44 @@ import Testing
         let denied = FakeChooserPanel()
         fixture.host.chooseFiles(EngineFileChooserRequest(mode: .openFile, pageOrigin: page), asker: "a page on \u{201C}docs.example\u{201D}", in: tabID, panel: denied)
         let deniedCard = try await fixture.waitForCard()
-        #expect(deniedCard.action == "Choose a file for a page on \u{201C}docs.example\u{201D} in \(handle)")
-        #expect(deniedCard.exactTextNote == "The page names no file types, so the panel offers every file. You pick in Arch's panel. The agent learns only how many items you chose.")
+        #expect(deniedCard.action == "Choose a file for a page on \u{201C}docs.example\u{201D} (\(handle))")
+        #expect(deniedCard.exactTextNote == "Arch has no file types from the page, so the panel offers every file. You pick in Arch's panel. The agent learns only how many items you chose.")
         await fixture.toolHost.approvals.answer(deniedCard.id, with: .deny, in: window)
         #expect(denied.windows.isEmpty && denied.received == [nil])
         // Cancel in the panel gives the page no file, and the agent hears that the user cancelled.
         let cancelled = FakeChooserPanel()
         fixture.host.chooseFiles(EngineFileChooserRequest(mode: .openFolder, pageOrigin: page), asker: "a page on \u{201C}docs.example\u{201D}", in: tabID, panel: cancelled)
         let folderCard = try await fixture.waitForCard()
-        #expect(folderCard.action == "Choose a folder for a page on \u{201C}docs.example\u{201D} in \(handle)")
+        #expect(folderCard.action == "Choose a folder for a page on \u{201C}docs.example\u{201D} (\(handle))")
         #expect(folderCard.exactTextNote == "The page receives every file in the folder. You pick in Arch's panel. The agent learns only how many items you chose.")
         await fixture.toolHost.approvals.answer(folderCard.id, with: .allowOnce, in: window)
         cancelled.pick(nil)
         #expect(cancelled.windows == [window] && cancelled.received == [nil])
-        // A save chooser shows the name the page suggests, with its closing quote doubled.
+        // A save chooser shows the name the page suggests on one line, with its closing quote doubled, its control characters and separators as spaces, and its format characters, such as a bidirectional override, dropped.
         let saving = FakeChooserPanel()
-        fixture.host.chooseFiles(EngineFileChooserRequest(mode: .save, suggestedName: "report\u{201D} 2.pdf", pageOrigin: page), asker: "a page on \u{201C}docs.example\u{201D}", in: tabID, panel: saving)
+        fixture.host.chooseFiles(EngineFileChooserRequest(mode: .save, suggestedName: "report\u{201D}\r2\u{202E}.pdf\u{2028}", pageOrigin: page), asker: "a page on \u{201C}docs.example\u{201D}", in: tabID,
+                                 panel: saving)
         let saveCard = try await fixture.waitForCard()
-        #expect(saveCard.action == "Choose where a page on \u{201C}docs.example\u{201D} saves a file in \(handle)")
-        #expect(saveCard.exactTextNote?.hasPrefix("The page suggests the name \u{201C}report\u{201D}\u{201D} 2.pdf\u{201D}.") == true)
+        #expect(saveCard.action == "Choose where a page on \u{201C}docs.example\u{201D} saves a file (\(handle))")
+        #expect(saveCard.exactTextNote?.hasPrefix("The page suggests the name \u{201C}report\u{201D}\u{201D} 2.pdf\u{201D}. ") == true, "\(saveCard.exactTextNote ?? "")")
+        // Without the card's window and without a front main window, the page gets no file, and the agent hears that no window could show the panel.
         await fixture.toolHost.approvals.answer(saveCard.id, with: .allowOnce)
-        // Without the card's window, the panel opens on the front main window, and with none the page gets no file.
         #expect(saving.windows.isEmpty && saving.received == [nil])
+        // Without the card's window, the panel opens on the front main window.
+        let front = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+        fixture.host.sheetWindow = front
+        let fallback = FakeChooserPanel()
+        fixture.host.chooseFiles(EngineFileChooserRequest(mode: .openFile, pageOrigin: page), asker: "a page on \u{201C}docs.example\u{201D}", in: tabID, panel: fallback)
+        await fixture.toolHost.approvals.answer(try await fixture.waitForCard().id, with: .allowOnce)
+        #expect(fallback.windows == [front] && fallback.received.isEmpty)
+        fallback.pick([picked[0]])
+        #expect(fallback.received == [[picked[0]]])
+        fixture.host.sheetWindow = nil
         let second2 = await fixture.call("list_tabs")
         #expect(second2.text.contains("The user did not allow the file chooser in \(handle), so the page received no file (P7)."))
         #expect(second2.text.contains("The user cancelled the file chooser in \(handle), so the page received no file (P7)."))
-        #expect(second2.text.contains("The file chooser in \(handle) ended without the user's answer, so the page received no file (P7)."))
+        #expect(second2.text.contains("The user allowed the file chooser in \(handle), but no window could show Arch's panel, so the page received no file (P7)."))
+        #expect(second2.text.contains("The user chose 1 file for the page in \(handle) (P7)."))
         #expect(Self.events(of: second2).contains { $0["kind"] == "fileChooserEnded" && $0["chosen"] == 0 && $0["asks"] == "folder" })
 
         // The card's timeout gives the page no file and opens no panel.
@@ -452,12 +468,14 @@ import Testing
         quick.askAboutFileChooser(lateChooser, in: tabID, of: fixture.grant.id, state: fixture.state, client: AgentToolClient(grant: fixture.grant))
         try await waitUntil { !late.received.isEmpty }
         #expect(late.received == [nil] && late.windows.isEmpty && fixture.toolHost.approvals.pending.isEmpty)
-        // A new page in the tab withdraws the card, and the page gets no file.
+        // A load of the document and an address change within it, as by `pushState`, leave the card waiting: `Browsing` ends the chooser, and with it the card, once the tab commits another document.
         let moved = FakeChooserPanel()
         fixture.host.chooseFiles(request, asker: asker, in: tabID, panel: moved)
-        _ = try await fixture.waitForCard()
-        fixture.host.load(URL(string: "https://docs.example/next")!, in: tabID)
-        try await waitUntil { !moved.received.isEmpty }
+        let movedCard = try await fixture.waitForCard()
+        fixture.host.report(.addressChanged(URL(string: "https://docs.example/upload/step-2")), in: tabID)
+        fixture.host.report(.loaded(url: URL(string: "https://docs.example/upload/step-2"), title: "Upload"), in: tabID)
+        #expect(fixture.toolHost.approvals.isPending(movedCard.id) && moved.received.isEmpty)
+        await fixture.toolHost.approvals.answer(movedCard.id, with: .deny)
         #expect(moved.received == [nil] && moved.windows.isEmpty)
         // Browsing ends a chooser whose page moved on or whose tab closed: a waiting card goes, and a panel that shows closes with Cancel, which the agent hears as a chooser that ended before the user chose.
         let closing = FakeChooserPanel()
@@ -474,6 +492,7 @@ import Testing
         #expect(showing.closed == 1 && showing.received == [nil] && !showingChooser.showsPanel && showingChooser.hasEnded)
         let third = await fixture.call("list_tabs")
         #expect(third.text.contains("The file chooser in \(handle) ended before the user chose, so the page received no file (P7)."))
+        #expect(third.text.contains("The file chooser in \(handle) ended without the user's answer, so the page received no file (P7)."))
         #expect(Self.events(of: third).contains { $0["kind"] == "fileChooserEnded" && $0["chosen"] == .null })
 
         // Deny and Stop stops the client; Stop, as at Stop All Agents, ends the card with no file.

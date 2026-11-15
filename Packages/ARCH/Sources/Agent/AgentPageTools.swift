@@ -244,8 +244,8 @@ extension AgentToolHost {
         guard node.ref != nil else { return nil }
         let facts = AgentElementFacts(tag: "", role: node.role, name: node.name ?? "", inputType: node.inputType, valueClass: node.valueClass, isEditable: node.isEditable ?? false,
                                       isFileInput: node.isFileInput ?? false, submitsForm: node.submits ?? false, formFields: node.formFields ?? [])
-        // The chooser a click opens asks the user, who picks the files (P7).
-        if facts.isFileInput { return "(the user picks files)" }
+        // The user picks the files, through hand_to_user; a chooser the page opens asks the user (P7).
+        if facts.isFileInput { return "(hand to the user for files)" }
         if AgentPolicy.isChallenge(facts) { return "(CAPTCHA: hand to the user)" }
         if facts.isEditable, facts.valueClass == .hidden { return "(agents do not type here)" }
         if access == .run { return nil }
@@ -590,7 +590,7 @@ extension AgentToolHost {
     }
 }
 
-/// Screenshots as agents get them (docs/agents.md, Fields the script never reveals; Tools ▸ Limits): the boxes of hidden and personal fields, other sites' frames, and extension frames, and in a tab the user shared every field's, painted over before scaling and encoding, a full page cut at `AgentLimits.screenshotFullPageCSSHeight` CSS pixels, the longest side at most `AgentLimits.screenshotLongestSide` pixels, and JPEG at `AgentLimits.screenshotJPEGQuality` within `AgentLimits.screenshotBytes`, lower in quality and then in size when needed. The capture on a card, which only the user sees, is marked instead.
+/// Screenshots as agents get them (docs/agents.md, Fields the script never reveals; Tools ▸ Limits): the boxes of hidden and personal fields, other sites' frames, extension frames, and file inputs that hold files, and in a tab the user shared every field's, painted over before scaling and encoding, a full page cut at `AgentLimits.screenshotFullPageCSSHeight` CSS pixels, the longest side at most `AgentLimits.screenshotLongestSide` pixels, and JPEG at `AgentLimits.screenshotJPEGQuality` within `AgentLimits.screenshotBytes`, lower in quality and then in size when needed. The capture on a card, which only the user sees, is marked instead.
 enum AgentScreenshot {
     struct Capture {
         var image: CGImage
