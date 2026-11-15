@@ -808,7 +808,7 @@ public protocol PluginSecrets: AnyObject {
 
 public enum PluginError: Error, Hashable, Sendable {
     case permissionDenied(PluginPermission)
-    /// The plugin instance whose context the call went through has stopped.
+    /// The plugin instance whose context the call went through has stopped, or the scheduler has stopped the hook step whose listener closes or selects the step's event's tab.
     case stopped
     /// The command acts on a page, and the invocation has none.
     case noPage
