@@ -1,4 +1,4 @@
-// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions): a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; an open names a space of another Persona as not granted and a deleted Persona as closed; and a selection of the tab that a window has selected already leaves the window's internal page and palette.
+// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions and Personas): a tab that a plugin opens goes to the preferred or the named space of its Persona in its engine, and its opening, selection, and first load carry the plugin's cause; a selection goes to the window of the tab's Persona that shows it, else the front main window on its space, else the front main window of its Persona, and never to a window of another Persona; a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; an open names a space of another Persona as not granted and a deleted Persona as closed; and a selection of the tab that a window has selected already leaves the window's internal page and palette.
 import ARCHEngine
 import Events
 import Foundation
@@ -18,6 +18,84 @@ import Testing
         registry.register(SessionTestEngine(kind: .chromium))
         let session = try BrowserSession(testRegistry: registry, directory: directory)
         try check(session, session.pluginBrowserHost)
+    }
+
+    /// A tab that a plugin opens goes where a new tab of its Persona goes, the last main window's space while that is the Persona's, else the Persona's first space, or to the space the options name, in their engine, and is selected in a window of its Persona only. Its opening, its selection with the space switch it brings, and its first load carry the plugin's cause, and its next load none.
+    @Test func aPluginsTabOpensInItsPersonasSpaceWithItsCause() throws {
+        try withSession { session, host in
+            let home = try #require(session.spaces.first)
+            let side = session.makeSpace(in: home.resolvedPersonaID)
+            let work = session.addPersona(named: "Work")
+            let research = try #require(session.spaces(in: work.id).first)
+            let workWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: research.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            let homeWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            defer { [homeWindow, workWindow].forEach(session.windowWillClose) }
+            var events: [String] = []
+            let subscription = session.events.subscribe(BrowserEventFilter()) { event in events.append("\(event.kind.rawValue) \(event.cause == cause)") }
+            defer { subscription.cancel() }
+            let address = try #require(URL(string: "https://example.org/opened"))
+
+            let openedID = try host.openTab(address, PluginOpenTabOptions(engine: .chromium), in: home.resolvedPersonaID, cause: cause)
+            let opened = try #require(session.tabs.first { $0.id == openedID })
+            #expect(opened.spaceID == home.id && opened.engineKind == .chromium && homeWindow.selectedTabID == opened.id)
+            opened.webContentsDidFinishLoadingDocument(opened.webContents)
+            #expect(events.filter { !$0.hasPrefix("titleChanged") } == ["tabOpened true", "tabSelected true", "pageLoaded true"])
+            events = []
+            opened.webContentsDidFinishLoadingDocument(opened.webContents)
+            #expect(events == ["pageLoaded false"])
+
+            let behind = try host.openTab(address, PluginOpenTabOptions(spaceID: side.id, select: false), in: home.resolvedPersonaID, cause: cause)
+            #expect(session.tabs.first { $0.id == behind }?.spaceID == side.id && homeWindow.selectedTabID == opened.id)
+            // The front main window is the home Persona's, so the work Persona's tab opens in its first space, in the window on it.
+            let workTab = try host.openTab(address, PluginOpenTabOptions(), in: work.id, cause: cause)
+            #expect(session.tabs.first { $0.id == workTab }?.spaceID == research.id && workWindow.selectedTabID == workTab)
+            #expect(homeWindow.selectedTabID == opened.id && homeWindow.currentSpaceID == home.id)
+            events = []
+            host.selectTab(behind, cause: cause)
+            #expect(homeWindow.selectedTabID == behind && homeWindow.currentSpaceID == side.id)
+            #expect(events == ["tabSelected true", "spaceSwitched true"])
+        }
+    }
+
+    /// A selection goes to the window of the tab's Persona that shows it, else to the front main window on its space, else to the front main window of its Persona, which then shows the tab's space; a favorite's tab of another Persona goes to that Persona's window, so the front window keeps its Persona / Space, and without a window of the Persona nothing changes.
+    @Test func aPluginsSelectionStaysInAWindowOfTheTabsPersona() throws {
+        try withSession { session, host in
+            let home = try #require(session.spaces.first)
+            let side = session.makeSpace(in: home.resolvedPersonaID)
+            let work = session.addPersona(named: "Work")
+            let research = try #require(session.spaces(in: work.id).first)
+            let travel = session.addPersona(named: "Travel")
+            let trip = try #require(session.spaces(in: travel.id).first)
+            let workWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: research.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            let behindWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            let frontWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            defer { [frontWindow, behindWindow, workWindow].forEach(session.windowWillClose) }
+            @MainActor func tab(in space: Space) -> Tab { session.openTab(url: URL(string: "https://example.org/\(UUID())"), in: space.id, select: false, engine: .webKit) }
+            let shownBehind = tab(in: home), inHome = tab(in: home), inSide = tab(in: side), inTrip = tab(in: trip)
+            behindWindow.selectTab(shownBehind.id)
+            let frontSelection = frontWindow.selectedTabID
+
+            // The window that shows the tab keeps it, and the front window on its space does not take it.
+            host.selectTab(shownBehind.id, cause: cause)
+            #expect(frontWindow.selectedTabID == frontSelection && behindWindow.selectedTabID == shownBehind.id)
+            host.selectTab(inHome.id, cause: cause)
+            #expect(frontWindow.selectedTabID == inHome.id && behindWindow.selectedTabID == shownBehind.id)
+            // No window shows the side space, so the front main window of the Persona moves there.
+            host.selectTab(inSide.id, cause: cause)
+            #expect(frontWindow.selectedTabID == inSide.id && frontWindow.currentSpaceID == side.id && behindWindow.currentSpaceID == home.id)
+
+            // A favorite's tab of the work Persona goes to the work window, though the front window is in front.
+            let favorite = Favorite(url: URL(string: "https://example.org/favorite")!, title: "Favorite", personaID: work.id)
+            session.addFavorites([favorite], in: work.id)
+            let favoriteTab = session.openTab(for: favorite)
+            host.selectTab(favoriteTab.id, cause: cause)
+            #expect(workWindow.selectedTabID == favoriteTab.id && workWindow.personaID == work.id)
+            #expect(frontWindow.selectedTabID == inSide.id && frontWindow.personaID == home.resolvedPersonaID)
+            // No window of the travel Persona is open, so nothing changes.
+            host.selectTab(inTrip.id, cause: cause)
+            #expect([frontWindow, behindWindow, workWindow].map(\.selectedTabID) == [inSide.id, shownBehind.id, favoriteTab.id])
+            #expect(frontWindow.currentSpaceID == side.id && workWindow.currentSpaceID == research.id)
+        }
     }
 
     /// A plugin's tab whose address turns out to be a file downloads nothing, as a restored tab does not fetch its file again, while the user's own tab downloads it; the plugin's tab's pages ask before their first download.
