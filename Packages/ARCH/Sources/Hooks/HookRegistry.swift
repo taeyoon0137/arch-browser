@@ -237,6 +237,10 @@ public final class HookRegistry: ObservableObject {
     @Published public private(set) var isReady = false
     /// A hook's feature ended: the hook was removed, or an editor test of edited settings ended. The app shell deletes the feature's kept runs.
     public var featureDidEnd: ((AIFeatureID) -> Void)?
+    /// Runs that left a hook's last runs, pushed out by later runs and skips or replaced at Keep Nothing. No row reaches their kept agent runs, so the app shell deletes them.
+    public var runsDidLeave: ((Set<UUID>) -> Void)?
+    /// Clear Activity emptied every row's last runs. The app shell deletes every kept agent run.
+    public var activityDidClear: (() -> Void)?
     public let log: HookRunLog
 
     private let store: HookStore
@@ -432,6 +436,7 @@ public final class HookRegistry: ObservableObject {
     public func clearActivity() {
         log.clear()
         lastRuns = [:]
+        activityDidClear?()
     }
 
     public func move(_ id: UUID, to index: Int) {
@@ -1057,12 +1062,17 @@ public final class HookRegistry: ObservableObject {
     /// Keep the Session and Keep Activity Only log the entry and keep it in the hook's last runs; Keep Nothing keeps the last run's reduced summary in memory only.
     private func note(_ entry: HookRunEntry, message: String?, of hook: Hook) {
         let summary = HookRunSummary(entry, message: message)
+        let previous = lastRuns[hook.id] ?? []
+        let runs: [HookRunSummary]
         if hook.record == .none {
-            lastRuns[hook.id] = [summary.reduced]
-            return
+            runs = [summary.reduced]
+        } else {
+            log.record(entry)
+            runs = Array((previous + [summary]).suffix(Self.keptRunSummaries))
         }
-        log.record(entry)
-        lastRuns[hook.id] = Array(((lastRuns[hook.id] ?? []) + [summary]).suffix(Self.keptRunSummaries))
+        lastRuns[hook.id] = runs
+        let left = Set(previous.map(\.id)).subtracting(runs.map(\.id))
+        if !left.isEmpty { runsDidLeave?(left) }
     }
 
     /// The entry's event, subject, site, and Persona; never a title, a name, a path, or a query.

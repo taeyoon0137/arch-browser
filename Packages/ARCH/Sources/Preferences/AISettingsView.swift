@@ -29,7 +29,7 @@ struct AISettingsView: View {
 
     /// The agents' service, whose page shows only when the app shell set one.
     let agents: AgentService?
-    /// The hook registry, whose page shows only when the app shell set one.
+    /// The hook registry. Its page shows only when the app shell set both it and the agents' service, whose runner keeps the hooks' agent runs.
     let hooks: HookRegistry?
     @ObservedObject private var service = AIService.shared
     @ObservedObject private var settings = AIService.shared.settings

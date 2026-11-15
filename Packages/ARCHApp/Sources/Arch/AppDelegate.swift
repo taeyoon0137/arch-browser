@@ -153,6 +153,8 @@ import Terminal
         PreferencesWindowController.hooks = hooks
         agents.didStopAll = { [weak hooks] in hooks?.stopAgentHooks() }
         hooks.featureDidEnd = { [weak agents] in agents?.runs.deleteKeptRuns(of: $0) }
+        hooks.runsDidLeave = { [weak agents] in agents?.runs.deleteKeptRuns(ofHookRuns: $0) }
+        hooks.activityDidClear = { [weak agents] in agents?.runs.deleteAllKeptRuns() }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.becameActiveAt = Date() }
             Task { @MainActor [weak self] in await self?.sync?.refreshIfRequested() }

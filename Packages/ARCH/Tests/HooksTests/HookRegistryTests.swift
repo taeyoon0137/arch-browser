@@ -708,8 +708,11 @@ import Testing
         for content in ["Secret", "account", "token", "abc", nothing.id.uuidString] {
             #expect(!file.contains(content))
         }
+        // Clear Activity tells the app shell, which deletes the kept agent runs that no row reaches any more.
+        var cleared = 0
+        registry.activityDidClear = { cleared += 1 }
         registry.clearActivity()
-        #expect(registry.log.entries.isEmpty && registry.lastRuns.isEmpty)
+        #expect(registry.log.entries.isEmpty && registry.lastRuns.isEmpty && cleared == 1)
     }
 
     /// Keep Nothing keeps a failure's code with Arch's own sentence, and a skip, in memory and logs neither.
@@ -725,11 +728,16 @@ import Testing
         harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
         #expect(await eventually { registry.lastRuns[failing.id]?.last?.code == "notConfigured" })
         #expect(registry.lastRuns[failing.id]?.last?.message == "Assign a model to the Deep tier in Settings ▸ AI.")
+        var left: [Set<UUID>] = []
+        registry.runsDidLeave = { left.append($0) }
         harness.bus.post(.tabSelected(tab: tab, windowID: UUID()))
         #expect(await eventually { registry.lastRuns[daily.id]?.last?.outcome == .completed })
+        let completed = try #require(registry.lastRuns[daily.id]?.last?.id)
         harness.bus.post(.tabSelected(tab: tab, windowID: UUID()))
         #expect(await eventually { registry.lastRuns[daily.id]?.last?.reason == .dailyLimit })
         #expect(registry.log.entries.isEmpty)
+        // The skip replaced the run, so the app shell hears that the run left, to delete any agent runs it kept.
+        #expect(left == [[completed]])
     }
 
     @Test func aRegistryWithoutHooksWritesNothing() async throws {

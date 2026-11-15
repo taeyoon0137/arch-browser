@@ -77,8 +77,6 @@ struct AgentHooksPage: View {
                 Spacer()
                 Button("Clear Activity") {
                     registry.clearActivity()
-                    // Without the last runs, no row would reach the kept runs.
-                    for hook in registry.hooks { runner.deleteKeptRuns(of: .agentHook(hook.id)) }
                     shownSessions = []
                 }
                 .disabled(registry.lastRuns.isEmpty && registry.log.entries.isEmpty)
