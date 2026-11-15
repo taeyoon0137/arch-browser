@@ -1,7 +1,8 @@
-// Dragging a tab between a space's pinned and open lists (bookmark rule 2): the slot it takes beside the row under the pointer (`SidebarTabSlot.placement`) and at each list's end (`SidebarTabSlot.listEnd`), the rows the sidebar then shows (`project`), and what release commits, which leaves the tab as Pin Tab or Unpin Tab leaves it, saved page and unloading included. The frames stand in for a column whose pinned tabs, divider, open tabs, and New Tab row are stacked 2 points apart; the lifted row, the gesture, and the animation are app checks.
+// Dragging a tab between a space's pinned and open lists (bookmark rule 2): the slot it takes beside the row under the pointer (`SidebarTabSlot.placement`), at each list's end (`SidebarTabSlot.listEnd`), and under the divider where no row takes it (`SidebarTabSlot.unpinning`), the rows the sidebar then shows (`project`), and what release commits, which leaves the tab as Pin Tab or Unpin Tab leaves it, saved page, unloading, live folder items, and agent tabs included. The frames stand in for a column whose pinned tabs, divider, open tabs, and New Tab row are stacked 2 points apart; the lifted row, the gesture, and the animation are app checks.
 import ARCHEngine
 import CoreGraphics
 import Foundation
+import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -132,6 +133,11 @@ import Testing
         #expect(lower?.slot == .beside(p2.id, folder: nil, pinned: true, after: true) && lower?.takesRowsPlace == false)
         let upper = SidebarTabSlot.placement(beside: p2, rowFrame: p2Row, dragging: o1, slotFrame: o1Row, current: nil, at: point(145))
         #expect(upper?.slot == .beside(p2.id, folder: nil, pinned: true, after: false) && upper?.takesRowsPlace == true)
+        // The row's middle is in its far half from either side, as a row of the slot's own list counts it, so the slot lands under the pointer and the next move at the same point keeps it.
+        let middle = SidebarTabSlot.placement(beside: p2, rowFrame: p2Row, dragging: o1, slotFrame: o1Row, current: nil, at: point(p2Row.midY))
+        #expect(middle?.slot == .beside(p2.id, folder: nil, pinned: true, after: false) && middle?.takesRowsPlace == true)
+        let fromAbove = SidebarTabSlot.placement(beside: o1, rowFrame: o1Row, dragging: p2, slotFrame: p2Row, current: nil, at: point(o1Row.midY))
+        #expect(fromAbove?.slot == .beside(o1.id, folder: nil, pinned: false, after: true) && fromAbove?.takesRowsPlace == true)
 
         // Release pins it as Pin Tab pins the other open tab, with the page it shows as its saved page.
         let slot = try #require(lower).slot
@@ -253,5 +259,117 @@ import Testing
         session.togglePinned(unpinned)
         #expect(PinState(dragged) == PinState(unpinned))
         #expect(dragged.isPinned && dragged.savedPage?.url == dragged.url && !dragged.isLoaded)
+    }
+
+    @Test func underTheDividerAPinnedTabUnpinsWhereNoRowTakesIt() throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let p1 = tab("p1", pinned: true, in: session, space), p2 = tab("p2", pinned: true, in: session, space)
+        let agentTab = try #require(session.openAgentTab(url: URL(string: "about:blank#agent")!, engine: nil, owner: UUID(), folderName: "Task", in: space.id))
+        let o1 = tab("o1", pinned: false, in: session, space), o2 = tab("o2", pinned: false, in: session, space)
+        // An agent's folder, expanded, starts the open list; neither its row nor its tab takes the user's tab.
+        let agentFolder = try #require(session.folders(in: space.id, pinned: false).first)
+        #expect(agentFolder.isAgentFolder && !agentFolder.isCollapsed && agentTab.agentOwnerID != nil)
+        #expect(session.folderTree.rows(in: space.id, pinned: false).map(\.id) == [agentFolder.id, agentTab.id, o1.id, o2.id])
+        #expect(!session.folderTree.canMoveTab(p2, into: agentFolder.id))
+        let divider = frame(y: 176, height: 10), newTab = frame(y: 340)
+        let frames = [p1.id: frame(y: 100), p2.id: frame(y: 138), agentFolder.id: frame(y: 188), agentTab.id: frame(y: 226), o1.id: frame(y: 264), o2.id: frame(y: 302)]
+        let looseOpenTabs = session.folderTree.tabsOutsideFolders(in: space.id, pinned: false)
+        func unpinning(_ tab: Tab, current: SidebarTabSlot?, at point: CGPoint, openTabs: [Tab]? = nil) -> SidebarTabSlot? {
+            SidebarTabSlot.unpinning(tab, current: current, at: point, divider: divider, newTabRow: newTab, openTabs: openTabs ?? looseOpenTabs, rowFrames: frames)
+        }
+
+        // Past the divider, which showed the tab at the pinned list's end, the gap under it, the agent folder's row, and its tab take the tab before the first open tab.
+        let endOfPins = SidebarTabSlot.end(pinned: true)
+        let beforeO1 = SidebarTabSlot.beside(o1.id, folder: nil, pinned: false, after: false)
+        #expect(unpinning(p2, current: endOfPins, at: point(187)) == beforeO1)
+        #expect(unpinning(p2, current: endOfPins, at: point(200)) == beforeO1)
+        #expect(unpinning(p2, current: endOfPins, at: point(240)) == beforeO1)
+        // A tab still in its own pinned slot, as after a fast drag that skips the divider, too.
+        #expect(unpinning(p2, current: nil, at: point(240)) == beforeO1)
+        // Between two open tabs the lower one takes it, and between the last one and the New Tab row the open list's end does.
+        #expect(unpinning(p2, current: endOfPins, at: point(301)) == .beside(o2.id, folder: nil, pinned: false, after: false))
+        #expect(unpinning(p2, current: endOfPins, at: point(339)) == .end(pinned: false))
+        // Without open tabs outside folders, the agent folder's row takes it to the open list's end.
+        #expect(unpinning(p2, current: endOfPins, at: point(200), openTabs: []) == .end(pinned: false))
+        // A slot among the open tabs, an open tab, the divider and the pinned rows, the New Tab row, and the space beside the rows are left to the other rules.
+        #expect(unpinning(p2, current: beforeO1, at: point(200)) == nil)
+        #expect(unpinning(o1, current: nil, at: point(200)) == nil)
+        #expect(unpinning(p2, current: endOfPins, at: point(180)) == nil)
+        #expect(unpinning(p2, current: endOfPins, at: point(150)) == nil)
+        #expect(unpinning(p2, current: endOfPins, at: point(345)) == nil)
+        #expect(unpinning(p2, current: endOfPins, at: CGPoint(x: 5, y: 200)) == nil)
+
+        var pins = session.folderTree.rows(in: space.id, pinned: true), open = session.folderTree.rows(in: space.id, pinned: false)
+        beforeO1.project(p2, pinnedRows: &pins, openRows: &open)
+        #expect(pins.map(\.id) == [p1.id] && open.map(\.id) == [agentFolder.id, agentTab.id, p2.id, o1.id, o2.id])
+        // Release unpins it as Unpin Tab unpins the other pinned tab, and the agent keeps its folder and tab.
+        beforeO1.commit(p2, in: space, session: session)
+        session.togglePinned(p1)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: true).isEmpty)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == [p1.id, p2.id, o1.id, o2.id])
+        #expect(PinState(p2) == PinState(p1))
+        #expect(p2.savedPage == nil && p2.agentOwnerID == nil)
+        #expect(session.folders(in: space.id).map(\.id) == [agentFolder.id] && agentTab.folderID == agentFolder.id && agentTab.agentOwnerID != nil)
+    }
+
+    @Test func aLiveFolderItemsTabDraggedAmongTheOpenTabsLeavesItsFolderAsUnpinTabDoes() throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A private feed's live folder that has fetched two items. Its address is not in the Keychain store, so no refresh reaches the network.
+        let folder = session.makeFolder(in: space.id, pinned: true)
+        session.updateFolder(folder.id) { $0.live = LiveFolderConfiguration(source: .feed(address: URL(string: "https://fixture.invalid/feed.xml")!, isPrivate: true)) }
+        let items = ["a", "b"].map { LiveItem(id: $0, url: URL(string: "https://fixture.invalid/\($0)")!, title: "Item \($0)") }
+        session.liveFolderService.store.update(folder.id) { $0.recordSuccess(items: items, at: Date()) }
+        let itemTabs = items.map { item in
+            let tab = session.openTab(url: item.url, in: space.id, pinned: true, select: false)
+            LiveFolderTabs.prepare(tab, as: item, inFolder: folder.id)
+            return tab
+        }
+        let dragged = itemTabs[0], unpinned = itemTabs[1]
+        let o1 = tab("o1", pinned: false, in: session, space)
+        #expect(session.folderTree.isLive(dragged.folderID) && dragged.savedPage?.url == items[0].url)
+
+        // The first open tab's upper half takes the item's tab before it.
+        let placement = SidebarTabSlot.placement(beside: o1, rowFrame: frame(y: 188), dragging: dragged, slotFrame: frame(y: 100), current: nil, at: point(195))
+        let slot = try #require(placement).slot
+        #expect(slot == .beside(o1.id, folder: nil, pinned: false, after: false))
+        slot.commit(dragged, in: space, session: session)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == [dragged.id, o1.id])
+        session.togglePinned(unpinned)
+        // Each is an ordinary open tab without a saved page, and the folder has a new tab for each item (live folder rule 4).
+        #expect(PinState(dragged) == PinState(unpinned))
+        #expect(!dragged.isPinned && dragged.folderID == nil && dragged.liveItemID == nil && dragged.savedPage == nil)
+        #expect(unpinned.liveItemID == nil && unpinned.savedPage == nil)
+        let inFolder = session.folderTree.tabs(inFolder: folder.id)
+        #expect(inFolder.compactMap(\.liveItemID).sorted() == ["a", "b"])
+        #expect(!inFolder.contains { $0 === dragged || $0 === unpinned })
+    }
+
+    @Test func anAgentsTabDraggedAmongThePinnedTabsBecomesTheUsersAsPinTabMakesIt() throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let p1 = tab("p1", pinned: true, in: session, space)
+        func agentTab(_ name: String) throws -> Tab {
+            try #require(session.openAgentTab(url: URL(string: "about:blank#\(name)")!, engine: nil, owner: UUID(), folderName: name, in: space.id))
+        }
+        // Each in an agent folder of its own.
+        let dragged = try agentTab("dragged"), overDivider = try agentTab("divider"), pinned = try agentTab("pinned")
+        #expect(session.folders(in: space.id, pinned: false).filter(\.isAgentFolder).count == 3)
+        #expect([dragged, overDivider, pinned].allSatisfy { $0.agentOwnerID != nil })
+
+        // Coming from below, the last pinned tab's lower half takes the agent's tab after it; the divider takes another to the pinned list's end.
+        let placement = SidebarTabSlot.placement(beside: p1, rowFrame: frame(y: 100), dragging: dragged, slotFrame: frame(y: 188), current: nil, at: point(130))
+        let slot = try #require(placement).slot
+        #expect(slot == .beside(p1.id, folder: nil, pinned: true, after: true))
+        slot.commit(dragged, in: space, session: session)
+        SidebarTabSlot.end(pinned: true).commit(overDivider, in: space, session: session)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: true).map(\.id) == [p1.id, dragged.id, overDivider.id])
+        session.togglePinned(pinned)
+        // Each is the user's pinned tab with the page it shows as its saved page, and each agent folder went with its last tab.
+        #expect(PinState(dragged) == PinState(pinned) && PinState(overDivider) == PinState(pinned))
+        #expect(PinState(dragged) == PinState(p1))
+        #expect([dragged, overDivider, pinned].allSatisfy { $0.agentOwnerID == nil })
+        #expect(session.folders(in: space.id).isEmpty)
     }
 }

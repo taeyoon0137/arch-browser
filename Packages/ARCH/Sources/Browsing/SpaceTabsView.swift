@@ -309,7 +309,7 @@ struct SpaceTabsView: View {
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { rowFrames[$0.id]?.contains(point) == true }.flatMap { tree.canMoveTab(tab, into: $0.id) ? $0.id : nil } : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && point.x > listFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: point, in: windowModel) : nil)
-        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. Nor does a live folder's tab, since nothing else enters a live folder and its tabs keep their source's order (live folder rule 4). A row of the tab's own list makes room once the pointer crosses its middle, and a row of the other list, past the divider, as soon as the pointer reaches it, so the tab pins or unpins wherever it enters the other list's rows (`SidebarTabSlot.placement`). The divider ends the pinned list; the New Tab row and the empty space below it end the open list.
+        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. Nor does a live folder's tab, since nothing else enters a live folder and its tabs keep their source's order (live folder rule 4). A row of the tab's own list makes room once the pointer crosses its middle, and a row of the other list, past the divider, as soon as the pointer reaches it, so the tab pins or unpins wherever it enters the other list's rows (`SidebarTabSlot.placement`). The divider ends the pinned list; the New Tab row and the empty space below it end the open list. Between them, where no row takes a pinned tab, it goes before the next open tab outside folders (`SidebarTabSlot.unpinning`).
         guard tabReorder.acceptsRow(at: point, in: listFrame, excluding: sidebarDrag.favoriteBarFrames[space.id]) else {
             if tabSlot != nil { tabSlot = nil }
             return
@@ -326,10 +326,14 @@ struct SpaceTabsView: View {
             frame = endFrame
         } else if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(point) == true }),
                   let rowFrame = rowFrames[target.id], let slot = rowFrames[tab.id],
-                  let placement = SidebarTabSlot.placement(beside: target, rowFrame: rowFrame, dragging: tab, slotFrame: slot, current: tabSlot, at: point) {
-            guard target.agentOwnerID == nil || target.folderID == tab.folderID else { return }
+                  let placement = SidebarTabSlot.placement(beside: target, rowFrame: rowFrame, dragging: tab, slotFrame: slot, current: tabSlot, at: point),
+                  target.agentOwnerID == nil || target.folderID == tab.folderID {
             next = placement.slot
             frame = placement.takesRowsPlace ? rowFrame : nil
+        } else if let unpinned = SidebarTabSlot.unpinning(tab, current: tabSlot, at: point, divider: rowFrames[Self.pinnedListEndID], newTabRow: rowFrames[Self.openListEndID],
+                                                          openTabs: tree.tabsOutsideFolders(in: space.id, pinned: false), rowFrames: rowFrames) {
+            next = unpinned
+            frame = nil
         } else {
             return
         }
