@@ -42,7 +42,7 @@ We also recommend [Dia](https://www.diabrowser.com), the new browser from the te
 
 ## 🧭 Role
 
-Arch is a sidebar-first macOS browser. Keep tabs pinned in a space, compare pages in split view, and ask your own agent about a tab while the page stays in view. Each Persona has its own spaces.
+Arch is a sidebar-first macOS browser with its own implementation: Personas with their own spaces, pinned tabs, split view, a command bar, plugins, media controls, and your own agents working with your tabs.
 
 The core goals are:
 

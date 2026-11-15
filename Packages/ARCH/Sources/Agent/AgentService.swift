@@ -595,10 +595,14 @@ import Foundation
 
     /// The panel's header for a grant: the client, its access, and its place as "Persona / Space".
     private func describeInPanel(_ grant: AgentGrant) {
+        panel.describe(AgentPanelOwner(name: grant.client.displayName, access: grant.level.title, place: place(of: grant)), for: grant.id)
+    }
+
+    /// The grant's "Persona / Space", or its Persona alone while the Persona has no space.
+    public func place(of grant: AgentGrant) -> String {
         let tools = toolHost()
         let persona = tools.personaName(of: grant)
-        let place = tools.space(of: grant).map { "\(persona) / \($0.name)" } ?? persona
-        panel.describe(AgentPanelOwner(name: grant.client.displayName, access: grant.level.title, place: place), for: grant.id)
+        return tools.space(of: grant).map { "\(persona) / \($0.name)" } ?? persona
     }
 
     /// The tool host for a call on a connection, or for what agent tabs report, with the service's cards and waits.
