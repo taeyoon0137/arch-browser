@@ -71,9 +71,9 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         versionEngines(among: running).first { engineChecks[$0] != nil && !engines.contains($0) && !dismissedVersionNotes.contains($0) }
     }
 
-    /// What the plugin may do, one sentence each, as Settings states it in the install sheet's order: the grant's permissions, the data kinds that come with `ai` and the API permissions that come with a web extension, then the grant's sites.
+    /// What the plugin may do, one sentence each, as Settings states it in the install sheet's order: the grant's permissions, the data kinds that come with `ai` and the API permissions that come with a web extension, then the grant's sites and, for `whenInvoked`, its site access.
     public var accessSummaries: [String] {
-        permissionSummaries + includedSummaries + grant.sites.map(\.accessSummary)
+        permissionSummaries + includedSummaries + grant.sites.map(\.accessSummary) + grant.siteAccessSummaries
     }
 
     /// The sentence of each permission of the grant, in a fixed order.
@@ -89,10 +89,10 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     /// The most sites whose sentences Settings lists among `accessSummaries`; with more, it states them in one (`accessBrief`).
     public static let listedSiteLimit = 3
 
-    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence and those that come with the grant, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
+    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence and those that come with the grant, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more", followed by the site access's sentence for `whenInvoked`.
     public var accessBrief: [String]? {
         guard grant.sites.count > Self.listedSiteLimit, let sites = MatchPattern.briefAccessSummary(of: grant.sites) else { return nil }
-        return permissionSummaries + includedSummaries + [sites]
+        return permissionSummaries + includedSummaries + [sites] + grant.siteAccessSummaries
     }
 }
 
@@ -121,11 +121,16 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var plugins: [InstalledPlugin] {
         didSet {
             contributions = PluginContributionIndex(plugins)
+            pruneSiteAccess()
             runEnabledPlugins()
             registerAIFeatures()
         }
     }
     @Published public private(set) var contributions: PluginContributionIndex
+    /// The page scripts of the plugins that reach their sites `whenInvoked` and have access in a tab, by tab, which the session gives the tab after the Persona's (`pageScripts(forTab:)`). Each runs only on the host of the tab's access, besides its patterns and the granted sites.
+    @Published public private(set) var tabPageScripts: [UUID: [EnginePageScript]] = [:]
+    /// The tabs where each plugin that reaches its sites `whenInvoked` has access, by plugin and tab.
+    private var siteAccess: [PluginID: [UUID: TabSiteAccess]] = [:]
     /// The pairs whose versions are both listed, in the order the user made them.
     @Published public private(set) var engineVersions: [PluginEngineVersions] = []
     /// Why the last write of `plugins.json` failed, as Settings states it, while the file lacks changes of this run: switches, joins, separations, dismissed notes, removals, and the engines' answers, which keep their effect until Arch quits. Each change writes the whole file again, so the first write that succeeds saves them all and clears it. An install whose write fails throws instead and leaves nothing to save.
@@ -181,6 +186,16 @@ public final class PluginManager: ObservableObject {
         let activation: Task<Void, any Error>
         /// Whether the activation succeeded, after which uses reach the plugin without waiting.
         var isActive = false
+    }
+
+    /// The access that running one of a `whenInvoked` plugin's commands in a tab gives it: the tab's pages on the host of the document the command ran on, while the tab keeps the page it had then and the plugin the grant and manifest it had then.
+    private struct TabSiteAccess {
+        /// `<scheme>://<host>/*` of the document the command ran on.
+        let site: MatchPattern
+        /// The tab's page at the command. A tab that gets another page, as when it unloads or changes engines, loses the access.
+        weak var contents: (any EngineWebContents)?
+        let grant: PluginGrant
+        let manifest: PluginManifest
     }
 
     /// `directory` is the app's Application Support folder. Built-in plugins get everything their manifests ask for. Of two built-in plugins with the same identifier, the first counts. The installed plugins follow, each read from its package, script plugins by the manager and other kinds by their `runtimes`; one whose package or `plugins.json` entry does not read, as one of a kind without a runtime, stays in the file but out of the list. A version whose identifier ends in an engine and that no record pairs, as a build before engine versions leaves it, is paired again with the other plugin of its package's identifier. The runtimes learn the enabled plugins of their kinds at once.
@@ -251,7 +266,7 @@ public final class PluginManager: ObservableObject {
     /// The installed package as the list shows it under its entry's identifier, with the entry's proof, with the part of the entry's grant that its manifest asks for, with why its runtime cannot run it, if it cannot, with the current answers of the engines that checked it, and with the engines whose note asking for a version the user dismissed.
     private static func installedPlugin(_ package: PluginPackage, id: PluginID, install: PluginListFile.Install, isEnabled: Bool, runtime: (any PluginRuntime)?) -> InstalledPlugin {
         InstalledPlugin(kind: package.kind, manifest: package.manifest, origin: package.origin, proof: install.proof, predatesProof: install.predatesProof,
-                        packageURL: package.rootURL, grant: install.grant.limited(to: package.manifest),
+                        packageURL: package.rootURL, grant: install.grant.limited(to: package.manifest, kind: package.kind),
                         isEnabled: isEnabled, installedAt: install.installedAt, unavailability: runtime?.unavailability,
                         engineChecks: currentChecks(install.engineChecks, engines: runtime?.engines ?? [:]), entryID: id == package.manifest.id ? nil : id,
                         dismissedVersionNotes: Set((install.dismissedVersionNotes ?? []).compactMap(EngineKind.init(rawValue:))))
@@ -566,7 +581,7 @@ public final class PluginManager: ObservableObject {
         let installed = package.moved(to: move.installedURL)
         let runtime = runtimes[installed.kind]
         let checks = Self.fileChecks(package.engineChecks, engines: runtime?.engines ?? [:])
-        var install = PluginListFile.Install(id: id.rawValue, origin: package.origin, proof: package.proof, grant: grant.limited(to: package.manifest), installedAt: Date(),
+        var install = PluginListFile.Install(id: id.rawValue, origin: package.origin, proof: package.proof, grant: grant.limited(to: package.manifest, kind: package.kind), installedAt: Date(),
                                              engineChecks: checks.isEmpty ? nil : checks)
         if !isNew, let index = installs.firstIndex(where: { $0.id == install.id }) {
             if case let .readable(old) = installs[index] { install.dismissedVersionNotes = old.dismissedVersionNotes }
@@ -919,6 +934,8 @@ public final class PluginManager: ObservableObject {
         events?.cancel()
         events = nil
         for id in Array(running.keys) { stop(id) }
+        siteAccess = [:]
+        tabPageScripts = [:]
         badges = [:]
         engineVersions = []
         plugins = []
@@ -962,20 +979,21 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Contributions
 
-    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. The plugin receives the invocation as `shown(_:to:)` gives it. A command that fails, or whose plugin fails to start, beeps.
+    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`). The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
         guard let installed = enabledPlugin(command.plugin), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
+        grantSiteAccess(to: installed, for: invocation)
         do {
-            try await start(installed)?.run(command.command, shown(invocation, to: installed.grant))
+            try await start(installed)?.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
         } catch {
             NSSound.beep()
         }
     }
 
-    /// The invocation as a plugin with the grant sees it: its tab as `shown(_:to:)` gives it, and for a plugin with `ai`, none of what the user clicked on when the tab's page is on a site excluded from AI, and no link or image address on such a site, which its code could send to a model as text.
-    private func shown(_ invocation: PluginInvocation, to grant: PluginGrant) -> PluginInvocation {
+    /// The invocation as a plugin with the grant sees it: its tab as `shown(_:to:of:)` gives it, and for a plugin with `ai`, none of what the user clicked on when the tab's page is on a site excluded from AI, and no link or image address on such a site, which its code could send to a model as text.
+    private func shown(_ invocation: PluginInvocation, to grant: PluginGrant, of plugin: PluginID) -> PluginInvocation {
         var shown = invocation
-        shown.tab = invocation.tab.map { self.shown($0, to: grant) }
+        shown.tab = invocation.tab.map { self.shown($0, to: grant, of: plugin) }
         if let tab = invocation.tab, excludesAI(tab, for: grant) {
             shown.linkURL = nil
             shown.imageURL = nil
@@ -986,9 +1004,9 @@ public final class PluginManager: ObservableObject {
         return shown
     }
 
-    /// The tab as a plugin with the grant sees it: without what the grant does not cover, and for a plugin with `ai` without the title and address of a page on a site excluded from AI, which its code could send to a model as text (hook decision 14).
-    fileprivate func shown(_ tab: PluginTab, to grant: PluginGrant) -> PluginTab {
-        var shown = tab.redacted(for: grant)
+    /// The tab as the plugin with the grant sees it: without the title and addresses of a page it does not reach (`reaches(_:in:of:grant:)`) unless the grant has `tabs`, and for a plugin with `ai` without those of a page on a site excluded from AI, which its code could send to a model as text (hook decision 14).
+    fileprivate func shown(_ tab: PluginTab, to grant: PluginGrant, of plugin: PluginID) -> PluginTab {
+        var shown = tab.redacted(for: grant) { self.reaches($0, in: tab, of: plugin, grant: grant) }
         if excludesAI(tab, for: grant) {
             shown.title = nil
             shown.url = nil
@@ -1029,19 +1047,20 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Page scripts
 
-    /// Whether a page script of the enabled plugin runs in the main frame at `url`: the script's patterns and one of the plugin's granted sites cover the address.
+    /// Whether a page script of the enabled plugin runs in the main frame at `url` in every tab: the script's patterns and one of the plugin's granted sites cover the address, and the plugin reaches its sites as listed rather than `whenInvoked`, where its scripts run only in a tab after one of its commands.
     public func pageScriptsCover(_ url: URL, of id: PluginID) -> Bool {
-        guard let installed = enabledPlugin(id), installed.grant.covers(url) else { return false }
+        guard let installed = enabledPlugin(id), installed.grant.siteAccess == .listedSites, installed.grant.covers(url) else { return false }
         return installed.manifest.contributions.pageScripts.contains { $0.covers(url) }
     }
 
-    /// Passes a value that a page script in `tab` sent to its plugin, starting the plugin first if it has not started. The value reaches the plugin only while the plugin is enabled and its granted sites cover the sending frame's document, and the plugin receives the tab without what its grant does not cover. A plugin with `ai` could send what a page script read to a model as text, so it gets nothing from a frame or a tab on a site excluded from AI. Returns the plugin's reply as JSON text, or nil when there is none or the plugin fails.
+    /// Passes a value that a page script in `tab` sent to its plugin, starting the plugin first if it has not started. The value reaches the plugin only while the plugin is enabled and reaches the sending frame's document in the tab (`reaches(_:in:of:grant:)`), and the plugin receives the tab without what its grant does not cover. A plugin with `ai` could send what a page script read to a model as text, so it gets nothing from a frame or a tab on a site excluded from AI. Returns the plugin's reply as JSON text, or nil when there is none or the plugin fails.
     public func receive(_ message: EnginePageScriptMessage, from tab: PluginTab) async -> String? {
         guard let installed = plugins.first(where: { $0.id.pageScriptWorld == message.world }), installed.isEnabled,
-              let frameURL = message.frameURL, installed.grant.covers(frameURL),
+              let frameURL = message.frameURL, reaches(frameURL, in: tab, of: installed.id, grant: installed.grant),
               !excludesAI(frameURL, for: installed.grant), !excludesAI(tab, for: installed.grant),
               let body = try? JSONDecoder().decode(PluginValue.self, from: Data(message.json.utf8)) else { return nil }
-        let page = PluginPageMessage(tab: tab.redacted(for: installed.grant), frameURL: frameURL, isMainFrame: message.isMainFrame, body: body)
+        let page = PluginPageMessage(tab: tab.redacted(for: installed.grant) { self.reaches($0, in: tab, of: installed.id, grant: installed.grant) },
+                                     frameURL: frameURL, isMainFrame: message.isMainFrame, body: body)
         do {
             guard let reply = try await start(installed)?.receive(page) else { return nil }
             return String(decoding: try JSONEncoder().encode(reply), as: UTF8.self)
@@ -1050,17 +1069,107 @@ public final class PluginManager: ObservableObject {
         }
     }
 
+    // MARK: Site access
+
+    /// The page scripts that a tab's pages run: the Persona's, which every tab runs, then those of the plugins that have access in the tab after one of their commands ran there.
+    public func pageScripts(forTab id: UUID) -> [EnginePageScript] {
+        contributions.pageScripts + (tabPageScripts[id] ?? [])
+    }
+
+    /// Gives a plugin that reaches its sites `whenInvoked` access in the invocation's tab, on the host of the document it shows, when the tab is one of the Persona's and the granted sites cover that document. The plugin's page scripts that cover the document then run in it at once, without the user's gesture as a page run, which on WebKit needs the flags for plugins' page runs and otherwise leaves them to the tab's next document, and run in the tab's later documents on the host (`tabPageScripts`). A tab that has the access keeps it as it is.
+    private func grantSiteAccess(to installed: InstalledPlugin, for invocation: PluginInvocation) {
+        guard installed.grant.siteAccess == .whenInvoked, let id = invocation.tab?.id, let tab = personaTabs().first(where: { $0.id == id }),
+              let document = tab.documentURL, installed.grant.covers(document), currentSiteAccess(of: installed.id, in: tab) == nil,
+              let scheme = document.scheme, let host = document.host(), let site = try? MatchPattern("\(scheme)://\(host)/*"),
+              let contents = browserHost?.webContents(forTab: id) else { return }
+        siteAccess[installed.id, default: [:]][id] = TabSiteAccess(site: site, contents: contents, grant: installed.grant, manifest: installed.manifest)
+        publishTabPageScripts()
+        for script in installed.manifest.contributions.pageScripts where script.covers(document) {
+            guard let engineScript = script.engineScript(world: installed.id.pageScriptWorld, sites: installed.grant.sites, within: [site]) else { continue }
+            contents.executeJavaScriptWithoutUserGesture(engineScript.source, inWorld: engineScript.world) { _ in }
+        }
+    }
+
+    /// Whether the plugin with the grant reaches the page at `url` in `tab`, a tab of the Persona as the browser host gives it: the granted sites cover the page, and for `whenInvoked` the plugin's access in the tab covers it too. Without a tab, a `whenInvoked` plugin reaches no page.
+    fileprivate func reaches(_ url: URL, in tab: PluginTab?, of plugin: PluginID, grant: PluginGrant) -> Bool {
+        guard grant.covers(url) else { return false }
+        guard grant.siteAccess == .whenInvoked else { return true }
+        guard let tab, let access = currentSiteAccess(of: plugin, in: tab) else { return false }
+        return access.site.matches(url)
+    }
+
+    /// The host of the plugin's access in the tab, for a page run's check in the page, or none without access, which covers no page.
+    fileprivate func accessSites(of plugin: PluginID, inTab id: UUID) -> [MatchPattern] {
+        guard let tab = personaTabs().first(where: { $0.id == id }), let access = currentSiteAccess(of: plugin, in: tab) else { return [] }
+        return [access.site]
+    }
+
+    /// The plugin's access in `tab`, a tab of the Persona as the browser host gives it, while it holds: the tab keeps the page it had at the command and shows a document on the access's host, and the plugin is enabled with the grant and manifest it had then. Access that no longer holds ends.
+    private func currentSiteAccess(of plugin: PluginID, in tab: PluginTab) -> TabSiteAccess? {
+        guard let access = siteAccess[plugin]?[tab.id] else { return nil }
+        if let installed = enabledPlugin(plugin), installed.grant == access.grant, installed.manifest == access.manifest,
+           let contents = access.contents, contents === browserHost?.webContents(forTab: tab.id), let document = tab.documentURL, access.site.matches(document) {
+            return access
+        }
+        endSiteAccess(of: [plugin], inTab: tab.id)
+        return nil
+    }
+
+    /// Ends the access that a tab loses with the event: all of it when the tab closes or leaves the Persona's tabs, and otherwise what no longer holds, as once the tab commits a document of another host.
+    private func endSiteAccess(after event: BrowserEvent) {
+        guard let id = event.tab?.id else { return }
+        let holders = siteAccess.filter { $0.value[id] != nil }.map(\.key)
+        guard !holders.isEmpty else { return }
+        guard event.kind != .tabClosed, let tab = personaTabs().first(where: { $0.id == id }) else { return endSiteAccess(of: holders, inTab: id) }
+        for plugin in holders { _ = currentSiteAccess(of: plugin, in: tab) }
+    }
+
+    private func endSiteAccess(of plugins: [PluginID], inTab id: UUID) {
+        for plugin in plugins { siteAccess[plugin]?[id] = nil }
+        siteAccess = siteAccess.filter { !$0.value.isEmpty }
+        publishTabPageScripts()
+    }
+
+    /// Ends the access of the plugins that are no longer enabled, or whose grant or manifest changed, as at an update, after a change to the list.
+    private func pruneSiteAccess() {
+        var pruned: [PluginID: [UUID: TabSiteAccess]] = [:]
+        for (plugin, tabs) in siteAccess {
+            guard let installed = enabledPlugin(plugin) else { continue }
+            let kept = tabs.filter { $0.value.grant == installed.grant && $0.value.manifest == installed.manifest }
+            if !kept.isEmpty { pruned[plugin] = kept }
+        }
+        guard pruned.values.map(\.count).reduce(0, +) != siteAccess.values.map(\.count).reduce(0, +) else { return }
+        siteAccess = pruned
+        publishTabPageScripts()
+    }
+
+    /// Sets `tabPageScripts` from each tab's access, in the order of the plugins in the list, each script checking the access's host besides its patterns and the granted sites.
+    private func publishTabPageScripts() {
+        var scripts: [UUID: [EnginePageScript]] = [:]
+        for plugin in plugins {
+            for (tab, access) in siteAccess[plugin.id] ?? [:] {
+                scripts[tab, default: []] += access.manifest.contributions.pageScripts.compactMap {
+                    $0.engineScript(world: plugin.id.pageScriptWorld, sites: access.grant.sites, within: [access.site])
+                }
+            }
+        }
+        if scripts != tabPageScripts { tabPageScripts = scripts }
+    }
+
     // MARK: Events
 
     /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. A plugin never receives the events its own calls caused, such as the title change of its rename, and receives at most 10 events for one subject and 60 in all within a minute, so a listener that reacts to another plugin's or a hook's changes cannot keep them going without end. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
     /// A plugin with `ai` receives its events through the shared hook scheduler instead (`hookStep(for:view:)`): one step for each, which joins the event's chain at `hookOrder`.
     private func deliver(_ event: BrowserEvent) {
         guard !isClosed else { return }
+        endSiteAccess(after: event)
         var steps: [AIHookStep] = []
         for installed in plugins where installed.isEnabled && installed.unavailability == nil && installed.manifest.events.contains(event.kind) {
             if event.cause?.origin == .plugin(id: installed.id.rawValue) { continue }
             let grant = installed.grant
-            guard let view = event.view(.plugin(tabs: grant.permissions.contains(.tabs), downloads: false, covers: grant.covers)),
+            // Only a plugin that reaches its sites `whenInvoked` needs the tab, whose access its addresses need.
+            let tab = grant.siteAccess == .whenInvoked ? event.tab.flatMap { tab in personaTabs().first { $0.id == tab.id } } : nil
+            guard let view = event.view(.plugin(tabs: grant.permissions.contains(.tabs), downloads: false, covers: { self.reaches($0, in: tab, of: installed.id, grant: grant) })),
                   eventLimiter.admit(installed.id.rawValue, subject: event.subject, at: Date()) == .allowed else { continue }
             if installed.runsHooks, ai != nil {
                 steps.append(hookStep(for: installed.id, view: view, tab: event.tab?.id, document: Self.document(of: event)))
@@ -1245,11 +1354,11 @@ public final class PluginManager: ObservableObject {
         browserHost?.tabs(in: persona) ?? []
     }
 
-    /// The tab of the Persona that a page call of a plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document outside the granted sites, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
-    fileprivate func page(of id: UUID, for grant: PluginGrant) throws -> (tab: PluginTab, contents: any EngineWebContents) {
+    /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
+    fileprivate func page(of id: UUID, for grant: PluginGrant, of plugin: PluginID) throws -> (tab: PluginTab, contents: any EngineWebContents) {
         guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
         guard let document = tab.documentURL else { throw PluginError.noPage }
-        guard grant.covers(document), !excludesAI(tab, for: grant) else { throw PluginError.siteNotGranted }
+        guard reaches(document, in: tab, of: plugin, grant: grant), !excludesAI(tab, for: grant) else { throw PluginError.siteNotGranted }
         guard let contents = browserHost?.webContents(forTab: id) else { throw PluginError.noPage }
         return (tab, contents)
     }
@@ -1555,7 +1664,7 @@ final class ScopedPluginContext: PluginPanelContext {
     func tabs() throws -> [PluginTab] {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { return [] }
-        return manager.personaTabs().map { manager.shown($0, to: grant) }
+        return manager.personaTabs().map { manager.shown($0, to: grant, of: pluginID) }
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {
@@ -1594,9 +1703,10 @@ final class ScopedPluginContext: PluginPanelContext {
     func runPageScript(_ script: PluginScript, in id: PluginTab.ID) async throws -> PluginValue {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { throw PluginError.notGranted(id) }
-        let function = try await PluginPageRun.function(running: manager.source(of: script, for: pluginID), sites: grant.sites)
+        let function = try await PluginPageRun.function(running: manager.source(of: script, for: pluginID), sites: grant.sites,
+                                                        within: grant.siteAccess == .whenInvoked ? manager.accessSites(of: pluginID, inTab: id) : nil)
         guard !hasEnded else { throw PluginError.stopped }
-        let page = try manager.page(of: id, for: grant)
+        let page = try manager.page(of: id, for: grant, of: pluginID)
         let reply = try await run(function, in: page.contents, waitingAtMost: manager.pageRunLimit)
         guard !hasEnded else { throw PluginError.stopped }
         guard let shown = manager.personaTabs().first(where: { $0.id == id }), shown.documentID == page.tab.documentID else { throw PluginError.noPage }
@@ -1633,7 +1743,7 @@ final class ScopedPluginContext: PluginPanelContext {
     func postMessage(_ message: PluginValue, toTab id: PluginTab.ID) throws {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { throw PluginError.notGranted(id) }
-        let page = try manager.page(of: id, for: grant)
+        let page = try manager.page(of: id, for: grant, of: pluginID)
         do {
             try page.contents.postPageScriptMessage(String(decoding: try JSONEncoder().encode(message), as: UTF8.self), toWorld: pluginID.pageScriptWorld)
         } catch is EngineUserGestureError {

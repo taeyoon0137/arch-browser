@@ -25,16 +25,27 @@ final class PluginPages {
             }
     }
 
-    /// Gives the Persona's tabs the plugins' page scripts whenever they change, from each page's next document on, after the app's own (`TabUnloading.pageScripts(withPluginScripts:inAgentTab:)`). A web contents the session creates starts with the scripts of that moment.
+    /// Gives the Persona's tabs the plugins' page scripts whenever they change, from each page's next document on, after the app's own (`TabUnloading.pageScripts(withPluginScripts:inAgentTab:)`): every tab the Persona's, when those change, and a tab whose plugins' access changes those of the plugins with access in it (`PluginManager.pageScripts(forTab:)`). A web contents the session creates starts with the Persona's scripts of that moment.
     func follow(_ plugins: PluginManager, of personaID: Persona.ID) {
-        pageScriptSubscriptions[personaID] = plugins.$contributions.map(\.pageScripts).removeDuplicates().dropFirst()
-            .sink { [weak self] scripts in
+        var applied = (shared: plugins.contributions.pageScripts, byTab: plugins.tabPageScripts)
+        pageScriptSubscriptions[personaID] = plugins.$contributions.map(\.pageScripts).combineLatest(plugins.$tabPageScripts)
+            .sink { [weak self] shared, byTab in
                 MainActor.assumeIsolated {
-                    for tab in self?.session?.allTabs ?? [] where tab.personaID == personaID {
-                        tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: scripts, inAgentTab: tab.agentOwnerID != nil))
-                    }
+                    let changed = Set(applied.byTab.keys).union(byTab.keys).filter { applied.byTab[$0] != byTab[$0] }
+                    let sharedChanged = shared != applied.shared
+                    applied = (shared, byTab)
+                    guard sharedChanged || !changed.isEmpty else { return }
+                    self?.setPageScripts(ofTabsIn: personaID, where: { sharedChanged || changed.contains($0.id) }, shared: shared, byTab: byTab)
                 }
             }
+    }
+
+    /// Gives the Persona's tabs that `needs` picks their page scripts, then again those of the tabs with scripts of their own, since on WebKit a tab shares its script list with the pages it opens and the last list set for them holds: the plugins' scripts there check their tab's host, and only the tab with the access hears from them.
+    private func setPageScripts(ofTabsIn personaID: Persona.ID, where needs: (Tab) -> Bool, shared: [EnginePageScript], byTab: [UUID: [EnginePageScript]]) {
+        let tabs = session?.allTabs.filter { $0.personaID == personaID } ?? []
+        for tab in tabs.filter({ needs($0) && byTab[$0.id] == nil }) + tabs.filter({ byTab[$0.id] != nil }) {
+            tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: shared + (byTab[tab.id] ?? []), inAgentTab: tab.agentOwnerID != nil))
+        }
     }
 
     /// Stops following the plugins of a Persona the user deleted.
@@ -42,13 +53,15 @@ final class PluginPages {
         pageScriptSubscriptions[personaID] = nil
     }
 
-    /// Sets the callbacks of each tab that joins and gives it its Persona's page scripts: a page that another page opens starts with that page's scripts, and the preview panel's pages run none.
+    /// Sets the callbacks of each tab that joins and gives it its Persona's page scripts: a page that another page opens starts with that page's scripts, and the preview panel's pages run none. The tabs with scripts of their own then take theirs again, which a page that one of them opened would otherwise replace on WebKit.
     private func follow(_ tabs: [Tab]) {
         guard let session else { return }
         followedTabIDs.formIntersection(tabs.map(\.id))
+        var joinedPersonas: Set<Persona.ID> = []
         for tab in tabs where followedTabIDs.insert(tab.id).inserted {
             let plugins = session.plugins(in: tab.personaID)
-            tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: plugins.contributions.pageScripts, inAgentTab: tab.agentOwnerID != nil))
+            joinedPersonas.insert(tab.personaID)
+            tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: plugins.pageScripts(forTab: tab.id), inAgentTab: tab.agentOwnerID != nil))
             tab.receivePageScriptMessage = { [weak session, weak tab] message, reply in
                 MainActor.assumeIsolated {
                     guard let tab, let pluginTab = session?.pluginTab(tab) else { return reply(nil) }
@@ -60,6 +73,11 @@ final class PluginPages {
                     if let tab { self?.addMenuItems(for: element, in: tab, to: menu) }
                 }
             }
+        }
+        for personaID in joinedPersonas {
+            let plugins = session.plugins(in: personaID)
+            guard !plugins.tabPageScripts.isEmpty else { continue }
+            setPageScripts(ofTabsIn: personaID, where: { _ in false }, shared: plugins.contributions.pageScripts, byTab: plugins.tabPageScripts)
         }
     }
 

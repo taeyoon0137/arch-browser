@@ -9,7 +9,7 @@ import WebKit
 @testable import Plugins
 
 /// A page that runs the scripts the engine would run in its main frame in a JavaScriptCore context of its own, with `location` for its address and a channel whose `send` records what the scripts send, and records the values posted to its worlds.
-private final class ScriptedPage: EngineWebContents {
+final class ScriptedPage: EngineWebContents {
     /// The address of the document that scripts run in.
     var address: String
     /// Runs before each script, as a navigation that comes while the engine runs it.
@@ -117,7 +117,7 @@ private final class ScriptedPage: EngineWebContents {
 }
 
 /// The parts of `location` that the page's check reads, as a browser writes them for `address`.
-private func pageLocation(_ address: String) -> [String: String] {
+func pageLocation(_ address: String) -> [String: String] {
     let url = URL(string: address)!
     let path = url.path()
     return ["protocol": url.scheme!.lowercased() + ":", "hostname": url.host()?.lowercased() ?? "", "pathname": path.isEmpty ? "/" : path, "href": address]
@@ -125,7 +125,7 @@ private func pageLocation(_ address: String) -> [String: String] {
 
 /// The Persona's tabs and their pages, which the tests set.
 @MainActor
-private final class PageHost: PluginBrowserHost {
+final class PageHost: PluginBrowserHost {
     var tabs: [PluginTab] = []
     var pages: [UUID: ScriptedPage] = [:]
 

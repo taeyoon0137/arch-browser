@@ -114,6 +114,8 @@ private struct PluginReviewView: View {
     @State private var updateTarget: PluginID?
     /// The sites the user grants: at first all that the manifest asks for, except, in an update or a version, those that the installed version asked for and the user left out.
     @State private var sites: Set<MatchPattern>
+    /// How a script plugin reaches the sites: at first only in a tab where the user runs one of its commands when its manifest asks for that or asks for every website and has commands, and in an update or a version as the installed grant does.
+    @State private var siteAccess: SiteAccess
     /// Why the last install failed.
     @State private var failure: String?
 
@@ -135,6 +137,7 @@ private struct PluginReviewView: View {
         _choice = State(initialValue: choice)
         _updateTarget = State(initialValue: review.package.updates)
         _sites = State(initialValue: Self.offeredSites(review: review, choice: choice, target: review.package.updates, in: plugins))
+        _siteAccess = State(initialValue: Self.offeredGrant(review: review, choice: choice, target: review.package.updates, in: plugins).siteAccess)
     }
 
     private var package: PluginPackage { review.package }
@@ -264,6 +267,14 @@ private struct PluginReviewView: View {
                             Text(site.description)
                         }
                     }
+                    // Only a script plugin's sites follow Arch's site access; a web extension's engines keep its own.
+                    if package.kind == .script, !manifest.sites.isEmpty, let summary = SiteAccess.whenInvoked.summary {
+                        if manifest.siteAccess == .whenInvoked {
+                            Text(summary)
+                        } else {
+                            Toggle(summary, isOn: Binding(get: { siteAccess == .whenInvoked }, set: { siteAccess = $0 ? .whenInvoked : .listedSites }))
+                        }
+                    }
                 }
                 Section("Files") {
                     ForEach(package.files, id: \.self) { path in
@@ -315,8 +326,8 @@ private struct PluginReviewView: View {
             }
             .padding([.horizontal, .bottom], 20)
         }
-        .onChange(of: choice) { sites = Self.offeredSites(review: review, choice: choice, target: updateTarget, in: plugins) }
-        .onChange(of: updateTarget) { sites = Self.offeredSites(review: review, choice: choice, target: updateTarget, in: plugins) }
+        .onChange(of: choice) { offerGrant() }
+        .onChange(of: updateTarget) { offerGrant() }
     }
 
     /// The engine of the chosen version, if the choice is one.
@@ -387,20 +398,33 @@ private struct PluginReviewView: View {
         }
     }
 
-    /// The sites the review offers at first: for an update, or a version, as an update of the installed plugin would offer them; otherwise all that the manifest asks for.
+    /// The sites the review offers at first (`offeredGrant(review:choice:target:in:)`).
     private static func offeredSites(review: PluginReview, choice: Choice, target: PluginID?, in plugins: PluginManager) -> Set<MatchPattern> {
+        Set(offeredGrant(review: review, choice: choice, target: target, in: plugins).sites)
+    }
+
+    /// The grant the review offers at first: for an update, or a version, as an update of the installed plugin would offer it; otherwise as a new plugin's (`PluginGrant(offeredBy:kind:)`).
+    private static func offeredGrant(review: PluginReview, choice: Choice, target: PluginID?, in plugins: PluginManager) -> PluginGrant {
         let manifest = review.package.manifest
         var installedID = review.versionOf == nil ? target : nil
         if case .version = choice { installedID = review.versionOf ?? review.package.counterpart }
         let installed = installedID.flatMap { id in plugins.plugins.first { $0.id == id } }
-        return Set((installed.map { PluginGrant(updating: $0, to: manifest) } ?? PluginGrant(requestedBy: manifest)).sites)
+        return installed.map { PluginGrant(updating: $0, to: manifest) } ?? PluginGrant(offeredBy: manifest, kind: review.package.kind)
     }
 
-    /// Installs with every permission the manifest asks for and the chosen sites, once the user confirms a grant of every website or of native apps.
+    /// Offers the sites and the site access again for the chosen way to install.
+    private func offerGrant() {
+        let grant = Self.offeredGrant(review: review, choice: choice, target: updateTarget, in: plugins)
+        sites = Set(grant.sites)
+        siteAccess = grant.siteAccess
+    }
+
+    /// Installs with every permission the manifest asks for, the chosen sites, and for a script plugin the chosen site access, once the user confirms a grant of every website as listed or of native apps.
     private func install(isEnabled: Bool) {
         var package = package
         package.updates = target?.id
-        let grant = PluginGrant(permissions: package.manifest.permissions, sites: package.manifest.sites.filter(sites.contains))
+        let grant = PluginGrant(permissions: package.manifest.permissions, sites: package.manifest.sites.filter(sites.contains),
+                                siteAccess: package.kind == .script ? siteAccess : .listedSites)
         let version = joined?.id
         let engine = choiceEngine
         let isNewPlugin = version == nil && target == nil
