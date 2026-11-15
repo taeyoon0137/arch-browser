@@ -107,12 +107,14 @@ enum AgentPageOperation: Encodable {
     /// The boxes a screenshot paints over, file inputs that hold files among them, and the viewport and page sizes; in a tab the user shared, every field's box too.
     case boxes(shared: Bool)
     case act(AgentPageAction)
-    /// Before trusted input (VII.21): the element as `act` checks it, a field focused with its selection placed for `type`, the point to act at with the visual viewport, and the target check armed for the input's events.
+    /// Before trusted input (VII.21): the element as `act` checks it, a field focused with its selection placed for `type`, the point to act at with the visual viewport, and the target check armed for the input's events, with the token that its reads take.
     case prepare(AgentInputPreparation)
-    /// What the target check saw of the input's events, with the page's scroll position; `need` replaces the counts that mark the input's end, `cancelRest` cancels the input's events still to come, and `disarm` ends the check. A check whose counts are reached ends by itself.
-    case inputState(need: AgentInputNeed?, cancelRest: Bool, disarm: Bool)
+    /// What the target check saw of the input's events, with the page's scroll position; `need` replaces the counts that mark the input's end, `cancelRest` cancels the input's events still to come, and `disarm` ends the check. A check whose counts are reached ends by itself. Each applies only to the check that `token` armed; without a token, only the scroll position comes.
+    case inputState(token: Int?, need: AgentInputNeed?, cancelRest: Bool, disarm: Bool)
+    /// Ends whatever the target check holds, so that it cancels none of the user's own input once the user acts in the tab.
+    case releaseInput
 
-    private enum Keys: String, CodingKey { case op, full, ref, shared, scroll, action, words, need, cancelRest, disarm }
+    private enum Keys: String, CodingKey { case op, full, ref, shared, scroll, action, words, token, need, cancelRest, disarm }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: Keys.self)
@@ -136,18 +138,21 @@ enum AgentPageOperation: Encodable {
         case .prepare(let preparation):
             try container.encode("prepare", forKey: .op)
             try container.encode(preparation, forKey: .action)
-        case .inputState(let need, let cancelRest, let disarm):
+        case .inputState(let token, let need, let cancelRest, let disarm):
             try container.encode("inputState", forKey: .op)
+            try container.encodeIfPresent(token, forKey: .token)
             try container.encodeIfPresent(need, forKey: .need)
             try container.encode(cancelRest, forKey: .cancelRest)
             try container.encode(disarm, forKey: .disarm)
+        case .releaseInput:
+            try container.encode("releaseInput", forKey: .op)
         }
     }
 }
 
 /// What `prepare` readies for trusted input.
 struct AgentInputPreparation: Encodable, Equatable {
-    /// `click`, `hover`, `type`, `press`, or `scroll`; a `scroll` without a ref arms no check.
+    /// `click`, `hover`, `type`, `press`, or `scroll`; for a `scroll` without a ref the check only counts `wheel` events.
     var kind: String
     var ref: AgentRefTarget?
     /// For `type`: select the field's text, which the input replaces, instead of placing the caret at its end.
@@ -174,11 +179,12 @@ struct AgentFocusedElement: Encodable, Equatable {
     }
 }
 
-/// The counts of the target check after which an input's events have all come: clicks, key ups, moves, and the length of the text that `beforeinput` events carry.
+/// The counts of the target check after which an input's events have all come: clicks, key ups, moves, wheel turns, and the length of the text that `beforeinput` events carry.
 struct AgentInputNeed: Codable, Equatable {
     var clicks: Int?
     var keyups: Int?
     var moves: Int?
+    var wheels: Int?
     var text: Int?
 }
 
@@ -199,10 +205,12 @@ struct AgentPoint: Decodable, Equatable {
 /// What `prepare` reports.
 struct AgentInputReply: Decodable {
     var url: String
-    /// Why the input cannot go: `act`'s problems; `stale` when focus is on another element than the one the step is for; and `noCheck` (no target check in the document), `inFrame` (focus inside a frame), `noFocus` (the element takes no focus), `noSelection` (a field without a selection to place), and `readOnly` (a read-only field), for which the action uses DOM events.
+    /// Why the input cannot go: `act`'s problems; `stale` when focus is on another element than the one the step is for; and `noCheck` (no target check in the document), `inFrame` (focus inside a frame), `noFocus` (the element takes no focus itself), `noSelection` (a field without a selection to place), `readOnly` (a read-only field), and `inner` (another control lies at the element's center, as a button inside a grid cell does), for which the action uses DOM events.
     var problem: String?
     var cover: String?
     var hit: String?
+    /// The token of the check that `prepare` armed, which the call's reads of the check take.
+    var token: Int?
     /// The element's center in CSS pixels of the layout viewport.
     var point: AgentPoint?
     var viewport: AgentVisualViewport
@@ -325,7 +333,17 @@ public enum AgentPageScripts {
     /// The global through which `prepare` arms the target check and `inputState` reads it.
     static let targetCheckName = "__archAgentInput"
 
-    /// The target check of trusted input (docs/agents.md, Actions), which `Browsing` gives agent tabs' main frames at document start in the world `arch.agent`, so that its capture-phase listeners on the window come before any of the page's. While `prepare` has it armed, it cancels with `preventDefault()` and `stopImmediatePropagation()` each trusted event of the action's kinds whose target is not the element, or inside it, or a label of it, and every later one of the action, and counts what came. A `keyup` it only counts and cancels after an earlier cancel, since the key's own default action, such as Tab's, moves focus before it. It holds the built-ins it calls from document start. On WebKit the page cannot see its world; on Chromium it shares the page's main world, where the page can find and change the check (Risks 19).
+    /// The roles and tags of controls (docs/agents.md, Actions): a click whose element has another control at its center goes as DOM events, and the target check lets no event other than a hover reach the element through another control. `prepare` and the check read this one copy.
+    static let controlRoles = ["button", "checkbox", "combobox", "link", "listbox", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "radio", "searchbox", "slider",
+                               "spinbutton", "switch", "tab", "textbox", "treeitem"]
+    static let controlTags = ["button", "input", "option", "select", "summary", "textarea"]
+    /// The two lists as a JavaScript literal; `a` and `area` with an `href` are controls too.
+    static var controlsLiteral: String {
+        func list(_ names: [String]) -> String { "[" + names.map { "\"\($0)\"" }.joined(separator: ", ") + "]" }
+        return "{ roles: \(list(controlRoles)), tags: \(list(controlTags)) }"
+    }
+
+    /// The target check of trusted input (docs/agents.md, Actions), which `Browsing` gives agent tabs' main frames at document start in the world `arch.agent`, so that its capture-phase listeners on the window come before any of the page's. While `prepare` has it armed, it cancels with `preventDefault()` and `stopImmediatePropagation()` each trusted event of the action's kinds whose target is not the element, or inside it, or a label of it, or for any event other than a hover reaches the element through another control, such as a button inside a grid cell or a label, and every later one of the action, and counts what came. A `keyup` it only counts and cancels after an earlier cancel, since the key's own default action, such as Tab's, moves focus before it; a `wheel` event it only counts, through a passive listener. Arming returns a token, and a read or an end of the check applies only to the check of its token; `release` ends whatever the check holds once the user acts in the tab. It holds the built-ins it calls from document start. On WebKit the page cannot see its world; on Chromium it shares the page's main world, where the page can find and change the check (Risks 19).
     public static let targetCheck = EnginePageScript(world: world, source: targetCheckSource, injectionTime: .documentStart, mainFrameOnly: true)
 
     static let targetCheckSource = #"""
@@ -338,21 +356,48 @@ public enum AgentPageScripts {
       const typeOf = describe(Event.prototype, "type").get, dataOf = describe(InputEvent.prototype, "data").get;
       const parentOf = describe(Node.prototype, "parentNode").get, hostOf = describe(ShadowRoot.prototype, "host").get;
       const localNameOf = describe(Element.prototype, "localName").get, controlOf = describe(HTMLLabelElement.prototype, "control").get;
+      const attributeOf = Element.prototype.getAttribute, lower = String.prototype.toLowerCase;
       const rootOf = describe(Document.prototype, "documentElement").get;
       const KINDS = ["pointerover", "mouseover", "pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "pointermove", "mousemove",
         "keydown", "keypress", "keyup", "beforeinput"];
+      const HOVERS = create(null);
+      HOVERS.pointerover = HOVERS.mouseover = HOVERS.pointermove = HOVERS.mousemove = true;
+      const CONTROLS = \#(controlsLiteral);
+      const controlRoles = create(null), controlTags = create(null);
+      for (let index = 0; index < CONTROLS.roles.length; index += 1) controlRoles[CONTROLS.roles[index]] = true;
+      for (let index = 0; index < CONTROLS.tags.length; index += 1) controlTags[CONTROLS.tags[index]] = true;
       const doc = document;
-      let state = null;
+      let state = null, serial = 0;
       const call = (getter, node) => { try { return apply(getter, node, []); } catch (error) { return null; } };
+      const attribute = (node, name) => { try { return apply(attributeOf, node, [name]); } catch (error) { return null; } };
       const up = (node) => call(parentOf, node) || call(hostOf, node);
-      const within = (target, element) => {
+      // The first token of the role attribute, in lower case.
+      const roleOf = (node) => {
+        const value = attribute(node, "role");
+        if (typeof value !== "string") return "";
+        let token = "";
+        for (let index = 0; index < value.length; index += 1) {
+          const character = value[index];
+          if (character === " " || character === "\t" || character === "\n" || character === "\r" || character === "\f") { if (token) break; } else token += character;
+        }
+        return apply(lower, token, []);
+      };
+      const isControl = (node) => {
+        const name = call(localNameOf, node);
+        if (!name) return false;
+        if (controlTags[name]) return true;
+        if ((name === "a" || name === "area") && attribute(node, "href") !== null) return true;
+        return !!controlRoles[roleOf(node)];
+      };
+      const within = (target, element, strict) => {
         for (let node = target; node; node = up(node)) {
           if (node === element) return true;
           if (call(localNameOf, node) === "label" && call(controlOf, node) === element) return true;
+          if (strict && isControl(node)) return false;
         }
         return false;
       };
-      const accepts = (current, target) => current.exact ? target === current.element || target === doc || target === call(rootOf, doc) : within(target, current.element);
+      const accepts = (current, target, type) => current.exact ? target === current.element || target === doc || target === call(rootOf, doc) : within(target, current.element, !HOVERS[type]);
       const listener = (event) => {
         const current = state;
         if (!current || current.done || !event.isTrusted) return;
@@ -360,7 +405,9 @@ public enum AgentPageScripts {
         const type = apply(typeOf, event, []);
         if (!current.kinds[type]) return;
         current.seen += 1;
-        if (!current.cancelled && type !== "keyup" && !accepts(current, apply(pathOf, event, [])[0])) current.cancelled = true;
+        // A wheel turn scrolls what lies under the point and activates nothing, so it is only counted.
+        if (type === "wheel") { current.wheels += 1; return; }
+        if (!current.cancelled && type !== "keyup" && !accepts(current, apply(pathOf, event, [])[0], type)) current.cancelled = true;
         if (current.cancelled) {
           apply(cancel, event, []);
           apply(stop, event, []);
@@ -375,28 +422,40 @@ public enum AgentPageScripts {
         }
       };
       for (let index = 0; index < KINDS.length; index += 1) apply(listen, window, [KINDS[index], listener, true]);
+      const passive = create(null);
+      passive.capture = true;
+      passive.passive = true;
+      apply(listen, window, ["wheel", listener, passive]);
+      const counts = (need) => ({ clicks: need.clicks, keyups: need.keyups, moves: need.moves, wheels: need.wheels, text: need.text });
       const complete = (current) => {
         const need = current.need;
         // Text comes as one `beforeinput`, or on Chromium as a keypress per UTF-16 unit, whose `beforeinput` the same task dispatches.
         return (!need.clicks || current.clicks >= need.clicks) && (!need.keyups || current.keyups >= need.keyups) && (!need.moves || current.moves >= need.moves)
-          && (!need.text || current.text >= need.text || current.keypresses >= need.text);
+          && (!need.wheels || current.wheels >= need.wheels) && (!need.text || current.text >= need.text || current.keypresses >= need.text);
       };
       define(globalThis, "\#(targetCheckName)", { value: freeze({
         arm(element, exact, kinds, need, holdMs) {
           const set = create(null);
           for (let index = 0; index < kinds.length; index += 1) set[kinds[index]] = true;
-          state = { element, exact, kinds: set, need: { clicks: need.clicks, keyups: need.keyups, moves: need.moves, text: need.text }, until: apply(now, clock, []) + holdMs,
-            done: false, seen: 0, cancelled: false, clicks: 0, keyups: 0, keypresses: 0, moves: 0, text: 0 };
+          serial += 1;
+          state = { token: serial, element, exact, kinds: set, need: counts(need), until: apply(now, clock, []) + holdMs,
+            done: false, seen: 0, cancelled: false, clicks: 0, keyups: 0, keypresses: 0, moves: 0, wheels: 0, text: 0 };
+          return serial;
         },
-        read(need, cancelRest, disarm) {
+        read(token, need, cancelRest, disarm) {
           const current = state;
           if (!current) return { armed: false, seen: 0, cancelled: false, complete: false };
-          if (need) current.need = { clicks: need.clicks, keyups: need.keyups, moves: need.moves, text: need.text };
+          // Another action armed the check since, so this one's later events met that action's check, and none of them counts as delivered.
+          if (current.token !== token) return { armed: false, seen: 0, cancelled: true, complete: false };
+          if (need) current.need = counts(need);
           if (cancelRest) current.cancelled = true;
           if (apply(now, clock, []) > current.until) current.done = true;
           const reply = { armed: !current.done, seen: current.seen, cancelled: current.cancelled, complete: complete(current) };
           if (disarm || reply.complete) state = null;
           return reply;
+        },
+        release() {
+          if (state) state.done = true;
         },
       }) });
     }
@@ -1014,13 +1073,46 @@ public enum AgentPageScripts {
       return true;
     }
 
-    /// Readies trusted input (docs/agents.md, Actions): the element passes `act`'s checks; for `type`, and `press` with a ref, it takes focus; for `press` without a ref, the element the policy read still has focus. Then the target check is armed in the same task, so no page script runs between the checks and the arming.
+    const CONTROLS = \#(AgentPageScripts.controlsLiteral);
+    const CONTROL_ROLES = new Set(CONTROLS.roles), CONTROL_TAGS = new Set(CONTROLS.tags);
+
+    /// Whether an element is a control, as the target check counts one.
+    function isControl(node) {
+      if (!node || node.nodeType !== 1) return false;
+      const tag = tagOf(node);
+      if (CONTROL_TAGS.has(tag)) return true;
+      if ((tag === "a" || tag === "area") && node.hasAttribute("href")) return true;
+      return CONTROL_ROLES.has((node.getAttribute("role") || "").trim().split(/\s+/)[0].toLowerCase());
+    }
+
+    /// Whether a press at the element's center would reach another control first, such as a button inside a grid cell, whose facts the policy did not read. The hit follows open shadow roots, as the event's target does.
+    function controlAtCenter(el) {
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+      const root = el.getRootNode();
+      let hit = (root.elementFromPoint ? root.elementFromPoint(x, y) : null) || el.ownerDocument.elementFromPoint(x, y);
+      for (let depth = 0; hit && hit.shadowRoot && depth < 32; depth += 1) {
+        const inner = hit.shadowRoot.elementFromPoint(x, y);
+        if (!inner || inner === hit) break;
+        hit = inner;
+      }
+      for (let node = hit; node; node = node.parentNode || node.host) {
+        if (node === el || (tagOf(node) === "label" && node.control === el)) return false;
+        if (isControl(node)) return true;
+      }
+      return false;
+    }
+
+    /// Readies trusted input (docs/agents.md, Actions): the element passes `act`'s checks, and a click's has no other control at its center; for `type`, and `press` with a ref, the element itself takes focus; for `press` without a ref, the element the policy read still has focus. Then the target check is armed in the same task, so no page script runs between the checks and the arming, and the reply carries its token. A scroll without a ref arms the check to count the wheel turn.
     function prepare() {
       const action = op.action;
       const reply = { url: location.href, viewport: visual() };
-      if (action.kind === "scroll" && !action.ref) return reply;
       const check = globalThis.\#(AgentPageScripts.targetCheckName);
       if (!check) return Object.assign(reply, { problem: "noCheck" });
+      if (action.kind === "scroll" && !action.ref) {
+        reply.token = check.arm(document.documentElement, false, action.kinds, action.need, action.holdMs);
+        return reply;
+      }
       let el = null, exact = false;
       if (action.ref) {
         const resolved = resolve(action.ref);
@@ -1030,6 +1122,7 @@ public enum AgentPageScripts {
         // A key goes to the focused element whatever lies over it, as after typed text that shows the page's suggestions.
         const reason = action.kind === "press" ? unusable(el) : blocked(el);
         if (reason) return Object.assign(reply, reason);
+        if (action.kind === "click" && controlAtCenter(el)) return Object.assign(reply, { problem: "inner" });
       } else {
         el = focusedElement();
         if (el && (tagOf(el) === "iframe" || tagOf(el) === "frame")) return Object.assign(reply, { problem: "inFrame" });
@@ -1048,28 +1141,35 @@ public enum AgentPageScripts {
         if (action.kind === "type" && !isEditable(el)) return Object.assign(reply, { problem: "notEditable" });
         // A read-only field takes no text, so trusted text would send no event the check could see.
         if (action.kind === "type" && (tagOf(el) === "input" || tagOf(el) === "textarea") && el.readOnly) return Object.assign(reply, { problem: "readOnly" });
+        // The element itself takes focus, not a control inside it, such as a grid cell's button, which would receive the key.
         const before = focusedElement();
-        if (!before || !contains(el, before)) el.focus();
+        if (before !== el) el.focus();
         const after = focusedElement();
-        // A page whose focus handler moved focus on is stale; an element that takes no focus gets DOM events.
-        if (!after || !contains(el, after)) return Object.assign(reply, { problem: after === before ? "noFocus" : "stale" });
+        // A page whose focus handler moved focus on is stale; an element that takes no focus itself, or hands it into its own shadow tree, gets DOM events.
+        if (after !== el) return Object.assign(reply, { problem: after === before || (el.shadowRoot && contains(el.shadowRoot, after)) ? "noFocus" : "stale" });
         if (action.kind === "type" && !placeSelection(el, !!action.replace)) return Object.assign(reply, { problem: "noSelection" });
       }
       const keyTarget = exact ? null : focusedElement();
       reply.editable = !!keyTarget && isEditable(keyTarget);
       const rect = el.getBoundingClientRect();
       reply.point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      check.arm(el, exact, action.kinds, action.need, action.holdMs);
+      reply.token = check.arm(el, exact, action.kinds, action.need, action.holdMs);
       return reply;
     }
 
     function inputState() {
       const check = globalThis.\#(AgentPageScripts.targetCheckName);
-      const state = check ? check.read(op.need || null, !!op.cancelRest, !!op.disarm) : { armed: false, seen: 0, cancelled: false, complete: false };
+      const state = check && op.token ? check.read(op.token, op.need || null, !!op.cancelRest, !!op.disarm) : { armed: false, seen: 0, cancelled: false, complete: false };
       return Object.assign({ url: location.href, scrollX, scrollY }, state);
     }
 
-    const operations = { snapshot, element, boxes, act, prepare, inputState };
+    function releaseInput() {
+      const check = globalThis.\#(AgentPageScripts.targetCheckName);
+      if (check) check.release();
+      return { url: location.href };
+    }
+
+    const operations = { snapshot, element, boxes, act, prepare, inputState, releaseInput };
     return JSON.stringify(operations[op.op]());
     """#
 }

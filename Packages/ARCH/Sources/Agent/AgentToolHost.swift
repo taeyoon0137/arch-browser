@@ -901,6 +901,7 @@ import Foundation
         case .closed, .takenOver:
             state?.endWrittenLoad(in: tabID)
             approvals.withdraw(tab: tabID, owner: ownerID, document: nil)
+            if case .takenOver = report { releaseInputCheck(in: tabID) }
         case .downloadAsked(let url): if let state { askAboutDownload(url, in: tabID, of: ownerID, state: state, client: client) }
         case .externalAppAsked(let url): if let state { askAboutExternalApp(url, in: tabID, of: ownerID, state: state, client: client) }
         default: break

@@ -173,7 +173,7 @@ import Foundation
         session.tabs.first { $0.id == id && $0.agentOwnerID != nil }
     }
 
-    /// Follows an agent tab's folder, so that the owner hears when the user takes the tab over: by moving it out of the folder, deleting the folder, or keeping its tabs.
+    /// Follows an agent tab's folder, so that the owner hears when the user takes the tab over: by moving it out of the folder, deleting the folder, or keeping its tabs. The tab's next documents then run the target check only while an agent folder still holds it.
     private func follow(_ tab: Tab, owner: UUID) {
         let tabID = tab.id
         let observer = tab.$folderID.combineLatest(session.$folders)
@@ -185,6 +185,10 @@ import Foundation
                     MainActor.assumeIsolated {
                         guard let self, self.followed[tabID]?.owner == owner else { return }
                         self.followed[tabID] = nil
+                        if let tab = self.session.allTabs.first(where: { $0.id == tabID }) {
+                            let plugins = self.session.plugins(in: tab.personaID).contributions.pageScripts
+                            tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: plugins, inAgentTab: tab.agentOwnerID != nil))
+                        }
                         self.agentTabDidReport?(owner, tabID, .takenOver)
                     }
                 }

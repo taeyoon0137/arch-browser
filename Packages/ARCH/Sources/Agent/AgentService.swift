@@ -765,6 +765,9 @@ import Foundation
         guard self.session(withID: session.id) === session, !session.hasEnded, !session.isTakenOver else { return }
         session.takeOver()
         let owned = host.agentTabs(of: session.id)
+        // The user acts in the session's tabs now, where no target check of an action that ended `stale` may cancel the user's input.
+        let tools = toolHost()
+        for tab in owned { tools.releaseInputCheck(in: tab.id) }
         let shared = host.userTabs(in: session.personaID).filter { $0.agentOwnerID == nil && session.handles.sharedTabIDs.contains($0.id) }
         let eligible = Set((owned + shared).map(\.id))
         let recent = session.items.reversed().lazy.compactMap { item -> UUID? in

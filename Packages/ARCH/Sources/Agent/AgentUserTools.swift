@@ -111,6 +111,12 @@ extension AgentToolHost {
                                  agentSays: message, connectionID: connectionID, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         box.approvalID = card.id
         guard !client.deniesApprovals else { return userEnded(.ended(Self.deniedApprovalsReason), ask: "finish the step", decision: .denied) }
+        // The user acts in the tab once the agent's trusted action there ends, and the target check of one that ended `stale` cancels none of the user's input.
+        while state.inputTabs.contains(tab.id) {
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return Self.ended }
+        }
+        releaseInputCheck(in: tab.id)
         host.showTab(tab.id)
         let answer = await request(card, for: client)
         switch answer {

@@ -441,7 +441,12 @@ extension AgentToolHost {
         guard !Task.isCancelled, client.isCurrent else { return Self.ended }
         var reply: AgentActionReply
         var trusted = false
-        switch await trustedAction(tool, arguments, tab: tab, handle: handle, access: access, target: target, facts: facts, state: state) {
+        // The form `type` typed into, for P5: also when the action fails once trusted text went, since the field may hold it.
+        let tabID = tab.id
+        func recordTyping() {
+            if tool == "type", let key = facts?.formKey { state.typedForms[tabID] = (pages, typed.union([key])) }
+        }
+        switch await trustedAction(tool, arguments, tab: tab, handle: handle, access: access, target: target, facts: facts, state: state, didType: recordTyping) {
         case .ended(var failure):
             failure.site = site
             return failure
@@ -466,10 +471,10 @@ extension AgentToolHost {
                 return outcome
             }
         }
-        if tool == "type", let key = facts?.formKey { state.typedForms[tab.id] = (pages, typed.union([key])) }
+        recordTyping()
         await settle(tab.id)
         // A wheel turn scrolls as the page lets it, so the position comes once the page settled.
-        if trusted, tool == "scroll", case .value(let position) = await pageScript(.inputState(need: nil, cancelRest: false, disarm: false), in: tab, as: AgentInputState.self, handle: handle) {
+        if trusted, tool == "scroll", case .value(let position) = await pageScript(.inputState(token: nil, need: nil, cancelRest: false, disarm: false), in: tab, as: AgentInputState.self, handle: handle) {
             reply.scrollX = position.scrollX
             reply.scrollY = position.scrollY
         }

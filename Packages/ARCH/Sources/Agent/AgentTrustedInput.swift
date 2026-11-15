@@ -1,4 +1,4 @@
-// Trusted input in the action tools (docs/agents.md, Actions; Risks 18 and 19): in the client's own agent tab, whose engine offers `EngineWebContents.input`, `click`, `type`, `press`, `scroll` in a direction, and `hover` go as the user's own input, at the point in the view that the element's box from the page script maps to, with the target check armed before each call, and the result says `inputKind: trusted`. The action keeps DOM events in a tab the user shared, whose chooser would open the user's own panel without a P7 card, for an element in a frame, for select boxes and file, color, date, and time inputs, whose native controls can track modally on the main thread, for text with a line break or a control character, which the engines refuse because it can submit a form, for keys the engines have no key for, for a `scroll` to an element, which no input event expresses, after an `EngineInputError`, and in a tab whose input once reached no check.
+// Trusted input in the action tools (docs/agents.md, Actions; Risks 18 and 19): in the client's own agent tab, whose engine offers `EngineWebContents.input`, `click`, `type`, `press`, `scroll` in a direction, and `hover` go as the user's own input, at the point in the view that the element's box from the page script maps to, with the target check armed before each call, one action at a time per tab, and the result says `inputKind: trusted`. The action keeps DOM events in a tab the user shared, whose chooser would open the user's own panel without a P7 card, for an element in a frame, for select boxes and file, color, date, and time inputs, whose native controls can track modally on the main thread, for text with a line break or a control character, which the engines refuse because it can submit a form, for keys the engines have no key for, for a character key without Command or Control, which would type its character past the rules that read typing from `type` alone (P2, P5, and P14), for a click whose element has another control at its center, for a `scroll` to an element, which no input event expresses, after an `EngineInputError`, and in a tab whose input once reached no check. A pointer move or a wheel turn that reaches no check goes again as DOM events.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -50,6 +50,8 @@ extension AgentToolHost {
             return [.text(text)] + (arguments["submit"] == .bool(true) ? [.key(.enter, [])] : [])
         case "press":
             guard let (key, modifiers) = key(arguments["keys"]?.stringValue ?? "") else { return nil }
+            // A character key without Command or Control types its character into the focused field, where only `type`'s text meets P2, P5, and P14; DOM key events type nothing.
+            if case .character = key, modifiers.isDisjoint(with: [.command, .control]) { return nil }
             return [.key(key, modifiers)]
         case "scroll":
             guard arguments["ref"] == nil, let direction = arguments["direction"]?.stringValue else { return nil }
@@ -87,51 +89,84 @@ extension AgentToolHost {
         CGPoint(x: (point.x - viewport.left) * viewport.scale * zoomFactor, y: (point.y - viewport.top) * viewport.scale * zoomFactor)
     }
 
-    /// Runs an action as trusted input where the tab offers it. Each call's preparation checks the element again, as `act` does, and arms the target check; the call then waits until the check has the call's events, cancelled ones included, so that an action whose events the check cancelled is `stale`, and one whose first event does not come within `inputCheckWait` is `stale` too, after which the tab acts through DOM events.
+    /// Runs an action as trusted input where the tab offers it, after any trusted action that still runs in the tab. Each call's preparation checks the element again, as `act` does, and arms the target check; the call then waits until the check has the call's events, cancelled ones included, so that an action whose events the check cancelled is `stale`, and one whose first event does not come within `inputCheckWait` is `stale` too, after which the tab acts through DOM events; a pointer move or a wheel turn that does not come goes again as DOM events instead. Once `type`'s text went, `didType` records the form for P5 at once, and a failure after it says that the field may hold the text.
     func trustedAction(_ tool: String, _ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, access: AgentTabAccess, target: AgentRefTarget?, facts: AgentElementFacts?,
-                       state: AgentGrantState) async -> TrustedInputOutcome {
-        guard access == .agentTab, !state.domInputTabs.contains(tab.id), (target?.frame ?? 0) == 0, let input = host.trustedInput(of: tab.id),
-              let calls = Self.inputCalls(tool, arguments, facts: facts) else { return .useDOM }
+                       state: AgentGrantState, didType: () -> Void) async -> TrustedInputOutcome {
+        guard access == .agentTab, (target?.frame ?? 0) == 0, let calls = Self.inputCalls(tool, arguments, facts: facts) else { return .useDOM }
+        // The target check holds one action's check, which another action's arming would replace while the first one's events still come.
+        while state.inputTabs.contains(tab.id) {
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return .ended(Self.ended) }
+        }
+        guard !state.domInputTabs.contains(tab.id), let input = host.trustedInput(of: tab.id) else { return .useDOM }
+        state.inputTabs.insert(tab.id)
+        defer { state.inputTabs.remove(tab.id) }
         var hit: String?
+        var typed = false
+        func end(_ outcome: Outcome) -> TrustedInputOutcome {
+            guard typed, case .text(let text)? = outcome.result.content.first else { return .ended(outcome) }
+            var outcome = outcome
+            outcome.result.content[0] = .text(text + " Arch had typed the text, or some of it, before that, so read the field before you type again.")
+            return .ended(outcome)
+        }
+        func enterThroughDOM() async -> TrustedInputOutcome {
+            let outcome = await pressEnterThroughDOM(target, tab: tab, handle: handle, hit: hit)
+            if case .ended(let failure) = outcome { return end(failure) }
+            return outcome
+        }
         for (index, call) in calls.enumerated() {
             let reply: AgentInputReply
             switch await pageScript(.prepare(preparation(for: call, tool: tool, arguments: arguments, target: target, facts: facts)), in: tab, as: AgentInputReply.self, handle: handle) {
-            case .outcome(let failure): return .ended(failure)
+            case .outcome(let failure): return end(failure)
             case .value(let value): reply = value
             }
             if let problem = reply.problem {
-                if ["noCheck", "inFrame", "noFocus", "noSelection", "readOnly"].contains(problem) { return index == 0 ? .useDOM : await pressEnterThroughDOM(target, tab: tab, handle: handle, hit: hit) }
-                return .ended(Self.unreachable(problem, cover: reply.cover, ref: target?.ref ?? "", handle: handle, tool: tool) ?? Self.error("notInteractable", "\(handle) could not \(tool) there."))
+                if ["noCheck", "inFrame", "noFocus", "noSelection", "readOnly", "inner"].contains(problem) { return index == 0 ? .useDOM : await enterThroughDOM() }
+                return end(Self.unreachable(problem, cover: reply.cover, ref: target?.ref ?? "", handle: handle, tool: tool) ?? Self.error("notInteractable", "\(handle) could not \(tool) there."))
             }
+            guard let token = reply.token else { return index == 0 ? .useDOM : await enterThroughDOM() }
             hit = hit ?? reply.hit
             do {
                 try send(call, through: input, reply: reply)
             } catch EngineInputError.unsupported where call == .key(.space, []) && reply.editable == true {
                 // An engine that presses no Space types one into the field that would receive it.
-                guard case .value = await pageScript(.inputState(need: AgentInputNeed(text: 1), cancelRest: false, disarm: false), in: tab, as: AgentInputState.self, handle: handle),
+                guard case .value = await pageScript(.inputState(token: token, need: AgentInputNeed(text: 1), cancelRest: false, disarm: false), in: tab, as: AgentInputState.self, handle: handle),
                       (try? input.input.insertText(" ")) != nil else {
-                    await endCheck(in: tab, handle: handle)
+                    await endCheck(token, in: tab, handle: handle)
                     return .useDOM
                 }
             } catch {
-                await endCheck(in: tab, handle: handle)
-                return index == 0 ? .useDOM : await pressEnterThroughDOM(target, tab: tab, handle: handle, hit: hit)
+                await endCheck(token, in: tab, handle: handle)
+                return index == 0 ? .useDOM : await enterThroughDOM()
             }
-            if case .wheel = call { continue }
-            switch await awaitInput(in: tab, handle: handle) {
-            case .outcome(let failure): return .ended(failure)
+            if case .text = call {
+                typed = true
+                didType()
+            }
+            switch await awaitInput(call, token: token, in: tab, handle: handle) {
+            case .outcome(let failure): return end(failure)
             case .value(.delivered): continue
             case .value(.moved):
-                return .ended(Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "The page in \(handle) put another element under the input, or moved focus, so Arch cancelled it. Take a new snapshot.",
-                                                              structured: ["tab": .string(handle)])))
+                return end(Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "The page in \(handle) put another element under the input, or moved focus, so Arch cancelled it. Take a new snapshot.",
+                                                           structured: ["tab": .string(handle)])))
+            case .value(.unseen) where Self.activatesNothing(call):
+                return .useDOM
             case .value(.unseen):
                 state.domInputTabs.insert(tab.id)
-                return .ended(Outcome(result: AgentToolResult(status: .stale, code: "stale",
-                                                              text: "No event of the input reached the element in \(handle), as when the page puts another site's frame over it. Take a new snapshot; Arch acts in \(handle) through DOM events from now on.",
-                                                              structured: ["tab": .string(handle)])))
+                return end(Outcome(result: AgentToolResult(status: .stale, code: "stale",
+                                                           text: "No event of the input reached the element in \(handle), as when the page puts another site's frame over it. Take a new snapshot; Arch acts in \(handle) through DOM events from now on.",
+                                                           structured: ["tab": .string(handle)])))
             }
         }
         return .done(AgentActionReply(url: tab.url?.absoluteString ?? "", hit: hit), trusted: true)
+    }
+
+    /// A pointer move and a wheel turn give the page no activation, so one that reaches no check goes again as DOM events, and the tab keeps trusted input.
+    private static func activatesNothing(_ call: AgentInputCall) -> Bool {
+        switch call {
+        case .move, .wheel: true
+        default: false
+        }
     }
 
     /// What `prepare` readies for one call: the element, the events the check looks at, and the counts after which the call's events have all come.
@@ -149,7 +184,7 @@ extension AgentToolHost {
         case .key:
             return AgentInputPreparation(kind: "press", ref: target, focus: target == nil ? facts.map(AgentFocusedElement.init) : nil, kinds: keys, need: AgentInputNeed(keyups: 1), holdMs: hold)
         case .wheel:
-            return AgentInputPreparation(kind: "scroll", kinds: [], need: AgentInputNeed(), holdMs: 0)
+            return AgentInputPreparation(kind: "scroll", kinds: ["wheel"], need: AgentInputNeed(wheels: 1), holdMs: hold)
         }
     }
 
@@ -174,40 +209,46 @@ extension AgentToolHost {
         }
     }
 
-    /// Reads the target check until it has the call's events, cancelled ones included. A check that the page's next document replaced counts as delivered. One that has seen no event after `inputCheckWait` cancels the input's events still to come while it holds; one that has seen some but not all after three times that ends, or keeps cancelling when it cancelled one.
-    private func awaitInput(in tab: AgentTabInfo, handle: String) async -> Resolved<InputCheck> {
+    /// Reads the target check that `token` armed until it has the call's events, cancelled ones included. A check that the page's next document replaced counts as delivered. One that has seen no event after `inputCheckWait` cancels the input's events still to come while it holds, or for a pointer move or a wheel turn ends; one that has seen some but not all after three times that ends, or keeps cancelling when it cancelled one.
+    private func awaitInput(_ call: AgentInputCall, token: Int, in tab: AgentTabInfo, handle: String) async -> Resolved<InputCheck> {
         let start = Date()
         while true {
             try? await Task.sleep(for: .milliseconds(50))
             if Task.isCancelled {
-                endCheckLater(in: tab)
+                endCheckLater(token, in: tab)
                 return .outcome(Self.ended)
             }
             let current: AgentInputState
-            switch await pageScript(.inputState(need: nil, cancelRest: false, disarm: false), in: tab, as: AgentInputState.self, handle: handle) {
+            switch await pageScript(.inputState(token: token, need: nil, cancelRest: false, disarm: false), in: tab, as: AgentInputState.self, handle: handle) {
             case .outcome(let failure): return .outcome(failure)
             case .value(let value): current = value
             }
             if current.complete || !current.armed { return .value(current.cancelled ? .moved : .delivered) }
             let waited = Date().timeIntervalSince(start)
             if current.seen == 0, waited >= inputCheckWait {
-                _ = await pageScript(.inputState(need: nil, cancelRest: true, disarm: false), in: tab, as: AgentInputState.self, handle: handle)
+                let ends = Self.activatesNothing(call)
+                _ = await pageScript(.inputState(token: token, need: nil, cancelRest: !ends, disarm: ends), in: tab, as: AgentInputState.self, handle: handle)
                 return .value(.unseen)
             }
             if waited >= inputCheckWait * 3 {
-                if !current.cancelled { await endCheck(in: tab, handle: handle) }
+                if !current.cancelled { await endCheck(token, in: tab, handle: handle) }
                 return .value(current.cancelled ? .moved : .delivered)
             }
         }
     }
 
-    private func endCheck(in tab: AgentTabInfo, handle: String) async {
-        _ = await pageScript(.inputState(need: nil, cancelRest: false, disarm: true), in: tab, as: AgentInputState.self, handle: handle)
+    private func endCheck(_ token: Int, in tab: AgentTabInfo, handle: String) async {
+        _ = await pageScript(.inputState(token: token, need: nil, cancelRest: false, disarm: true), in: tab, as: AgentInputState.self, handle: handle)
     }
 
     /// Ends the check of a call that was cancelled, without waiting for the page.
-    private func endCheckLater(in tab: AgentTabInfo) {
-        host.runPageScript(AgentPageScripts.source(for: .inputState(need: nil, cancelRest: false, disarm: true)), world: AgentPageScripts.world, in: tab.id) { _ in }
+    private func endCheckLater(_ token: Int, in tab: AgentTabInfo) {
+        host.runPageScript(AgentPageScripts.source(for: .inputState(token: token, need: nil, cancelRest: false, disarm: true)), world: AgentPageScripts.world, in: tab.id) { _ in }
+    }
+
+    /// Ends whatever the tab's target check holds, without waiting for the page, once the user acts in the tab: at Take Over, at `hand_to_user`, and when the tab leaves its agent folder, so that the check of an action that ended `stale` cancels none of the user's own input.
+    func releaseInputCheck(in tabID: UUID) {
+        host.runPageScript(AgentPageScripts.source(for: .releaseInput), world: AgentPageScripts.world, in: tabID) { _ in }
     }
 
     /// The Enter of `type` with `submit` through DOM events, once its text went as trusted input and the engine refused the key, as WebKit does while the tab's window is not key.

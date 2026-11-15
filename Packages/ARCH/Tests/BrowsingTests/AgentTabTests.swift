@@ -176,9 +176,8 @@ import Testing
         #expect(!source.isLoaded && ended[source.id] == [initial, reloaded])
     }
 
-    /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts and reaches the agents' service first through `BrowserAgentHost`, with who asks as Arch's panel names it. The service's denial, a new document, quitting, a change of engine, the tab's close, and a session without the service's callback give the page no file, and the user's own tab still queues Arch's panel.
-    /// Only agent tabs run the agents' target check and give the tool host their trusted input, at the page's zoom (docs/agents.md, Actions).
-    @Test func onlyAgentTabsRunTheTargetCheckAndGiveTheirTrustedInput() throws {
+    /// Only agent tabs run the agents' target check and give the tool host their trusted input, at the page's zoom (docs/agents.md, Actions); a tab the user keeps runs no check in its next documents.
+    @Test func onlyAgentTabsRunTheTargetCheckAndGiveTheirTrustedInput() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentInputTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -199,8 +198,12 @@ import Testing
         let userPage = try #require(userTab.webContents as? PageDouble)
         userPage.input = InputDouble()
         #expect(userPage.pageScripts == [TabUnloading.inputScript] && host.trustedInput(of: userTab.id) == nil)
+        session.keepTabs(ofFolder: try #require(session.tabs.first { $0.id == info.id }?.folderID))
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+        #expect(agentPage.pageScripts == [TabUnloading.inputScript] && host.trustedInput(of: info.id) == nil)
     }
 
+    /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts and reaches the agents' service first through `BrowserAgentHost`, with who asks as Arch's panel names it. The service's denial, a new document, quitting, a change of engine, the tab's close, and a session without the service's callback give the page no file, and the user's own tab still queues Arch's panel.
     @Test func anAgentTabsFileChooserReachesTheServiceBeforeAnyPanelAndEndsWithItsPage() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentChooserTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -191,6 +191,8 @@ struct AgentTabActivity: Equatable {
     var actionTimes: [Date] = []
     /// Agent tabs whose trusted input reached no target check, as when the page moved another site's frame under the point, which act through DOM events for the rest of the session (docs/agents.md, Actions).
     var domInputTabs: Set<UUID> = []
+    /// Agent tabs with a trusted action between its first `prepare` and its last read of the target check, whose next trusted action, and `hand_to_user`, wait for it.
+    var inputTabs: Set<UUID> = []
 
     /// The events of one launch stop growing past this many until the client calls again; the oldest go first.
     static let keptEvents = 200
