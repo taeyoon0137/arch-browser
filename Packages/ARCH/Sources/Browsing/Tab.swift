@@ -96,7 +96,7 @@ import LiveFolders
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// Denies an agent tab's request without asking, as the session's permission answers do.
     var denyPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
-    /// The session sets this callback to show Arch's open or save panel for the page's file chooser, as a sheet that waits in the tab's prompts until a window shows the page. Without it the page gets no file.
+    /// The session sets this callback to answer the page's file chooser: with Arch's open or save panel as a sheet that waits in the tab's prompts until a window shows the page, or in an agent tab with the agent monitor's P7 card first (`BrowserSession.chooseFiles(inAgentTab:owner:request:completion:)`). Without it the page gets no file.
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
@@ -287,10 +287,12 @@ import LiveFolders
 @MainActor protocol AgentTabMonitor: AnyObject {
     func userDocumentDidEnd(in tabID: UUID, document: UUID)
     func userTabAddressDidChange(_ tabID: UUID)
-    /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
-    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool
+    /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address, which `kind` tells apart (rules P13 and P16).
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool
     /// Whether a download the agent tab's page started from `url` may go ahead, because the user allowed it (rule P6).
     func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool
+    /// The agent tab's page opened a file chooser, which the monitor ends through its P7 card before any panel opens (`AgentFileChooser`).
+    func agentTab(_ tab: Tab, owner: UUID, choosesFiles chooser: AgentFileChooser)
     /// What happened in an agent tab, for its agent's next result.
     func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport)
     /// The agent tab closed, before the session removes an agent folder it leaves empty.
@@ -477,9 +479,9 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
 
     // MARK: File choosers
 
-    /// An agent tab's chooser gets no file and queues no panel, whatever started it, also a DOM `click()` from the agents' world, until the tool host asks about it (rule P7, plan task VII.22).
+    /// The session answers every chooser, and in an agent tab asks the agent monitor first, whatever started it, including a DOM `click()` from the agents' world (rule P7).
     public func webContents(_ webContents: any EngineWebContents, runFileChooser request: EngineFileChooserRequest, completion: @escaping ([URL]?) -> Void) {
-        guard agentOwnerID == nil, let chooseFiles else { return completion(nil) }
+        guard let chooseFiles else { return completion(nil) }
         chooseFiles(request, completion)
     }
 
@@ -645,9 +647,10 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 // MARK: Navigation checks and link previews
 
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
-    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
+    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rules P13 and P16), whoever started the navigation; a link or window that opens elsewhere is asked about as a popup, not as a hop of the tab's navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
-        if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
+        let kind: AgentLoadKind = action.disposition != .currentTab ? .popup : action.isRedirect ? .redirect : .navigation
+        if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url, kind: kind) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), let openURLInNewTab {
             guard agentOwnerID == nil else { return .cancel }

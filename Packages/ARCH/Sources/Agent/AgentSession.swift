@@ -39,7 +39,7 @@ extension AgentAPISession: AgentSessionRunning {
     public enum Origin: Equatable, Sendable {
         /// The user started it in Arch.
         case app
-        /// An outside client started it with `arch-cli task` under this grant: the client's text adds nothing to the site scope, Allow on its sensitive cards asks for Touch ID, and `deniesApprovals` denies each approval at once (plan task VII.13 asks them).
+        /// An outside client started it with `arch-cli task` under this grant: the client's text adds nothing to the site scope, Allow on its sensitive cards asks for Touch ID, and `deniesApprovals` denies each approval at once without a card.
         case outsideClient(grantID: UUID, clientName: String, deniesApprovals: Bool)
     }
 
@@ -104,8 +104,16 @@ extension AgentAPISession: AgentSessionRunning {
     var scope: AgentSiteScope {
         didSet { siteScope = scope.sites }
     }
-    var handles = AgentGrantHandles()
-    var snapshots = AgentSnapshotStore()
+    /// What the tool host keeps for the session, as for a grant: its handles, its agent tabs' events and activity, its snapshots, what the user allowed, and the calls that run, which the end of a turn cancels.
+    let toolState = AgentGrantState()
+    var handles: AgentGrantHandles {
+        get { toolState.handles }
+        set { toolState.handles = newValue }
+    }
+    var snapshots: AgentSnapshotStore {
+        get { toolState.snapshots }
+        set { toolState.snapshots = newValue }
+    }
     let ready = AgentGate(isOpen: false)
     let handedBack = AgentGate(isOpen: true)
     private(set) var runner: (any AgentSessionRunning)?
@@ -219,6 +227,11 @@ extension AgentAPISession: AgentSessionRunning {
     var clientName: String {
         if case .outsideClient(_, let name, _) = origin { return name }
         return "Arch"
+    }
+
+    /// The name the session's cards lead with, which Touch ID's reason repeats: the outside client's name as Arch verified it for a session the client started, whose title is the client's own words, and otherwise the title.
+    var cardName: String {
+        isFromOutsideClient ? clientName : title
     }
 
     // MARK: Runner
@@ -370,11 +383,14 @@ extension AgentAPISession: AgentSessionRunning {
         runner?.stop()
     }
 
-    /// The calls waiting at a gate from the turn that ended go on with a refusal, and none of them runs later, as at a Hand Back after Stop.
+    /// The calls waiting at a gate from the turn that ended go on with a refusal, and none of them runs later, as at a Hand Back after Stop. The calls the tool host still runs are cancelled and its cards withdrawn, so that no step the user allows runs after its turn.
     private func endCallsOfTheTurn() {
         if state == .waitingForUser { state = .running }
         acceptsQuestions = false
         dismissQuestions?()
+        toolState.cancelCalls()
+        // The navigations of written addresses go on, but a hop of one that leaves the scope is refused from now on, since no call asks the user.
+        toolState.stopAwaitingLoads()
         callEpoch += 1
         ready.release()
         handedBack.release()

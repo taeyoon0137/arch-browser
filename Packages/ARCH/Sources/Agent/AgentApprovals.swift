@@ -1,4 +1,4 @@
-// The cards that wait for the user (docs/agents.md, Permissions, approvals, and injection defenses ▸ Approval interface): the steps a rule or the mode asks about, `request_approval`, `ask_user`, `hand_to_user`, `request_tab`, and the downloads and links to other apps that pages in agent tabs start. Each card waits until the user answers in Arch's own interface, its time runs out, its page moves on, or the client's work ends; an unanswered card is a denial. Several cards can wait per client, grouped by page: Allow on This Page and Allow on <site> answer the other cards of that page or site that offer them. A sensitive card of an outside client asks for Touch ID or the login password before Allow counts.
+// The cards that wait for the user (docs/agents.md, Permissions, approvals, and injection defenses ▸ Approval interface): the steps a rule or the mode asks about, `request_approval`, `ask_user`, `hand_to_user`, `request_tab`, and the downloads, links to other apps, and file choosers that pages in agent tabs start. Each card waits until the user answers in Arch's own interface, its time runs out, its page moves on, or the client's work ends; an unanswered card is a denial. Several cards can wait per client, grouped by page: Allow on This Page and Allow on <site> answer the other cards of that page or site that offer them. A sensitive card of an outside client asks for Touch ID or the login password before Allow counts.
 import AgentControl
 import AppKit
 import Foundation
@@ -21,6 +21,8 @@ public enum AgentApprovalKind: Equatable, Sendable {
     case download
     /// A link to another app that a page in an agent tab opened (P11), with the app's name.
     case externalApp(String)
+    /// A file chooser that a page in an agent tab opened (P7).
+    case fileChooser
 }
 
 /// How a card ended.
@@ -104,6 +106,8 @@ public struct AgentApproval: Identifiable {
     public var exactText: String?
     /// Arch's note under the exact text, as what an allowance for the page or site lets the site receive.
     public var exactTextNote: String?
+    /// A P13 card's question: the address it would open, whose parts the session has not seen the card marks.
+    var addressQuestion: AgentAddressQuestion?
     /// The agent's explanation, its question, or its message.
     public var agentSays: String?
     /// A viewport capture with the element's box marked, which only the user sees, so it is not painted over.
@@ -177,7 +181,7 @@ public struct AgentApproval: Identifiable {
     var authenticator: any AgentAuthenticating = AgentDeviceOwnerAuthentication()
 
     @Published private var questionDrafts: [UUID: String] = [:]
-    private var completions: [UUID: (AgentApprovalAnswer) -> Void] = [:]
+    private var completions: [UUID: (AgentApprovalAnswer, NSWindow?) -> Void] = [:]
     /// The waiting cards by ID; a card leaves once it ends, with its capture.
     private var cards: [UUID: AgentApproval] = [:]
     private var waiting: Set<UUID> = []
@@ -201,6 +205,11 @@ public struct AgentApproval: Identifiable {
 
     /// Registers the answer before publishing the card, including when a page opens one synchronously.
     func open(_ approval: AgentApproval, onAnswer: @escaping (AgentApprovalAnswer) -> Void) {
+        open(approval, onAnswerInWindow: { answer, _ in onAnswer(answer) })
+    }
+
+    /// As `open(_:onAnswer:)`, with the window of the card the user answered, or nil when the card ended without the user, for a card whose Allow opens a sheet there (P7).
+    func open(_ approval: AgentApproval, onAnswerInWindow onAnswer: @escaping (AgentApprovalAnswer, NSWindow?) -> Void) {
         let id = approval.id
         completions[id] = onAnswer
         cards[id] = approval
@@ -241,16 +250,16 @@ public struct AgentApproval: Identifiable {
         return groups
     }
 
-    /// The user's answer from a card. Allow on a sensitive card of an outside client counts only after Touch ID or the login password; a failure leaves the card waiting. Allow on This Page, on <site>, and Allow Downloads also answer the other waiting cards of that page or site that offer the same. Says whether the answer counted.
+    /// The user's answer from a card, in the window that shows the card. Allow on a sensitive card of an outside client counts only after Touch ID or the login password; a failure leaves the card waiting. Allow on This Page, on <site>, and Allow Downloads also answer the other waiting cards of that page or site that offer the same. Says whether the answer counted.
     @discardableResult
-    public func answer(_ id: UUID, with answer: AgentApprovalAnswer) async -> Bool {
+    public func answer(_ id: UUID, with answer: AgentApprovalAnswer, in window: NSWindow? = nil) async -> Bool {
         guard let approval = cards[id], isPending(id) else { return false }
         if approval.needsAuthentication(for: answer) {
             // The sentence's page names stand in quotes whose closing quote inside is doubled (`AgentToolHost.actionSentence`), so a name cannot end the quote and add words of its own.
             guard await authenticator.authenticate(reason: "allow \(approval.clientName) to \(approval.action.prefix(1).lowercased() + approval.action.dropFirst())") else { return false }
             guard isPending(id) else { return false }
         }
-        finish(id, answer)
+        finish(id, answer, window: window)
         let grouped = pending.filter { other in
             guard other.ownerID == approval.ownerID, other.offers.contains(answer) else { return false }
             switch answer {
@@ -297,7 +306,7 @@ public struct AgentApproval: Identifiable {
         }
     }
 
-    private func finish(_ id: UUID, _ answer: AgentApprovalAnswer) {
+    private func finish(_ id: UUID, _ answer: AgentApprovalAnswer, window: NSWindow? = nil) {
         guard waiting.remove(id) != nil else { return }
         pending.removeAll { $0.id == id }
         let ownerID = cards[id]?.ownerID
@@ -306,7 +315,7 @@ public struct AgentApproval: Identifiable {
         outcomes[id] = answer
         endedOrder.append(id)
         if endedOrder.count > Self.keptOutcomes { outcomes[endedOrder.removeFirst()] = nil }
-        completions.removeValue(forKey: id)?(answer)
+        completions.removeValue(forKey: id)?(answer, window)
         if let ownerID, !pending.contains(where: { $0.ownerID == ownerID }) { didEnd?(ownerID) }
     }
 }

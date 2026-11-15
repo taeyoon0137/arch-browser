@@ -1,4 +1,5 @@
 // Unloading (`docs/bookmarks.md`, Unloading; bookmark rules 4 and 5): what each way of closing a tab does to it, which tabs that no window shows unload on their own, the page script that tells the app the user typed in a page, the memory pressure source, and the stand-ins a tab takes when its page unloads. The session applies them (`BrowserSession.swift`, its Tabs and Unloading sections); these parts need no session, so tests drive them directly.
+import Agent
 import AppKit
 import ARCHEngine
 import Foundation
@@ -146,9 +147,9 @@ public enum TabUnloading {
     }
     """, injectionTime: .documentStart, mainFrameOnly: false)
 
-    /// A tab's page scripts: `inputScript`, then its Persona's plugins' `scripts`.
-    static func pageScripts(withPluginScripts scripts: [EnginePageScript]) -> [EnginePageScript] {
-        [inputScript] + scripts
+    /// A tab's page scripts: `inputScript`, in an agent tab the target check of the agents' trusted input (`AgentPageScripts.targetCheck`), then its Persona's plugins' `scripts`.
+    static func pageScripts(withPluginScripts scripts: [EnginePageScript], inAgentTab: Bool = false) -> [EnginePageScript] {
+        [inputScript] + (inAgentTab ? [AgentPageScripts.targetCheck] : []) + scripts
     }
 
     /// What `inputScript` reports.

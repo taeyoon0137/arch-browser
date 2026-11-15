@@ -32,7 +32,7 @@ import Testing
             let state = state
             let toolHost = toolHost
             host.agentTabDidReport = { owner, tab, report in toolHost.tab(tab, of: owner, didReport: report, state: state) }
-            host.agentTabMayLoad = { _, tab, url in toolHost.tab(tab, mayLoad: url, state: state) }
+            host.agentTabMayLoad = { _, tab, url, kind in toolHost.tab(tab, mayLoad: url, kind: kind, state: state) }
         }
 
         func call(_ name: String, _ arguments: [String: AgentJSON] = [:]) async -> AgentToolResult {

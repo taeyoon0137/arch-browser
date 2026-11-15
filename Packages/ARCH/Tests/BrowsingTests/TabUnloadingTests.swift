@@ -1,4 +1,5 @@
 // Unloading (`docs/bookmarks.md`, Unloading; bookmark rules 4 and 5): what each way of closing does to each kind of tab, the stand-in a pinned tab takes when it closes and the one any tab takes when it unloads on its own, the tab a window selects after a close or an unload, which tabs that no window shows unload, the hours setting, the reports that keep a tab loaded, the leave-page answer of an automatic unload, and Delete Tab's record. Tabs run on `PageStub` and `UnloadedWebContents`, without a session or an engine, so the session's side of each close, which keeps a pinned tab at its place in its list without a closed record or a Tab Close Log entry, is regression check 69.
+import Agent
 import AppKit
 import ARCHEngine
 import Foundation
@@ -358,6 +359,8 @@ import Testing
         let plugin = EnginePageScript(world: "ARCHPlugin.sample", source: "() => {}", injectionTime: .documentEnd, mainFrameOnly: true)
         #expect(TabUnloading.pageScripts(withPluginScripts: [plugin]) == [script, plugin])
         #expect(TabUnloading.pageScripts(withPluginScripts: []) == [script])
+        // An agent tab runs the agents' target check after it.
+        #expect(TabUnloading.pageScripts(withPluginScripts: [plugin], inAgentTab: true) == [script, AgentPageScripts.targetCheck, plugin])
     }
 
     @Test func theInputScriptsMessagesReadAsEvents() {

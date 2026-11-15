@@ -247,16 +247,22 @@ struct SpaceTabsView: View {
                 }, including: windowModel.renamingTabID == tab.id ? .subviews : .all)
     }
 
-    /// A dragged folder leaves an empty, dimmed slot in the list, and the rows inside it hide until release.
+    /// A dragged folder leaves an empty, dimmed slot in the list, and the rows inside it hide until release. An agent folder's waiting step shows under its row, outside the row's frame and drag, and hides with the row while it is dragged.
     private func row(for folder: TabFolder) -> some View {
-        TabFolderRowView(session: session, folder: folder)
-            .modifier(DraggedSlot(isDragged: sidebarDrag.folderID == folder.id, isLifted: sidebarDrag.isLifted))
-            .background(frameReader(for: folder.id))
-            // Dragging in the name field selects text instead.
-            .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
-                .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
-                .onChanged { dragChanged(folder.id, $0) }
-                .onEnded { _ in dragEnded() }, including: windowModel.renamingFolderID == folder.id ? .subviews : .all)
+        VStack(alignment: .leading, spacing: 0) {
+            TabFolderRowView(session: session, folder: folder)
+                .modifier(DraggedSlot(isDragged: sidebarDrag.folderID == folder.id, isLifted: sidebarDrag.isLifted))
+                .background(frameReader(for: folder.id))
+                // Dragging in the name field selects text instead.
+                .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
+                    .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
+                    .onChanged { dragChanged(folder.id, $0) }
+                    .onEnded { _ in dragEnded() }, including: windowModel.renamingFolderID == folder.id ? .subviews : .all)
+            if folder.agentSessionID != nil {
+                SessionFolderStepLine(session: session, folder: folder)
+                    .opacity(sidebarDrag.folderID == folder.id ? 0 : 1)
+            }
+        }
     }
 
     /// Reports a tab's or folder's row frame in the window.

@@ -126,7 +126,12 @@ final class EngineRuntime {
     /// Set while the app quits. Every prompt ends at once without the user, so that a page's next dialog cannot hold the quit and every engine callback has its answer before the engines shut down. A quit that does not happen, as when a window's own sheet holds it, opens the prompt queue again.
     public var isQuitting = false {
         didSet {
-            if isQuitting { prompts.close() } else { prompts.reopen() }
+            if isQuitting {
+                prompts.close()
+                Array(agentFileChoosers.keys).forEach(endAgentFileChoosers(of:))
+            } else {
+                prompts.reopen()
+            }
         }
     }
 
@@ -873,9 +878,9 @@ final class EngineRuntime {
         return adopt(makeWebContents(url: url, engine: preferred, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select, preferredEngine: preferred)
     }
 
-    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:)`), which Chromium receives only with the browser it creates.
-    func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
-        let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts)
+    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts, with the agents' target check for an agent tab, and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:inAgentTab:)`), which Chromium receives only with the browser it creates.
+    func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID, agentTab: Bool = false) -> any EngineWebContents {
+        let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts, inAgentTab: agentTab)
         let requested = engine ?? defaultEngine
         let runtime = runtime(for: requested, in: personaID)
         return runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: runtime.kind == requested ? state : nil, pageScripts: pageScripts))
@@ -930,7 +935,9 @@ final class EngineRuntime {
             self.undoableCloseCount = 0
         }
         tab.didCommitDocument = { [weak self, weak tab] in
-            guard let self, let tab, self.prompts.hasPrompt(for: tab.id), self.allTabs.contains(where: { $0 === tab }) else { return }
+            guard let self, let tab else { return }
+            self.endAgentFileChoosers(of: tab.id)
+            guard self.prompts.hasPrompt(for: tab.id), self.allTabs.contains(where: { $0 === tab }) else { return }
             self.prompts.dismiss(tabID: tab.id, matching: \.endsWithDocument)
         }
         // Only the page's own dialogs go: a permission, sign-in, or leave-page question still applies.
@@ -1030,9 +1037,10 @@ final class EngineRuntime {
         }
         // The tab's prompts name an extension's page by the extension, as the address pill does.
         tab.extensionName = { [weak self] url in self?.extensionName(ofPageAt: url, in: personaID) }
-        // A page's file chooser opens Arch's panel on both engines, after the tab's prompts before it, as a sheet on the window that shows the tab (`PanePromptLayer`), naming who asks from the engine's report rather than from the tab's address; Cancel, the tab leaving the screen, a closed tab, or quitting gives the page no file.
+        // A page's file chooser opens Arch's panel on both engines, after the tab's prompts before it, as a sheet on the window that shows the tab (`PanePromptLayer`), naming who asks from the engine's report rather than from the tab's address; Cancel, the tab leaving the screen, a closed tab, or quitting gives the page no file. An agent tab's chooser asks on the tool host's card first (P7).
         tab.chooseFiles = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(nil) }
+            if let owner = tab.agentOwnerID { return self.chooseFiles(inAgentTab: tab, owner: owner, request: request, completion: completion) }
             let panel = FileChooserPanel.make(for: request)
             let content = TabPromptContent.fileChooser(identity: PromptSiteIdentity.make(for: request.origin ?? request.pageOrigin, in: tab))
             self.enqueuePrompt(content, panel: panel, for: tab) { completion(TabPromptContent.fileChooserResult($0) ? FileChooserPanel.chosenURLs(of: panel) : nil) }
@@ -1047,7 +1055,7 @@ final class EngineRuntime {
 
     /// Creates the page of a tab that has none, as a window does before it first shows the tab: a web contents of the tab's Persona at the address, in the engine, and with the page state that its stand-in keeps (`UnloadedWebContents`). A tab that has its page keeps it.
     func loadPage(of tab: Tab) {
-        tab.loadPage { makeWebContents(url: $0, engine: $1, state: $2, in: tab.personaID) }
+        tab.loadPage { makeWebContents(url: $0, engine: $1, state: $2, in: tab.personaID, agentTab: tab.agentOwnerID != nil) }
     }
 
     /// Selects a tab that no window shows. A space's tab goes to the front main window on its space, or else to the front main window of its Persona, which then shows the tab's space, so that a window of another Persona keeps its Persona / Space while one of the tab's Persona is open; only without either does it go to the sidebar target. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
@@ -1080,7 +1088,7 @@ final class EngineRuntime {
             if tab.pendingSyncEngine == kind { tab.pendingSyncEngine = nil }
             if tab.requestedEngineSwitch == kind { tab.requestedEngineSwitch = nil }
             let state = tab.preferredEngine == kind ? tab.restorableStateForPreferredEngine : nil
-            let replacement = self.makeWebContents(url: tab.url, engine: kind, state: state, in: tab.personaID)
+            let replacement = self.makeWebContents(url: tab.url, engine: kind, state: state, in: tab.personaID, agentTab: tab.agentOwnerID != nil)
             self.replaceWebContents(of: tab, with: replacement)
             tab.preferredEngine = kind
         }
@@ -1090,6 +1098,7 @@ final class EngineRuntime {
     private func replaceWebContents(of tab: Tab, with replacement: any EngineWebContents) {
         let old = tab.webContents
         prompts.dismiss(tabID: tab.id)
+        endAgentFileChoosers(of: tab.id)
         let window = windows.first { $0.selectedTabID == tab.id }
         if window?.isFindBarVisible == true { window?.hideFindBar() }
         tab.replaceWebContents(with: replacement)
@@ -1162,6 +1171,7 @@ final class EngineRuntime {
         windows.forEach { $0.setPageFullscreen(false, of: tab) }
         // Ending the tab's prompts runs the code that asked for them before `dismiss` returns. The lists are read afterwards, and a tab that closed meanwhile is left alone.
         prompts.dismiss(tabID: tab.id)
+        endAgentFileChoosers(of: tab.id)
         let index = tabs.firstIndex(where: { $0.id == tab.id })
         let favoriteID = favoriteTabs.first { $0.value === tab }?.key
         guard index != nil || favoriteID != nil else { return false }
@@ -1828,9 +1838,39 @@ final class EngineRuntime {
 
     // MARK: Agent tabs
 
-    /// Where agent tabs ask about their navigations and report what their rules did: `BrowserAgentHost` sets itself.
+    /// Where agent tabs ask about their navigations and file choosers and report what their rules did: `BrowserAgentHost` sets itself.
     weak var agentMonitor: (any AgentTabMonitor)? {
         didSet { allTabs.forEach { $0.agentMonitor = agentMonitor } }
+    }
+
+    /// The file choosers of agent tabs that wait for their P7 card or show Arch's panel, by tab.
+    private var agentFileChoosers: [UUID: [AgentFileChooser]] = [:]
+
+    /// Rule P7, the seam in place of the agent tab's answer of no file: the chooser queues no panel among the tab's prompts, since no window shows the tab. The agent monitor decides on its card first, before any panel, and on Allow, Arch's panel opens as a sheet on the window of that card, naming who asks as the tab's own panel does (`FileChooserPanel`). A new document in the tab, a change of its engine, its close, and quitting end the chooser with no file, and so does a session without a monitor.
+    func chooseFiles(inAgentTab tab: Tab, owner: UUID, request: EngineFileChooserRequest, completion: @escaping ([URL]?) -> Void) {
+        let tabID = tab.id
+        let chooser = AgentFileChooser(request: request, asker: FileChooserPanel.asker(of: request), present: { window, answer in
+            let panel = FileChooserPanel.make(for: request)
+            panel.beginSheetModal(for: window) { response in answer(response == .OK ? FileChooserPanel.chosenURLs(of: panel) : nil) }
+            return { [weak panel, weak window] in
+                guard let panel, let window else { return }
+                window.endSheet(panel, returnCode: .cancel)
+            }
+        }, answer: { [weak self] files in
+            if let self, var waiting = self.agentFileChoosers[tabID] {
+                waiting.removeAll(where: \.hasEnded)
+                self.agentFileChoosers[tabID] = waiting.isEmpty ? nil : waiting
+            }
+            completion(files)
+        })
+        agentFileChoosers[tabID, default: []].append(chooser)
+        guard let agentMonitor, !isQuitting else { return chooser.deny() }
+        agentMonitor.agentTab(tab, owner: owner, choosesFiles: chooser)
+    }
+
+    /// Ends an agent tab's file choosers with no file: a panel that shows closes with Cancel, and a card that waits goes.
+    private func endAgentFileChoosers(of tabID: UUID) {
+        agentFileChoosers.removeValue(forKey: tabID)?.forEach { $0.end() }
     }
 
     /// Opens an agent's tab at `url` in the background, in `engine` or the default engine, in the agent folder of `owner`, which it makes named `folderName` among the open tabs of the space `spaceID` when there is none (docs/agents.md, In the browser ▸ Agent folders). It selects nothing and switches no window's space. Nil when no space has that ID.
@@ -1845,7 +1885,7 @@ final class EngineRuntime {
         }
         guard let space = spaces.first(where: { $0.id == folder.spaceID }) else { return nil }
         let preferred = engine ?? defaultEngine
-        let page = makeWebContents(url: url, engine: preferred, state: nil, in: space.resolvedPersonaID)
+        let page = makeWebContents(url: url, engine: preferred, state: nil, in: space.resolvedPersonaID, agentTab: true)
         return adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, preferredEngine: preferred)
     }
 
@@ -1853,7 +1893,7 @@ final class EngineRuntime {
     private func adoptAgentPopup(_ popup: any EngineWebContents, targetURL: URL?, opener: Tab, owner: UUID) {
         guard let folder = folders.first(where: { $0.id == opener.folderID && $0.agentSessionID == owner }), let spaceID = opener.spaceID else { return retire(popup, of: opener.personaID) }
         let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, opener: opener.webContents, folderID: folder.id, preferredEngine: opener.preferredEngine)
-        if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url) == false {
+        if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url, kind: .popup) == false {
             DispatchQueue.main.async { [weak self, weak opened] in
                 if let self, let opened, opened.agentOwnerID == owner { self.closeAgentTab(opened, reason: .page) }
             }

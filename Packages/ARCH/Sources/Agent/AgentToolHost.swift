@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session the session details, lists, guide, outline, readable text, and questions, with the tab request of a task started in Arch. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, with the actions' trusted input in `AgentTrustedInput.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; an in-app session's calls run on the same path with its site scope (P13), its own agent folder, and its cards in its panel. An outside client's call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result. A session's call waits on its card instead.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -18,19 +18,21 @@ import Foundation
     var scriptWait: TimeInterval = 10
     /// The cards that wait for the user, which the service shows in the agent panel.
     var approvals = AgentApprovals()
-    /// Outside clients navigate freely in their own agent tabs; in-app sessions' agent tabs, with the site scope, come with plan task VII.17.1.
-    var clientKind: AgentClientKind = .outside
-    /// How long a call waits for the user before it answers `approvalPending`, and how long a card stays open (docs/agents.md, Tools ▸ Limits).
+    /// How long an outside client's call waits for the user before it answers `approvalPending`, and how long a card stays open (docs/agents.md, Tools ▸ Limits). An in-app session's call waits on its card until the card ends, which the service gives the in-app approval wait.
     var answerWait = TimeInterval(AgentLimits.callAnswerSeconds)
     var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
+    /// When an in-app session's call stops waiting for the user, from its arrival: its cards and its wait while the session is taken over share this time, which stays below the tool timeout of the user's CLI (docs/agents.md, Tools ▸ Limits).
+    var callDeadline: Date?
     /// After an action, how long the host waits for a load it started, and the pause after it.
     var settleWait: TimeInterval = 3
     var settlePause: TimeInterval = 0.3
+    /// How long trusted input's first event may take to reach the target check before the action is `stale` and the tab acts through DOM events (docs/agents.md, Actions).
+    var inputCheckWait: TimeInterval = 2
     /// The connection the call came on, which its cards name so that they end when the client leaves.
     var connectionID: UUID?
     /// The call's request ID on its connection, which a client's `tools/cancel` names.
     var callID: Int?
-    /// Deny and Stop: the service disconnects the client.
+    /// Deny and Stop: the service disconnects the client, or stops the session's turn, by the owner's ID.
     var stopClient: ((UUID) -> Void)?
 
     /// What a call did, for the result, the activity log, and the agent panel.
@@ -66,18 +68,23 @@ import Foundation
         }
     }
 
-    /// Runs a call for the grant, as a task the grant's state keeps until it ends, so that Stop, Stop All Agents, revocation, expiry, and the connection's close cancel it (`AgentGrantState.cancelCalls(onConnection:)`). A call that still waits for the user after `answerWait` answers `approvalPending` with a handle, under which it goes on until `approval_wait` takes its result.
+    /// Runs a call for an outside client's grant.
     func run(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
-        if call.name == "approval_wait" { return await approvalWait(call, for: grant, state: state) }
+        await run(call, for: AgentToolClient(grant: grant), state: state)
+    }
+
+    /// Runs a call for a grant or an in-app session, as a task the client's state keeps until it ends, so that Stop, Stop All Agents, revocation, expiry, the connection's close, and a session's turn ending cancel it (`AgentGrantState.cancelCalls(onConnection:)`). A call that still waits for the user after `answerWait` answers `approvalPending` with a handle, under which it goes on until `approval_wait` takes its result; an in-app session's call waits on its card instead, for at most the in-app approval wait.
+    func run(_ call: AgentToolCall, for client: AgentToolClient, state: AgentGrantState) async -> Outcome {
+        if call.name == "approval_wait" { return await approvalWait(call, for: client, state: state) }
         let box = AgentCallBox(connectionID: connectionID, callID: callID)
         state.runningCalls.append(box)
         box.task = Task {
-            let outcome = await runNow(call, for: grant, state: state, box: box)
+            let outcome = await runNow(call, for: client, state: state, box: box)
             state.runningCalls.removeAll { $0 === box }
             box.finish(outcome)
         }
         while true {
-            if await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome { return outcome }
+            if await Self.wait(for: box, seconds: answerWait), let outcome = box.outcome { return outcome }
             // A caller that was cancelled stops the call too; a card it waited on records a denial.
             if Task.isCancelled {
                 var ended = Self.ended
@@ -85,7 +92,8 @@ import Foundation
                 box.task?.cancel()
                 return ended
             }
-            guard let approvalID = box.approvalID, approvals.isPending(approvalID) else { continue }
+            // An in-app session's call never answers before its card does.
+            guard client.session == nil, let approvalID = box.approvalID, approvals.isPending(approvalID) else { continue }
             let handle = state.handles.approvals.handle(for: approvalID)
             state.pendingCalls[handle] = box
             var pending = Self.pending(handle, tool: call.name)
@@ -95,11 +103,11 @@ import Foundation
     }
 
     /// `approval_wait`: the result of a call that answered `approvalPending`, once it has one, or `approvalPending` again after `answerWait`.
-    private func approvalWait(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState) async -> Outcome {
-        if let refusal = precheck(call, state: state) { return refusal }
+    private func approvalWait(_ call: AgentToolCall, for client: AgentToolClient, state: AgentGrantState) async -> Outcome {
+        if let refusal = precheck(call, client, state: state) { return refusal }
         let handle = call.arguments["approval"]?.stringValue ?? ""
         guard let box = state.pendingCalls[handle] else { return Self.error("notFound", "No call of this client waits under \(handle).") }
-        guard await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome else { return Self.pending(handle, tool: "approval_wait") }
+        guard await Self.wait(for: box, seconds: answerWait), let outcome = box.outcome else { return Self.pending(handle, tool: "approval_wait") }
         state.pendingCalls[handle] = nil
         return outcome
     }
@@ -116,9 +124,9 @@ import Foundation
     }
 
     /// Runs a call now and adds the events since the client's previous call.
-    private func runNow(_ call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
+    private func runNow(_ call: AgentToolCall, for client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let start = state.lastSequence
-        var outcome = await outcome(of: call, for: grant, state: state, box: box)
+        var outcome = await outcome(of: call, for: client, state: state, box: box)
         // A result that would still pass its limit, as a page's very long address can make one, says so in its place, so that no result takes a client's connection past the frame limit.
         if outcome.result.text.utf8.count > AgentLimits.resultTextBytes { outcome.result = Self.tooLong(outcome.result, tool: call.name) }
         attachEvents(to: &outcome, since: start, state: state)
@@ -128,8 +136,8 @@ import Foundation
     /// The bytes a result leaves, within its limit, for the sentences around a page's text and for the events.
     static let resultRoom = 2_000
 
-    /// The checks before any tool runs: a tool of the catalog, arguments its parameters allow, and a call within the day's limit.
-    private func precheck(_ call: AgentToolCall, state: AgentGrantState) -> Outcome? {
+    /// The checks before any tool runs: a tool of the catalog, arguments its parameters allow, and for a grant a call within the day's limit; an in-app session counts its calls per message and per session before they reach the host.
+    private func precheck(_ call: AgentToolCall, _ client: AgentToolClient, state: AgentGrantState) -> Outcome? {
         guard let tool = AgentToolCatalog.tool(named: call.name) else {
             return Self.error("unknownTool", "Arch has no tool named \(call.name).")
         }
@@ -137,7 +145,7 @@ import Foundation
         if tool.name != "guide", let problem = Self.problem(with: call.arguments, for: tool) {
             return Self.error("invalidArguments", problem)
         }
-        guard state.countCall(at: now()) else {
+        guard client.session != nil || state.countCall(at: now()) else {
             return Outcome(result: AgentToolResult(status: .error, code: "limitReached",
                                                    text: "This client made \(Self.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.",
                                                    structured: ["limits": ["toolCallsPerDay": .number(Double(AgentLimits.toolCallsPerGrantPerDay))]]))
@@ -145,29 +153,30 @@ import Foundation
         return nil
     }
 
-    private func outcome(of call: AgentToolCall, for grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
-        if let refusal = precheck(call, state: state) { return refusal }
+    private func outcome(of call: AgentToolCall, for client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
+        if let refusal = precheck(call, client, state: state) { return refusal }
         guard let tool = AgentToolCatalog.tool(named: call.name) else { return Self.error("unknownTool", "Arch has no tool named \(call.name).") }
         let arguments = call.arguments
+        let shared = arguments["scope"]?.stringValue == "shared"
         switch tool.name {
-        case "session_info": return Outcome(result: sessionInfo(grant, state: state))
-        case "list_spaces": return Outcome(result: listSpaces(grant, state: state))
-        case "list_tabs": return Outcome(result: listTabs(shared: arguments["scope"]?.stringValue == "shared", grant, state: state))
-        case "open_tab": return await openTab(arguments, grant, state: state)
-        case "navigate": return await navigate(arguments, grant, state: state)
-        case "close_tab": return closeTab(arguments, grant, state: state)
-        case "read_text": return await readText(arguments, grant, state: state)
-        case "wait_for": return await waitFor(arguments, grant, state: state)
-        case "list_downloads": return listDownloads(grant)
-        case "search_history": return await searchHistory(arguments, grant)
-        case "snapshot": return await snapshot(arguments, grant, state: state)
-        case "screenshot": return await screenshot(arguments, grant, state: state)
-        case "click", "type", "press", "select_option", "scroll", "hover": return await act(tool.name, arguments, grant, state: state, box: box)
-        case "request_tab": return await requestTab(arguments, grant, state: state, box: box)
-        case "ask_user": return await askUser(arguments, ownerID: grant.id, name: grant.client.displayName, box: box)
-        case "request_approval": return await requestApproval(arguments, grant, state: state, box: box)
-        case "hand_to_user": return await handToUser(arguments, grant, state: state, box: box)
-        case "guide": return Outcome(result: AgentHarness.guideResult(arguments: arguments))
+        case "session_info": return Outcome(result: client.session != nil ? sessionInfo(ofSession: client, handles: &state.handles) : sessionInfo(client, state: state))
+        case "list_spaces": return Outcome(result: client.session != nil ? listSpaces(ofSession: client, handles: &state.handles) : listSpaces(client, state: state))
+        case "list_tabs": return Outcome(result: client.session != nil ? listTabs(shared: shared, ofSession: client, handles: &state.handles) : listTabs(shared: shared, client, state: state))
+        case "open_tab": return await openTab(arguments, client, state: state, box: box)
+        case "navigate": return await navigate(arguments, client, state: state, box: box)
+        case "close_tab": return closeTab(arguments, client, state: state)
+        case "read_text": return await readText(arguments, client, state: state)
+        case "wait_for": return await waitFor(arguments, client, state: state)
+        case "list_downloads": return listDownloads(client)
+        case "search_history": return await searchHistory(arguments, client)
+        case "snapshot": return await snapshot(arguments, client, state: state)
+        case "screenshot": return await screenshot(arguments, client, state: state)
+        case "click", "type", "press", "select_option", "scroll", "hover": return await act(tool.name, arguments, client, state: state, box: box)
+        case "request_tab": return await requestTab(arguments, client, state: state, box: box)
+        case "ask_user": return await askUser(arguments, client, box: box)
+        case "request_approval": return await requestApproval(arguments, client, state: state, box: box)
+        case "hand_to_user": return await handToUser(arguments, client, state: state, box: box)
+        case "guide": return Outcome(result: AgentHarness.guideResult(arguments: arguments, inSession: client.session != nil))
         default: return Self.notAvailable("This build of Arch does not run \(tool.name) yet.")
         }
     }
@@ -205,28 +214,28 @@ import Foundation
 
     // MARK: Session and lists
 
-    private func sessionInfo(_ grant: AgentGrant, state: AgentGrantState) -> AgentToolResult {
-        let persona = personaName(of: grant)
-        let space = space(of: grant)
+    private func sessionInfo(_ client: AgentToolClient, state: AgentGrantState) -> AgentToolResult {
+        let persona = personaName(of: client)
+        let space = space(of: client)
         let spaceHandle = space.map { state.handles.spaces.handle(for: $0.id) }
-        let openTabs = host.agentTabs(of: grant.id).count
-        let asks = Self.whatAsks(grant.level)
+        let openTabs = host.agentTabs(of: client.id).count
+        let asks = Self.whatAsks(client.level)
         // A Persona's place reads as "Persona / Space" (Personas, history, and permissions).
         let place = space.map { "\(persona) / \($0.name) (\(spaceHandle ?? ""))" } ?? "the \(persona) Persona"
-        var lines = ["This client has \(grant.level.title) access in \(place)."]
-        lines.append("Site scope: none. An outside client navigates freely in its own agent tabs, which open in its agent folder \u{201C}\(Self.folderName(for: grant.client))\u{201D}.")
+        var lines = ["This client has \(client.level.title) access in \(place)."]
+        lines.append("Site scope: none. An outside client navigates freely in its own agent tabs, which open in its agent folder \u{201C}\(client.folderName)\u{201D}.")
         lines.append("Agent tabs: \(openTabs == 0 ? "none" : String(openTabs)) open, at most \(AgentLimits.agentTabs) at once.")
         lines.append("Limits: \(Self.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls a day for this grant, \(AgentLimits.actionsPerSecond) actions a second, \(AgentLimits.toolWaitSeconds) seconds per wait.")
         lines.append(contentsOf: asks)
         let structured: AgentJSON = [
-            "mode": .string(grant.level.rawValue),
+            "mode": .string(client.level.rawValue),
             "persona": .string(persona),
             "space": space.map { ["handle": .string(spaceHandle ?? ""), "name": .string($0.name)] } ?? .null,
             "siteScope": .null,
             "agentTabs": .number(Double(openTabs)),
             "limits": ["agentTabs": .number(Double(AgentLimits.agentTabs)), "toolCallsPerDay": .number(Double(AgentLimits.toolCallsPerGrantPerDay)), "actionsPerSecond": .number(Double(AgentLimits.actionsPerSecond))],
             "asks": .array(asks.map(AgentJSON.string)),
-            "scopes": ["searchHistory": .bool(grant.scopes.searchHistory), "startTasks": .bool(grant.scopes.startTasks)],
+            "scopes": ["searchHistory": .bool(client.scopes.searchHistory), "startTasks": .bool(client.scopes.startTasks)],
         ]
         return AgentToolResult(status: .ok, text: lines.joined(separator: "\n"), structured: structured)
     }
@@ -241,13 +250,13 @@ import Foundation
         }
         return [
             "Reading and navigating in your own agent tabs run without asking. \(interactions)",
-            "Arch refuses typing passwords, codes, or card details, file choosers, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, and every action in a tab the user shared ask the user.",
+            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, every action in a tab the user shared, and a page's file chooser ask the user. For a form that needs a file, use hand_to_user: the user picks files in Arch, and you learn only how many.",
         ]
     }
 
-    private func listSpaces(_ grant: AgentGrant, state: AgentGrantState) -> AgentToolResult {
-        let spaces = host.spaces(in: grant.personaID)
-        let agentTabs = host.agentTabs(of: grant.id)
+    private func listSpaces(_ client: AgentToolClient, state: AgentGrantState) -> AgentToolResult {
+        let spaces = host.spaces(in: client.personaID)
+        let agentTabs = host.agentTabs(of: client.id)
         var rows: [AgentJSON] = []
         var lines: [String] = []
         for space in spaces {
@@ -256,14 +265,14 @@ import Foundation
             rows.append(["handle": .string(handle), "name": .string(space.name), "agentTabs": .number(Double(count))])
             lines.append("\(handle)  \(space.name)  \(count == 1 ? "1 agent tab" : "\(count) agent tabs")")
         }
-        let persona = personaName(of: grant)
+        let persona = personaName(of: client)
         let summary = spaces.isEmpty ? "The \(persona) Persona has no spaces." : "The \(persona) Persona has \(spaces.count == 1 ? "1 space" : "\(spaces.count) spaces")."
         return AgentToolResult(status: .ok, text: ([summary] + lines).joined(separator: "\n"), structured: ["spaces": .array(rows)])
     }
 
     /// The client's agent tabs, or the tabs the user shared, in sidebar order. A tab on a site excluded from AI, or on a page agents do not read, is listed without its title or address (rule P16).
-    private func listTabs(shared: Bool, _ grant: AgentGrant, state: AgentGrantState) -> AgentToolResult {
-        let tabs = shared ? host.tabs(withIDs: Set(state.handles.sharedTabIDs)).filter { access(to: $0, grant, state: state) != .notTheClients } : host.agentTabs(of: grant.id)
+    private func listTabs(shared: Bool, _ client: AgentToolClient, state: AgentGrantState) -> AgentToolResult {
+        let tabs = shared ? host.tabs(withIDs: Set(state.handles.sharedTabIDs)).filter { access(to: $0, client, state: state) != .notTheClients } : host.agentTabs(of: client.id)
         var rows: [AgentJSON] = []
         var lines: [String] = []
         for tab in tabs {
@@ -323,12 +332,13 @@ import Foundation
 
     // MARK: Navigation
 
-    private func openTab(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+    private func openTab(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let url: URL
+        var isWritten = false
         if let ref = arguments["ref"]?.stringValue {
             if arguments["url"] != nil { return Self.error("invalidArguments", "open_tab takes url or ref, not both.") }
             guard let handle = arguments["tab"]?.stringValue else { return Self.error("invalidArguments", "open_tab needs tab, the tab whose snapshot holds ref.") }
-            switch link(ref, in: handle, grant, state: state) {
+            switch link(ref, in: handle, client, state: state) {
             case .value(let followed): url = followed
             case .outcome(let failure): return failure
             }
@@ -339,31 +349,48 @@ import Foundation
             case .value(let written): url = written
             case .outcome(let refusal): return refusal
             }
+            isWritten = true
         }
-        let openTabs = host.agentTabs(of: grant.id)
-        guard openTabs.count < AgentLimits.agentTabs else {
-            return Outcome(result: AgentToolResult(status: .error, code: "limitReached",
-                                                   text: "This client has \(AgentLimits.agentTabs) agent tabs open, the most at once. Close one with close_tab first.",
-                                                   structured: ["limits": ["agentTabs": .number(Double(AgentLimits.agentTabs))]]), site: AgentActivityEntry.site(of: url))
+        if let full = tabLimit(client, opening: url) { return full }
+        guard let space = space(of: client) else { return Self.error("noSpace", "The \(personaName(of: client)) Persona has no space for agent tabs.") }
+        var decision: AgentActivityEntry.Decision?
+        if isWritten {
+            switch await askAboutWrittenAddress(url, in: nil, handle: nil, client, state: state, box: box) {
+            case .value(let answered): decision = answered
+            case .outcome(var refusal):
+                refusal.site = AgentActivityEntry.site(of: url)
+                return refusal
+            }
         }
-        guard let space = space(of: grant) else { return Self.error("noSpace", "The \(personaName(of: grant)) Persona has no space for agent tabs.") }
+        // A session whose turn ended or that the user took over while the card waited opens nothing, and other calls may have opened tabs meanwhile.
+        guard !Task.isCancelled, client.isCurrent else { return Self.ended }
+        if decision != nil, var full = tabLimit(client, opening: url) {
+            full.decision = decision
+            return full
+        }
         let engine = arguments["engine"]?.stringValue.map { $0 == "webkit" ? EngineKind.webKit : EngineKind.chromium }
-        let owner = AgentTabOwner(id: grant.id, spaceID: space.id, folderName: Self.folderName(for: grant.client))
+        let owner = AgentTabOwner(id: client.id, spaceID: space.id, folderName: client.folderName)
         guard let tab = host.openAgentTab(at: url, engine: engine, for: owner) else { return Self.error("noSpace", "Arch could not open an agent tab in this client's space.") }
         let handle = state.handles.tabs.handle(for: tab.id)
-        let before = AgentTabActivity()
-        let loaded = await waitForLoad(of: tab.id, grant, state: state, since: before)
-        if Task.isCancelled { return Self.ended }
-        var outcome = loadOutcome(of: tab.id, handle: handle, grant, state: state, since: before, didLoad: loaded, opened: true)
+        let load = isWritten && client.kind == .inApp ? state.beginWrittenLoad(url, in: tab.id) : nil
+        var outcome = await finishLoad(of: tab.id, handle: handle, load: load, client, state: state, box: box, since: AgentTabActivity(), opened: true, decision: decision)
         outcome.site = AgentActivityEntry.site(of: url)
         return outcome
     }
 
-    private func navigate(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+    /// The refusal of a tab past the limit of agent tabs, or nil while the client has room for one.
+    private func tabLimit(_ client: AgentToolClient, opening url: URL) -> Outcome? {
+        guard host.agentTabs(of: client.id).count >= AgentLimits.agentTabs else { return nil }
+        return Outcome(result: AgentToolResult(status: .error, code: "limitReached",
+                                               text: "This client has \(AgentLimits.agentTabs) agent tabs open, the most at once. Close one with close_tab first.",
+                                               structured: ["limits": ["agentTabs": .number(Double(AgentLimits.agentTabs))]]), site: AgentActivityEntry.site(of: url))
+    }
+
+    private func navigate(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let given = ["url", "ref", "action"].filter { arguments[$0] != nil }
         guard given.count == 1 else { return Self.error("invalidArguments", "navigate takes one of url, ref, or action.") }
-        let tab: AgentTabInfo, handle: String
-        switch agentTab(arguments["tab"]?.stringValue ?? "", grant, state: state) {
+        var tab: AgentTabInfo, handle: String
+        switch agentTab(arguments["tab"]?.stringValue ?? "", client, state: state) {
         case .value(let resolved): (tab, handle) = resolved
         case .outcome(let failure): return failure
         }
@@ -374,7 +401,7 @@ import Foundation
             case .outcome(let refusal): return refusal
             }
         } else if let ref = arguments["ref"]?.stringValue {
-            switch link(ref, in: handle, grant, state: state) {
+            switch link(ref, in: handle, client, state: state) {
             case .value(let url): navigation = .load(url)
             case .outcome(let failure): return failure
             }
@@ -390,13 +417,104 @@ import Foundation
                 navigation = .reload
             }
         }
+        let written = arguments["url"] != nil
+        var decision: AgentActivityEntry.Decision?
+        if written, case .load(let url) = navigation {
+            switch await askAboutWrittenAddress(url, in: tab, handle: handle, client, state: state, box: box) {
+            case .value(let answered): decision = answered
+            case .outcome(var refusal):
+                refusal.site = AgentActivityEntry.site(of: url)
+                return refusal
+            }
+            // The tab may have closed or left the client while the card waited.
+            switch agentTab(handle, client, state: state) {
+            case .value(let resolved): tab = resolved.0
+            case .outcome(let failure): return failure
+            }
+        }
+        guard !Task.isCancelled, client.isCurrent else { return Self.ended }
         let before = state.activity(of: tab.id)
+        // The navigation replaces the tab's earlier one, whose checks end; a written address's starts its own.
+        var load: UUID?
+        if client.kind == .inApp {
+            if written, case .load(let url) = navigation { load = state.beginWrittenLoad(url, in: tab.id) } else { state.endWrittenLoad(in: tab.id) }
+        }
         host.navigate(tab.id, navigation)
-        let loaded = await waitForLoad(of: tab.id, grant, state: state, since: before)
-        if Task.isCancelled { return Self.ended }
-        var outcome = loadOutcome(of: tab.id, handle: handle, grant, state: state, since: before, didLoad: loaded, opened: false, history: navigation == .back || navigation == .forward)
+        var outcome = await finishLoad(of: tab.id, handle: handle, load: load, client, state: state, box: box, since: before, opened: false,
+                                       history: navigation == .back || navigation == .forward, decision: decision)
         if case .load(let url) = navigation { outcome.site = AgentActivityEntry.site(of: url) }
         return outcome
+    }
+
+    /// How many redirect hops off the scope one call asks the user about before it gives up.
+    static let askedHopsPerCall = 3
+
+    /// Waits for the load a call started and answers with it, with the user's decision when a card asked. A redirect hop of an in-app session's written address (`load`) that the scope stopped (`heldHops`) asks the user with the hop's full address; Allow adds it to the scope and loads it as a written address's navigation of its own, and any other answer ends the call without it. Once the call ends, a hop of its navigation that the scope stops is refused.
+    private func finishLoad(of tabID: UUID, handle: String, load: UUID?, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox, since start: AgentTabActivity, opened: Bool,
+                            history: Bool = false, decision: AgentActivityEntry.Decision? = nil) async -> Outcome {
+        var before = start
+        var asked = 0
+        var load = load
+        var decision = decision
+        defer { if let load { state.stopAwaiting(load, in: tabID) } }
+        while true {
+            let loaded = await waitForLoad(of: tabID, load: load, client, state: state, since: before)
+            if Task.isCancelled { return Self.ended }
+            guard let current = load, let question = state.takeHeldHop(of: current, in: tabID) else {
+                var outcome = loadOutcome(of: tabID, handle: handle, client, state: state, since: before, didLoad: loaded, opened: opened, history: history)
+                outcome.decision = decision
+                return outcome
+            }
+            load = nil
+            guard asked < Self.askedHopsPerCall else {
+                var outcome = Self.error("navigationFailed", "\(handle) kept redirecting to sites outside the session's scope, so Arch stopped its navigation.")
+                outcome.decision = decision
+                return outcome
+            }
+            asked += 1
+            guard let tab = host.tabs(withIDs: [tabID]).first, tab.agentOwnerID == client.id else {
+                var outcome = loadOutcome(of: tabID, handle: handle, client, state: state, since: before, didLoad: loaded, opened: opened, history: history)
+                outcome.decision = decision
+                return outcome
+            }
+            switch await askAboutAddress(question, in: tab, handle: handle, isHop: true, client, state: state, box: box) {
+            case .value(let answered): decision = answered ?? decision
+            case .outcome(let refusal): return refusal
+            }
+            guard !Task.isCancelled, client.isCurrent, host.tabs(withIDs: [tabID]).first?.agentOwnerID == client.id else { return Self.ended }
+            before = state.activity(of: tabID)
+            load = state.beginWrittenLoad(question.url, in: tabID)
+            host.navigate(tabID, .load(question.url))
+        }
+    }
+
+    /// Rule P13 for an address an in-app session's agent wrote (docs/agents.md, Site scope and navigation): it opens without asking only when the session has seen it, when it is the search engine's results address, or when it is the bare origin of a site in scope; otherwise the user decides on a sensitive card, in every mode. An outside client navigates freely in its own agent tabs. The address may open with the user's decision, nil when no card asked.
+    private func askAboutWrittenAddress(_ url: URL, in tab: AgentTabInfo?, handle: String?, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Resolved<AgentActivityEntry.Decision?> {
+        guard client.kind == .inApp, let owner = client.inAppSession, case .asks(let question) = owner.scope.written(url) else { return .value(nil) }
+        return await askAboutAddress(question, in: tab, handle: handle, isHop: false, client, state: state, box: box)
+    }
+
+    /// A P13 card: the step, the scope's sentence, and the full address with the parts the session has not seen marked. The card is about the address, not the tab's page, so a new page in the tab leaves it waiting. Allow adds the address to the scope, which makes its site part of it, and gives the decision for the activity log; any other answer gives the call's outcome.
+    private func askAboutAddress(_ question: AgentAddressQuestion, in tab: AgentTabInfo?, handle: String?, isHop: Bool, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Resolved<AgentActivityEntry.Decision?> {
+        let facts = AgentNavigationFacts(isWritten: true, siteInScope: !question.isOutsideScope, isRedirectHop: isHop)
+        guard let owner = client.inAppSession, case .ask(let ask) = AgentPolicy.decide(.navigation(facts), client: client.kind, mode: client.level) else { return .value(nil) }
+        let place = handle.map { "in \($0)" } ?? "in a new agent tab"
+        // A hop asks only when it leaves the scope; its address may be one a page showed.
+        let action = isHop ? "Follow a redirect \(place) to a site outside the session's scope" : "Open an address \(place)"
+        var offers = AgentApproval.offers(for: ask)
+        // Take Over needs a tab to show.
+        if tab == nil { offers.removeAll { $0 == .takeOver } }
+        var card = AgentApproval(ownerID: client.id, clientName: client.name, isOutsideClient: client.isOutsideClient, kind: .step, rules: ask.rules, isSensitive: ask.isSensitive,
+                                 offers: offers, action: action, tabID: tab?.id, tabHandle: handle, site: question.url.host?.lowercased(), exactText: question.url.absoluteString,
+                                 connectionID: connectionID, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
+        card.exactTextNote = question.sentence
+        card.addressQuestion = question
+        box.approvalID = card.id
+        let answer = await request(card, for: client)
+        if let ended = answerOutcome(answer, card: card, handle: handle ?? "", client: client) { return .outcome(ended) }
+        guard !Task.isCancelled, client.isCurrent else { return .outcome(Self.ended) }
+        owner.scope.add(question.url)
+        return .value(card.needsAuthentication ? .approvedWithTouchID : .approved)
     }
 
     /// An address the agent wrote, as rule P16 lets it open: http or https, with a host, on a site not excluded from AI.
@@ -411,9 +529,9 @@ import Foundation
     }
 
     /// The full address of a link that a ref names in the tab's latest snapshot, which a followed link opens without the agent seeing its query (docs/agents.md, Untrusted marking), refused like a written address on a site agents do not open (P16), and stale once the tab shows another document.
-    private func link(_ ref: String, in handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<URL> {
+    private func link(_ ref: String, in handle: String, _ client: AgentToolClient, state: AgentGrantState) -> Resolved<URL> {
         let tab: AgentTabInfo
-        switch readableTab(handle, grant, state: state) {
+        switch readableTab(handle, client, state: state) {
         case .value(let resolved): tab = resolved.0
         case .outcome(let failure): return .outcome(failure)
         }
@@ -434,22 +552,23 @@ import Foundation
         Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "The page in \(handle) changed since your last snapshot. Take a new snapshot.", structured: ["tab": .string(handle)]))
     }
 
-    /// Waits until the tab's main frame finishes a document, the tab stops loading, a rule stops its navigation, or it closes or leaves the client, at most `loadWait`, and says whether one of them happened.
-    private func waitForLoad(of tabID: UUID, _ grant: AgentGrant, state: AgentGrantState, since before: AgentTabActivity) async -> Bool {
+    /// Waits until the tab's main frame finishes a document, the tab stops loading, a rule stops its navigation or the scope a hop of `load`, or it closes or leaves the client, at most `loadWait`, and says whether one of them happened.
+    private func waitForLoad(of tabID: UUID, load: UUID?, _ client: AgentToolClient, state: AgentGrantState, since before: AgentTabActivity) async -> Bool {
         await Self.poll(for: loadWait) {
             let activity = state.activity(of: tabID)
-            if activity.documents > before.documents || activity.stops > before.stops || activity.refusals > before.refusals || activity.isGone { return true }
-            return host.tabs(withIDs: [tabID]).first?.agentOwnerID != grant.id
+            let isHeld = load != nil && state.heldHops[tabID]?.loadID == load
+            if activity.documents > before.documents || activity.stops > before.stops || activity.refusals > before.refusals || activity.isGone || isHeld { return true }
+            return host.tabs(withIDs: [tabID]).first?.agentOwnerID != client.id
         }
     }
 
     /// The result of a load the call waited for: refused when a rule stopped it or the page is one agents do not read, an error when no new document came, and otherwise the address and the title.
-    private func loadOutcome(of tabID: UUID, handle: String, _ grant: AgentGrant, state: AgentGrantState, since before: AgentTabActivity, didLoad: Bool, opened: Bool, history: Bool = false) -> Outcome {
+    private func loadOutcome(of tabID: UUID, handle: String, _ client: AgentToolClient, state: AgentGrantState, since before: AgentTabActivity, didLoad: Bool, opened: Bool, history: Bool = false) -> Outcome {
         let activity = state.activity(of: tabID)
         guard let tab = host.tabs(withIDs: [tabID]).first else {
             return Outcome(result: AgentToolResult(status: .error, code: "tabNotFound", text: "\(handle) closed before its page loaded."), reportedTabID: tabID)
         }
-        guard tab.agentOwnerID == grant.id else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle)), reportedTabID: tabID) }
+        guard tab.agentOwnerID == client.id else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle)), reportedTabID: tabID) }
         if activity.refusals > before.refusals {
             return Outcome(result: Self.refusal(.p16, "Arch stopped \(handle)'s navigation at an address that agents do not open: a site excluded from AI, an internal page, a file, or another app's link.",
                                                 handle: handle), reportedTabID: tabID)
@@ -475,25 +594,27 @@ import Foundation
         return Outcome(result: AgentToolResult(status: status, code: status == .error ? "navigationFailed" : nil, text: text, structured: .object(structured)), reportedTabID: tabID)
     }
 
-    private func closeTab(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) -> Outcome {
+    private func closeTab(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState) -> Outcome {
         let tab: AgentTabInfo, handle: String
-        switch agentTab(arguments["tab"]?.stringValue ?? "", grant, state: state) {
+        switch agentTab(arguments["tab"]?.stringValue ?? "", client, state: state) {
         case .value(let resolved): (tab, handle) = resolved
         case .outcome(let failure): return failure
         }
+        guard client.isCurrent else { return Self.ended }
         host.closeAgentTab(tab.id)
+        state.endWrittenLoad(in: tab.id)
         return Outcome(result: AgentToolResult(status: .ok, text: "Closed \(handle).", structured: ["tab": .string(handle), "closed": true]), site: tab.url.flatMap(AgentActivityEntry.site(of:)))
     }
 
     // MARK: Reading
 
-    private func readText(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+    private func readText(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState) async -> Outcome {
         let tab: AgentTabInfo, handle: String
-        switch readableTab(arguments["tab"]?.stringValue ?? "", grant, state: state) {
+        switch readableTab(arguments["tab"]?.stringValue ?? "", client, state: state) {
         case .value(let resolved): (tab, handle) = resolved
         case .outcome(let failure): return failure
         }
-        return await readText(arguments, tab: tab, handle: handle) { mayStillRead($0, grant, state: state) }
+        return await readText(arguments, tab: tab, handle: handle) { mayStillRead($0, as: tab, handle: handle, client, state: state) }
     }
 
     func readText(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, mayReadTab: (AgentTabInfo) -> Bool) async -> Outcome {
@@ -578,17 +699,27 @@ import Foundation
         }
     }
 
-    /// Whether the client may still read `tab`: one of its agent tabs, or one the user shared with it that is still the user's.
-    func mayStillRead(_ tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> Bool {
-        access(to: tab, grant, state: state) != .notTheClients
+    /// Whether the client may still read `tab`: one of its agent tabs, or one the user shared with it that is still the user's, in an in-app session also one of the user's open tabs of its Persona; and for a session, while the call's turn goes on and the user has not taken the session over.
+    func mayStillRead(_ tab: AgentTabInfo, _ client: AgentToolClient, state: AgentGrantState) -> Bool {
+        guard client.isCurrent else { return false }
+        switch access(to: tab, client, state: state) {
+        case .notTheClients: return false
+        case .agentTab: return true
+        case .shared: return client.session == nil || host.userTabs(in: client.personaID).contains { $0.id == tab.id }
+        }
     }
 
-    private func waitFor(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+    /// Whether the client may still read the tab that a read began on as `original`, as it is now: also under the same handle, which Stop Sharing removes, and with the same owner.
+    func mayStillRead(_ current: AgentTabInfo, as original: AgentTabInfo, handle: String, _ client: AgentToolClient, state: AgentGrantState) -> Bool {
+        current.agentOwnerID == original.agentOwnerID && state.handles.tabs.id(for: handle) == original.id && mayStillRead(current, client, state: state)
+    }
+
+    private func waitFor(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState) async -> Outcome {
         let given = ["load", "text", "url", "ref"].filter { arguments[$0] != nil }
         guard given.count == 1 else { return Self.error("invalidArguments", "wait_for takes one of load, text, url, or ref.") }
         if given == ["load"], arguments["load"] != .bool(true) { return Self.error("invalidArguments", "load must be true.") }
         let tab: AgentTabInfo, handle: String
-        switch readableTab(arguments["tab"]?.stringValue ?? "", grant, state: state) {
+        switch readableTab(arguments["tab"]?.stringValue ?? "", client, state: state) {
         case .value(let resolved): (tab, handle) = resolved
         case .outcome(let failure): return failure
         }
@@ -604,7 +735,7 @@ import Foundation
             // Watching scrolls nothing, so that a wait leaves the user's shared tab where it is.
             while !isMet {
                 guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
-                guard mayStillRead(current, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
+                guard mayStillRead(current, client, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
                 if case .refused(let rule, let sentence) = AgentPolicy.mayRead(current.url, allowsAI: allowsAI) {
                     return Outcome(result: Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle), site: site)
                 }
@@ -618,7 +749,7 @@ import Foundation
             waited = "the text \u{201C}\(text)\u{201D} to appear"
             while !isMet {
                 guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
-                let reading = await read(current, handle: handle) { mayStillRead($0, grant, state: state) }
+                let reading = await read(current, handle: handle) { mayStillRead($0, client, state: state) }
                 switch reading {
                 case .value(let content): isMet = content.text.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 case .outcome(let failure) where failure.result.status == .refused: return Outcome(result: failure.result, site: site)
@@ -631,14 +762,14 @@ import Foundation
             let address = arguments["url"]?.stringValue
             waited = address.map { "its address to contain \u{201C}\($0)\u{201D}" } ?? "its document to load"
             isMet = await Self.poll(for: deadline.timeIntervalSinceNow) {
-                guard let current = host.tabs(withIDs: [tab.id]).first, mayStillRead(current, grant, state: state) else { return true }
+                guard let current = host.tabs(withIDs: [tab.id]).first, mayStillRead(current, client, state: state) else { return true }
                 guard let address else { return !current.isLoading && current.url != nil }
                 // The address as results show it, without its query and fragment, which agents never see, and never that of a page agents do not read.
                 guard AgentPolicy.showsTitle(of: current.url, allowsAI: allowsAI), let url = current.url else { return false }
                 return AgentAddress.reduced(url).absoluteString.contains(address)
             }
             guard let current = host.tabs(withIDs: [tab.id]).first else { return Self.error("tabNotFound", "\(handle) closed while it waited.") }
-            guard mayStillRead(current, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
+            guard mayStillRead(current, client, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
         }
         if Task.isCancelled { return Self.ended }
         let structured: AgentJSON = ["tab": .string(handle), "met": .bool(isMet)]
@@ -647,8 +778,8 @@ import Foundation
     }
 
     /// The downloads the client's agent tabs started once the user allowed them: name, size, and state, never a path.
-    private func listDownloads(_ grant: AgentGrant) -> Outcome {
-        let downloads = host.agentDownloads(of: grant.id)
+    private func listDownloads(_ client: AgentToolClient) -> Outcome {
+        let downloads = host.agentDownloads(of: client.id)
         var rows: [AgentJSON] = []
         var lines: [String] = []
         for download in downloads {
@@ -665,8 +796,8 @@ import Foundation
     }
 
     /// History pages whose title or address without query and fragment contains the query, without excluded sites and pages agents do not read, at most `limit`, each address once. The store also matches queries and fragments, which agents never see, so it is asked for more.
-    private func searchHistory(_ arguments: [String: AgentJSON], _ grant: AgentGrant) async -> Outcome {
-        guard grant.scopes.searchHistory else {
+    private func searchHistory(_ arguments: [String: AgentJSON], _ client: AgentToolClient) async -> Outcome {
+        guard client.scopes.searchHistory else {
             return Outcome(result: AgentToolResult(status: .refused, code: "historyScope", text: "search_history needs the history scope, which the user gives on Arch's grant sheet."))
         }
         let query = (arguments["query"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -693,29 +824,29 @@ import Foundation
     // MARK: Tabs
 
     /// One of the grant's agent tabs by handle: not found for a handle this client was not given or a tab that closed, and refused (P17) for a tab the user took over.
-    func agentTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
+    func agentTab(_ handle: String, _ client: AgentToolClient, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
         guard let id = state.handles.tabs.id(for: handle) else { return .outcome(Self.error("tabNotFound", "This client has no tab \(handle).")) }
         guard let tab = host.tabs(withIDs: [id]).first else { return .outcome(Self.error("tabNotFound", "\(handle) is closed.")) }
-        guard tab.agentOwnerID == grant.id else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
+        guard tab.agentOwnerID == client.id else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
         return .value((tab, handle))
     }
 
     /// A tab the client may read: one of its agent tabs, or one the user shared with it that is still the user's, by the tab's current owner.
-    func readableTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
+    func readableTab(_ handle: String, _ client: AgentToolClient, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
         guard let id = state.handles.tabs.id(for: handle) else { return .outcome(Self.error("tabNotFound", "This client has no tab \(handle).")) }
         guard let tab = host.tabs(withIDs: [id]).first else { return .outcome(Self.error("tabNotFound", "\(handle) is closed.")) }
-        guard mayStillRead(tab, grant, state: state) else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
+        guard mayStillRead(tab, client, state: state) else { return .outcome(Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle))) }
         return .value((tab, handle))
     }
 
     /// How the client may use the tab as it is now, on every call: its own agent tab while the tab is in its agent folder, and a tab the user shared while the tab is the user's. A shared tab that has moved into an agent folder is no longer shared, and leaves the shared list. A tab never changes Persona, and the user shared one of the grant's Persona.
-    func access(to tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> AgentTabAccess {
+    func access(to tab: AgentTabInfo, _ client: AgentToolClient, state: AgentGrantState) -> AgentTabAccess {
         let isShared = state.handles.sharedTabIDs.contains(tab.id)
         if isShared, tab.agentOwnerID != nil {
             state.handles.sharedTabIDs.removeAll { $0 == tab.id }
             state.handles.actingSharedTabIDs.remove(tab.id)
         }
-        if tab.agentOwnerID == grant.id { return .agentTab }
+        if tab.agentOwnerID == client.id { return .agentTab }
         guard isShared, tab.agentOwnerID == nil else { return .notTheClients }
         return .shared(acting: state.handles.actingSharedTabIDs.contains(tab.id))
     }
@@ -725,25 +856,33 @@ import Foundation
          "loading": .bool(tab.isLoading), "engine": .string(tab.engine.rawValue)]
     }
 
-    /// The grant's space, or the Persona's first space once that one is gone.
+    /// The grant's or session's space, or the Persona's first space once that one is gone.
+    func space(of client: AgentToolClient) -> AgentSpaceInfo? {
+        let spaces = host.spaces(in: client.personaID)
+        return spaces.first { $0.id == client.spaceID } ?? spaces.first
+    }
+
     func space(of grant: AgentGrant) -> AgentSpaceInfo? {
-        let spaces = host.spaces(in: grant.personaID)
-        return spaces.first { $0.id == grant.spaceID } ?? spaces.first
+        space(of: AgentToolClient(grant: grant))
+    }
+
+    func personaName(of client: AgentToolClient) -> String {
+        host.personas.first { $0.id == client.personaID }?.name ?? "deleted"
     }
 
     func personaName(of grant: AgentGrant) -> String {
-        host.personas.first { $0.id == grant.personaID }?.name ?? "deleted"
+        personaName(of: AgentToolClient(grant: grant))
     }
 
     /// The agent folder's name for a client: its name and the app it runs in, as in "claude · Terminal".
-    static func folderName(for client: AgentClientIdentity) -> String {
+    nonisolated static func folderName(for client: AgentClientIdentity) -> String {
         [client.name, client.host].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
     // MARK: Events
 
     /// Keeps what happened in an agent tab for its client's next result, in `state`, which a grant has from its first call. A tab that a page opened beyond the limit of agent tabs closes again, on the next turn of the run loop, since the engine is still in the callback that made it. A new page, which an address change counts before its document finishes loading, withdraws the cards about the tab's earlier one, and a tab that closed or left the client withdraws all of its cards. A download or a link to another app that a page started asks the user on a card of its own (P6, P11), one at a time per tab.
-    func tab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport, state: AgentGrantState?, client: String = "") {
+    func tab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport, state: AgentGrantState?, client: AgentToolClient? = nil) {
         if case .opened(let openedID) = report, host.agentTabs(of: ownerID).count > AgentLimits.agentTabs {
             let host = host
             DispatchQueue.main.async { MainActor.assumeIsolated { host.closeAgentTab(openedID) } }
@@ -759,7 +898,10 @@ import Foundation
         state?.record(.report(report), tab: tabID)
         switch report {
         case .addressChanged, .loaded: approvals.withdraw(tab: tabID, owner: ownerID, document: state?.activity(of: tabID).pages ?? Int.max)
-        case .closed, .takenOver: approvals.withdraw(tab: tabID, owner: ownerID, document: nil)
+        case .closed, .takenOver:
+            state?.endWrittenLoad(in: tabID)
+            approvals.withdraw(tab: tabID, owner: ownerID, document: nil)
+            if case .takenOver = report { releaseInputCheck(in: tabID) }
         case .downloadAsked(let url): if let state { askAboutDownload(url, in: tabID, of: ownerID, state: state, client: client) }
         case .externalAppAsked(let url): if let state { askAboutExternalApp(url, in: tabID, of: ownerID, state: state, client: client) }
         default: break
@@ -773,10 +915,29 @@ import Foundation
         return url.host.map { state.downloadSites.contains($0.lowercased()) } ?? false
     }
 
-    /// Rule P16 at each main frame navigation, redirect hop, and popup of an agent tab, whoever started it: the exclusions then in force decide, and a refusal is an event for the client.
-    func tab(_ tabID: UUID, mayLoad url: URL, state: AgentGrantState?) -> Bool {
-        guard case .refused = AgentPolicy.mayLoad(url, allowsAI: allowsAI) else { return true }
-        state?.record(.refused(url), tab: tabID)
+    /// Rule P16 at each main frame navigation, redirect hop, and popup of an agent tab, whoever started it: the exclusions then in force decide, and a refusal is an event for the client. For an in-app session, rule P13 at each server redirect of a navigation by an address its agent wrote (`writtenLoads`), never at a popup or a link that opens elsewhere: a hop to a site outside `scope` stops, and the call that waits for the navigation asks the user with the hop's full address (`heldHops`), or, once no call waits, the hop is refused and the agent hears so. The navigation's checks end once the tab commits another document than the one it showed at the navigation's first check.
+    func tab(_ tabID: UUID, mayLoad url: URL, kind: AgentLoadKind, state: AgentGrantState?, scope: AgentSiteScope? = nil) -> Bool {
+        if case .refused = AgentPolicy.mayLoad(url, allowsAI: allowsAI) {
+            state?.record(.refused(url), tab: tabID)
+            return false
+        }
+        guard kind != .popup, let state, var load = state.writtenLoads[tabID] else { return true }
+        let document = host.tabs(withIDs: [tabID]).first?.documentID
+        if load.documentID == nil {
+            load.documentID = document
+            state.writtenLoads[tabID] = load
+        } else if load.documentID != document {
+            state.writtenLoads[tabID] = nil
+            return true
+        }
+        guard kind == .redirect, let scope, AgentSeenAddress(url) != AgentSeenAddress(load.url),
+              case .asks(let question) = scope.hop(to: url, ofWrittenAddress: true) else { return true }
+        if load.isAwaited {
+            state.heldHops[tabID] = AgentHeldHop(loadID: load.id, question: question)
+        } else {
+            state.writtenLoads[tabID] = nil
+            state.record(.hopStopped, tab: tabID)
+        }
         return false
     }
 
@@ -894,11 +1055,59 @@ import Foundation
             if let scheme { json["scheme"] = .string(scheme) }
             line = isWeb ? "Arch stopped \(handle) from loading a site excluded from AI (P16)."
                 : "Arch stopped \(handle) from loading an address with \(scheme.map { "the scheme \($0), which" } ?? "a scheme that") agents never open (P16)."
+        case .hopStopped:
+            json["kind"] = "redirectStopped"
+            json["rule"] = "P13"
+            line = "Arch stopped \(handle)'s navigation at a redirect to a site outside the session's scope, since no call waited to ask the user (P13). Navigate to the address again to let the user decide."
         case .closedOverLimit:
             json["kind"] = "closedOverLimit"
             line = "A page in \(handle) opened another tab, which Arch closed: a client has at most \(AgentLimits.agentTabs) agent tabs open."
+        case .fileChooserAsked(let mode):
+            json["kind"] = "fileChooserAsked"
+            json["rule"] = "P7"
+            json["asks"] = .string(Self.chooserName(mode))
+            line = "A page in \(handle) asks for \(Self.chooserObject(mode)), which waits for the user in Arch (P7). The user picks in Arch's panel, and you learn only how many items the page receives."
+        case .fileChooserEnded(let mode, let chosen):
+            json["kind"] = "fileChooserEnded"
+            json["rule"] = "P7"
+            json["asks"] = .string(Self.chooserName(mode))
+            json["chosen"] = chosen.map { .number(Double($0)) } ?? .null
+            switch chosen {
+            case nil: line = "The file chooser in \(handle) ended before the user chose, so the page received no file (P7)."
+            case 0?: line = "The user cancelled the file chooser in \(handle), so the page received no file (P7)."
+            case let count?: line = "The user chose \(Self.chosenItems(count, mode: mode)) for the page in \(handle) (P7)."
+            }
         }
         return (line, .object(json))
+    }
+
+    /// What a file chooser asks for, as an event names it.
+    static func chooserName(_ mode: EngineFileChooserRequest.Mode) -> String {
+        switch mode {
+        case .openFile: return "file"
+        case .openFiles: return "files"
+        case .openFolder: return "folder"
+        case .save: return "save"
+        }
+    }
+
+    /// What a file chooser asks for, in a sentence.
+    static func chooserObject(_ mode: EngineFileChooserRequest.Mode) -> String {
+        switch mode {
+        case .openFile: return "a file"
+        case .openFiles: return "files"
+        case .openFolder: return "a folder"
+        case .save: return "a place to save a file"
+        }
+    }
+
+    /// How many items the user chose, in a sentence: files, a folder, whose files the page receives, or a place to save.
+    static func chosenItems(_ count: Int, mode: EngineFileChooserRequest.Mode) -> String {
+        switch mode {
+        case .openFolder: return "a folder, whose files the page received"
+        case .save: return "a place to save the file"
+        case .openFile, .openFiles: return count == 1 ? "1 file" : "\(count) files"
+        }
     }
 
     // MARK: Helpers
@@ -923,6 +1132,26 @@ import Foundation
         return AgentToolResult(status: .error, code: "limitReached",
                                text: "\(tool)'s result would pass \(AgentLimits.resultTextBytes / 1024) KB of text, the most a result carries, as a page's very long address can make it.",
                                structured: .object(structured))
+    }
+
+    /// Waits until the call has its outcome, `seconds` pass, or the waiting task is cancelled, and says whether it has its outcome; the outcome answers at once, without polling.
+    static func wait(for box: AgentCallBox, seconds: TimeInterval) async -> Bool {
+        if box.outcome != nil { return true }
+        let once = AgentOnce<Bool>()
+        let timer = Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            once.resume(with: false)
+        }
+        defer { timer.cancel() }
+        _ = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard once.begin(continuation) else { return }
+                box.whenFinished { _ in once.resume(with: true) }
+            }
+        } onCancel: {
+            once.resume(with: false)
+        }
+        return box.outcome != nil && !Task.isCancelled
     }
 
     /// Polls `condition` on the main actor every 50 milliseconds until it holds, `seconds` pass, or the task is cancelled, and says whether it held.
@@ -957,6 +1186,19 @@ import Foundation
         error("notAvailable", text)
     }
 
+    /// Shows a card for the client's call and waits for the user's answer, at most until the call's deadline. A session an outside client started with `--deny-approvals` gets a denial at once, and no card opens; nor does one for a call whose session's turn ended or that the user took over.
+    func request(_ card: AgentApproval, for client: AgentToolClient) async -> AgentApprovalAnswer {
+        guard !client.deniesApprovals else { return .ended(Self.deniedApprovalsReason) }
+        guard client.isCurrent else { return .ended(Self.notCurrentReason) }
+        var card = card
+        if let callDeadline, callDeadline < card.deadline { card.deadline = callDeadline }
+        return await approvals.request(card)
+    }
+
+    static let deniedApprovalsReason = "This task was started with approvals denied, so Arch denied the step without asking the user."
+    static let notCurrentReason = "The session's turn ended or the user took the session over."
+
+
     /// A rule's refusal, named in its code and its text.
     static func refusal(_ rule: AgentRule, _ text: String, handle: String? = nil) -> AgentToolResult {
         var structured: [String: AgentJSON] = ["rule": .string(rule.rawValue)]
@@ -971,7 +1213,7 @@ import Foundation
     }
 }
 
-/// Who a call is for: an outside client's grant, or an in-app session. The host reads the same facts from both; a session adds its site scope and what is left of its call limits.
+/// Who a call is for: an outside client's grant, or an in-app session. The host runs both on the same path and reads the same facts from both; a session adds its site scope (P13), what is left of its call limits, and the turn and take-over the call belongs to.
 struct AgentToolClient {
     struct Session {
         var siteScope: [String]
@@ -979,6 +1221,9 @@ struct AgentToolClient {
         var callsLeftThisTurn: Int
         var callsLeftThisSession: Int
         var readerExcerpt: AgentReaderExcerpt?
+        /// The turn and the take-over the call arrived in; a call whose turn ended or whose session the user took over meanwhile reads and acts on nothing more.
+        var callEpoch = 0
+        var takeoverGeneration = 0
     }
 
     /// The grant's or session's ID, which owns its agent tabs.
@@ -988,8 +1233,20 @@ struct AgentToolClient {
     var spaceID: UUID
     var level: AgentAccessLevel
     var scopes: AgentGrantScopes
+    /// The name cards and Touch ID's reason give the client: an outside client's as Arch verified it, also for a session it started, or the title of a session the user started.
+    var name: String
+    /// The agent folder's name: the client and its app, as "claude · Terminal", or the session's title (docs/agents.md, Agent folders).
+    var folderName: String
+    /// The policy's kind of client: an in-app session has a site scope, which applies to its navigation and typing (P13, P14), also in a session an outside client started.
+    var kind: AgentClientKind
+    /// Whether the access comes from an outside client, whose sensitive Allow and Share count only after Touch ID or the login password: a grant, or a session an outside client started with `arch-cli task`.
+    var isOutsideClient: Bool
+    /// A session an outside client started with `--deny-approvals`: each card is denied at once, and none opens.
+    var deniesApprovals = false
     /// Set for an in-app session.
     var session: Session?
+    /// The in-app session itself, whose scope the host checks written addresses and redirect hops against and adds the addresses the user allows to.
+    var inAppSession: AgentSession?
 
     init(grant: AgentGrant) {
         id = grant.id
@@ -997,6 +1254,10 @@ struct AgentToolClient {
         spaceID = grant.spaceID
         level = grant.level
         scopes = grant.scopes
+        name = grant.client.displayName
+        folderName = AgentToolHost.folderName(for: grant.client)
+        kind = .outside
+        isOutsideClient = true
     }
 
     /// An in-app session, whose `search_history` follows Let In-App Agents Search History and which starts no tasks of its own.
@@ -1006,17 +1267,31 @@ struct AgentToolClient {
         spaceID = session.spaceID
         level = session.mode
         scopes = AgentGrantScopes(searchHistory: searchesHistory, startTasks: false)
+        // A session an outside client started names the client as Arch verified it, never words of the client's task.
+        name = session.cardName
+        folderName = session.title
+        kind = .inApp
+        isOutsideClient = session.isFromOutsideClient
+        if case .outsideClient(_, _, true) = session.origin { deniesApprovals = true }
         self.session = Session(siteScope: session.scope.sites, hasSearchResults: session.scope.searchResults != nil,
-                               callsLeftThisTurn: session.callsLeftThisTurn, callsLeftThisSession: session.callsLeftThisSession, readerExcerpt: session.readerExcerpt)
+                               callsLeftThisTurn: session.callsLeftThisTurn, callsLeftThisSession: session.callsLeftThisSession, readerExcerpt: session.readerExcerpt,
+                               callEpoch: session.callEpoch, takeoverGeneration: session.takeoverGeneration)
+        inAppSession = session
+    }
+
+    /// Whether the call's session still runs it: not ended, not taken over, and in the turn and take-over it arrived in. An outside client's grant always does.
+    @MainActor var isCurrent: Bool {
+        guard let owner = inAppSession, let session else { return true }
+        return !owner.hasEnded && !owner.isTakenOver && owner.callEpoch == session.callEpoch && owner.takeoverGeneration == session.takeoverGeneration
     }
 }
 
 // MARK: In-app sessions
 
-/// An in-app session's calls (docs/agents.md, In-app sessions), which run the tools that need no agent tab until plan task VII.17.1 runs them on the grant's path with the session as the agent folder's owner, its site scope (P13), and the cards in its panel.
+/// An in-app session's calls (docs/agents.md, In-app sessions; Site scope and navigation): every tool runs on the grant's path (`run(_:for:state:)`) with the session's own tool state (`AgentSession.toolState`), the session as the agent folder's owner, its site scope for written addresses and redirect hops (P13), and its cards in its panel. The session's details, lists, and guide are its own, a question waits only during a turn, and Take Over shows the tab a read is using.
 extension AgentToolHost {
-    /// The tools an in-app session runs in this build; its `tools/list` lists only these, and the others answer that they are not available yet.
-    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"]
+    /// The tools an in-app session runs: every served tool but `approval_wait`, since a session's call waits on its card instead of answering `approvalPending`.
+    static let sessionServedTools = servedTools.filter { $0 != "approval_wait" }
 
     /// The tools an in-app session in `mode` with `scopes` can call, in catalog order, for its `tools/list`.
     static func sessionTools(for mode: AgentAccessLevel, scopes: AgentGrantScopes) -> [AgentTool] {
@@ -1024,49 +1299,40 @@ extension AgentToolHost {
     }
 
     func run(_ call: AgentToolCall, in session: AgentSession, searchesHistory: Bool) async -> AgentToolResult {
-        let client = AgentToolClient(session: session, searchesHistory: searchesHistory)
-        guard let tool = AgentToolCatalog.tool(named: call.name) else {
-            return AgentToolResult(status: .error, code: "unknownTool", text: "Arch has no tool named \(call.name).")
-        }
+        await runSession(call, in: session, searchesHistory: searchesHistory).result
+    }
+
+    /// Runs an in-app session's call, with its result, the step the transcript shows, the site the activity log records, and the user's decision when a card asked.
+    func runSession(_ call: AgentToolCall, in session: AgentSession, searchesHistory: Bool) async -> Outcome {
+        guard let tool = AgentToolCatalog.tool(named: call.name) else { return Self.error("unknownTool", "Arch has no tool named \(call.name).") }
+        guard Self.sessionServedTools.contains(tool.name) else { return Self.notAvailable("In-app sessions do not run \(tool.name).") }
         // The harness checks guide's arguments itself, so an unknown topic is answered with the topic names, as arch-cli guide answers it, and a null topic gives the guide.
-        if tool.name == "guide" { return AgentHarness.guideResult(arguments: call.arguments, inSession: true) }
-        if let problem = Self.problem(with: call.arguments, for: tool) {
-            return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
-        }
-        switch tool.name {
-        case "ask_user":
+        if tool.name == "guide" { return Outcome(result: AgentHarness.guideResult(arguments: call.arguments, inSession: true)) }
+        if let problem = Self.problem(with: call.arguments, for: tool) { return Self.error("invalidArguments", problem) }
+        if tool.name == "ask_user" {
             guard session.isTurnRunning, !session.hasEnded, !session.isTakenOver, session.acceptsQuestions else {
-                return AgentToolResult(status: .refused, code: "stopped", text: "This session is not accepting questions for this turn.")
+                return Outcome(result: AgentToolResult(status: .refused, code: "stopped", text: "This session is not accepting questions for this turn."))
             }
             if case .outsideClient(_, _, true) = session.origin {
-                return AgentToolResult(status: .denied, code: "notAvailable", text: "This task was started with user prompts disabled.")
+                return Outcome(result: AgentToolResult(status: .denied, code: "notAvailable", text: "This task was started with user prompts disabled."))
             }
-            return await askUser(call.arguments, ownerID: session.id, name: session.title).result
-        case "session_info": return sessionInfo(ofSession: client, handles: &session.handles)
-        case "list_spaces": return listSpaces(ofSession: client, handles: &session.handles)
-        case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &session.handles)
-        case "read_text", "snapshot":
-            let handle = call.arguments["tab"]?.stringValue ?? ""
-            guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
-                return Self.error("tabNotFound", "This session has no open tab \(handle).").result
-            }
-            let epoch = session.callEpoch
-            let generation = session.takeoverGeneration
-            func mayRead(_ current: AgentTabInfo) -> Bool {
-                guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.takeoverGeneration == generation,
-                      current.agentOwnerID == tab.agentOwnerID, session.handles.tabs.id(for: handle) == id else { return false }
-                if current.agentOwnerID == session.id { return host.agentTabs(of: session.id).contains { $0.id == id } }
-                return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
-            }
-            let reading = session.beganReading(id)
-            defer { session.finishedReading(reading) }
-            if call.name == "read_text" { return await readText(call.arguments, tab: tab, handle: handle, mayReadTab: mayRead).result }
-            let snapshots = session.snapshots
-            return await snapshot(call.arguments, tab: tab, handle: handle, access: tab.agentOwnerID == nil ? .shared : .owned, store: snapshots, pages: 0) { current in
-                session.snapshots === snapshots && mayRead(current)
-            }.result
-        default: return AgentToolResult(status: .error, code: "notAvailable", text: "In-app sessions do not run \(tool.name) in this build of Arch yet.")
         }
+        let client = AgentToolClient(session: session, searchesHistory: searchesHistory)
+        // Take Over shows the tab a read is using.
+        var reading: UUID?
+        if tool.name == "read_text" || tool.name == "snapshot", let id = call.arguments["tab"]?.stringValue.flatMap(session.handles.tabs.id(for:)) {
+            reading = session.beganReading(id)
+        }
+        defer { if let reading { session.finishedReading(reading) } }
+        let outcome = await run(call, for: client, state: session.toolState)
+        // The full addresses behind a snapshot's link refs are seen, so that writing one of them opens it without asking.
+        if tool.name == "snapshot", outcome.result.status == .ok, client.isCurrent,
+           let id = call.arguments["tab"]?.stringValue.flatMap(session.handles.tabs.id(for:)), let record = session.toolState.snapshots.records[id] {
+            var scope = session.scope
+            record.refs.values.compactMap(\.href).forEach { scope.see($0) }
+            if scope != session.scope { session.scope = scope }
+        }
+        return outcome
     }
 
     /// An in-app session's details (docs/agents.md, Tools ▸ Catalog): its mode, its Persona and space, its site scope, its tabs, what is left of its limits, and what asks. The Persona and space read as "Persona / Space".
@@ -1078,11 +1344,11 @@ extension AgentToolHost {
         let place = space.map { "\(persona) / \($0.name) (\(spaceHandle ?? ""))" } ?? "the \(persona) Persona"
         let openTabs = host.agentTabs(of: client.id).count
         let shared = handles.sharedTabIDs.map { handles.tabs.handle(for: $0) }
-        let asks = ["Reading an available tab runs without asking. Opening, navigating and interacting with pages require the user."]
+        let asks = Self.whatAsksInSession(client.level)
         let sites = session.siteScope.isEmpty ? "no sites yet" : session.siteScope.joined(separator: ", ")
         var lines = ["This session works in \(place), in \(client.level.title)."]
         lines.append("Site scope: \(sites)\(session.hasSearchResults ? ", and the search engine's results address" : "").")
-        lines.append("Agent tabs: \(openTabs == 0 ? "none" : String(openTabs)) open, at most \(AgentLimits.agentTabs) at once. Tabs the user shared: \(shared.isEmpty ? "none" : shared.joined(separator: ", ")).")
+        lines.append("Agent tabs: \(openTabs == 0 ? "none" : String(openTabs)) open, at most \(AgentLimits.agentTabs) at once, in the agent folder \u{201C}\(client.folderName)\u{201D}. Tabs the user shared: \(shared.isEmpty ? "none" : shared.joined(separator: ", ")).")
         lines.append("Limits: \(session.callsLeftThisTurn) of \(AgentLimits.toolCallsPerTurn) tool calls left for this message and \(session.callsLeftThisSession) of \(AgentLimits.toolCallsPerSession) for the session, \(AgentLimits.actionsPerSecond) actions a second.")
         lines.append(contentsOf: asks)
         if let excerpt = session.readerExcerpt, handles.sharedTabIDs.contains(excerpt.tabID),
@@ -1103,6 +1369,20 @@ extension AgentToolHost {
             "scopes": ["searchHistory": .bool(client.scopes.searchHistory)],
         ]
         return AgentToolResult(status: .ok, text: lines.joined(separator: "\n"), structured: structured)
+    }
+
+    /// What asks the user or is refused at each mode in an in-app session (docs/agents.md, Modes; Site scope and navigation).
+    static func whatAsksInSession(_ level: AgentAccessLevel) -> [String] {
+        let interactions: String
+        switch level {
+        case .readOnly: interactions = "Interactions other than scroll and hover are refused, and so are sensitive steps such as request_approval."
+        case .askBeforeActing: interactions = "Each interaction asks the user first, and sensitive steps such as request_approval always ask."
+        case .actInAgentTabs: interactions = "Interactions in your agent tabs on sites in scope run without asking; on other sites they ask once per site, and sensitive steps such as request_approval always ask."
+        }
+        return [
+            "Reading runs without asking, and so does following a link by its ref. An address you write opens without asking only when a page or the user showed it, when it is the search engine's results address, or when it is the bare origin of a site in scope; any other address asks the user in every mode, and so does a redirect of it to a site outside the scope. \(interactions)",
+            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, and a page's file chooser ask the user. For a form that needs a file, use hand_to_user: the user picks files in Arch, and you learn only how many. The tabs the user shared are for reading only.",
+        ]
     }
 
     private func listSpaces(ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
@@ -1161,11 +1441,6 @@ extension AgentToolHost {
         return AgentToolResult(status: .ok, text: ([summary] + lines).joined(separator: "\n"), structured: ["scope": .string(kind), "tabs": .array(rows)])
     }
 
-    /// The session's space, or the Persona's first space once that one is gone.
-    func space(of client: AgentToolClient) -> AgentSpaceInfo? {
-        let spaces = host.spaces(in: client.personaID)
-        return spaces.first { $0.id == client.spaceID } ?? spaces.first
-    }
 }
 
 /// Resumes a continuation once, with the first of the answers that may come, as a page's answer and a timer, on whatever thread each comes.

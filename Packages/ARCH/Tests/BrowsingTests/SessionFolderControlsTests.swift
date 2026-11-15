@@ -384,6 +384,51 @@ import Testing
         #expect(browser.tabs.contains { $0.id == kept.id })
     }
 
+    @Test func aSessionsToolsOpenItsFolderWhoseStepLineNamesTheWaitingCardAndADraggedOutTabIsTheUsers() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchSessionFolder-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: StartedFolderClient())
+        defer { service.stop() }
+        let home = try #require(browser.spaces.first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let page = browser.openTab(url: URL(string: "https://fixture.invalid/plans"), in: home.id, select: false)
+        let session = try service.startSession(.init(task: "Research the plans", personaID: home.resolvedPersonaID, spaceID: home.id, attachedTabIDs: [page.id],
+                                                     mode: .readOnly, model: StartedFolderClient.model, effort: nil))
+        try #require(await eventually { session.model != nil })
+        let tools = service.sessionTools(for: session)
+
+        // open_tab, through the browser's host, opens the tab in the background in a folder named after the session in its space.
+        let opening = Task { await tools.run(AgentToolCall(name: "open_tab", arguments: ["url": "https://fixture.invalid/"])) }
+        try #require(await eventually { browser.tabs.contains { $0.agentOwnerID == session.id } })
+        let tab = try #require(browser.tabs.first { $0.agentOwnerID == session.id })
+        tab.webContentsDidFinishLoadingDocument(tab.webContents)
+        let opened = await opening.value
+        #expect(opened.status == .ok && window.selectedTabID != tab.id)
+        let handle = try #require(opened.structured?["tab"]?.stringValue)
+        let folder = try #require(browser.folders.first { $0.agentSessionID == session.id })
+        #expect(folder.name == session.title && folder.spaceID == home.id && tab.folderID == folder.id)
+        #expect(window.agentSession(of: folder) === session)
+
+        // A written address no page showed waits on a card, whose step the line under the folder's row names.
+        let navigation = Task { await tools.run(AgentToolCall(name: "navigate", arguments: ["tab": .string(handle), "url": "https://fixture.invalid/plans?d=1"])) }
+        try #require(await eventually { service.approvals.pending.contains { $0.ownerID == session.id } })
+        let card = try #require(service.approvals.pending.first { $0.ownerID == session.id })
+        #expect(card.tabID == tab.id && card.action == "Open an address in \(handle)" && session.state == .waitingForUser)
+        let step = try #require(SessionFolderStepLine.waitingStep(in: service.approvals, of: session.id))
+        #expect(step.sentence == card.action && step.count == 1)
+
+        // Dragging the tab out of the folder makes it the user's: the card is withdrawn, the folder goes with its last tab, and the handle is refused (P17).
+        browser.moveOutOfFolder(tab)
+        #expect(await navigation.value.status == .stale)
+        #expect(tab.agentOwnerID == nil && !browser.folders.contains { $0.id == folder.id })
+        #expect(!service.approvals.isPending(card.id) && session.state == .running)
+        #expect(SessionFolderStepLine.waitingStep(in: service.approvals, of: session.id) == nil)
+        let refused = await tools.run(AgentToolCall(name: "navigate", arguments: ["tab": .string(handle), "action": "reload"]))
+        #expect(refused.code == "P17")
+        await service.endSessionsForQuit()
+        #expect(browser.tabs.contains { $0.id == tab.id })
+    }
+
     @Test func panelKeepsOnlyTheReviewedFolderOfTheConversationStillShowing() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -550,6 +595,18 @@ private actor UnusedFolderKeys: AgentSealKeyStore {
 private struct WaitingFolderClient: AIClient {
     func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { _ in }
+    }
+}
+
+/// The model starts its reply and keeps the turn open, so that the session's calls run.
+private struct StartedFolderClient: AIClient {
+    static let model = AIModelRef(provider: .init(rawValue: "local-fixture"), model: "folder")
+
+    func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(.started(Self.model))
+            continuation.yield(.text("Working"))
+        }
     }
 }
 

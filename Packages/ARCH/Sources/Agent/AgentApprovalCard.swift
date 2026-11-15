@@ -45,7 +45,7 @@ struct AgentApprovalCard: View {
                     .accessibilityLabel("The page, with the element marked")
             }
             if let exactText = approval.exactText {
-                Text(verbatim: exactText)
+                exactTextView(exactText)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -75,6 +75,18 @@ struct AgentApprovalCard: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(approval.isSensitive ? Color.orange.opacity(0.6) : Color.primary.opacity(0.1)))
+    }
+
+    /// The exact text, and for an address the session has not seen (P13), the parts no page or the user showed, marked.
+    private func exactTextView(_ text: String) -> Text {
+        guard let question = approval.addressQuestion else { return Text(verbatim: text) }
+        let marked = question.markedAddress
+        var address = AttributedString(marked.text)
+        for part in marked.unseen {
+            guard let range = Range(part, in: address) else { continue }
+            address[range].backgroundColor = Color.orange.opacity(0.3)
+        }
+        return Text(address)
     }
 
     private var questionAnswer: Binding<String> {
@@ -150,7 +162,7 @@ struct AgentApprovalCard: View {
                             if isReplying, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { answer(.reply(reply)) } else { isReplying = true }
                         }
                     } else {
-                        AgentPointerButton(title: offer.title(site: approval.site), requiresPointer: offer.allows && approval.isSensitive) { answer(offer) }
+                        AgentPointerButton(title: offer.title(site: approval.site), requiresPointer: offer.allows && approval.isSensitive, inWindow: { answer(offer, in: $0) })
                     }
                 }
             }
@@ -158,8 +170,9 @@ struct AgentApprovalCard: View {
         .controlSize(.small)
     }
 
-    private func answer(_ answer: AgentApprovalAnswer) {
-        Task { await approvals.answer(approval.id, with: answer) }
+    /// Answers in the card's window, where a file chooser's Allow opens Arch's panel (P7).
+    private func answer(_ answer: AgentApprovalAnswer, in window: NSWindow? = nil) {
+        Task { await approvals.answer(approval.id, with: answer, in: window) }
     }
 }
 
@@ -182,9 +195,15 @@ struct AgentPointerButton: NSViewRepresentable {
     let title: String
     var keyEquivalent = ""
     let requiresPointer: Bool
-    let action: () -> Void
+    /// What the press does, with the window of the pressed button.
+    let action: (NSWindow?) -> Void
 
     init(title: String, keyEquivalent: String = "", requiresPointer: Bool, action: @escaping () -> Void) {
+        self.init(title: title, keyEquivalent: keyEquivalent, requiresPointer: requiresPointer, inWindow: { _ in action() })
+    }
+
+    /// A button whose action receives the window it was pressed in.
+    init(title: String, keyEquivalent: String = "", requiresPointer: Bool, inWindow action: @escaping (NSWindow?) -> Void) {
         self.title = title
         self.keyEquivalent = keyEquivalent
         self.requiresPointer = requiresPointer
@@ -217,7 +236,7 @@ struct AgentPointerButton: NSViewRepresentable {
 
         @objc func press(_ sender: Any?) {
             if parent.requiresPointer, (sender as? AgentPointerNSButton)?.isPressedByPointer != true { return }
-            parent.action()
+            parent.action((sender as? NSView)?.window)
         }
     }
 }

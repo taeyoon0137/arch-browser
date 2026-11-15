@@ -1,4 +1,4 @@
-// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, passes on what happens in them, and asks the service about each of their navigations and downloads. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
+// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, gives the tool host their trusted input, passes on what happens in them, asks the service about each of their navigations and downloads, and hands it their file choosers. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
 import Agent
 import AppKit
 import ARCHEngine
@@ -14,8 +14,9 @@ import Foundation
     public var userDocumentDidEnd: ((_ tabID: UUID, _ documentID: UUID) -> Void)?
     public var userTabAddressDidChange: ((_ tabID: UUID) -> Void)?
     public var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
-    public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)?
     public var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    public var agentTabChoosesFiles: ((_ ownerID: UUID, _ tabID: UUID, _ chooser: AgentFileChooser) -> Void)?
     public var agentPanel: AgentPanelModel?
     /// The addresses of the downloads each owner's tabs started once the user allowed them, which `list_downloads` follows in the session's downloads.
     private var downloadsByOwner: [UUID: [URL]] = [:]
@@ -120,6 +121,12 @@ import Foundation
         if fullPage { tab.webContents.captureFullPage(completion: completion) } else { tab.webContents.captureViewport(completion: completion) }
     }
 
+    /// Only agent tabs, whose pages run the target check (`AgentPageScripts.targetCheck`), act through trusted input.
+    public func trustedInput(of tabID: UUID) -> AgentTabInput? {
+        guard let tab = agentTab(tabID), let input = tab.webContents.input else { return nil }
+        return AgentTabInput(input: input, zoomFactor: tab.webContents.zoomFactor)
+    }
+
     /// A page whose view no window shows and has never been sized lays out in a viewport of nothing, where no element is visible or reachable, so it gets the size of the front window's content first.
     private func giveViewport(to tab: Tab) {
         let view = tab.webContents.view
@@ -167,7 +174,7 @@ import Foundation
         session.tabs.first { $0.id == id && $0.agentOwnerID != nil }
     }
 
-    /// Follows an agent tab's folder, so that the owner hears when the user takes the tab over: by moving it out of the folder, deleting the folder, or keeping its tabs.
+    /// Follows an agent tab's folder, so that the owner hears when the user takes the tab over: by moving it out of the folder, deleting the folder, or keeping its tabs. The tab's next documents then run the target check only while an agent folder still holds it.
     private func follow(_ tab: Tab, owner: UUID) {
         let tabID = tab.id
         let observer = tab.$folderID.combineLatest(session.$folders)
@@ -179,6 +186,10 @@ import Foundation
                     MainActor.assumeIsolated {
                         guard let self, self.followed[tabID]?.owner == owner else { return }
                         self.followed[tabID] = nil
+                        if let tab = self.session.allTabs.first(where: { $0.id == tabID }) {
+                            let plugins = self.session.plugins(in: tab.personaID).contributions.pageScripts
+                            tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: plugins, inAgentTab: tab.agentOwnerID != nil))
+                        }
                         self.agentTabDidReport?(owner, tabID, .takenOver)
                     }
                 }
@@ -196,14 +207,19 @@ extension BrowserAgentHost: AgentTabMonitor {
         userTabAddressDidChange?(tabID)
     }
 
-    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
-        agentTabMayLoad?(owner, tab.id, url) ?? false
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool {
+        agentTabMayLoad?(owner, tab.id, url, kind) ?? false
     }
 
     func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {
         guard agentTabMayDownload?(owner, tab.id, url) == true else { return false }
         downloadsByOwner[owner, default: []].append(url)
         return true
+    }
+
+    func agentTab(_ tab: Tab, owner: UUID, choosesFiles chooser: AgentFileChooser) {
+        guard let agentTabChoosesFiles else { return chooser.deny() }
+        agentTabChoosesFiles(owner, tab.id, chooser)
     }
 
     func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {

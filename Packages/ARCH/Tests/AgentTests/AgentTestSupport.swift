@@ -20,11 +20,14 @@ import Testing
     var userDocumentDidEnd: ((_ tabID: UUID, _ documentID: UUID) -> Void)?
     var userTabAddressDidChange: ((_ tabID: UUID) -> Void)?
     var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
-    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)?
     var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    var agentTabChoosesFiles: ((_ ownerID: UUID, _ tabID: UUID, _ chooser: AgentFileChooser) -> Void)?
     var agentPanel: AgentPanelModel?
     /// Real web contents behind some tabs, which the page script and captures reach, as in the page script tests.
     var webContents: [UUID: any EngineWebContents] = [:]
+    /// The trusted input of some agent tabs, as `BrowserAgentHost` gives it.
+    var inputs: [UUID: AgentTabInput] = [:]
     /// What the fake engine captures for a tab in place of its web contents' capture; a tab with neither captures nothing, as Chromium may for a tab no window shows.
     var captures: [UUID: NSImage] = [:]
     var onCapture: (() -> Void)?
@@ -126,6 +129,8 @@ import Testing
         if fullPage { contents.captureFullPage(completion: completion) } else { contents.captureViewport(completion: completion) }
     }
 
+    func trustedInput(of tabID: UUID) -> AgentTabInput? { inputs[tabID] }
+
     func userTabs(in personaID: UUID) -> [AgentTabInfo] { tabs.filter { userTabIDs.contains($0.id) && $0.agentOwnerID == nil } }
 
     func showTab(_ tabID: UUID) { shownTabIDs.append(tabID) }
@@ -142,7 +147,7 @@ import Testing
         Array(history.filter { $0.url.absoluteString.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query) }.prefix(limit))
     }
 
-    /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one, which changes the tab's address, and reports the document once it finishes, or reports only the stop when a hop was refused or the load failed.
+    /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one, which changes the tab's address and document, and reports the document once it finishes, or reports only the stop when a hop was refused or the load failed.
     func load(_ url: URL, in tabID: UUID, keepsHistory: Bool = false) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
         tabs[index].isLoading = true
@@ -150,16 +155,19 @@ import Testing
         DispatchQueue.main.async { [self] in
             MainActor.assumeIsolated {
                 var address = url
+                var kind = AgentLoadKind.navigation
                 while true {
-                    if let owner, agentTabMayLoad?(owner, tabID, address) == false { return stop(tabID) }
+                    if let owner, agentTabMayLoad?(owner, tabID, address, kind) == false { return stop(tabID) }
                     guard let next = redirects[address] else { break }
                     address = next
+                    kind = .redirect
                 }
                 guard !hangingAddresses.contains(address) else { return }
                 guard !failingAddresses.contains(address) else { return stop(tabID) }
                 guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
                 if !keepsHistory, let current = tabs[index].url { backList[tabID, default: []].append(current) }
                 tabs[index].url = address
+                tabs[index].documentID = UUID()
                 if let owner { agentTabDidReport?(owner, tabID, .addressChanged(address)) }
                 guard !committingAddresses.contains(address) else { return }
                 tabs[index].title = pages[address]?.title ?? ""
@@ -171,6 +179,17 @@ import Testing
                 }
             }
         }
+    }
+
+    /// A server redirect of the navigation that still loads in `tabID`, asked about as an engine asks before the hop's request, which stops the navigation when the monitor refuses it; says whether it may go on.
+    @discardableResult
+    func redirect(_ tabID: UUID, to url: URL) -> Bool {
+        guard let owner = tabs.first(where: { $0.id == tabID })?.agentOwnerID else { return false }
+        guard agentTabMayLoad?(owner, tabID, url, .redirect) != false else {
+            stop(tabID)
+            return false
+        }
+        return true
     }
 
     private func stop(_ tabID: UUID) {
@@ -185,7 +204,7 @@ import Testing
         guard let opener = tabs.first(where: { $0.id == openerID }), let owner = opener.agentOwnerID else { return nil }
         let popup = AgentTabInfo(id: UUID(), spaceID: opener.spaceID, title: "", url: nil, isLoading: true, engine: opener.engine, agentOwnerID: owner)
         tabs.append(popup)
-        guard agentTabMayLoad?(owner, openerID, url) != false else {
+        guard agentTabMayLoad?(owner, openerID, url, .popup) != false else {
             tabs.removeAll { $0.id == popup.id }
             return nil
         }
@@ -199,6 +218,15 @@ import Testing
         guard let index = tabs.firstIndex(where: { $0.id == tabID }), let owner = tabs[index].agentOwnerID else { return }
         tabs[index].agentOwnerID = nil
         agentTabDidReport?(owner, tabID, .takenOver)
+    }
+
+    /// A file chooser that a page in an agent tab opens, as `Browsing` hands it over, whose panel the test answers (`FakeChooserPanel`).
+    @discardableResult
+    func chooseFiles(_ request: EngineFileChooserRequest, asker: String, in tabID: UUID, panel: FakeChooserPanel) -> AgentFileChooser? {
+        guard let owner = tabs.first(where: { $0.id == tabID })?.agentOwnerID else { return nil }
+        let chooser = AgentFileChooser(request: request, asker: asker, present: panel.present, answer: { panel.received.append($0) })
+        agentTabChoosesFiles?(owner, tabID, chooser)
+        return chooser
     }
 
     /// What `Browsing` reports from an agent tab.
@@ -217,12 +245,42 @@ import Testing
 
     func setAgentOnlyPersona(_ id: UUID?) { agentOnlyPersonaID = id }
 
-    func windowForSheet() -> NSWindow? { nil }
+    /// The front main window, which the fake host has only when a test gives it one.
+    var sheetWindow: NSWindow?
+
+    func windowForSheet() -> NSWindow? { sheetWindow }
 
     func deletePersona(_ id: UUID) {
         personas.removeAll { $0.id == id }
         spacesByPersona[id] = nil
         personasDidChange?()
+    }
+}
+
+/// Arch's panel for a file chooser as the tests see it: the windows it showed on, the answer the test gives in it, and what the page received.
+@MainActor final class FakeChooserPanel {
+    private(set) var windows: [NSWindow] = []
+    private(set) var closed = 0
+    /// What the page received from each chooser: file addresses, or nil for no file.
+    var received: [[URL]?] = []
+    private var answer: (([URL]?) -> Void)?
+
+    var present: (NSWindow, @escaping ([URL]?) -> Void) -> () -> Void {
+        { [self] window, answer in
+            windows.append(window)
+            self.answer = answer
+            return { [self] in
+                closed += 1
+                self.answer?(nil)
+                self.answer = nil
+            }
+        }
+    }
+
+    /// The user's pick in the panel, or Cancel for nil.
+    func pick(_ urls: [URL]?) {
+        answer?(urls)
+        answer = nil
     }
 }
 
@@ -327,6 +385,7 @@ final class FakeAuthenticator: AgentAuthenticating, @unchecked Sendable {
     private let lock = NSLock()
     private var _answer = true
     private var _count = 0
+    private var _reasons: [String] = []
 
     var answer: Bool {
         get { lock.withLock { _answer } }
@@ -334,10 +393,13 @@ final class FakeAuthenticator: AgentAuthenticating, @unchecked Sendable {
     }
 
     var count: Int { lock.withLock { _count } }
+    /// The reasons the prompts gave, in order.
+    var reasons: [String] { lock.withLock { _reasons } }
 
     func authenticate(reason: String) async -> Bool {
         lock.withLock {
             _count += 1
+            _reasons.append(reason)
             return _answer
         }
     }
