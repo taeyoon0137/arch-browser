@@ -263,11 +263,60 @@ final class SessionStore {
         self.seal = seal
     }
 
-    /// Where `load()` sets aside a file that does not decode. While a file is there, the live folders' service keeps the entries and Keychain items of the folders it may hold (`LiveFolderService(keepsUnknownFolders:)`).
+    /// Where `load()` sets aside a file that does not decode. While a file is there, the live folders' service keeps the entries and Keychain items of the folders it may hold (`keptLiveFolders`).
     private var unreadableFileURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("session.unreadable.json") }
 
-    /// Read at startup so a session still awaiting backup also keeps its live folders' local data.
-    var keepsUnknownLiveFolders: Bool { pendingBackup != nil || FileManager.default.fileExists(atPath: unreadableFileURL.path) }
+    /// Read at startup, after `load()`: the folders whose entries and Keychain items the live folders' service keeps while no register lists them (`LiveFolderService(keptFolders:)`), or nil for every such folder (`keepsUnknownFolders`). Every folder counts while a file awaits its backup or is set aside, and while the data folder's names or a copy cannot be read, since a Keychain item that a file needs cannot be brought back. Otherwise the folders are those that a `session-v<version>.json` copy has as live folders, whatever the versions of the copy and the file: this build, when it cannot read a newer build's live configuration, and an older build, which saves over the file without it, leave such a folder ordinary in `session.json`, and the copy brings it back once it is put back as `session.json`. They count for as long as the copy is there.
+    var keptLiveFolders: Set<UUID>? {
+        guard pendingBackup == nil, !FileManager.default.fileExists(atPath: unreadableFileURL.path) else { return nil }
+        let directory = fileURL.deletingLastPathComponent()
+        let names: [String]
+        do {
+            names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return []
+        } catch {
+            return nil
+        }
+        var folders: Set<UUID> = []
+        for name in names where Self.isCopy(named: name) {
+            guard let data = try? Data(contentsOf: directory.appendingPathComponent(name)),
+                  let copy = try? JSONDecoder().decode(CopiedFolders.self, from: data) else { return nil }
+            folders.formUnion(copy.liveFolderIDs)
+        }
+        return folders
+    }
+
+    /// Whether `name` is a copy's, `session-v<version>.json`.
+    private static func isCopy(named name: String) -> Bool {
+        let prefix = "session-v", suffix = ".json"
+        guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return false }
+        let digits = name.dropFirst(prefix.count).dropLast(suffix.count)
+        return !digits.isEmpty && digits.allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// The folders of a copy, which a newer build wrote, read without the rest of the file: a folder counts as live when it has a `live` value, also one that this build cannot decode.
+    private struct CopiedFolders: Decodable {
+        struct Folder: Decodable {
+            var id: UUID
+            var isLive: Bool
+
+            private enum CodingKeys: String, CodingKey {
+                case id, live
+            }
+
+            init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                id = try container.decode(UUID.self, forKey: .id)
+                isLive = try container.contains(.live) && !container.decodeNil(forKey: .live)
+            }
+        }
+
+        /// Optional, as in the snapshot.
+        var folders: [Folder]?
+
+        var liveFolderIDs: Set<UUID> { Set((folders ?? []).filter(\.isLive).map(\.id)) }
+    }
 
     /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that cannot be read or does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
     func load() -> SessionSnapshot? {

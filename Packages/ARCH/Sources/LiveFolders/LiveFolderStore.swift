@@ -87,11 +87,71 @@ public final class LiveFolderStore {
     private struct File: Codable {
         var version = 1
         /// By folder ID.
-        var folders: [String: LiveFolderState]
+        var folders: [String: Entry]
+    }
+
+    /// A folder's state or, when this build cannot decode it, as with a source that a later build adds, its JSON as the file has it, which saving writes back.
+    private enum Entry: Codable {
+        case state(LiveFolderState)
+        case unreadable(JSONValue)
+
+        init(from decoder: any Decoder) throws {
+            if let state = try? LiveFolderState(from: decoder) {
+                self = .state(state)
+            } else {
+                self = .unreadable(try JSONValue(from: decoder))
+            }
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            switch self {
+            case .state(let state): try state.encode(to: encoder)
+            case .unreadable(let value): try value.encode(to: encoder)
+            }
+        }
+    }
+
+    /// A JSON value as it was read: whole numbers stay whole.
+    private enum JSONValue: Codable {
+        case null, bool(Bool), integer(Int64), number(Double), string(String), array([JSONValue]), object([String: JSONValue])
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if container.decodeNil() {
+                self = .null
+            } else if let value = try? container.decode(Bool.self) {
+                self = .bool(value)
+            } else if let value = try? container.decode(Int64.self) {
+                self = .integer(value)
+            } else if let value = try? container.decode(Double.self) {
+                self = .number(value)
+            } else if let value = try? container.decode(String.self) {
+                self = .string(value)
+            } else if let value = try? container.decode([JSONValue].self) {
+                self = .array(value)
+            } else {
+                self = .object(try container.decode([String: JSONValue].self))
+            }
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch self {
+            case .null: try container.encodeNil()
+            case .bool(let value): try container.encode(value)
+            case .integer(let value): try container.encode(value)
+            case .number(let value): try container.encode(value)
+            case .string(let value): try container.encode(value)
+            case .array(let value): try container.encode(value)
+            case .object(let value): try container.encode(value)
+            }
+        }
     }
 
     public let fileURL: URL
     public private(set) var folders: [UUID: LiveFolderState] = [:]
+    /// The entries that this build cannot decode, which the file keeps as they were until their folders go.
+    private var unreadableEntries: [UUID: JSONValue] = [:]
     /// Whether the file did not decode at launch and moved to `live-folders.unreadable.json`; its folders then fetch again.
     public private(set) var replacedUnreadableFile = false
     private var pendingSave: DispatchWorkItem?
@@ -103,8 +163,12 @@ public final class LiveFolderStore {
         self.fileURL = fileURL
         if let data = try? Data(contentsOf: fileURL) {
             if let file = try? JSONDecoder().decode(File.self, from: data) {
-                for (key, state) in file.folders {
-                    if let id = UUID(uuidString: key) { folders[id] = state }
+                for (key, entry) in file.folders {
+                    guard let id = UUID(uuidString: key) else { continue }
+                    switch entry {
+                    case .state(let state): folders[id] = state
+                    case .unreadable(let value): unreadableEntries[id] = value
+                    }
                 }
             } else {
                 let unreadable = fileURL.deletingPathExtension().appendingPathExtension("unreadable").appendingPathExtension("json")
@@ -118,30 +182,39 @@ public final class LiveFolderStore {
         }
     }
 
-    /// The folder's state, empty before its first refresh.
+    /// The folders with an entry, also one that this build cannot decode.
+    public var folderIDs: Set<UUID> { Set(folders.keys).union(unreadableEntries.keys) }
+
+    /// The folder's state, empty before its first refresh and for an entry that this build cannot decode.
     public subscript(folder: UUID) -> LiveFolderState {
         folders[folder] ?? LiveFolderState()
     }
 
-    /// Changes one folder's state and saves half a second after the last change.
+    /// Changes one folder's state and saves half a second after the last change. The new state replaces an entry that this build cannot decode.
     public func update(_ folder: UUID, _ change: (inout LiveFolderState) -> Void) {
         var state = self[folder]
         change(&state)
         guard folders[folder] != state else { return }
         folders[folder] = state
+        unreadableEntries[folder] = nil
         scheduleSave()
     }
 
     public func remove(_ folder: UUID) {
-        guard folders.removeValue(forKey: folder) != nil else { return }
+        let removedState = folders.removeValue(forKey: folder) != nil
+        let removedEntry = unreadableEntries.removeValue(forKey: folder) != nil
+        guard removedState || removedEntry else { return }
         scheduleSave()
     }
 
-    /// Drops the entries of folders that are not live folders in `session.json` (Storage).
+    /// Drops the entries of folders that are not live folders in `session.json` (Storage), also those that this build cannot decode.
     public func removeFolders(notIn kept: Set<UUID>) {
-        let removed = folders.keys.filter { !kept.contains($0) }
+        let removed = folderIDs.subtracting(kept)
         guard !removed.isEmpty else { return }
-        for folder in removed { folders[folder] = nil }
+        for folder in removed {
+            folders[folder] = nil
+            unreadableEntries[folder] = nil
+        }
         scheduleSave()
     }
 
@@ -163,7 +236,9 @@ public final class LiveFolderStore {
     private func save(waiting: Bool) {
         pendingSave?.cancel()
         pendingSave = nil
-        let file = File(folders: Dictionary(uniqueKeysWithValues: folders.map { ($0.key.uuidString, $0.value) }))
+        var entries = unreadableEntries.mapValues(Entry.unreadable)
+        for (folder, state) in folders { entries[folder] = .state(state) }
+        let file = File(folders: Dictionary(uniqueKeysWithValues: entries.map { ($0.key.uuidString, $0.value) }))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(file) else { return }

@@ -357,6 +357,54 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         #expect(service.store.folders[unknown] != nil && service.store.folders[mine] == nil)
     }
 
+    /// As while the session keeps a newer build's copy: a kept folder that no register lists keeps its entry and address through the registered folders' changes, while another folder that no register lists loses both at once, and so does a kept folder once a register that listed it leaves it out. The next launch without it removes the kept folder's as well.
+    @Test func aKeptFolderThatNoRegisterListsKeepsItsEntryAndAddressThroughOtherFoldersChanges() async throws {
+        let keychain = InMemoryLiveFolderKeychain()
+        let kept = UUID(), stale = UUID(), mine = UUID(), other = UUID()
+        let fileURL = try temporaryDirectory().appendingPathComponent(LiveFolderStore.fileName)
+        let store = LiveFolderStore(fileURL: fileURL)
+        for (folder, name) in [(kept, "In the copy"), (stale, "Gone")] {
+            try await keychain.setAddress(URL(string: "https://tracker.example.org/feed.atom?token=abc123")!, for: folder, folderName: name)
+            store.update(folder) { $0.dismiss("a") }
+        }
+        let service = LiveFolderService(store: store, addresses: keychain, fetchers: StubFetchers(), isLowPowerMode: { false }, keptFolders: [kept, mine])
+        let made = try LiveFolderSource.makeFeed(address: URL(string: "https://tracker.example.org/mine.atom?token=def456")!)
+        let whole = try #require(made.keychainAddress)
+        try await service.setPrivateAddress(whole, for: mine, folderName: "Mine")
+        service.register([mine: LiveFolderConfiguration(source: made.source), other: feedConfiguration])
+        #expect(await waitUntil { keychain.folders == [kept, mine] })
+        #expect(service.store.folders[kept] != nil && service.store.folders[stale] == nil)
+        // A private feed stops being private, another folder's source changes, and both go, the kept one included.
+        service.register([mine: feedConfiguration, other: LiveFolderConfiguration(source: .gitHub(search: GitHubSearch(kind: .assignedIssues)))])
+        service.register([:])
+        // This write is queued after the cleanups.
+        let later = UUID()
+        try await service.setPrivateAddress(whole, for: later, folderName: "Later")
+        #expect(keychain.folders == [kept, later])
+        #expect(Set(service.store.folders.keys) == [kept])
+
+        service.stop()
+        let next = LiveFolderService(store: LiveFolderStore(fileURL: fileURL), addresses: keychain, fetchers: StubFetchers(), isLowPowerMode: { false })
+        next.register([:])
+        #expect(await waitUntil { keychain.folders == [later] })
+        #expect(next.store.folders.isEmpty)
+    }
+
+    /// An entry that the store cannot decode counts as its folder's: a kept folder keeps it with its address, and another folder that no register lists loses both.
+    @Test func entriesThatDoNotDecodeAreKeptAndRemovedLikeOthers() async throws {
+        let keychain = InMemoryLiveFolderKeychain()
+        let kept = UUID(), stale = UUID()
+        let fileURL = try temporaryDirectory().appendingPathComponent(LiveFolderStore.fileName)
+        let entry = #"{"source": {"laterSource": {}}, "failureCount": 0}"#
+        try Data(#"{"version": 1, "folders": {"\#(kept)": \#(entry), "\#(stale)": \#(entry)}}"#.utf8).write(to: fileURL)
+        for folder in [kept, stale] { try await keychain.setAddress(URL(string: "https://tracker.example.org/feed.atom?token=abc123")!, for: folder, folderName: "Later") }
+        let service = LiveFolderService(store: LiveFolderStore(fileURL: fileURL), addresses: keychain, fetchers: StubFetchers(), isLowPowerMode: { false }, keptFolders: [kept])
+        #expect(service.store.folderIDs == [kept, stale])
+        service.register([:])
+        #expect(await waitUntil { keychain.folders == [kept] })
+        #expect(service.store.folderIDs == [kept])
+    }
+
     @Test func aFetchThatQuittingCancelsRecordsNoAttempt() async throws {
         let fetchers = StubFetchers(delay: .seconds(5))
         let service = try service(fetchers)

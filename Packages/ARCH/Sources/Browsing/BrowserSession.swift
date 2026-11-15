@@ -161,10 +161,10 @@ final class EngineRuntime {
         let loaded = store.load()
         needsFullSidebarSync = loaded?.needsFullSidebarSync == true || loaded == nil
         let snapshot = loaded ?? SessionSnapshot.empty.normalized()
-        // The session is created on the main thread, where the live folders' service runs. While a file that did not decode is set aside, its live folders keep their entries and Keychain items for a repaired file.
-        let keepsUnknownLiveFolders = store.keepsUnknownLiveFolders
+        // The session is created on the main thread, where the live folders' service runs. The live folders of a file that did not decode and is set aside, and those of a newer build's `session-v<version>.json` copy, keep their entries and Keychain items for that file or copy.
+        let keptLiveFolders = store.keptLiveFolders
         liveFolderService = LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)),
-                                              addresses: liveFolderAddresses, keepsUnknownFolders: keepsUnknownLiveFolders)
+                                              addresses: liveFolderAddresses, keepsUnknownFolders: keptLiveFolders == nil, keptFolders: keptLiveFolders ?? [])
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
