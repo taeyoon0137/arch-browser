@@ -18,6 +18,15 @@ extension InstalledPlugin {
     }
 }
 
+/// A context whose AI requests and renames can stay out of the plugin's hook steps. A script plugin's panel makes them here, since the user makes them there, while a running step's listener has the plugin's other calls.
+@MainActor
+protocol PluginPanelContext: PluginContext {
+    /// As `ai()`, with a client whose requests belong to no hook step.
+    func panelAI() throws -> any AIClient
+    /// As `renameTab(_:to:)`, for the document the tab shows when the call arrives, whatever hook step runs.
+    func panelRenameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
+}
+
 /// One run of a plugin's listener as a step of the shared hook scheduler. The scheduler counts the errors of the AI requests that belong to the step toward its pause, and stops them with the step.
 @MainActor
 final class PluginHookStep {
@@ -55,9 +64,9 @@ final class PluginAIRequests {
         self.feature = feature
     }
 
-    /// A client whose requests belong to the step that runs now, if any.
-    func client() -> PluginAIClient {
-        PluginAIClient(requests: self, step: step)
+    /// A client whose requests belong to the step that runs now, if any, or with `inStep` false to no step.
+    func client(inStep: Bool = true) -> PluginAIClient {
+        PluginAIClient(requests: self, step: inStep ? step : nil)
     }
 
     /// Sends the request under the plugin's feature, passes its events on, and reports its end to its step. A stopped step's request never goes out.

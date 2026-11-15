@@ -15,7 +15,7 @@ public protocol Plugin: AnyObject {
     func run(_ command: String, _ invocation: PluginInvocation) async throws
     /// A value one of the plugin's page scripts sent. The returned value is the script's reply.
     func receive(_ message: PluginPageMessage) async throws -> PluginValue?
-    /// The panel of one of the plugin's sidebar items whose action is `.panel`. The manager asks each time the item opens it, and the popover holds it while it shows.
+    /// The panel of one of the plugin's sidebar items whose action is `.panel`. The manager asks each time the item opens it, and the popover holds it while it shows. A panel that can end while it shows conforms to `PluginEndingPanel`.
     func panel(for sidebarItemID: String) -> NSViewController?
     /// An event of a kind the manifest's `events` lists. The manager starts the plugin for it and ignores what it throws; a hook script's run ends when it returns and fails when it throws, a script plugin's with `PluginError.noListener` or `listenerFailed` for its listeners.
     func handle(_ event: PluginEvent) async throws
@@ -29,6 +29,12 @@ extension Plugin {
     public func panel(for sidebarItemID: String) -> NSViewController? { nil }
     /// Without an implementation, the plugin ignores events.
     public func handle(_ event: PluginEvent) async throws {}
+}
+
+/// A panel that can end while its popover shows, as a script plugin's does once its instance stops and its page can do nothing more. The popover sets `onEnd` as it shows the panel and closes when the panel calls it.
+@MainActor
+public protocol PluginEndingPanel: NSViewController {
+    var onEnd: (@MainActor () -> Void)? { get set }
 }
 
 /// A plugin compiled into the app. The app passes the list of these types to the plugin manager.
@@ -60,9 +66,9 @@ public protocol PluginContext: AnyObject {
     func tabs() throws -> [PluginTab]
     /// One of the tabs the plugin reaches, or nil for any other tab.
     func tab(_ id: PluginTab.ID) throws -> PluginTab?
-    /// Needs `tabs.rename`. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives; while a hook step of the plugin runs, a rename of its event's tab is for its event's document, and once the scheduler has stopped the step, the tab does not take it. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
+    /// Needs `tabs.rename`. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives; while a hook step of the plugin runs, a rename of its event's tab is for its event's document, and once the scheduler has stopped the step, the tab does not take it; a script plugin's panel renames outside any step. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
-    /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. Every request stops when the instance stops.
+    /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any, and a script plugin's panel's to none: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. Every request stops when the instance stops.
     func ai() throws -> any AIClient
 }
 

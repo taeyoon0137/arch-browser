@@ -1,4 +1,4 @@
-// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says.
+// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says. A panel's document gets the same `arch` without the listeners, since the app hands commands, page script values, and events to the background script only.
 import AI
 import WebKit
 
@@ -7,9 +7,18 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The name under which documents reach the handler, `window.webkit.messageHandlers.arch`.
     static let handlerName = "arch"
 
-    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` or `AIError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. The delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null; a command without a listener throws `noListener`. It runs an event's listeners one after another and returns null once the last one settles, or JSON text that names the failure: `{"noListener": true}` when the script set none for the kind, and `{"error": text}` with what a listener threw, so that `ScriptPlugin` reads the failure without WebKit's exception details.
+    /// The document that the bridge serves.
+    enum Role {
+        /// The background script's, which sets the listeners.
+        case background
+        /// A panel's, whose AI requests and renames the user makes there, so they belong to no hook step of the plugin.
+        case panel
+    }
+
+    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` or `AIError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. `ai.stream(request, onText)` asks for the reply's text with `ai.next` until the reply ends, waits for `onText` with each piece, and resolves as `ai.reply` does; when `onText` throws, it stops the request with `ai.cancel` and rejects with what `onText` threw. In the background document, the delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null; a command without a listener throws `noListener`. It runs an event's listeners one after another and returns null once the last one settles, or JSON text that names the failure: `{"noListener": true}` when the script set none for the kind, and `{"error": text}` with what a listener threw, so that `ScriptPlugin` reads the failure without WebKit's exception details.
     var script: String {
         let permitsAgent = (context as? any PluginAgentContext)?.permitsAgentRuns == true
+        let listens = role == .background
         return #"""
     (() => {
       const handler = window.webkit.messageHandlers.arch;
@@ -18,6 +27,22 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         return reply == null ? undefined : JSON.parse(reply);
       };
       const given = (value) => (value === undefined ? [] : [value]);
+      const stream = async (request, onText) => {
+        if (typeof onText !== "function") throw new Error("invalidCall");
+        const id = await call("ai.stream", [request]);
+        let text = "";
+        for (;;) {
+          const next = await call("ai.next", [id]);
+          if (next.finishReason !== undefined) return { text, finishReason: next.finishReason };
+          text += next.text;
+          try {
+            await onText(next.text);
+          } catch (thrown) {
+            call("ai.cancel", [id]).catch(() => {});
+            throw thrown;
+          }
+        }
+      };
       const commandListeners = new Map();
       const eventListeners = new Map();
       let messageListener = null;
@@ -30,47 +55,51 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           return "The listener threw a value that has no text.";
         }
       };
-      Object.defineProperty(window, "__archDeliver", {
-        value: async (kind, payload) => {
-          const body = JSON.parse(payload);
-          if (kind === "command") {
-            const listener = commandListeners.get(body.command);
-            if (!listener) throw new Error("noListener");
-            await listener(body.invocation);
-            return null;
-          }
-          if (kind === "event") {
-            const listeners = eventListeners.get(body.kind) ?? [];
-            if (listeners.length === 0) return JSON.stringify({ noListener: true });
-            try {
-              for (const listener of listeners) await listener(body.event);
-            } catch (thrown) {
-              return JSON.stringify({ error: describe(thrown) });
+      if (\#(listens)) {
+        Object.defineProperty(window, "__archDeliver", {
+          value: async (kind, payload) => {
+            const body = JSON.parse(payload);
+            if (kind === "command") {
+              const listener = commandListeners.get(body.command);
+              if (!listener) throw new Error("noListener");
+              await listener(body.invocation);
+              return null;
             }
-            return null;
-          }
-          if (!messageListener) return null;
-          const reply = await messageListener(body);
-          return reply === undefined ? null : JSON.stringify(reply);
-        },
-      });
+            if (kind === "event") {
+              const listeners = eventListeners.get(body.kind) ?? [];
+              if (listeners.length === 0) return JSON.stringify({ noListener: true });
+              try {
+                for (const listener of listeners) await listener(body.event);
+              } catch (thrown) {
+                return JSON.stringify({ error: describe(thrown) });
+              }
+              return null;
+            }
+            if (!messageListener) return null;
+            const reply = await messageListener(body);
+            return reply === undefined ? null : JSON.stringify(reply);
+          },
+        });
+      }
       Object.defineProperty(window, "arch", {
         value: Object.freeze({
           ...(\#(permitsAgent) ? { agent: Object.freeze({ run: (options) => call("agent.run", [options]) }) } : {}),
-          ai: Object.freeze({ reply: (request) => call("ai.reply", [request]) }),
-          commands: Object.freeze({ onRun: (id, listener) => { commandListeners.set(id, listener); } }),
-          events: Object.freeze({
-            on: (kind, listener) => {
-              if (typeof listener !== "function") throw new TypeError("arch.events.on needs a function");
-              eventListeners.set(kind, [...(eventListeners.get(kind) ?? []), listener]);
-            },
-          }),
+          ai: Object.freeze({ reply: (request) => call("ai.reply", [request]), stream }),
+          ...(\#(listens) ? {
+            commands: Object.freeze({ onRun: (id, listener) => { commandListeners.set(id, listener); } }),
+            events: Object.freeze({
+              on: (kind, listener) => {
+                if (typeof listener !== "function") throw new TypeError("arch.events.on needs a function");
+                eventListeners.set(kind, [...(eventListeners.get(kind) ?? []), listener]);
+              },
+            }),
+            pages: Object.freeze({ onMessage: (listener) => { messageListener = listener; } }),
+          } : {}),
           tabs: Object.freeze({
             list: () => call("tabs.list", []),
             get: (id) => call("tabs.get", [id]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
-          pages: Object.freeze({ onMessage: (listener) => { messageListener = listener; } }),
           storage: Object.freeze({
             get: (key) => call("storage.get", [key]),
             set: (key, value) => call("storage.set", [key, ...given(value)]),
@@ -95,18 +124,43 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     static let deliveryCall = "return await window.__archDeliver(kind, payload);"
 
     private let context: any PluginContext
+    private let role: Role
     /// The latest secret call, which the next one waits for, so that the script's secret calls take effect in the order it made them.
     private var secretCalls: Task<Void, Never>?
-    /// Told true as a call that the plugin's context and the bridge accepted starts to wait for Arch's own answer, an AI request's reply, and false as it ends, so that the instance does not count that wait toward its hang limit.
+    /// Told true as a call that the plugin's context and the bridge accepted starts to wait for Arch's own answer, an AI request's reply or its next text, and false as it ends, so that the instance does not count that wait toward its hang limit.
     var waitsForArch: ((Bool) -> Void)?
+    /// The `arch.ai.reply` requests that have not ended and the `arch.ai.stream` replies that the script has not read to their end, by number, which `end()` stops.
+    private var replies: [Int: Task<Void, Never>] = [:]
+    private var streams: [Int: AIReplyStream] = [:]
+    private var nextRequestNumber = 0
+    /// Set once the document's web view goes, after which every call fails with `stopped`.
+    private var hasEnded = false
 
-    init(context: any PluginContext) {
+    init(context: any PluginContext, role: Role = .background) {
         self.context = context
+        self.role = role
     }
 
-    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, and an AI call that the context and the bridge accept once its reply has come. The other calls reply before the handler returns.
+    /// Stops the AI requests of the document's calls, as its panel closes or its instance stops, and fails its later calls with `stopped`.
+    func end() {
+        hasEnded = true
+        for task in replies.values { task.cancel() }
+        replies = [:]
+        let ended = streams.values
+        streams = [:]
+        for stream in ended {
+            stream.task?.cancel()
+            if let waiting = stream.waiting {
+                waitsForArch?(false)
+                Self.reply(.failure(PluginError.stopped), to: waiting)
+            }
+        }
+    }
+
+    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, an AI reply's call once its reply has come, and a stream's `ai.next` call once text arrives or the reply ends. The other calls reply before the handler returns.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
+        guard !hasEnded else { return replyHandler(nil, PluginError.stopped.bridgeName) }
         let call: Call
         do {
             guard let text = message.body as? String else { throw BridgeFailure.invalidCall }
@@ -114,44 +168,144 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         } catch {
             return replyHandler(nil, BridgeFailure.invalidCall.rawValue)
         }
-        if call.call == "agent.run" {
+        switch call.call {
+        case "agent.run":
             guard let agent = context as? any PluginAgentContext, agent.permitsAgentRuns, call.args.count == 1,
                   let options = call.value(0) else { return replyHandler(nil, "permissionDenied") }
             Task {
                 do { Self.reply(.success(try await agent.runAgent(options)), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
             }
-            return
-        }
-        if call.call == "ai.reply" {
-            // The client belongs to the hook step that runs as the call arrives. A call refused here does not wait for Arch.
+        case "ai.reply", "ai.stream":
+            // The client belongs to the hook step that runs as the call arrives, unless a panel makes it. A call refused here does not wait for Arch.
             let client: any AIClient
             let request: AIRequest
             do {
-                client = try context.ai()
+                client = try aiClient()
                 request = try aiRequest(of: call)
             } catch {
                 return Self.reply(.failure(error), to: replyHandler)
             }
+            if call.call == "ai.stream" { return Self.reply(.success(startStream(request, with: client)), to: replyHandler) }
+            let number = nextRequestNumber
+            nextRequestNumber += 1
             waitsForArch?(true)
-            Task {
-                defer { waitsForArch?(false) }
+            replies[number] = Task {
+                defer {
+                    waitsForArch?(false)
+                    replies[number] = nil
+                }
                 do { Self.reply(.success(Self.value(of: try await client.reply(request))), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
             }
-            return
-        }
-        guard call.call.hasPrefix("secrets.") else { return Self.reply(Result { try perform(call) }, to: replyHandler) }
-        let previous = secretCalls
-        secretCalls = Task {
-            await previous?.value
-            let result: Result<PluginValue?, any Error>
-            do {
-                result = .success(try await performSecret(call))
-            } catch {
-                result = .failure(error)
+        case "ai.next":
+            guard let number = try? call.wholeNumber(0), let stream = streams[number], stream.waiting == nil else { return replyHandler(nil, BridgeFailure.invalidCall.rawValue) }
+            if let piece = takePiece(of: number) { return Self.reply(piece, to: replyHandler) }
+            stream.waiting = replyHandler
+            waitsForArch?(true)
+        case "ai.cancel":
+            guard let number = try? call.wholeNumber(0) else { return replyHandler(nil, BridgeFailure.invalidCall.rawValue) }
+            if let stream = streams.removeValue(forKey: number) {
+                stream.task?.cancel()
+                if let waiting = stream.waiting {
+                    waitsForArch?(false)
+                    Self.reply(.failure(AIError.cancelled), to: waiting)
+                }
             }
-            Self.reply(result, to: replyHandler)
+            replyHandler(nil, nil)
+        case let name where name.hasPrefix("secrets."):
+            let previous = secretCalls
+            secretCalls = Task {
+                await previous?.value
+                let result: Result<PluginValue?, any Error>
+                do {
+                    result = .success(try await performSecret(call))
+                } catch {
+                    result = .failure(error)
+                }
+                Self.reply(result, to: replyHandler)
+            }
+        default:
+            Self.reply(Result { try perform(call) }, to: replyHandler)
+        }
+    }
+
+    /// The AI interface for a call of the document: a panel's belongs to no hook step of the plugin.
+    private func aiClient() throws -> any AIClient {
+        if role == .panel, let context = context as? any PluginPanelContext { return try context.panelAI() }
+        return try context.ai()
+    }
+
+    /// Renames the tab for a call of the document: a panel's rename belongs to no hook step of the plugin.
+    private func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
+        if role == .panel, let context = context as? any PluginPanelContext { return try context.panelRenameTab(id, to: name) }
+        return try context.renameTab(id, to: name)
+    }
+
+    /// Starts reading the reply of an `arch.ai.stream` call and returns the stream's number, with which the script asks for its text.
+    private func startStream(_ request: AIRequest, with client: any AIClient) -> PluginValue {
+        let number = nextRequestNumber
+        nextRequestNumber += 1
+        let stream = AIReplyStream()
+        streams[number] = stream
+        stream.task = Task { [weak self] in
+            let end = await Self.read(client.stream(request), output: request.output) { [weak self] text in
+                guard let self, let stream = streams[number] else { return }
+                stream.text += text
+                answer(number)
+            }
+            guard let self, let stream = streams[number] else { return }
+            stream.end = end
+            answer(number)
+        }
+        return .number(Double(number))
+    }
+
+    /// Answers the stream's waiting `ai.next` call once there is something to say.
+    private func answer(_ number: Int) {
+        guard let stream = streams[number], let waiting = stream.waiting, let piece = takePiece(of: number) else { return }
+        stream.waiting = nil
+        waitsForArch?(false)
+        Self.reply(piece, to: waiting)
+    }
+
+    /// What the stream's next `ai.next` call resolves with: `{text}` with the text that arrived since the last one, or once the script has read all of it and the reply has ended, `{finishReason}`, or the error it ended with, after which the stream goes. Nil while neither has come.
+    private func takePiece(of number: Int) -> Result<PluginValue?, any Error>? {
+        guard let stream = streams[number] else { return nil }
+        if !stream.text.isEmpty {
+            defer { stream.text = "" }
+            return .success(.object(["text": .string(stream.text)]))
+        }
+        guard let end = stream.end else { return nil }
+        streams[number] = nil
+        return end.map { .object(["finishReason": .string(Self.name(of: $0))]) }
+    }
+
+    /// Reads a reply, handing on each piece of text as it arrives, and returns how it ended, by the rules of `AIClient.reply(_:)`: a reply that ends without finishing is malformed, and a JSON reply must parse.
+    static func read(_ events: AsyncThrowingStream<AIEvent, any Error>, output: AIOutputFormat, receive: (String) -> Void) async -> Result<AIFinishReason, any Error> {
+        var text = ""
+        var hasStarted = false
+        var finishReason: AIFinishReason?
+        do {
+            for try await event in events {
+                switch event {
+                case .started: hasStarted = true
+                case let .text(delta) where !delta.isEmpty:
+                    text += delta
+                    receive(delta)
+                case let .finished(reason): finishReason = reason
+                case .waiting, .text, .toolCall, .usage: break
+                }
+            }
+            // A stream read by a canceled task ends without an error.
+            if Task.isCancelled { throw AIError.cancelled }
+            guard hasStarted, let finishReason else { throw AIError.malformedReply("The reply ended without finishing.") }
+            if case .json = output, (try? JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed)) == nil {
+                throw finishReason == .lengthLimit ? AIError.replyTooLong : AIError.malformedReply("The reply is not valid JSON.")
+            }
+            return .success(finishReason)
+        } catch {
+            return .failure(error)
         }
     }
 
@@ -196,9 +350,14 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         return AIRequest(feature: .plugin(context.pluginID.rawValue), instructions: instructions, messages: messages, output: output, maxOutputTokens: maxOutputTokens)
     }
 
-    /// What `arch.ai.reply` resolves with: `{text, finishReason}`, the reason `completed` or `lengthLimit`.
+    /// What `arch.ai.reply` resolves with: `{text, finishReason}`.
     private static func value(of reply: AIReply) -> PluginValue {
-        .object(["text": .string(reply.text), "finishReason": .string(reply.finishReason == .lengthLimit ? "lengthLimit" : "completed")])
+        .object(["text": .string(reply.text), "finishReason": .string(name(of: reply.finishReason))])
+    }
+
+    /// A finish reason as scripts read it: `completed` or `lengthLimit`.
+    private static func name(of reason: AIFinishReason) -> String {
+        reason == .lengthLimit ? "lengthLimit" : "completed"
     }
 
     /// The call's result, or nil for none.
@@ -223,7 +382,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return try UUID(uuidString: try call.text(0)).flatMap { try context.tab($0) }?.scriptValue ?? .null
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
-            return .bool(try context.renameTab(id, to: try call.optionalText(1)))
+            return .bool(try renameTab(id, to: try call.optionalText(1)))
         default:
             throw BridgeFailure.invalidCall
         }
@@ -263,6 +422,21 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let value = value(index), value != .null else { return nil }
             return try text(index)
         }
+
+        /// A whole number, such as a stream's.
+        func wholeNumber(_ index: Int) throws -> Int {
+            guard case let .number(number)? = value(index), let whole = Int(exactly: number) else { throw BridgeFailure.invalidCall }
+            return whole
+        }
+    }
+
+    /// The reply of one `arch.ai.stream` call: the task that reads it, the text that arrived since the script last asked for more, how the reply ended once it has, and the script's `ai.next` call that waits for either.
+    @MainActor
+    private final class AIReplyStream {
+        var task: Task<Void, Never>?
+        var text = ""
+        var end: Result<AIFinishReason, any Error>?
+        var waiting: (@MainActor @Sendable (Any?, String?) -> Void)?
     }
 
     private enum BridgeFailure: String, Error {

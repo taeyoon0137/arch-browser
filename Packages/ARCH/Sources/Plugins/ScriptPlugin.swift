@@ -1,4 +1,4 @@
-// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, page script value, or event starts. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted, or the end of its web content process, fails the instance; an instance without calls for the idle limit stops. Either way it releases its web view and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
+// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, panel, page script value, or event starts, and each panel shows one of its package's HTML files in a web view of the same sandbox while the popover holds it. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted, or the end of its web content process, fails the instance; an instance without calls for the idle limit and without a panel that shows stops. Either way it releases its web view, ends its panels' documents and closes their popovers, and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
 import JavaScriptCore
 import WebKit
 
@@ -30,8 +30,15 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     private let limits: ScriptPluginLimits
     /// Tells the owner that the instance stopped on its own, so that it drops the instance.
     public var onStop: ((ScriptPluginStop) -> Void)?
-    /// The background script's web view, from the activation until the instance stops. A plugin without a background script has none.
+    /// The background script's web view and bridge, from the activation until the instance stops. A plugin without a background script has none.
     private var webView: WKWebView?
+    private var bridge: ScriptPluginBridge?
+    /// The context that the panels' bridges act through, from the activation until the instance stops.
+    private var context: (any PluginContext)?
+    /// The sandbox's rule list, compiled at the activation of a plugin with a background script or a panel.
+    private var rules: WKContentRuleList?
+    /// The panels that the instance made and that a popover still holds.
+    private let panels = NSHashTable<ScriptPluginPanel>.weakObjects()
     /// The calls that wait for the background script, by number: the load of its document, commands, page script values, and events.
     private var waitingCalls: [Int: CheckedContinuation<Any?, any Error>] = [:]
     private var nextCallNumber = 0
@@ -77,14 +84,26 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         return "\(text) (line \(line.toInt32()))"
     }
 
-    /// Loads the background document in a new web view and waits, at most for the hang limit, until the background script has run and set its listeners.
+    /// Compiles the sandbox's rule list for a plugin with a background script or a panel, then loads the background document in a new web view and waits, at most for the hang limit, until the background script has run and set its listeners.
     public func activate(in context: any PluginContext) async throws {
+        self.context = context
+        let hasPanels = package.manifest.contributions.sidebarItems.contains { Self.page(of: $0) != nil }
+        guard package.background != nil || hasPanels else { return }
+        let rules: WKContentRuleList
+        do {
+            rules = try await PluginSandbox.blockingRules()
+        } catch {
+            end(failing: .stopped)
+            throw error
+        }
+        self.rules = rules
         guard package.background != nil else { return }
         let bridge = ScriptPluginBridge(context: context)
         bridge.waitsForArch = { [weak self] waits in self?.archWait(began: waits) }
-        let webView = WKWebView(frame: .zero, configuration: try await PluginSandbox.configuration(for: package, bridge: bridge))
+        let webView = WKWebView(frame: .zero, configuration: PluginSandbox.configuration(for: package, bridge: bridge, rules: rules))
         webView.navigationDelegate = self
         self.webView = webView
+        self.bridge = bridge
         do {
             _ = try await call { settle in
                 self.settleLoad = settle
@@ -103,6 +122,32 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     /// Runs the listener that the background script set with `arch.commands.onRun(id, listener)`, and fails when there is none or it throws.
     public func run(_ command: String, _ invocation: PluginInvocation) async throws {
         _ = try await deliver("command", CommandDelivery(command: command, invocation: ScriptInvocation(invocation)))
+    }
+
+    /// A new panel for a sidebar item whose action shows a page of the package, whose bridge acts through the instance's context and whose AI requests belong to no hook step. Nil for another item, and once the instance has stopped.
+    public func panel(for sidebarItemID: String) -> NSViewController? {
+        guard let context, let rules, let item = package.manifest.contributions.sidebarItems.first(where: { $0.id == sidebarItemID }),
+              let page = Self.page(of: item) else { return nil }
+        let bridge = ScriptPluginBridge(context: context, role: .panel)
+        let panel = ScriptPluginPanel(title: item.title, page: PluginSandbox.url(of: page, in: package.manifest.id),
+                                      configuration: PluginSandbox.configuration(for: package, bridge: bridge, rules: rules), bridge: bridge)
+        panel.onShow = { [weak self] isShown in
+            guard let self else { return }
+            if isShown {
+                idleStop?.cancel()
+                idleStop = nil
+            } else {
+                stopWhenIdle()
+            }
+        }
+        panels.add(panel)
+        return panel
+    }
+
+    /// The package path of the page that the item's panel shows, or nil for an item that runs a command.
+    private static func page(of item: PluginSidebarItem) -> String? {
+        guard case let .panel(page) = item.action else { return nil }
+        return page
     }
 
     /// Passes the value to the listener that the background script set with `arch.pages.onMessage(listener)` and returns what it returns. Nil when the plugin has no background script, or the script no listener.
@@ -183,10 +228,10 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         }
     }
 
-    /// Stops the instance once it has gone without calls for the idle limit, unless it is held or waits for Arch's answer to an AI request.
+    /// Stops the instance once it has gone without calls for the idle limit, unless it is held, waits for Arch's answer to an AI request, or has a panel that shows.
     private func stopWhenIdle() {
         idleStop?.cancel()
-        guard waitingCalls.isEmpty, archWaits == 0, webView != nil, !isHeld else { return }
+        guard waitingCalls.isEmpty, archWaits == 0, webView != nil, !isHeld, !panels.allObjects.contains(where: \.isShown) else { return }
         idleStop = Task { [weak self, idle = limits.idle] in
             try? await Task.sleep(for: .seconds(idle))
             guard let self, !Task.isCancelled else { return }
@@ -201,14 +246,20 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         onStop?(.failed(reason))
     }
 
-    /// Releases the web view, which ends its web content process, and fails the calls that wait for it with `error`.
+    /// Releases the web view, which ends its web content process, ends the panels' documents and closes their popovers, and fails the calls that wait for the background script with `error`.
     private func end(failing error: PluginError) {
         idleStop?.cancel()
         idleStop = nil
         settleLoad = nil
+        context = nil
         webView?.navigationDelegate = nil
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
         webView = nil
+        bridge?.end()
+        bridge = nil
+        for panel in panels.allObjects {
+            panel.end(closesPopover: true)
+        }
         let calls = waitingCalls
         waitingCalls = [:]
         for call in calls.values {

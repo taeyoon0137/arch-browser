@@ -14,15 +14,20 @@ enum PluginSandbox {
         URL(string: "\(scheme)://\(id.rawValue)/")!
     }
 
-    /// A configuration for a web view of the package, whose bridge calls go to `bridge`.
-    static func configuration(for package: PluginPackage, bridge: ScriptPluginBridge) async throws -> WKWebViewConfiguration {
+    /// The address of a file of the package, such as a panel's page.
+    static func url(of path: String, in id: PluginID) -> URL {
+        backgroundURL(of: id).appending(path: path, directoryHint: .notDirectory)
+    }
+
+    /// A configuration for a web view of the package, whose bridge calls go to `bridge` and whose loads `rules`, from `blockingRules()`, keep to the scheme.
+    static func configuration(for package: PluginPackage, bridge: ScriptPluginBridge, rules: WKContentRuleList) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         // Neither the policy nor the rule list covers WebRTC connections. Lockdown Mode takes WebRTC away from every frame of the web view.
         configuration.defaultWebpagePreferences.isLockdownModeEnabled = true
         configuration.setURLSchemeHandler(PluginSchemeHandler(package: package), forURLScheme: scheme)
         let controller = configuration.userContentController
-        controller.add(try await blockingRules())
+        controller.add(rules)
         controller.addScriptMessageHandler(bridge, contentWorld: .page, name: ScriptPluginBridge.handlerName)
         controller.addUserScript(WKUserScript(source: bridge.script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
         return configuration
@@ -31,7 +36,7 @@ enum PluginSandbox {
     private static var compiledRules: WKContentRuleList?
 
     /// Blocks every load outside the scheme, compiled at first use.
-    private static func blockingRules() async throws -> WKContentRuleList {
+    static func blockingRules() async throws -> WKContentRuleList {
         if let compiledRules { return compiledRules }
         let rules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^arch-plugin:"},"action":{"type":"ignore-previous-rules"}}]"#
         // WebKit answers with the list or an error.
