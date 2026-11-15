@@ -217,3 +217,243 @@ extension AgentHelloAnswer: Codable {
         }
     }
 }
+
+// MARK: - Outside programs' events
+
+/// What an outside program with Watch Browser Events reads (`docs/hooks.md`, arch-cli events): `events/subscribe` with a filter starts a subscription on the connection, whose events then come as `events/event` notifications in the outside view, and `events/unsubscribe` ends it. Arch keeps the grant's last 500 events in memory, which `after` replays.
+extension AgentControlMethod {
+    /// Params `AgentEventSubscribe`, answered with an `AgentEventSubscription`. Needs the grant's Watch Browser Events scope, and asks for a grant first as a tool call does.
+    public static let eventsSubscribe = "events/subscribe"
+    /// Params `{"subscription": <id>}`, answered with `{"unsubscribed": true}` or false.
+    public static let eventsUnsubscribe = "events/unsubscribe"
+    /// One event of a subscription: params `{"subscription": <id>, "event": {…}}`, the event in the outside view.
+    public static let eventNotification = "events/event"
+    /// Events the connection's queue of 1,000 dropped since the last it delivered: params `{"subscription": <id>, "count": <n>}`.
+    public static let eventsDroppedNotification = "events/dropped"
+}
+
+/// The events an outside program asks for, by the names `arch-cli events` takes. An empty list matches every value; the Persona is always the grant's.
+public struct AgentEventFilter: Codable, Equatable, Sendable {
+    /// The event kinds, such as `pageLoaded` (`AgentEventFilter.kinds`).
+    public var kinds: [String]
+    /// Spaces of the grant's Persona by name.
+    public var spaces: [String]
+    /// Site patterns, such as `example.org`, which match a host and its subdomains.
+    public var sites: [String]
+    public var exceptSites: [String]
+    /// `webkit` or `chromium`.
+    public var engines: [String]
+    /// `open`, `pinned`, `favorite`, `small-window`, or `agent`, the client's own agent tabs.
+    public var tabKinds: [String]
+
+    public init(kinds: [String] = [], spaces: [String] = [], sites: [String] = [], exceptSites: [String] = [], engines: [String] = [], tabKinds: [String] = []) {
+        self.kinds = kinds
+        self.spaces = spaces
+        self.sites = sites
+        self.exceptSites = exceptSites
+        self.engines = engines
+        self.tabKinds = tabKinds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kinds = try container.decodeIfPresent([String].self, forKey: .kinds) ?? []
+        spaces = try container.decodeIfPresent([String].self, forKey: .spaces) ?? []
+        sites = try container.decodeIfPresent([String].self, forKey: .sites) ?? []
+        exceptSites = try container.decodeIfPresent([String].self, forKey: .exceptSites) ?? []
+        engines = try container.decodeIfPresent([String].self, forKey: .engines) ?? []
+        tabKinds = try container.decodeIfPresent([String].self, forKey: .tabKinds) ?? []
+    }
+
+    /// The event kinds, as Arch's bus names them.
+    public static let kinds = ["tabOpened", "tabClosed", "pageLoaded", "addressChanged", "titleChanged", "tabSelected", "downloadFinished", "spaceSwitched"]
+    public static let engines = ["webkit", "chromium"]
+    public static let tabKinds = ["open", "pinned", "favorite", "small-window", "agent"]
+}
+
+/// `events/subscribe`'s params.
+public struct AgentEventSubscribe: Codable, Equatable, Sendable {
+    public var filter: AgentEventFilter
+    /// Replays the grant's buffered events after this sequence before new ones; nil starts with new events.
+    public var after: UInt64?
+
+    public init(filter: AgentEventFilter = AgentEventFilter(), after: UInt64? = nil) {
+        self.filter = filter
+        self.after = after
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        filter = try container.decodeIfPresent(AgentEventFilter.self, forKey: .filter) ?? AgentEventFilter()
+        after = try container.decodeIfPresent(UInt64.self, forKey: .after)
+    }
+}
+
+/// `events/subscribe`'s result: the subscription, and the sequence of the last event Arch had then.
+public struct AgentEventSubscription: Codable, Equatable, Sendable {
+    public var subscription: Int
+    public var sequence: UInt64
+
+    public init(subscription: Int, sequence: UInt64) {
+        self.subscription = subscription
+        self.sequence = sequence
+    }
+}
+
+/// One event as `arch-cli events` prints it without `--json`, from its outside view: `09:30:12 pageLoaded w4 example.org (chromium, open)`. A download's name is an untrusted block, since a page or a server chose it.
+public enum AgentEventLine {
+    public static func text(for event: AgentJSON, timeZone: TimeZone = .current) -> String {
+        var words: [String] = []
+        if let date = event["date"]?.stringValue.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = timeZone
+            formatter.dateFormat = "HH:mm:ss"
+            words.append(formatter.string(from: date))
+        }
+        words.append(event["kind"]?.stringValue ?? "event")
+        if let tab = event["tab"] {
+            words.append(tab["handle"]?.stringValue ?? tab["watch"]?.stringValue ?? "tab")
+            if tab["excluded"] == .bool(true) {
+                words.append("(excluded site)")
+            } else if let place = tab["url"]?.stringValue ?? tab["site"]?.stringValue {
+                words.append(place)
+            }
+            let details = [tab["engine"]?.stringValue, tab["kind"]?.stringValue].compactMap { $0 }
+            if !details.isEmpty { words.append("(" + details.joined(separator: ", ") + ")") }
+        }
+        if let download = event["download"] {
+            words.append(download["tab"]?.stringValue ?? "tab")
+            if download["excluded"] == .bool(true) {
+                words.append("(excluded site)")
+            } else {
+                if let name = download["name"]?.stringValue { words.append(name) }
+                if let site = download["site"]?.stringValue { words.append("from \(site)") }
+            }
+        }
+        if let window = event["window"]?.stringValue {
+            func side(_ value: AgentJSON?) -> String? {
+                guard let value else { return nil }
+                return value["space"]?.stringValue ?? (value["otherPersona"] == .bool(true) ? "another Persona" : nil)
+            }
+            words.append(window)
+            if let to = side(event["to"]) { words.append((side(event["from"]).map { "\($0) \u{2192} " } ?? "\u{2192} ") + to) }
+        }
+        if event["byThisClient"] == .bool(true) { words.append("[this client]") }
+        return words.joined(separator: " ")
+    }
+}
+
+// MARK: - Outside programs' hooks
+
+/// Hooks an outside program proposes (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks): `hooks/add` shows the proposal sheet in Arch and waits for the user, and the hook takes effect only after Allow with Touch ID or the login password. `hooks/list` and `hooks/remove` reach only the hooks the client's identity added. No method edits, pauses, or resumes a hook.
+extension AgentControlMethod {
+    /// Answered with an `AgentHookListing` of the hooks this client's identity added.
+    public static let hooksList = "hooks/list"
+    /// Params `AgentHookAdd`, answered with an `AgentHookAddResult` once the user answers the proposal sheet; `progress` notifications come while it waits.
+    public static let hooksAdd = "hooks/add"
+    /// Params `{"hook": <id>}`, answered with `{"removed": true}`, or false for a hook this identity did not add.
+    public static let hooksRemove = "hooks/remove"
+}
+
+/// `hooks/add`'s params: the hook as `arch-cli hooks add` describes it. Arch checks every member and the script's syntax before it shows the proposal sheet.
+public struct AgentHookAdd: Codable, Equatable, Sendable {
+    public var name: String
+    /// The event kind, such as `pageLoaded` (`AgentEventFilter.kinds`).
+    public var event: String
+    /// For `pageLoaded`: `first`, `new`, the default, or `every`.
+    public var loads: String?
+    /// The places, sites, engines, and tab kinds; its kinds are the event's. Its spaces are the grant's Persona's, and none means the whole Persona.
+    public var filter: AgentEventFilter
+    /// The wait after the event, in milliseconds; the trigger's default when absent.
+    public var delay: Int?
+    /// The run's time limit in seconds; the default when absent.
+    public var timeout: Int?
+    /// The JavaScript script, at most 256 KB of UTF-8 text.
+    public var script: String
+    /// `tabs.rename` and `agent`.
+    public var permissions: [String]
+    /// The agent run's options with `agent`, as `arch.agent.run` takes them.
+    public var agent: AgentJSON?
+    /// `activity`, the default, or `session`.
+    public var record: String?
+
+    public init(name: String, event: String, loads: String? = nil, filter: AgentEventFilter = AgentEventFilter(), delay: Int? = nil, timeout: Int? = nil, script: String,
+                permissions: [String] = [], agent: AgentJSON? = nil, record: String? = nil) {
+        self.name = name
+        self.event = event
+        self.loads = loads
+        self.filter = filter
+        self.delay = delay
+        self.timeout = timeout
+        self.script = script
+        self.permissions = permissions
+        self.agent = agent
+        self.record = record
+    }
+
+    /// The largest script `hooks add` sends, as for every JavaScript hook.
+    public static let scriptBytes = 256 * 1024
+    public static let permissions = ["tabs.rename", "agent"]
+    public static let loads = ["first", "new", "every"]
+    public static let records = ["activity", "session"]
+}
+
+/// `hooks/add`'s answer.
+public struct AgentHookAddResult: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Sendable {
+        /// The user allowed the hook, which runs from now on.
+        case added
+        /// The user did not allow it, or the sheet closed unanswered; `arch-cli` exits 3.
+        case declined
+        /// A rule refused it before or after the sheet; `arch-cli` exits 4.
+        case refused
+    }
+
+    public var status: Status
+    public var hook: UUID?
+    /// The refusal's or the decline's sentence.
+    public var message: String?
+
+    public init(status: Status, hook: UUID? = nil, message: String? = nil) {
+        self.status = status
+        self.hook = hook
+        self.message = message
+    }
+}
+
+/// One hook a client's identity added, as `hooks list` shows it.
+public struct AgentHookSummary: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    /// The situation in words, such as "When a new tab loads its first page".
+    public var trigger: String
+    /// `active`, or `paused` with the reason's name in parentheses, such as `paused (grantEnded)`.
+    public var state: String
+    /// The last run's time and outcome, when it ran and the grant has Watch Browser Events.
+    public var lastRun: String?
+
+    public init(id: UUID, name: String, trigger: String, state: String, lastRun: String? = nil) {
+        self.id = id
+        self.name = name
+        self.trigger = trigger
+        self.state = state
+        self.lastRun = lastRun
+    }
+}
+
+/// `hooks/list`'s result.
+public struct AgentHookListing: Codable, Equatable, Sendable {
+    public var hooks: [AgentHookSummary]
+
+    public init(hooks: [AgentHookSummary]) {
+        self.hooks = hooks
+    }
+}
+
+// MARK: - Outside programs' agent runs
+
+extension AgentControlMethod {
+    /// One agent run for a client with Start Agent Tasks (`docs/hooks.md`, arch-cli agent run and rename): params the run's options as `arch.agent.run` takes them, with `tabs` as the client's tab handles, answered with the run's result (`status`, `code`, `message`, `actions`, `reply`, `model`, and `usage`) once it ends. Inside a shell hook's run, the run uses the hook's grant, feature, and run tabs.
+    public static let agentRun = "agent/run"
+}

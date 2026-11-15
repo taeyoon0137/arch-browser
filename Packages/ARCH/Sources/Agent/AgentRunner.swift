@@ -83,23 +83,33 @@ public final class AgentRunner: ObservableObject {
         let ending = endings[request.feature, default: 0]
         let options = request.options
         if let reason = request.grant.refusal(for: options) { return Self.refused("notGranted", reason) }
-        let hook: UUID
+        // An outside client's run (`docs/hooks.md`, arch-cli agent run and rename) works on its agent tabs and the tabs shared with it, under `agentRun`, with the program's label, and checks no known providers, since its results go to the client that asked.
+        let knownProviders: [AIProviderID: String]?
         switch request.origin {
-        case .hook(let id, _), .test(let id, _): hook = id
-        case .outsideClient: return Self.refused("notGranted", "Outside programs cannot start this hook run.")
+        case .hook(let hook, _), .test(let hook, _):
+            guard request.feature == .agentHook(hook), let allowed = request.allowedTabs, Set(request.tabs).isSubset(of: allowed),
+                  (options.closedTab == nil) == (request.closedTab == nil), let known = request.knownProviders else {
+                return Self.refused("notGranted", "The requested tabs or caller are outside this hook's grant.")
+            }
+            knownProviders = known
+        case .outsideClient:
+            guard request.feature == .agentRun, case .program = request.promptSource, let allowed = request.allowedTabs, !request.tabs.isEmpty,
+                  Set(request.tabs).isSubset(of: allowed), options.closedTab == nil, request.closedTab == nil else {
+                return Self.refused("notGranted", "An outside client's run works only on its agent tabs and the tabs shared with it.")
+            }
+            knownProviders = nil
         }
-        guard request.feature == .agentHook(hook), case .user = request.promptSource,
-              let allowed = request.allowedTabs, Set(request.tabs).isSubset(of: allowed),
-              (options.closedTab == nil) == (request.closedTab == nil), let knownProviders = request.knownProviders else {
-            return Self.refused("notGranted", "The requested tabs or caller are outside this hook's grant.")
+        // A program's hook keeps the caps of its origin (`docs/hooks.md`, Hooks from outside programs).
+        if case .program = request.promptSource, knownProviders != nil, request.grant.returnsReply || request.grant.minimumRecord < .activity || request.grant.tabAccess != .title {
+            return Self.refused("notGranted", "A program's hook runs see titles and addresses only, keep their activity, and return no reply.")
         }
         // A run beyond two waits for a slot within its time limit, so that hooks that fire together do not fail.
         let waitStarted = ContinuousClock.now
         if let ended = await takeSlot(within: options.limits.timeout) { return ended }
         defer { releaseSlot() }
         let requested = Set(request.tabs)
-        let open = host.userTabs(in: personaID).filter { requested.contains($0.id) && $0.agentOwnerID == nil }
-        guard Set(open.map(\.id)) == requested else { return Self.refused("notGranted", "A requested tab is no longer in the hook's Persona.") }
+        let open = request.tabs.compactMap { currentTab($0, of: request, personaID: personaID) }
+        guard Set(open.map(\.id)) == requested else { return Self.refused("notGranted", "A requested tab is no longer one this run may use.") }
         let selected = open.filter { tab in
             guard request.documentIDs[tab.id] == tab.documentID, let document = request.documents[tab.id],
                   Self.sameDocument(tab.url, document) else { return false }
@@ -113,7 +123,7 @@ public final class AgentRunner: ObservableObject {
         guard !models.isEmpty else { return Self.refused("noModel", "The selected route has no usable model.") }
         var usesCLI: Bool?
         for model in models {
-            guard let configuration = provider(model.provider), knownProviders[model.provider] == configuration.hookDestination else {
+            guard let configuration = provider(model.provider), knownProviders.map({ $0[model.provider] == configuration.hookDestination }) ?? true else {
                 return Self.refused("unknownProvider", "Review the provider for this hook before running it.")
             }
             let cli: Bool
@@ -128,6 +138,9 @@ public final class AgentRunner: ObservableObject {
         }
         if case .hook = request.origin, !reserve(request.feature, request.grant.runsPerDay) {
             return Self.refused("dailyRuns", "This hook reached its daily run limit.")
+        }
+        if case .outsideClient(let grant, _) = request.origin, !reserve(.agentRun(grant: grant), request.grant.runsPerDay) {
+            return Self.refused("dailyRuns", "This client started its \(request.grant.runsPerDay) agent runs for today.")
         }
 
         let id = UUID()
@@ -180,6 +193,14 @@ public final class AgentRunner: ObservableObject {
         AgentRunResult(status: .refused, code: code, message: message)
     }
 
+    /// A run tab as the host shows it now, while the run may still use it: a hook's open tab of the Persona that is no agent's, an outside client's own agent tab, or a tab the user shared with the client that no agent folder holds.
+    private func currentTab(_ id: UUID, of request: AgentRunRequest, personaID: UUID) -> AgentTabInfo? {
+        guard case .outsideClient(let grant, _) = request.origin else {
+            return host.userTabs(in: personaID).first { $0.id == id && $0.agentOwnerID == nil }
+        }
+        return host.tabs(withIDs: [id]).first { request.sharedTabs.contains(id) ? $0.agentOwnerID == nil : $0.agentOwnerID == grant }
+    }
+
     static func sameDocument(_ url: URL?, _ document: URL) -> Bool {
         guard let url, var a = URLComponents(url: url, resolvingAgainstBaseURL: false),
               var b = URLComponents(url: document, resolvingAgainstBaseURL: false) else { return false }
@@ -218,7 +239,7 @@ public final class AgentRunner: ObservableObject {
         }
 
         var message: AIMessage {
-            var parts: [AIPart] = [.text("The user's instructions:\n" + request.options.prompt)]
+            var parts: [AIPart] = [.text(AgentRunner.label(of: request.promptSource) + request.options.prompt)]
             for (i, tab) in tabs.enumerated() {
                 guard let url = request.documents[tab.id] else { continue }
                 parts.append(.text("Tab t\(i + 1)"))
@@ -229,6 +250,14 @@ public final class AgentRunner: ObservableObject {
                 parts.append(.page(AIPageContent(url: AgentAddress.reduced(url), title: closed.name, text: "")))
             }
             return AIMessage(role: .user, parts: parts)
+        }
+    }
+
+    /// The line above the prompt, which says whose words follow (`docs/hooks.md`, Tools).
+    static func label(of source: AgentRunPromptSource) -> String {
+        switch source {
+        case .user: return "The user's instructions:\n"
+        case .program(let name): return "Instructions from \(name), a program the user allowed:\n"
         }
     }
 
@@ -372,21 +401,35 @@ public final class AgentRunner: ObservableObject {
         }
     }
 
-    private func record(_ status: AgentResultStatus, tool: AgentTool?, in run: Execution) {
+    private func record(_ status: AgentResultStatus, code: String? = nil, tool: AgentTool?, call: AgentToolCall? = nil, in run: Execution) {
         guard run.request.options.record != .none, let activity else { return }
         let hook: UUID
         let id: UUID?
+        let cancelled = Task.isCancelled || !run.active
         switch run.request.origin {
         case .hook(let owner, let runID): (hook, id) = (owner, runID)
         case .test(let owner, _): (hook, id) = (owner, nil)
-        case .outsideClient: return
+        case .outsideClient(let grant, let runID):
+            // As the client's own calls are, with the run tab's site, so that a run reads nothing that its calls would not have logged.
+            var client = ""
+            if case .program(let name) = run.request.promptSource { client = name }
+            activity.recordTool(ofRun: runID, grant: grant, client: client, persona: run.personaID, tool: tool, status: status, code: code, site: site(of: call, in: run),
+                                cancelled: cancelled, dryRun: run.request.options.dryRun)
+            return
         }
-        activity.recordTool(of: hook, run: id, persona: run.personaID, tool: tool, status: status, cancelled: Task.isCancelled || !run.active, dryRun: run.request.options.dryRun)
+        activity.recordTool(of: hook, run: id, persona: run.personaID, tool: tool, status: status, cancelled: cancelled, dryRun: run.request.options.dryRun)
+    }
+
+    /// The site of the document of the run tab a call names, for its activity entry.
+    private func site(of call: AgentToolCall?, in run: Execution) -> String? {
+        guard let handle = call?.arguments["tab"]?.stringValue, let index = Int(handle.dropFirst()), index > 0, index <= run.tabs.count, handle == "t\(index)",
+              let document = run.request.documents[run.tabs[index - 1].id] else { return nil }
+        return AgentActivityEntry.site(of: document)
     }
 
     private func perform(_ call: AgentToolCall, tool: AgentTool, in run: Execution) async -> AgentToolResult {
         let result = await execute(call, tool: tool, in: run)
-        record(result.status, tool: tool, in: run)
+        record(result.status, code: result.code, tool: tool, call: call, in: run)
         return result
     }
 
@@ -401,7 +444,7 @@ public final class AgentRunner: ObservableObject {
             return response("invalidArguments", error: true)
         }
         let id = run.tabs[index - 1].id
-        guard let document = run.request.documents[id], let tab = host.userTabs(in: run.personaID).first(where: { $0.id == id && $0.agentOwnerID == nil }),
+        guard let document = run.request.documents[id], let tab = currentTab(id, of: run.request, personaID: run.personaID),
               tab.documentID == run.tabs[index - 1].documentID, Self.sameDocument(tab.url, document), AgentPolicy.showsTitle(of: document, allowsAI: allowsAI) else {
             return response("stale", error: true)
         }
@@ -409,8 +452,8 @@ public final class AgentRunner: ObservableObject {
             let host = self.host
             let toolHost = AgentToolHost(host: host, allowsAI: allowsAI)
             func mayRead(_ current: AgentTabInfo) -> Bool {
-                run.isLive && current.agentOwnerID == nil && current.documentID == tab.documentID && Self.sameDocument(current.url, document)
-                    && host.userTabs(in: run.personaID).contains { $0.id == id }
+                run.isLive && current.agentOwnerID == tab.agentOwnerID && current.documentID == tab.documentID && Self.sameDocument(current.url, document)
+                    && self.currentTab(id, of: run.request, personaID: run.personaID) != nil
             }
             if tool.name == "snapshot" {
                 // A full outline holds the page's text, which only `read_text` grants.
@@ -422,6 +465,11 @@ public final class AgentRunner: ObservableObject {
             return await toolHost.readText(args, tab: tab, handle: handle, mayReadTab: mayRead).result
         }
         guard let name = args["name"]?.stringValue else { return response("invalidArguments", error: true) }
+        // Rule P19 for an outside client's run: its own agent tabs rename freely, and a shared tab would ask, which a run cannot.
+        if case .outsideClient = run.request.origin, run.request.sharedTabs.contains(id),
+           case .refuse = AgentPolicy.renameDecision(client: .run, tab: .shared(acting: false), allowedOnce: false) {
+            return AgentToolResult(status: .refused, code: AgentPolicy.wouldAskCode, text: AgentPolicy.wouldAskSentence)
+        }
         let firstLine = name.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces)
         let suggested = String(firstLine.prefix(60)).trimmingCharacters(in: .whitespaces)
         guard run.rename(id, suggested.isEmpty ? nil : suggested, document, !run.request.options.dryRun) else { return response("userNamed", error: true) }

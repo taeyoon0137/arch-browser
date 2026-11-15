@@ -183,6 +183,54 @@ import Testing
         #expect(SealedSettingsFile<AgentSettings>.open(try Data(contentsOf: reading.settingsURL), with: SymmetricKey(size: .bits256)) == nil)
     }
 
+    /// A file sealed before grants had Watch Browser Events and their runs a day (VII.30) opens with its grants and Allow Outside Clients, which take the scope off and 200 runs a day, instead of being set aside.
+    @Test func aFileFromBeforeTheEventsScopeOpensWithItsGrants() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let written = try await writeSettings(harness)
+        try await recorded(harness)
+        let key = try #require(harness.keys.key)
+        let file = try AgentJSON.decode(Data(contentsOf: harness.settingsURL))
+        var members = try #require(file["settings"]?.objectValue)
+        guard case .array(var grants)? = members["grants"] else { Issue.record("The file has no grants."); return }
+        for index in grants.indices {
+            var grant = try #require(grants[index].objectValue)
+            #expect(grant.removeValue(forKey: "runsPerDay") != nil)
+            var scopes = grant["scopes"]?.objectValue ?? [:]
+            #expect(scopes.removeValue(forKey: "watchEvents") != nil)
+            grant["scopes"] = .object(scopes)
+            grants[index] = .object(grant)
+        }
+        members["grants"] = .array(grants)
+        let contents = AgentJSON.object(members)
+        let seal = HMAC<SHA256>.authenticationCode(for: try contents.encoded(), using: key)
+        try AgentJSON.object(["seal": .string(Data(seal).base64EncodedString()), "settings": contents]).encoded().write(to: harness.settingsURL)
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        #expect(service.state == .ready)
+        #expect(service.settings.allowsOutsideClients)
+        let grant = try #require(service.settings.grants.first)
+        #expect(grant.id == written.grantID)
+        #expect(grant.runsPerDay == AgentGrant.defaultRunsPerDay)
+        #expect(!grant.scopes.watchEvents)
+        #expect(FileManager.default.fileExists(atPath: harness.settingsURL.path))
+    }
+
+    /// Watch Browser Events asks for Touch ID, as every extra scope does, and a grant's runs a day stay within 1 to 2,000.
+    @Test func theEventsScopeAsksForTouchIDAndRunsADayStayInRange() async throws {
+        #expect(AgentGrantChoice(scopes: AgentGrantScopes(watchEvents: true)).needsAuthentication)
+        #expect(!AgentGrantChoice().needsAuthentication)
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let written = try await writeSettings(harness)
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        service.setRunsPerDay(5_000, for: written.grantID)
+        #expect(service.settings.grants.first?.runsPerDay == 2_000)
+        service.setRunsPerDay(0, for: written.grantID)
+        #expect(service.settings.grants.first?.runsPerDay == 1)
+    }
+
     @Test func noFileStartsWithTheDefaultsAndNeedsNoKey() async throws {
         let keys = MemoryKeys()
         keys.failure = "Locked."

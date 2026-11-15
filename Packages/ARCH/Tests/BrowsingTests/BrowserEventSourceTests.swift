@@ -1,4 +1,4 @@
-// The browser event source on fake web contents: a new tab but no restored tabs, an agent folder's tab as `agent`, a name from code under the suggested name rules with its cause, also when it comes while a WebKit navigation waits to commit, the hook host's tabs by their committed addresses, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, a document's address and the end of an earlier name at its commit, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
+// The browser event source on fake web contents: a new tab but no restored tabs, an agent folder's tab as `agent` with its owner, a name from code under the suggested name rules with its cause, also when it comes while a WebKit navigation waits to commit, the hook host's tabs by their committed addresses, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, a document's address and the end of an earlier name at its commit, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -54,7 +54,7 @@ import Testing
         #expect(BrowserEventSource.kind(of: imported) == .pinned)
     }
 
-    /// An agent folder's tab posts as `agent`, which only a filter that names the kind receives, and as the user's once it leaves the folder.
+    /// An agent folder's tab posts as `agent` with its folder's owner, which only a filter that names the kind receives, and as the user's once it leaves the folder.
     @Test func anAgentFoldersTabPostsAsAnAgentTabUntilItLeavesTheFolder() {
         let agentFolder = UUID()
         let owner = UUID()
@@ -65,7 +65,8 @@ import Testing
         bus.subscribe(BrowserEventFilter()) { userEvents.events.append($0) }
         source.follow(tabs: [tab], postingNewTabs: true)
         source.tabWillClose(tab, reason: .agent)
-        let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .agent, engine: .chromium, url: URL(string: "https://example.org/a"), documentID: tab.documentID)
+        let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .agent, engine: .chromium, url: URL(string: "https://example.org/a"), documentID: tab.documentID,
+                                agentOwnerID: owner)
         #expect(recorder.payloads == [.tabOpened(tab: ref, openerTabID: nil), .tabClosed(tab: ref, reason: .agent)])
         #expect(userEvents.events.isEmpty)
         tab.folderID = nil

@@ -1,4 +1,5 @@
 // The agent run's plain values (`docs/hooks.md`, Agent run API): what a caller asks of one agent run, what its grant allows, and what the run returns. Hooks keep the options and grants in `hooks.json`, and scripts and outside programs send the options as JSON. `AgentRunner` (VII.27) runs them; nothing here runs an agent.
+import AgentControl
 import AI
 import Foundation
 
@@ -193,7 +194,8 @@ public enum AgentRunOrigin: Hashable, Sendable {
     case hook(UUID, run: UUID)
     /// The editor's Test or a hook row's Run on Current Tab, with the test's hook run.
     case test(hook: UUID, run: UUID)
-    case outsideClient(grant: UUID)
+    /// An outside client's `agent/run`, with the run's ID, which the run's activity entries carry.
+    case outsideClient(grant: UUID, run: UUID)
 }
 
 /// Who wrote the prompt, which the first message names.
@@ -220,7 +222,7 @@ public struct AgentRunRequest: Sendable {
     public var options: AgentRunOptions
     /// The tabs the run reads and renames (`docs/hooks.md`, Run tabs).
     public var tabs: [UUID]
-    /// For a hook, the tabs it reaches, which `tabs` must stay within; nil for an outside client.
+    /// The tabs the caller reaches, which `tabs` must stay within: a hook's, or an outside client's agent tabs and the tabs shared with it.
     public var allowedTabs: Set<UUID>?
     /// The document each run tab's renames belong to: the event's address for the event's tab; the runner adds the others' addresses as it writes the first message.
     public var documents: [UUID: URL]
@@ -235,6 +237,8 @@ public struct AgentRunRequest: Sendable {
     /// `agentHook.<hook id>` or `agentRun`.
     public var feature: AIFeatureID
     public var grant: AgentRunGrant
+    /// For an outside client's run, the run tabs the user shared with the client; the others are its agent tabs.
+    public var sharedTabs: Set<UUID> = []
 
     public init(options: AgentRunOptions, tabs: [UUID], allowedTabs: Set<UUID>?, documents: [UUID: URL] = [:], documentIDs: [UUID: UUID] = [:], closedTab: AgentRunClosedTab? = nil,
                 knownProviders: [AIProviderID: String]?, origin: AgentRunOrigin, promptSource: AgentRunPromptSource, feature: AIFeatureID, grant: AgentRunGrant) {
@@ -300,6 +304,29 @@ extension AIFeatureID {
     public static func agentHook(_ hook: UUID) -> AIFeatureID {
         AIFeatureID(rawValue: "agentHook.\(hook.uuidString)")
     }
+
+    /// Agent Runs from Programs: the runs outside programs start with `arch-cli agent run` (`docs/hooks.md`, Model choice and tiers).
+    public static let agentRun = AIFeatureID(rawValue: "agentRun")
+
+    /// The key of one grant's runs today in `ai-usage.json`, which its runs a day bound; no request names it as its feature.
+    public static func agentRun(grant: UUID) -> AIFeatureID {
+        AIFeatureID(rawValue: "agentRun.\(grant.uuidString)")
+    }
+}
+
+extension AIFeature {
+    /// Agent Runs from Programs: automatic and `perRequest`, since each run names its tier or models, and requiring `agent`.
+    public static let agentRun = AIFeature(id: .agentRun, name: "Agent Runs from Programs",
+                                           summary: "Runs one agent for a program you allowed, on the tabs it opened or you shared with it, within its grant.",
+                                           trigger: .automatic, data: AIDataScope(kinds: [.page]), requirements: [.agent], routing: .perRequest)
+}
+
+extension AgentRunGrant {
+    /// The run grant of an outside client with Start Agent Tasks (`docs/hooks.md`, arch-cli agent run and rename): `read_text` and `snapshot`, which the client could call itself at every level, and `rename_tab` for its own agent tabs (P19); page access; Keep Activity Only to Keep the Session; the ceilings of 10 minutes, 20 rounds, and 50 tool calls; the grant's runs a day; and the reply, since the client asked.
+    public static func forClient(_ grant: AgentGrant) -> AgentRunGrant {
+        AgentRunGrant(tools: [AgentToolCatalog.renameTab.name, "read_text", "snapshot"], tabAccess: .page, minimumRecord: .activity, maximumRecord: .session,
+                      runsPerDay: grant.runsPerDay, limits: AgentRunLimits(timeout: .seconds(600), rounds: 20, toolCalls: 50), returnsReply: true)
+    }
 }
 
 extension Duration {
@@ -307,4 +334,36 @@ extension Duration {
     var agentRunSeconds: Double {
         Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
+}
+
+extension AgentPolicy {
+    /// What a run says when a step would ask the user, who is not there (hook decision 5).
+    public static let wouldAskSentence = "This run cannot ask the user, so Arch refused the step."
+    public static let wouldAskCode = "wouldAsk"
+
+    /// A run's decision from an outside client's: P16, P17, and the other refusals stand, and every card becomes a refusal with `wouldAsk`.
+    static func runDecision(_ decision: AgentDecision) -> AgentDecision {
+        if case .ask = decision { return .refuse(nil, wouldAskSentence) }
+        return decision
+    }
+
+    /// Rule P19 for `rename_tab`: a session's or an outside client's own agent tab renames freely, a tab the user shared asks once per tab, and any other tab is refused with P17. A run renames its run tabs without asking, which for an outside client's run are its own agent tabs and the tabs shared with it, so a shared tab not yet allowed once is refused with `wouldAsk`.
+    public static func renameDecision(client: AgentClientKind, tab: AgentTabAccess, allowedOnce: Bool) -> AgentDecision {
+        switch tab {
+        case .notTheClients: return .refuse(.p17, entry(.p17).sentence)
+        case .agentTab: return .allow
+        case .shared:
+            let decision: AgentDecision = allowedOnce ? .allow : .ask(AgentAsk(rules: [.p19], isSensitive: false))
+            return client == .run ? runDecision(decision) : decision
+        }
+    }
+}
+
+/// Suggested names for agent tabs, which `BrowserAgentHost` gives under the AI hooks' rules (hook decision 13) for `rename_tab` from outside clients and their runs. A protocol beside `AgentBrowserHost`, so that a host without it gives no names and the tool refuses.
+@MainActor
+public protocol AgentTabNaming: AnyObject {
+    /// Suggests a name for the tab while it shows `document`, ignoring the fragment, inside `withCause` with the grant's cause; nil removes a suggested name. False when the tab no longer shows that document or the user's name or refusal keeps its name.
+    func suggestName(_ name: String?, forTab id: UUID, showing document: URL, byGrant grant: UUID, applying: Bool) -> Bool
+    /// The address the tab has committed, which names belong to, while its shown address may still be loading; nil before its first commit.
+    func committedAddress(ofTab id: UUID) -> URL?
 }

@@ -140,22 +140,29 @@ import Terminal
         self.agents = agents
         PreferencesWindowController.agents = agents
         session.agents = agents
+        // Grants with Watch Browser Events read the session's events through the outside view.
+        agents.attach(events: session.events)
         session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
         // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain. JavaScript hooks run in the plugin sandbox, and shell hooks run their trusted copies with the bundle's tools first on PATH, binding `arch-cli` through the agents' socket.
         let settings = AIService.shared.settings
         let scriptHost = session.pluginBrowserHost
-        let javaScript = HookScriptRunner(host: scriptHost, allowsAI: { settings.allowsAI(on: $0) }) { request, invocation in
+        // A script's agent runs, `arch.agent.run` and a shell script's `arch-cli agent run`, rename under the hooks' rules with the run's cause.
+        let runAgent: HookScriptRunner.AgentCall = { request, invocation in
             await agents.runs.run(request, personaID: invocation.personaID) { tab, name, document, applying in
                 scriptHost.renameTab(tab, to: name, showing: document, cause: invocation.cause, applying: applying)
             }
         }
-        let shell = ShellHookRunner(host: scriptHost, allowsAI: { settings.allowsAI(on: $0) }, channel: agents, helpers: HookShellScript.appHelpers)
+        let javaScript = HookScriptRunner(host: scriptHost, allowsAI: { settings.allowsAI(on: $0) }, runAgent: runAgent)
+        let shell = ShellHookRunner(host: scriptHost, allowsAI: { settings.allowsAI(on: $0) }, channel: agents, helpers: HookShellScript.appHelpers, runAgent: runAgent)
         self.shellHooks = shell
         let hooks = HookRegistry(directory: supportDirectory, bus: session.events, host: BrowserHookHost(session: session),
                                  javaScript: javaScript, shell: shell)
         self.hooks = hooks
         PreferencesWindowController.hooks = hooks
         agents.didStopAll = { [weak hooks] in hooks?.stopAgentHooks() }
+        // Hooks that outside programs propose show their sheet in the front main window, as the grant sheet does, and pause when the program's grant ends.
+        hooks.proposalPrompt = HookProposalSheetPresenter(window: { [weak agents] in agents?.host.windowForSheet() })
+        agents.hookRegistrar = hooks
         hooks.featureDidEnd = { [weak agents] in agents?.runs.deleteKeptRuns(of: $0) }
         hooks.runsDidLeave = { [weak agents] in agents?.runs.deleteKeptRuns(ofHookRuns: $0) }
         hooks.activityDidClear = { [weak agents] in agents?.runs.deleteAllKeptRuns() }
@@ -301,7 +308,10 @@ import Terminal
     func setQuitting(_ quitting: Bool) {
         session?.isQuitting = quitting
         // AppKit calls the quit on the main thread, where the agents' grant sheets show.
-        if quitting { agents?.cancelQuestions() }
+        if quitting {
+            agents?.cancelQuestions()
+            hooks?.proposalPrompt?.cancelAll()
+        }
     }
 
     /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits. The agents' socket goes with the app.

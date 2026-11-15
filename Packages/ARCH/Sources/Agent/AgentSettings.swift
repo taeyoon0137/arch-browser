@@ -46,8 +46,15 @@ public struct AgentGrant: Codable, Identifiable, Equatable, Sendable {
     public var expiry: AgentGrantExpiry
     public var grantedAt: Date
     public var lastUsedAt: Date?
+    /// The agent runs `arch-cli agent run` may start a day under Start Agent Tasks (`docs/hooks.md`, arch-cli agent run and rename), 1 to 2,000, which the grant's row in Settings ▸ AI ▸ Agents changes. `ai-usage.json` keeps the day's count per grant.
+    public var runsPerDay: Int
 
-    public init(id: UUID = UUID(), client: AgentClientIdentity, personaID: UUID, spaceID: UUID, level: AgentAccessLevel, scopes: AgentGrantScopes, expiry: AgentGrantExpiry, grantedAt: Date, lastUsedAt: Date? = nil) {
+    /// A new grant's runs a day.
+    public static let defaultRunsPerDay = 200
+    public static let runsPerDayRange = 1...2_000
+
+    public init(id: UUID = UUID(), client: AgentClientIdentity, personaID: UUID, spaceID: UUID, level: AgentAccessLevel, scopes: AgentGrantScopes, expiry: AgentGrantExpiry, grantedAt: Date, lastUsedAt: Date? = nil,
+                runsPerDay: Int = AgentGrant.defaultRunsPerDay) {
         self.id = id
         self.client = client
         self.personaID = personaID
@@ -57,6 +64,26 @@ public struct AgentGrant: Codable, Identifiable, Equatable, Sendable {
         self.expiry = expiry
         self.grantedAt = grantedAt
         self.lastUsedAt = lastUsedAt
+        self.runsPerDay = runsPerDay
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, client, personaID, spaceID, level, scopes, expiry, grantedAt, lastUsedAt, runsPerDay
+    }
+
+    /// `runsPerDay` takes its default when absent, so that a grant written before it existed keeps working instead of setting the file aside.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        client = try container.decode(AgentClientIdentity.self, forKey: .client)
+        personaID = try container.decode(UUID.self, forKey: .personaID)
+        spaceID = try container.decode(UUID.self, forKey: .spaceID)
+        level = try container.decode(AgentAccessLevel.self, forKey: .level)
+        scopes = try container.decode(AgentGrantScopes.self, forKey: .scopes)
+        expiry = try container.decode(AgentGrantExpiry.self, forKey: .expiry)
+        grantedAt = try container.decode(Date.self, forKey: .grantedAt)
+        lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+        runsPerDay = try container.decodeIfPresent(Int.self, forKey: .runsPerDay) ?? Self.defaultRunsPerDay
     }
 
     public func hasExpired(at date: Date) -> Bool {
@@ -65,19 +92,34 @@ public struct AgentGrant: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
-/// The grant sheet's extra scopes, both off by default.
+/// The grant sheet's extra scopes, all off by default.
 public struct AgentGrantScopes: Codable, Equatable, Sendable {
     /// `search_history`, over the history every Persona shares (Persona rule 6).
     public var searchHistory = false
-    /// `task/start`: in-app sessions on the user's AI subscription.
+    /// `task/start` and `agent/run`: in-app sessions and agent runs on the user's AI subscription.
     public var startTasks = false
+    /// `events/subscribe` and `watch_events`: the grant's Persona's browser events through the outside view, with sites and never titles or pages (`docs/hooks.md`, Grants).
+    public var watchEvents = false
 
-    public init(searchHistory: Bool = false, startTasks: Bool = false) {
+    public init(searchHistory: Bool = false, startTasks: Bool = false, watchEvents: Bool = false) {
         self.searchHistory = searchHistory
         self.startTasks = startTasks
+        self.watchEvents = watchEvents
     }
 
-    public var isEmpty: Bool { !searchHistory && !startTasks }
+    public var isEmpty: Bool { !searchHistory && !startTasks && !watchEvents }
+
+    private enum CodingKeys: String, CodingKey {
+        case searchHistory, startTasks, watchEvents
+    }
+
+    /// A scope that an earlier build did not write is off, so that its grants keep working instead of setting the file aside.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        searchHistory = try container.decodeIfPresent(Bool.self, forKey: .searchHistory) ?? false
+        startTasks = try container.decodeIfPresent(Bool.self, forKey: .startTasks) ?? false
+        watchEvents = try container.decodeIfPresent(Bool.self, forKey: .watchEvents) ?? false
+    }
 }
 
 /// Who an outside client is, from its process ancestry and signature (`AgentClientIdentifier`). Two connections share a grant when their keys are equal; the other fields describe the client.

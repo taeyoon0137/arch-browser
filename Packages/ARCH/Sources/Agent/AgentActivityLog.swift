@@ -17,6 +17,8 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         case declined
         /// A connection failed the peer checks; `outcome` holds the reason.
         case refusedPeer
+        /// An outside client's agent run (`docs/hooks.md`, arch-cli agent run and rename), with its model, outcome, and the refusal's rule; each of its tool calls has an entry of its own.
+        case agentRun
     }
 
     /// How a call was decided.
@@ -53,9 +55,13 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     public var rule: String?
     /// The result's status, or the refusal's reason.
     public var outcome: String?
+    /// An agent run's model, as "provider/model".
+    public var model: String?
+    /// The outside client's agent run the entry belongs to: the run's own entry and each of its tool calls, which count toward the run's limits rather than the client's 2,000 calls a day.
+    public var runID: UUID?
 
     public init(id: UUID = UUID(), date: Date, event: Event, grantID: UUID? = nil, sessionID: UUID? = nil, hookID: UUID? = nil, hookRunID: UUID? = nil, clientName: String, personaID: UUID? = nil, tool: String? = nil, toolClass: String? = nil,
-                site: String? = nil, decision: Decision? = nil, rule: String? = nil, outcome: String? = nil) {
+                site: String? = nil, decision: Decision? = nil, rule: String? = nil, outcome: String? = nil, model: String? = nil, runID: UUID? = nil) {
         self.id = id
         self.date = date
         self.event = event
@@ -71,6 +77,8 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         self.decision = decision
         self.rule = rule
         self.outcome = outcome
+        self.model = model
+        self.runID = runID
     }
 
     /// The site an entry may name for an address: its host, without scheme, port, path, query, fragment, or credentials.
@@ -123,19 +131,37 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
 
     /// Keeps only Arch's identifiers, catalog metadata, and a fixed outcome. The caller supplies no model or page strings.
     func recordTool(of hook: UUID, run: UUID?, persona: UUID, tool: AgentTool?, status: AgentResultStatus, cancelled: Bool, dryRun: Bool) {
-        let outcome: String
-        if cancelled { outcome = "cancelled" }
-        else if dryRun && status == .ok && tool?.name == "rename_tab" { outcome = "previewed" }
-        else { outcome = status.rawValue }
-        let decision: AgentActivityEntry.Decision
-        switch status {
-        case .refused: decision = .refused
-        case .denied: decision = .denied
-        case .timeout: decision = .timedOut
-        default: decision = .auto
-        }
         record(AgentActivityEntry(date: now(), event: .toolCall, hookID: hook, hookRunID: run, clientName: "Agent Hook", personaID: persona,
-                                  tool: tool?.name, toolClass: tool?.toolClass.rawValue, decision: cancelled ? nil : decision, outcome: outcome))
+                                  tool: tool?.name, toolClass: tool?.toolClass.rawValue, decision: cancelled ? nil : Self.decision(for: status),
+                                  outcome: Self.outcome(of: status, tool: tool, cancelled: cancelled, dryRun: dryRun)))
+    }
+
+    /// A tool call of an outside client's run, under the grant as the client's own calls are, with the run tab's site and the refusal's code, and with the outcomes of a hook run's calls.
+    func recordTool(ofRun run: UUID, grant: UUID, client: String, persona: UUID, tool: AgentTool?, status: AgentResultStatus, code: String?, site: String?, cancelled: Bool, dryRun: Bool) {
+        let decision = cancelled ? nil : Self.decision(for: status)
+        record(AgentActivityEntry(date: now(), event: .toolCall, grantID: grant, clientName: client, personaID: persona, tool: tool?.name, toolClass: tool?.toolClass.rawValue,
+                                  site: site, decision: decision, rule: decision == .refused ? code : nil, outcome: Self.outcome(of: status, tool: tool, cancelled: cancelled, dryRun: dryRun),
+                                  runID: run))
+    }
+
+    private static func outcome(of status: AgentResultStatus, tool: AgentTool?, cancelled: Bool, dryRun: Bool) -> String {
+        if cancelled { return "cancelled" }
+        if dryRun && status == .ok && tool?.name == "rename_tab" { return "previewed" }
+        return status.rawValue
+    }
+
+    private static func decision(for status: AgentResultStatus) -> AgentActivityEntry.Decision {
+        switch status {
+        case .refused: return .refused
+        case .denied: return .denied
+        case .timeout: return .timedOut
+        default: return .auto
+        }
+    }
+
+    /// The tool calls under the grant today that its 2,000 calls a day count after a relaunch: all but its agent runs' calls, which count toward the runs' limits instead.
+    func callsToday(of grantID: UUID, at date: Date) -> Int {
+        entries.filter { $0.grantID == grantID && $0.event == .toolCall && $0.runID == nil && Calendar.current.isDate($0.date, inSameDayAs: date) }.count
     }
 
     /// Settings' Clear Activity.

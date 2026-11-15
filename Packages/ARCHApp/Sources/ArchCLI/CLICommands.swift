@@ -1,4 +1,4 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `events`, `hooks`, `agent run`, `rename`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
 import AgentControl
 import Foundation
 
@@ -52,6 +52,19 @@ enum CLICommands {
             return runTool(call, json: request.json)
         case .screenshot(let call, let output):
             return screenshot(call, output: output, json: request.json)
+        case .events(let subscribe):
+            return events(subscribe, json: request.json)
+        case .hooks(let action):
+            return hooks(action, json: request.json)
+        case .agentRun(var options, let fromStandardInput):
+            if fromStandardInput {
+                let input = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+                if case .object(var fields) = options {
+                    fields["prompt"] = .string(input.hasSuffix("\n") ? String(input.dropLast()) : input)
+                    options = .object(fields)
+                }
+            }
+            return agentRun(options, json: request.json)
         }
     }
 
@@ -186,6 +199,140 @@ enum CLICommands {
             if json { return printJSON(["released": .bool(released)]) }
             print(released ? "This client no longer has access to Arch. Its next command asks again." : "This client had no access to give up.")
             return .done
+        }
+    }
+
+    // MARK: - events
+
+    /// Subscribes to the grant's browser events and prints each as it arrives, one line each, or one JSON object per line in the outside view with `--json`, until interrupted. Events Arch dropped because this client read too slowly are counted on standard error. A grant without Watch Browser Events exits 6, and a filter Arch refuses, such as a space it does not know, exits 4.
+    private static func events(_ subscribe: AgentEventSubscribe, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let subscription: AgentEventSubscription
+            do {
+                subscription = try connection.call(AgentControlMethod.eventsSubscribe, params: AgentJSON(encoding: subscribe)) { printError($0) }.decode(as: AgentEventSubscription.self)
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .refused
+            }
+            if !json { printError("Following browser events in Arch after event \(subscription.sequence). Press Control-C to stop.") }
+            let id = AgentJSON.number(Double(subscription.subscription))
+            while true {
+                switch try connection.receive() {
+                case .notification(AgentControlMethod.eventNotification, let params):
+                    guard params?["subscription"] == id, let event = params?["event"] else { continue }
+                    if json {
+                        if printJSON(event) != .done { return .internalError }
+                    } else {
+                        print(terminalSafe(AgentEventLine.text(for: event)))
+                    }
+                    fflush(stdout)
+                case .notification(AgentControlMethod.eventsDroppedNotification, let params):
+                    guard params?["subscription"] == id, case .number(let count)? = params?["count"] else { continue }
+                    printError("Arch dropped \(Int(count)) events that this client did not read in time.")
+                case .notification(AgentControlMethod.revokedNotification, let params):
+                    throw AgentClientError.revoked(params?["message"]?.stringValue ?? "Your access to Arch ended.")
+                default:
+                    continue
+                }
+            }
+        }
+    }
+
+    // MARK: - hooks
+
+    /// Lists the hooks this client added, proposes one, or removes one. `add` reads the script and the agent options, which must be a JSON object, sends the proposal, says on standard error that it waits for the user, and prints the new hook's ID on Allow; Don't Allow exits 3 and a refusal, by Arch or of a script over 256 KB, exits 4.
+    private static func hooks(_ action: AgentHooksAction, json: Bool) -> AgentExitCode {
+        var proposal: AgentHookAdd?
+        if case .add(var add, let scriptPath, let agentPath) = action {
+            guard let script = FileManager.default.contents(atPath: scriptPath) else {
+                printError("arch-cli could not read the script at \(scriptPath).")
+                return .usage
+            }
+            guard script.count <= AgentHookAdd.scriptBytes, let text = String(data: script, encoding: .utf8) else {
+                printError("A hook's script is UTF-8 text of at most 256 KB.")
+                return .refused
+            }
+            add.script = text
+            if let agentPath {
+                guard let data = FileManager.default.contents(atPath: agentPath) else {
+                    printError("arch-cli could not read the agent options at \(agentPath).")
+                    return .usage
+                }
+                guard let options = try? AgentJSON.decode(data), options.objectValue != nil else {
+                    printError("The agent options must be one JSON object, as arch.agent.run takes them.")
+                    return .refused
+                }
+                add.agent = options
+            }
+            proposal = add
+        }
+        return withConnection { connection, _ in
+            do {
+                switch action {
+                case .list:
+                    let listing = try connection.call(AgentControlMethod.hooksList) { printError($0) }.decode(as: AgentHookListing.self)
+                    if json { return printJSON(try AgentJSON(encoding: listing)) }
+                    if listing.hooks.isEmpty { print("This client has added no hooks.") }
+                    for hook in listing.hooks {
+                        print("\(hook.id.uuidString)  \(terminalSafe(hook.name))\n  \(hook.trigger) \u{00B7} \(hook.state)\(hook.lastRun.map { " \u{00B7} last run \($0)" } ?? "")")
+                    }
+                    return .done
+                case .remove(let id):
+                    let removed = try connection.call(AgentControlMethod.hooksRemove, params: ["hook": .string(id.uuidString)])["removed"] == .bool(true)
+                    if json { return printJSON(["removed": .bool(removed)]) }
+                    print(removed ? "Removed the hook." : "This client added no hook with that ID.")
+                    return removed ? .done : .toolError
+                case .add:
+                    let result = try connection.call(AgentControlMethod.hooksAdd, params: AgentJSON(encoding: proposal)) { printError($0) }.decode(as: AgentHookAddResult.self)
+                    if json {
+                        if printJSON(try AgentJSON(encoding: result)) != .done { return .internalError }
+                    } else if let hook = result.hook {
+                        print(hook.uuidString)
+                    }
+                    if !json, let message = result.message { printError(message) }
+                    switch result.status {
+                    case .added: return .done
+                    case .declined: return .denied
+                    case .refused: return .refused
+                    }
+                }
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .refused
+            }
+        }
+    }
+
+    // MARK: - agent run
+
+    /// Runs one agent in Arch and prints the result's sentence and the agent's reply, or the result as JSON with `--json`. It exits 0 when the run completed, 1 when it failed or was cancelled, 4 when a rule refused it, as for a grant without Start Agent Tasks' runs left, and 5 when it ran out of time.
+    private static func agentRun(_ options: AgentJSON, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let result: AgentJSON
+            do {
+                result = try connection.call(AgentControlMethod.agentRun, params: options) { printError($0) }
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .refused
+            }
+            let status = result["status"]?.stringValue ?? "failed"
+            if json {
+                if printJSON(result) != .done { return .internalError }
+            } else {
+                let sentences = ["completed": "The agent run completed.", "failed": "The agent run failed.", "timedOut": "The agent run ran out of time.",
+                                 "cancelled": "The agent run was cancelled.", "refused": "Arch refused the agent run."]
+                var line = sentences[status] ?? "The agent run ended."
+                if let message = result["message"]?.stringValue { line += " " + message }
+                if let code = result["code"]?.stringValue, result["message"] == nil { line += " (\(code))" }
+                printError(terminalSafe(line))
+                if let reply = result["reply"]?.stringValue { print(terminalSafe(reply)) }
+            }
+            switch status {
+            case "completed": return .done
+            case "refused": return .refused
+            case "timedOut": return .timedOut
+            default: return .toolError
+            }
         }
     }
 

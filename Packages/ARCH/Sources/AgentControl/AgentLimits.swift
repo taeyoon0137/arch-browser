@@ -41,4 +41,10 @@ public enum AgentLimits {
     public static let sessionIdleHours = 2
     /// Calls one connection runs at a time; more are refused with `busy`.
     public static let callsPerConnection = 4
+
+    /// Outside programs' events (`docs/hooks.md`, arch-cli events; arch-mcp): the events Arch keeps per grant, the subscriptions a connection holds, the events a connection's queue holds before it drops the oldest, and the events one `watch_events` call returns.
+    public static let eventBuffer = 500
+    public static let subscriptionsPerConnection = 4
+    public static let eventQueue = 1_000
+    public static let watchEventsPerCall = 100
 }

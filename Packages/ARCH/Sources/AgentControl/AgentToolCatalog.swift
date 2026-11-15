@@ -277,6 +277,13 @@ public enum AgentToolCatalog {
         AgentToolParameter("name", .string, required: true, "The suggested name, or an empty string to clear it.")
     ])
 
+    /// Offered to an outside client whose grant has Watch Browser Events (`docs/hooks.md`, arch-mcp): events come as a tool, since MCP clients do not pass a server's notifications to their model (hook decision 11).
+    public static let watchEvents = AgentTool("watch_events", .reads, [], "Returns the browser events of the grant's Persona after a sequence, up to \(AgentLimits.watchEventsPerCall) at a time, or waits up to timeout_ms for the first: tabs that open, load, change address or title, are selected, or close, downloads this client's tabs finished, and space switches. The user's own tabs show a watch ID such as w4 and their site only, never titles or pages; no tool accepts a watch ID.", [
+        AgentToolParameter("kinds", .list(AgentEventFilter.kinds), "The event kinds to return; every kind when absent."),
+        AgentToolParameter("after", .integer, "The last sequence of the previous result; replays the events Arch keeps after it. Without it, only new events.", minimum: 0),
+        AgentToolParameter("timeout_ms", .integer, "How long to wait for a first event, at most \(number(AgentLimits.toolWaitSeconds * 1000)) milliseconds, the default.", minimum: 0, maximum: AgentLimits.toolWaitSeconds * 1000),
+    ])
+
     public static let sessionTabRequest = AgentTool("request_tab", .reads, [.waitsForUser], "Asks the user to choose one tab to share for reading.", [
         AgentToolParameter("reason", .string, required: true, "Why this task needs another tab, shown to the user."),
         AgentToolParameter("access", .choice(["read"]), required: true, "Read-only access."),
@@ -291,6 +298,7 @@ public enum AgentToolCatalog {
 
     public static func tool(named name: String) -> AgentTool? {
         if name == renameTab.name { return renameTab }
+        if name == watchEvents.name { return watchEvents }
         return tools.first { $0.name == name }
     }
 

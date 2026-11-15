@@ -38,6 +38,19 @@ public enum AgentCLICommand: Equatable, Sendable {
     case typeFromStandardInput(AgentToolCall)
     /// `screenshot`, whose image goes only to the file `-o` names, or to `arch-screenshot-<time>.jpg` in the current folder.
     case screenshot(AgentToolCall, output: String?)
+    /// Streams the grant's browser events in the outside view until interrupted (`events/subscribe`), after replaying the buffered ones after `after`.
+    case events(AgentEventSubscribe)
+    /// The hooks this client's identity added (`hooks/list`), a hook it proposes (`hooks/add`), or removing one (`hooks/remove`).
+    case hooks(AgentHooksAction)
+    /// One agent run (`agent/run`) with its options as JSON; with `promptFromStandardInput`, the prompt comes from standard input, as `-` asks.
+    case agentRun(AgentJSON, promptFromStandardInput: Bool)
+}
+
+public enum AgentHooksAction: Equatable, Sendable {
+    case list
+    /// The proposal without its script and agent options, which `script` and `agentOptions` name as files that `arch-cli` reads when it runs.
+    case add(AgentHookAdd, script: String, agentOptions: String?)
+    case remove(UUID)
 }
 
 public enum AgentSessionsAction: Equatable, Sendable {
@@ -120,6 +133,13 @@ public enum AgentCommandLine {
         AgentCLICommandSpec(name: "downloads", arguments: "", summary: "Lists the downloads this client's agent tabs started.", needsArch: true),
         AgentCLICommandSpec(name: "history", arguments: "<query>", summary: "Searches the browsing history for the query's words, when this client's grant includes the history scope.", needsArch: true),
         AgentCLICommandSpec(name: "call", arguments: "<tool> [json]", summary: "Runs any tool, with its arguments as one JSON object.", needsArch: true),
+        AgentCLICommandSpec(name: "agent run", arguments: "(<prompt>|-) [--tab t]... [--tier fast|standard|deep | --model provider/model] [--page] [--record none|activity|session] [--tools tool,...] [--timeout s] [--rounds n] [--dry-run]",
+                            summary: "Runs one agent in Arch on your AI subscription or API key, on this client's agent tabs and the tabs you shared with it, or the --tab ones, and prints its reply. It never asks you: a step that would ask is refused. It needs a grant with Start Agent Tasks, counts toward the grant's agent runs a day, uses the Standard tier and keeps the activity unless told otherwise, and reads pages only with --page. - reads the prompt from standard input.", needsArch: true),
+        AgentCLICommandSpec(name: "rename", arguments: "<tab> <name>", summary: "Suggests a sidebar name for one of this client's agent tabs (rename_tab). Your own names always win.", needsArch: true),
+        AgentCLICommandSpec(name: "hooks", arguments: "list | add --name n --event kind [--loads first|new|every] [--space name]... [--site pattern]... [--except-site pattern]... [--engine webkit|chromium] [--tab-kind kind]... [--delay ms] [--timeout s] --script file.js [--permission tabs.rename|agent]... [--agent options.json] [--record activity|session] | remove id",
+                            summary: "Lists the hooks this client added, proposes a JavaScript hook, or removes one this client added. Each proposal waits for your approval in Arch, which shows its script and asks for Touch ID; a hook from a program reaches only its event's tab, never titles, addresses, or pages, and pauses when the program's access ends.", needsArch: true),
+        AgentCLICommandSpec(name: "events", arguments: "[--kind k]... [--space name]... [--site pattern]... [--except-site pattern]... [--engine webkit|chromium] [--tab-kind open|pinned|favorite|small-window|agent]... [--after seq]",
+                            summary: "Prints the browser events of this client's Persona as they happen, one line each, until interrupted: tabs that open, load, change address or title, are selected, or close, downloads this client's tabs finished, and space switches. Your own tabs show a watch ID and their site only, never titles or pages. --after first replays the events Arch keeps after that sequence. It needs a grant with Watch Browser Events.", needsArch: true),
     ]
 
     /// The options that take a value, and the commands that take each option.
@@ -141,6 +161,7 @@ public enum AgentCommandLine {
 
     /// Parses `arch-cli`'s arguments without the program name. `--json`, `--help`, and `-h` may appear anywhere; `help` means `--help`. An option of `optionCommands` belongs to the commands it lists and takes the next argument when it takes a value; `--dir` takes the next argument and belongs to `links`; `--target` and `--path` each take the next argument, may repeat, and belong to `skills`; `--space`, `--mode`, and `--model` each take the next argument and, with `--deny-approvals`, belong to `task`.
     public static func parse(_ arguments: [String]) throws -> AgentCLIRequest {
+        if let request = try parseProgramCommand(arguments) { return request }
         var json = false
         var help = false
         var options: [String: String] = [:]
@@ -403,5 +424,155 @@ public enum AgentCommandLine {
 
     private static func expectNoOperands(_ operands: [String], for name: String) throws {
         if !operands.isEmpty { throw AgentUsageError(message: "\(name) takes no arguments.") }
+    }
+}
+
+// MARK: - Outside programs' commands
+
+extension AgentCommandLine {
+    /// The commands for outside programs' events, hooks, agent runs, and renames (`docs/hooks.md`, arch-cli events; arch-cli hooks; arch-cli agent run and rename), which take repeatable options of their own; nil for every other command. `--json`, `--help`, and `-h` may appear anywhere, as for the others.
+    static func parseProgramCommand(_ arguments: [String]) throws -> AgentCLIRequest? {
+        guard let name = arguments.first(where: { !$0.hasPrefix("-") }), ["events", "hooks", "agent", "rename"].contains(name) else { return nil }
+        var json = false
+        var help = false
+        var values: [String: [String]] = [:]
+        var words: [String] = []
+        // `hooks`'s options are those of `hooks add`, which the verb after it names.
+        let valueOptions = programValueOptions[name] ?? []
+        let flagOptions = programFlagOptions[name] ?? []
+        var flags: Set<String> = []
+        var remaining = arguments[...]
+        while let argument = remaining.popFirst() {
+            switch argument {
+            case "--json": json = true
+            case "--help", "-h": help = true
+            case _ where flagOptions.contains(argument): flags.insert(argument)
+            case _ where valueOptions.contains(argument):
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "\(argument) needs a value.") }
+                values[argument, default: []].append(value)
+            case _ where argument.hasPrefix("-") && argument != "-": throw AgentUsageError(message: "\(name) does not take \(argument).")
+            default: words.append(argument)
+            }
+        }
+        if help { return AgentCLIRequest(command: .help, json: json) }
+        let operands = Array(words.dropFirst())
+        switch name {
+        case "hooks":
+            return AgentCLIRequest(command: .hooks(try hooksAction(operands, values)), json: json)
+        case "agent":
+            guard operands.first == "run" else { throw AgentUsageError(message: "agent takes run, as in arch-cli agent run \"<prompt>\".") }
+            guard operands.count == 2 else { throw AgentUsageError(message: "agent run takes the prompt as one argument, in quotes, or - to read it from standard input.") }
+            return AgentCLIRequest(command: .agentRun(try agentRunOptions(operands[1], values, flags), promptFromStandardInput: operands[1] == "-"), json: json)
+        case "rename":
+            guard operands.count >= 2 else { throw AgentUsageError(message: "rename takes <tab> <name>.") }
+            return AgentCLIRequest(command: .tool(AgentToolCall(name: "rename_tab", arguments: ["tab": .string(operands[0]), "name": .string(operands.dropFirst().joined(separator: " "))])), json: json)
+        default:
+            try expectNoOperands(operands, for: name)
+            return AgentCLIRequest(command: .events(try eventSubscribe(values)), json: json)
+        }
+    }
+
+    /// `hooks list`, `hooks add` with its options, of which `--name`, `--event`, and `--script` are required and the others repeat or not as their usage says, and `hooks remove <id>`. Arch checks the event, the permissions, and the agent options, so that its refusals exit 4.
+    private static func hooksAction(_ operands: [String], _ values: [String: [String]]) throws -> AgentHooksAction {
+        let verb = operands.first
+        if verb != "add", let option = values.keys.sorted().first { throw AgentUsageError(message: "Only hooks add takes \(option).") }
+        switch verb {
+        case nil, "list"?:
+            guard operands.count <= 1 else { throw AgentUsageError(message: "hooks list takes no arguments.") }
+            return .list
+        case "remove"?:
+            guard operands.count == 2, let id = UUID(uuidString: operands[1]) else { throw AgentUsageError(message: "hooks remove takes a hook's ID, as hooks list shows it.") }
+            return .remove(id)
+        case "add"?:
+            guard operands.count == 1 else { throw AgentUsageError(message: "hooks add takes options only.") }
+            func one(_ option: String, required: Bool = false) throws -> String? {
+                let given = values[option] ?? []
+                guard given.count <= 1 else { throw AgentUsageError(message: "\(option) comes at most once.") }
+                if required, given.isEmpty { throw AgentUsageError(message: "hooks add needs \(option).") }
+                return given.first
+            }
+            func number(_ option: String) throws -> Int? {
+                guard let text = try one(option) else { return nil }
+                guard let value = Int(text), value >= 0 else { throw AgentUsageError(message: "\(option) takes a whole number.") }
+                return value
+            }
+            let add = AgentHookAdd(name: try one("--name", required: true)!, event: try one("--event", required: true)!, loads: try one("--loads"), filter: try eventFilter(values),
+                                   delay: try number("--delay"), timeout: try number("--timeout"), script: "", permissions: values["--permission"] ?? [], record: try one("--record"))
+            return .add(add, script: try one("--script", required: true)!, agentOptions: try one("--agent"))
+        default:
+            throw AgentUsageError(message: "hooks takes list, add, or remove.")
+        }
+    }
+
+    private static let filterOptions: Set<String> = ["--space", "--site", "--except-site", "--engine", "--tab-kind"]
+    private static let programValueOptions: [String: Set<String>] = [
+        "events": filterOptions.union(["--kind", "--after"]),
+        "hooks": filterOptions.union(["--name", "--event", "--loads", "--delay", "--timeout", "--script", "--permission", "--agent", "--record"]),
+        "agent": ["--tab", "--tier", "--model", "--record", "--tools", "--timeout", "--rounds"],
+    ]
+    private static let programFlagOptions: [String: Set<String>] = ["agent": ["--page", "--dry-run"]]
+
+    /// `agent run`'s options as `agent/run` takes them: the prompt, empty for `-` until standard input gives it, the tabs, the tier or one model, page access, the record level, the tools, the limits, and a dry run. Arch checks the tools, the record level, and the limits against the grant, so that its refusals exit 4.
+    private static func agentRunOptions(_ prompt: String, _ values: [String: [String]], _ flags: Set<String>) throws -> AgentJSON {
+        func one(_ option: String) throws -> String? {
+            let given = values[option] ?? []
+            guard given.count <= 1 else { throw AgentUsageError(message: "\(option) comes at most once.") }
+            return given.first
+        }
+        var options: [String: AgentJSON] = ["prompt": .string(prompt == "-" ? "" : prompt)]
+        if let tabs = values["--tab"] { options["tabs"] = .array(tabs.map(AgentJSON.string)) }
+        let tier = try one("--tier")
+        let model = try one("--model")
+        if tier != nil, model != nil { throw AgentUsageError(message: "agent run takes --tier or --model, not both.") }
+        if let tier {
+            guard ["fast", "standard", "deep"].contains(tier) else { throw AgentUsageError(message: "--tier takes fast, standard, or deep.") }
+            options["model"] = ["tier": .string(tier)]
+        }
+        if let model {
+            let parts = model.split(separator: "/", maxSplits: 1).map(String.init)
+            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { throw AgentUsageError(message: "--model takes provider/model, as Settings \u{25B8} AI names them.") }
+            options["model"] = ["models": [["provider": .string(parts[0]), "model": .string(parts[1])]]]
+        }
+        if flags.contains("--page") { options["tabAccess"] = "page" }
+        if let record = try one("--record") {
+            guard ["none", "activity", "session"].contains(record) else { throw AgentUsageError(message: "--record takes none, activity, or session.") }
+            options["record"] = .string(record)
+        }
+        if let tools = try one("--tools") { options["tools"] = .array(tools.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }
+        var limits: [String: AgentJSON] = [:]
+        for (option, key) in [("--timeout", "timeout"), ("--rounds", "rounds")] {
+            guard let text = try one(option) else { continue }
+            guard let value = Int(text), value > 0 else { throw AgentUsageError(message: "\(option) takes a whole number.") }
+            limits[key] = .number(Double(value))
+        }
+        if !limits.isEmpty { options["limits"] = .object(limits) }
+        if flags.contains("--dry-run") { options["dryRun"] = true }
+        return .object(options)
+    }
+
+    /// `events`'s subscription: its filter's lists, each value checked, and `--after`.
+    private static func eventSubscribe(_ values: [String: [String]]) throws -> AgentEventSubscribe {
+        let kinds = values["--kind"] ?? []
+        for kind in kinds where !AgentEventFilter.kinds.contains(kind) {
+            throw AgentUsageError(message: "--kind takes \(AgentEventFilter.kinds.joined(separator: ", ")).")
+        }
+        var subscribe = AgentEventSubscribe(filter: try eventFilter(values))
+        subscribe.filter.kinds = kinds
+        if let after = values["--after"] {
+            guard after.count == 1, let sequence = UInt64(after[0]) else { throw AgentUsageError(message: "--after takes one sequence number, a whole number.") }
+            subscribe.after = sequence
+        }
+        return subscribe
+    }
+
+    /// The places, sites, engines, and tab kinds that `events` and `hooks add` share.
+    static func eventFilter(_ values: [String: [String]]) throws -> AgentEventFilter {
+        let engines = values["--engine"] ?? []
+        guard engines.count <= 1, engines.allSatisfy(AgentEventFilter.engines.contains) else { throw AgentUsageError(message: "--engine takes webkit or chromium, once.") }
+        let tabKinds = values["--tab-kind"] ?? []
+        for kind in tabKinds where !AgentEventFilter.tabKinds.contains(kind) {
+            throw AgentUsageError(message: "--tab-kind takes \(AgentEventFilter.tabKinds.joined(separator: ", ")).")
+        }
+        return AgentEventFilter(spaces: values["--space"] ?? [], sites: values["--site"] ?? [], exceptSites: values["--except-site"] ?? [], engines: engines, tabKinds: tabKinds)
     }
 }

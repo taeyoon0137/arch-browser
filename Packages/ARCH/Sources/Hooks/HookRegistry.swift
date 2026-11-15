@@ -195,13 +195,15 @@ public enum HookRegistryError: LocalizedError, Equatable {
     /// Allow Shell Scripts is off, or the shell hook comes from an outside program, which may add none (hook decision 4).
     case shellScriptsOff
     case invalidScript(String)
+    /// An edit would lift a cap of a hook from an outside program (`docs/hooks.md`, Hooks from outside programs).
+    case outsideCaps(String)
 
     public var errorDescription: String? {
         switch self {
         case .duplicate: return "A hook with this identifier exists already."
         case .unknownHook: return "Arch has no hook it can change with this identifier."
         case .namesAgentTabs: return "Hooks cannot run for agent tabs."
-        case .invalidAgentOptions(let reason), .invalidScript(let reason): return reason
+        case .invalidAgentOptions(let reason), .invalidScript(let reason), .outsideCaps(let reason): return reason
         case .shellScriptsOff: return "Turn on Allow Shell Scripts first."
         }
     }
@@ -247,6 +249,10 @@ public final class HookRegistry: ObservableObject {
     /// Clear Activity emptied every row's last runs. The app shell deletes every kept agent run.
     public var activityDidClear: (() -> Void)?
     public let log: HookRunLog
+    /// Shows the proposal sheet of hooks from outside programs; the app shell sets it.
+    public var proposalPrompt: (any HookProposalPrompting)?
+    /// Touch ID or the login password, which a proposal's Allow asks for.
+    public var authenticator: any AgentAuthenticating = AgentDeviceOwnerAuthentication()
 
     private let store: HookStore
     private let ai: AIService
@@ -278,6 +284,13 @@ public final class HookRegistry: ObservableObject {
     private var isLoading = false
     private var isApplyingSettings = false
     private var isPreparingKey = false
+    /// When each program's last proposal was declined, so that its next one waits a minute.
+    private var proposalDeclines: [AgentClientIdentity.Key: Date] = [:]
+    /// The programs whose proposal sheet is open, each of which has at most one.
+    private var openProposals: Set<AgentClientIdentity.Key> = []
+    /// The identities with a grant in force, as the agents' service last said, and as the registry last applied them.
+    private var reportedPrograms: Set<AgentClientIdentity.Key>?
+    private var appliedPrograms: Set<AgentClientIdentity.Key>?
 
     /// The app's registry: `hooks.json` and the scripts in `directory`, the session's bus and host, and the shared AI service, whose hook scheduler the AI hook center's hooks run on too.
     public convenience init(directory: URL, bus: BrowserEventBus, host: any HookBrowserHost, javaScript: any HookScriptRunning, shell: any HookScriptRunning) {
@@ -343,6 +356,7 @@ public final class HookRegistry: ObservableObject {
         if !allowsShellScripts { changed = pauseShellHooks() || changed }
         changed = applyPlaces() || changed
         if changed, store.hasFile { persist() }
+        applyProgramGrants()
     }
 
     /// Writes `hooks.json` now when the key is in, or once the Keychain gives it.
@@ -411,6 +425,7 @@ public final class HookRegistry: ObservableObject {
         let stored = hooks[index]
         if let script { try checkShellScript(of: hook, script: script, origin: stored.origin) }
         var updated = try Self.checked(hook)
+        if case .outsideClient = stored.origin, let problem = programCapsProblem(updated, of: stored) { throw HookRegistryError.outsideCaps(problem) }
         updated.origin = stored.origin
         updated.created = stored.created
         updated.state = stored.state
@@ -743,8 +758,9 @@ public final class HookRegistry: ObservableObject {
         for (index, hook) in hooks.enumerated() where hook.state == .active && hook.trigger.kind == event.kind {
             guard hook.filter.matches(event),
                   hook.trigger.matches(event, previousDocument: previousDocument, carriesFirstLoad: carryOvers.contains(hook.id)) else { continue }
-            // A hook that may reach a model gets nothing from a site excluded from AI, which its log therefore does not name either.
-            if hook.usesAgent, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { continue }
+            // A hook that may reach a model, or an outside program's hook, gets nothing from a site excluded from AI, which its log therefore does not name either.
+            if hook.keepsToAISites, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { continue }
+            if !mayRunProgramHook(hook) { continue }
             let chain = event.cause?.hookChain ?? []
             if chain.contains(hook.id) || chain.count >= Self.maximumHookChain {
                 recordSkip(of: hook, event: event, .loop)
@@ -797,7 +813,7 @@ public final class HookRegistry: ObservableObject {
 
     /// The registry's checks after the delay (`docs/hooks.md`, Running, step 6).
     private func mayStart(_ run: HookRun) -> Bool {
-        guard isReady, runsHooks, let hook = hook(withID: run.hookID), hook.state == .active, !hook.script.isShell || allowsShellScripts else {
+        guard isReady, runsHooks, let hook = hook(withID: run.hookID), hook.state == .active, !hook.script.isShell || allowsShellScripts, mayRunProgramHook(hook) else {
             return decline(run, .inactive)
         }
         guard dayCount(of: hook.id).runs < hook.timing.runsPerDay else { return decline(run, .dailyLimit) }
@@ -809,7 +825,7 @@ public final class HookRegistry: ObservableObject {
                 return decline(run, .documentChanged)
             }
         }
-        if hook.usesAgent, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { return decline(run, .excludedSite) }
+        if hook.keepsToAISites, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { return decline(run, .excludedSite) }
         return true
     }
 
@@ -878,7 +894,7 @@ public final class HookRegistry: ObservableObject {
                             requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) -> HookInvocation? {
         let event = run.event
         let settings = ai.settings
-        let access = BrowserEventScriptAccess.hook(tabs: hook.grant.permissions.contains(.tabs), allowsAI: hook.usesAgent ? { settings.allowsAI(on: $0) } : nil)
+        let access = BrowserEventScriptAccess.hook(tabs: hook.grant.permissions.contains(.tabs), allowsAI: hook.keepsToAISites ? { settings.allowsAI(on: $0) } : nil)
         guard let view = event.view(access) else { return nil }
         // A close's own tab is gone, and a test treats it as closed.
         let closedID = event.kind == .tabClosed ? event.subject : nil
@@ -1281,5 +1297,213 @@ final class HookRunSlots {
 
     private func canStart(_ hook: UUID) -> Bool {
         running.count < total && running.values.filter { $0 == hook }.count < perHook
+    }
+}
+
+// MARK: - Hooks from outside programs
+
+extension HookOrigin {
+    /// The identity of the outside program that added the hook.
+    var programKey: AgentClientIdentity.Key? {
+        if case .outsideClient(let key, _) = self { return key }
+        return nil
+    }
+}
+
+extension Hook {
+    /// Whether site exclusions keep events from the hook (hook decision 14): it may reach a model, or an outside program added it.
+    var keepsToAISites: Bool { usesAgent || origin.programKey != nil }
+}
+
+extension HookRegistry: AgentHookRegistrar {
+    /// The hooks one program's identity may have.
+    public static let hooksPerProgram = 20
+    /// How long a declined program waits before its next proposal shows.
+    static let proposalInterval: TimeInterval = 60
+
+    public func hooks(addedBy client: AgentClientIdentity.Key) -> [AgentHookSummary] {
+        hooks.filter { $0.origin.programKey == client }.map { hook in
+            let state: String
+            switch hook.state {
+            case .active: state = "active"
+            case .paused(let reason): state = "paused (\(reason.rawValue))"
+            }
+            let lastRun = lastRuns[hook.id]?.first.map { "\($0.date.ISO8601Format()) \($0.outcome.rawValue)" }
+            return AgentHookSummary(id: hook.id, name: hook.name, trigger: hook.trigger.situationSentence, state: state, lastRun: lastRun)
+        }
+    }
+
+    public func remove(_ id: UUID, addedBy client: AgentClientIdentity.Key) -> Bool {
+        guard isReady, hooks.contains(where: { $0.id == id && $0.origin.programKey == client }) else { return false }
+        remove(id)
+        return true
+    }
+
+    public func grantsDidChange(inForce clients: Set<AgentClientIdentity.Key>) {
+        reportedPrograms = clients
+        applyProgramGrants()
+    }
+
+    /// Whether the hook's origin lets it run now: an outside program's hook waits for the first report of the grants in force, which the agents' service sends once it has checked `agent.json`, so that a hook whose grant ended while Arch was closed never runs before it pauses.
+    func mayRunProgramHook(_ hook: Hook) -> Bool {
+        hook.origin.programKey == nil || appliedPrograms != nil
+    }
+
+    /// Whether the program had a grant in force at the last report.
+    private func hasGrant(_ client: AgentClientIdentity.Key) -> Bool {
+        appliedPrograms?.contains(client) == true
+    }
+
+    /// Pauses with `grantEnded` each active hook whose program had a grant in force and now has none. The first time after launch, every program that added a hook counts as having had one, so that a hook whose grant ended while Arch was closed, as one until Arch quits does, pauses then.
+    private func applyProgramGrants() {
+        guard isReady, let clients = reportedPrograms else { return }
+        let before = appliedPrograms ?? Set(hooks.compactMap(\.origin.programKey))
+        appliedPrograms = clients
+        var changed = false
+        for index in hooks.indices where hooks[index].state == .active {
+            guard let key = hooks[index].origin.programKey, before.contains(key), !clients.contains(key) else { continue }
+            hooks[index].state = .paused(.grantEnded)
+            cancelRuns(of: hooks[index])
+            changed = true
+        }
+        if changed { persist() }
+    }
+
+    /// Shows one sheet per program at a time. The calling task's cancellation, as when the program's connection closes, closes the sheet as unanswered, and a program whose access ended or that left while the sheet showed adds nothing and is not asked for Touch ID.
+    public func propose(_ proposal: AgentHookProposal, from client: AgentClientIdentity, grant: AgentGrant) async -> AgentHookDecision {
+        guard isReady else { return .refused("Arch has not read its hooks yet. Try again in a moment.") }
+        func capped() -> Bool { hooks.filter { $0.origin.programKey == client.key }.count >= Self.hooksPerProgram }
+        if capped() { return .refused("\(client.displayName) has added \(Self.hooksPerProgram) hooks, the most for one program. Remove one first.") }
+        if let declined = proposalDeclines[client.key], now().timeIntervalSince(declined) < Self.proposalInterval {
+            return .declined("You did not allow a hook from \(client.displayName) a moment ago. Arch asks again after a minute.")
+        }
+        if openProposals.contains(client.key) { return .declined("Arch is already showing a hook from \(client.displayName). Wait for the answer to that one.") }
+        if let problem = HookScriptRunner.problem(in: proposal.script) { return .refused(problem) }
+        let hook: Hook
+        do {
+            hook = try Self.checked(Self.hook(from: proposal, client: client))
+        } catch {
+            return .refused(error.localizedDescription)
+        }
+        if let problem = programCapsProblem(hook, of: nil) { return .refused(problem) }
+        guard let proposalPrompt else { return .refused("Arch cannot show the proposal now.") }
+        openProposals.insert(client.key)
+        defer { openProposals.remove(client.key) }
+        let allowed = await proposalPrompt.ask(review(of: hook, script: proposal.script, client: client))
+        // The program's access may have ended, or the program left, while the sheet showed.
+        guard hasGrant(client.key) else { return .refused("The program's access to Arch ended while you answered.") }
+        guard allowed, !Task.isCancelled else {
+            proposalDeclines[client.key] = now()
+            return .declined(Task.isCancelled ? "The program left before you answered." : "You did not allow the hook \u{201C}\(hook.name)\u{201D}.")
+        }
+        guard await authenticator.authenticate(reason: "add the hook \u{201C}\(hook.name)\u{201D} from \u{201C}\(client.displayName)\u{201D}") else {
+            proposalDeclines[client.key] = now()
+            return .declined("Arch did not add the hook, since Touch ID or the login password did not confirm it.")
+        }
+        guard hasGrant(client.key) else { return .refused("The program's access to Arch ended while you answered.") }
+        guard !Task.isCancelled else { return .declined("The program left before Arch added the hook.") }
+        if capped() { return .refused("\(client.displayName) has added \(Self.hooksPerProgram) hooks, the most for one program. Remove one first.") }
+        do {
+            try add(hook, script: proposal.script)
+        } catch {
+            return .refused(error.localizedDescription)
+        }
+        return .added(hook.id)
+    }
+
+    /// The hook a proposal describes: its event's trigger with the defaults, the proposal's filter, `tabs.rename` and `agent` with the proposal's agent grant, its agent run, record, delay, and time limit, which for an agent hook stays above the run's by 5 seconds, 200 runs a day, and the program as its origin.
+    static func hook(from proposal: AgentHookProposal, client: AgentClientIdentity) -> Hook {
+        let trigger: HookTrigger
+        switch proposal.event {
+        case .tabOpened: trigger = .tabOpened
+        case .tabClosed: trigger = .tabClosed(reasons: [])
+        case .pageLoaded: trigger = .pageLoaded(loads: proposal.loads == "first" ? .firstAfterOpen : proposal.loads == "every" ? .every : .newAddress, includesRestoredTabs: false)
+        case .addressChanged: trigger = .addressChanged(changes: .newHost)
+        case .titleChanged: trigger = .titleChanged(sources: [.page])
+        case .tabSelected: trigger = .tabSelected
+        case .downloadFinished: trigger = .downloadFinished
+        case .spaceSwitched: trigger = .spaceSwitched(personaChangesOnly: false)
+        }
+        var permissions: Set<HookPermission> = proposal.renamesTabs ? [.tabsRename] : []
+        var agentGrant: AgentRunGrant?
+        var timing = HookTiming(for: trigger)
+        timing.runsPerDay = AgentGrant.defaultRunsPerDay
+        if let delay = proposal.delay { timing.delay = delay }
+        if let timeout = proposal.timeout { timing.timeout = timeout }
+        if let options = proposal.agent {
+            permissions.insert(.agent)
+            agentGrant = AgentHookProposal.agentGrant(for: options)
+            timing.timeout = max(proposal.timeout ?? .zero, options.limits.timeout + .seconds(5))
+        }
+        return Hook(name: proposal.name, trigger: trigger, filter: proposal.filter, grant: HookGrant(permissions: permissions, agent: agentGrant), agent: proposal.agent,
+                    record: proposal.record, timing: timing, origin: .outsideClient(client.key, name: client.displayName))
+    }
+
+    /// Why a hook from an outside program is outside its caps, so that neither the proposal nor the user's later edit lifts them: no `tabs`, agent runs at tab access `title` with at least Keep Activity Only and no reply, at least Keep Activity Only in the run log, a JavaScript script, and places of one Persona, the one the stored hook's places name for an edit.
+    func programCapsProblem(_ hook: Hook, of stored: Hook?) -> String? {
+        if hook.grant.permissions.contains(.tabs) { return "Hooks from programs cannot read tab titles and addresses." }
+        if hook.script.isShell { return "Programs cannot add shell scripts." }
+        if hook.record < .activity { return "Hooks from programs keep at least their activity." }
+        if let grant = hook.grant.agent, grant.tabAccess != .title || grant.minimumRecord < .activity || grant.returnsReply {
+            return "Agent runs of hooks from programs see titles and addresses only, keep their activity, and return no reply."
+        }
+        guard case .places(let places) = hook.filter.scope, let owner = persona(of: places) else { return "Hooks from programs run in one Persona." }
+        if let stored, case .places(let storedPlaces) = stored.filter.scope, let storedOwner = persona(of: storedPlaces), storedOwner != owner {
+            return "Hooks from programs stay in the Persona of the program that added them."
+        }
+        return nil
+    }
+
+    /// The one Persona the places belong to, or nil for places of several or of none.
+    private func persona(of places: [BrowserPlace]) -> UUID? {
+        let personas = Set(places.compactMap { place -> UUID? in
+            switch place {
+            case .persona(let id): return id
+            case .space(let id): return host.places.first { $0.spaces.contains { $0.id == id } }?.id
+            }
+        })
+        return personas.count == 1 && places.count > 0 ? personas.first : nil
+    }
+
+    /// What the proposal sheet shows of the hook.
+    private func review(of hook: Hook, script: Data, client: AgentClientIdentity) -> HookProposalReview {
+        let places: String
+        if case .places(let chosen) = hook.filter.scope {
+            places = chosen.map { place -> String in
+                switch place {
+                case .persona(let id): return host.places.first { $0.id == id }?.name ?? "Deleted Persona"
+                case .space(let id):
+                    guard let persona = host.places.first(where: { $0.spaces.contains { $0.id == id } }), let space = persona.spaces.first(where: { $0.id == id }) else { return "Deleted Space" }
+                    return "\(persona.name) / \(space.name)"
+                }
+            }.joined(separator: ", ")
+        } else {
+            places = "Everywhere"
+        }
+        let sites = !hook.filter.sites.isEmpty ? "only " + hook.filter.sites.map(\.value).joined(separator: ", ")
+            : !hook.filter.exceptSites.isEmpty ? "all sites except " + hook.filter.exceptSites.map(\.value).joined(separator: ", ") : "all sites"
+        var permissions: [String] = ["It receives each event of its situation without tab titles or addresses, and reaches only the event's tab."]
+        if hook.grant.permissions.contains(.tabsRename) { permissions.append("It can suggest a name for the event's tab. Your own names always win.") }
+        var agent: [String] = []
+        if let options = hook.agent {
+            permissions.append("It can run an agent that sees the event's tab's title and address, never its page, and suggests the tab's name. The agent's reply never reaches the script, and Arch logs each run and tool call.")
+            let model: String
+            switch options.model {
+            case .tier(let tier):
+                let first = ai.settings.route(for: .tier(tier)).models.first.map { ai.settings.title(of: $0) }
+                model = "\(tier.title) tier\(first.map { " \u{00B7} \($0)" } ?? ", which has no model yet")"
+            case .models(let models):
+                model = models.first.map { ai.settings.title(of: $0) } ?? "No model"
+            }
+            agent = [
+                "Model: \(model)",
+                "Record: \(options.record == .session ? "Keeps the session" : "Keeps activity only")",
+                "Actions: \(options.tools.contains(AgentToolCatalog.renameTab.name) ? "Rename the tab" : "None")",
+                "Limits: \(Int(options.limits.timeout.components.seconds)) seconds, \(options.limits.rounds) \(options.limits.rounds == 1 ? "round" : "rounds"), \(options.limits.toolCalls) tool \(options.limits.toolCalls == 1 ? "call" : "calls"), \(hook.timing.runsPerDay) runs a day",
+            ]
+        }
+        return HookProposalReview(clientName: client.displayName, clientPath: client.executablePath, name: hook.name,
+                                  situation: "\(hook.trigger.situationSentence) \u{00B7} \(places) \u{00B7} \(sites)", permissions: permissions, agent: agent,
+                                  prompt: hook.agent?.prompt, script: String(decoding: script, as: UTF8.self))
     }
 }

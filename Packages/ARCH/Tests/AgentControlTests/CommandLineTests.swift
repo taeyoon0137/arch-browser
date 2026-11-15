@@ -204,6 +204,74 @@ import Testing
         #expect(AgentClientError.protocolMismatch(arch: 2).message.contains("version 2") && AgentClientError.protocolMismatch(arch: 2).message.contains("version 1"))
     }
 
+    /// `events` takes repeatable filter options of its own, checks each value, and `--after`; `--space` there is not `task`'s.
+    @Test func eventsParseIntoASubscription() throws {
+        #expect(try AgentCommandLine.parse(["events"]) == AgentCLIRequest(command: .events(AgentEventSubscribe()), json: false))
+        let full = try AgentCommandLine.parse(["--json", "events", "--kind", "pageLoaded", "--kind", "tabClosed", "--space", "Home", "--site", "example.org", "--except-site", "mail.example.org",
+                                               "--engine", "chromium", "--tab-kind", "open", "--tab-kind", "small-window", "--after", "812"])
+        #expect(full == AgentCLIRequest(command: .events(AgentEventSubscribe(filter: AgentEventFilter(kinds: ["pageLoaded", "tabClosed"], spaces: ["Home"], sites: ["example.org"], exceptSites: ["mail.example.org"],
+                                                                                                      engines: ["chromium"], tabKinds: ["open", "small-window"]), after: 812)), json: true))
+        #expect(try AgentCommandLine.parse(["events", "--help"]).command == .help)
+        for wrong in [["events", "--kind", "tabMoved"], ["events", "--engine", "gecko"], ["events", "--engine", "webkit", "--engine", "chromium"], ["events", "--tab-kind", "window"],
+                      ["events", "--after", "-1"], ["events", "--after"], ["events", "now"], ["events", "--full"]] {
+            #expect(throws: AgentUsageError.self, "\(wrong)") { try AgentCommandLine.parse(wrong) }
+        }
+        // `task` keeps its own --space.
+        #expect(try AgentCommandLine.parse(["task", "read it", "--space", "Home"]).command == .task(AgentTaskStart(task: "read it", space: "Home")))
+    }
+
+    /// `hooks list`, `hooks add` with its required and repeatable options, whose event and permissions Arch checks, and `hooks remove <id>`.
+    @Test func hooksParse() throws {
+        #expect(try AgentCommandLine.parse(["hooks"]).command == .hooks(.list))
+        #expect(try AgentCommandLine.parse(["hooks", "list", "--json"]) == AgentCLIRequest(command: .hooks(.list), json: true))
+        let id = UUID()
+        #expect(try AgentCommandLine.parse(["hooks", "remove", id.uuidString]).command == .hooks(.remove(id)))
+        let add = try AgentCommandLine.parse(["hooks", "add", "--name", "Name tabs", "--event", "pageLoaded", "--loads", "first", "--space", "Home", "--site", "example.org",
+                                              "--script", "name.js", "--permission", "tabs.rename", "--permission", "agent", "--agent", "agent.json", "--record", "session", "--delay", "500", "--timeout", "40"])
+        let expected = AgentHookAdd(name: "Name tabs", event: "pageLoaded", loads: "first", filter: AgentEventFilter(spaces: ["Home"], sites: ["example.org"]), delay: 500, timeout: 40,
+                                    script: "", permissions: ["tabs.rename", "agent"], record: "session")
+        #expect(add.command == .hooks(.add(expected, script: "name.js", agentOptions: "agent.json")))
+        // Arch refuses the permission tabs and an unknown event, so that they exit 4, not 2.
+        #expect(try AgentCommandLine.parse(["hooks", "add", "--name", "x", "--event", "tabMoved", "--script", "x.js", "--permission", "tabs"]).command
+                    == .hooks(.add(AgentHookAdd(name: "x", event: "tabMoved", script: "", permissions: ["tabs"]), script: "x.js", agentOptions: nil)))
+        for wrong in [["hooks", "add", "--event", "pageLoaded", "--script", "x.js"], ["hooks", "add", "--name", "x", "--event", "pageLoaded"], ["hooks", "list", "--name", "x"],
+                      ["hooks", "remove", "nope"], ["hooks", "edit"], ["hooks", "add", "--name", "a", "--name", "b", "--event", "pageLoaded", "--script", "x.js"],
+                      ["hooks", "add", "--name", "x", "--event", "pageLoaded", "--script", "x.js", "--delay", "soon"]] {
+            #expect(throws: AgentUsageError.self, "\(wrong)") { try AgentCommandLine.parse(wrong) }
+        }
+    }
+
+    /// `agent run` with its options as `agent/run` takes them, `-` for a prompt from standard input, and `rename <tab> <name>` as `rename_tab`.
+    @Test func agentRunAndRenameParse() throws {
+        let run = try AgentCommandLine.parse(["agent", "run", "Name the tabs", "--tab", "t1", "--tab", "t3", "--tier", "fast", "--page", "--record", "session", "--tools", "rename_tab, read_text",
+                                              "--timeout", "40", "--rounds", "2", "--dry-run", "--json"])
+        let expected: AgentJSON = ["prompt": "Name the tabs", "tabs": ["t1", "t3"], "model": ["tier": "fast"], "tabAccess": "page", "record": "session",
+                                   "tools": ["rename_tab", "read_text"], "limits": ["timeout": 40, "rounds": 2], "dryRun": true]
+        #expect(run == AgentCLIRequest(command: .agentRun(expected, promptFromStandardInput: false), json: true))
+        #expect(try AgentCommandLine.parse(["agent", "run", "-", "--model", "claude/sonnet"]).command
+                    == .agentRun(["prompt": "", "model": ["models": [["provider": "claude", "model": "sonnet"]]]], promptFromStandardInput: true))
+        // Arch refuses Keep Nothing for a program, so that it exits 4, not 2.
+        #expect(try AgentCommandLine.parse(["agent", "run", "x", "--record", "none"]).command == .agentRun(["prompt": "x", "record": "none"], promptFromStandardInput: false))
+        #expect(try AgentCommandLine.parse(["rename", "t2", "Release", "notes"]).command == .tool(AgentToolCall(name: "rename_tab", arguments: ["tab": "t2", "name": "Release notes"])))
+        for wrong in [["agent"], ["agent", "go", "x"], ["agent", "run"], ["agent", "run", "x", "--tier", "huge"], ["agent", "run", "x", "--tier", "fast", "--model", "a/b"],
+                      ["agent", "run", "x", "--model", "sonnet"], ["agent", "run", "x", "--rounds", "0"], ["rename", "t1"], ["rename", "t1", "x", "--page"]] {
+            #expect(throws: AgentUsageError.self, "\(wrong)") { try AgentCommandLine.parse(wrong) }
+        }
+    }
+
+    /// One event's line without `--json`: the time, the kind, the tab's handle or watch ID with its address or site, and the engine and tab kind; an excluded site shows neither.
+    @Test func eventLines() throws {
+        let event: AgentJSON = ["seq": 812, "kind": "pageLoaded", "date": "2026-11-14T09:30:12Z",
+                                "tab": ["watch": "w4", "space": "s1", "kind": "open", "engine": "chromium", "site": "example.org"], "isRestore": false, "isFirstLoadAfterOpen": true]
+        #expect(AgentEventLine.text(for: event, timeZone: TimeZone(identifier: "UTC")!) == "09:30:12 pageLoaded w4 example.org (chromium, open)")
+        let switched: AgentJSON = ["seq": 813, "kind": "spaceSwitched", "date": "2026-11-14T09:31:02Z", "window": "win1", "to": ["otherPersona": true], "from": ["space": "s1"]]
+        #expect(AgentEventLine.text(for: switched, timeZone: TimeZone(identifier: "UTC")!) == "09:31:02 spaceSwitched win1 s1 \u{2192} another Persona")
+        let excluded: AgentJSON = ["seq": 814, "kind": "addressChanged", "tab": ["handle": "t2", "kind": "agent", "engine": "webkit", "excluded": true], "byThisClient": true]
+        #expect(AgentEventLine.text(for: excluded) == "addressChanged t2 (excluded site) (webkit, agent) [this client]")
+        #expect(AgentToolCatalog.tool(named: "watch_events")?.toolClass == .reads)
+        #expect(!AgentToolCatalog.tools.contains { $0.name == "watch_events" })
+    }
+
     @Test func theGuideAndItsCLITopic() {
         #expect(AgentHarness.text(for: nil) == AgentHarness.instructions)
         #expect(AgentHarness.instructions.contains("session_info"))

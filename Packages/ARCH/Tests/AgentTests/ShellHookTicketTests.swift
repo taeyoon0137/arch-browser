@@ -63,6 +63,37 @@ import Testing
         try await waitUntil { !harness.socketExists }
     }
 
+    /// `agent/run` on a run's bound connection reaches the run's handler, and a run without one answers -32601 (`docs/hooks.md`, arch-cli agent run and rename).
+    @Test func aRunsAgentRunReachesItsHandler() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        let asked = Shared<[[String: AgentJSON]]>([])
+        let run = UUID()
+        let ticket = service.openHookRun(run, tools: ["list_tabs"], call: { _ in AgentToolResult(status: .ok, text: "") }, agentRun: { fields in
+            asked.value.append(fields)
+            return AgentRunResult(status: .completed, reply: "Named it.")
+        })
+        harness.addProcess(Self.scriptProcess, parent: 1, start: Self.scriptStart)
+        harness.addProcess(getpid(), parent: Self.scriptProcess)
+        service.hookRun(run, didStart: Self.scriptProcess)
+        let bound = try TestClient(harness.location)
+        #expect(try await bound.hello(ticket: ticket, client: .cli).status == .bound)
+        let result = try await bound.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": ["t1"]])
+        #expect(result["status"] == "completed" && result["reply"] == "Named it.")
+        #expect(asked.value == [["prompt": "Name it", "tabs": ["t1"]]])
+        service.closeHookRun(run)
+
+        let plain = UUID()
+        let other = service.openHookRun(plain, tools: ["list_tabs"]) { _ in AgentToolResult(status: .ok, text: "") }
+        service.hookRun(plain, didStart: Self.scriptProcess)
+        let client = try TestClient(harness.location)
+        #expect(try await client.hello(ticket: other, client: .cli).status == .bound)
+        await #expect(throws: AgentClientError.self) { try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it"]) }
+        service.closeHookRun(plain)
+    }
+
     @Test func aProgramInARunThatDroppedTheTicketIsNoOutsideClient() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }

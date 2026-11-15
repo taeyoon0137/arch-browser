@@ -3,6 +3,7 @@ import Agent
 import AppKit
 import ARCHEngine
 import Combine
+import Events
 import Foundation
 
 @MainActor public final class BrowserAgentHost: AgentBrowserHost {
@@ -213,5 +214,19 @@ extension BrowserAgentHost: AgentTabMonitor {
     func agentTabDidClose(_ tab: Tab, owner: UUID) {
         guard followed.removeValue(forKey: tab.id) != nil, closingTabID != tab.id else { return }
         agentTabDidReport?(owner, tab.id, .closed)
+    }
+}
+
+// MARK: - Names from outside clients
+
+extension BrowserAgentHost: AgentTabNaming {
+    /// An outside client's or its run's `rename_tab`: the suggested name under `BrowserHooks.suggest(_:for:to:applying:)`, whose title change names the client's grant as its cause.
+    public func suggestName(_ name: String?, forTab id: UUID, showing document: URL, byGrant grant: UUID, applying: Bool) -> Bool {
+        guard let tab = session.tabs.first(where: { $0.id == id }) else { return false }
+        return session.events.withCause(BrowserEventCause(origin: .outsideClient(grant: grant))) { BrowserHooks.suggest(name, for: document, to: tab, applying: applying) }
+    }
+
+    public func committedAddress(ofTab id: UUID) -> URL? {
+        session.tabs.first { $0.id == id }?.committedURL
     }
 }

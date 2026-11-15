@@ -544,6 +544,43 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         #expect(tools.call(AgentToolCall(name: "rename_tab", arguments: ["tab": "t1", "name": "No"])).code == "notGranted")
     }
 
+    /// `arch-cli agent run` inside the run (`docs/hooks.md`, arch-cli agent run and rename): the hook's grant and feature, the run's tabs by handle with `t1` the event's tab by default, the hook's saved model, its actions joining the run's, and nothing once the run ended; a hook without `agent` starts none.
+    @Test func aRunsAgentRunUsesTheHooksGrantFeatureAndTabs() async throws {
+        defer { harness.cleanUp() }
+        let event = harness.tab("/event")
+        let other = harness.tab("/other")
+        [event, other].forEach(harness.host.show)
+        var hook = try shellHook(try shellFixture("input.sh"), permissions: [.tabsRename, .agent])
+        hook.grant.agent = AgentRunGrant(tools: ["rename_tab"], minimumRecord: .none, maximumRecord: .activity, returnsReply: true)
+        hook.agent = AgentRunOptions(prompt: "Saved", model: .tier(.fast), tools: ["rename_tab"])
+        var run = invocation(of: hook, script: try shellFixture("input.sh"), loading: event)
+        run.tabs = [event.id, other.id]
+        run.documents[other.id] = other.url
+        var requests: [AgentRunRequest] = []
+        let tools = ShellHookRunTools(invocation: run, host: plugins, allowsAI: { _ in true }) { request, _ in
+            requests.append(request)
+            return AgentRunResult(status: .completed, actions: [.renamedTab(tab: event.id, name: "Named")], reply: "Done")
+        }
+        #expect(tools.permitsAgentRuns)
+        let result = await tools.runAgent(["prompt": "Name the tab"])
+        #expect(result.status == .completed && result.reply == "Done")
+        let request = try #require(requests.first)
+        #expect(request.tabs == [event.id] && request.allowedTabs == Set([event.id, other.id]))
+        #expect(request.feature == .agentHook(hook.id) && request.origin == .hook(hook.id, run: run.run) && request.grant == hook.grant.agent)
+        #expect(request.options.model == .tier(.fast) && request.options.tools == ["rename_tab"] && request.options.tabAccess == .title && request.options.record == .activity)
+        #expect(tools.actions == [.renamedTab(tab: event.id, name: "Named")] && tools.agentUse != nil)
+        _ = await tools.runAgent(["prompt": "Both", "tabs": ["t2", "t1"]])
+        #expect(requests.last?.tabs == [other.id, event.id])
+        #expect(await tools.runAgent(["prompt": "Elsewhere", "tabs": ["t7"]]).code == "notGranted")
+        tools.end()
+        #expect(await tools.runAgent(["prompt": "Late"]).code == "runEnded")
+        #expect(requests.count == 2)
+        // Without `agent`, or without a runner, the run starts no agent.
+        hook.grant = HookGrant(permissions: [.tabsRename])
+        run.hook = hook
+        #expect(!ShellHookRunTools(invocation: run, host: plugins, allowsAI: { _ in true }) { _, _ in AgentRunResult(status: .completed) }.permitsAgentRuns)
+    }
+
     @Test func aTestRunReportsItsRenamesWithoutApplyingThem() throws {
         defer { harness.cleanUp() }
         let tab = harness.tab("/preview")

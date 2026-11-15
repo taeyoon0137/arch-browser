@@ -88,8 +88,8 @@ import Testing
         }
         #expect(AgentPolicy.mayLoad(URL(string: "about:blank")!, allowsAI: { _ in true }) == .allowed)
         #expect(AgentPolicy.mayRead(URL(string: "about:blank")!, allowsAI: { _ in true }) != .allowed)
-        // Every rule has a row here or above.
-        #expect(Set(Self.table.map(\.rule)).union([.p16]) == Set(AgentRule.allCases))
+        // Every rule has a row here or above, and P19, which renames, its own test.
+        #expect(Set(Self.table.map(\.rule)).union([.p16, .p19]) == Set(AgentRule.allCases))
     }
 
     @Test func theTableHoldsEveryRuleInOrderWithTheSensitiveCards() {
@@ -100,9 +100,26 @@ import Testing
         for entry in AgentPolicy.table { #expect(!entry.trigger.isEmpty && !entry.sentence.isEmpty) }
     }
 
+    /// Rule P19 (`docs/hooks.md`, Tools): sessions and outside clients rename their own agent tabs freely, a shared tab after asking once, and no other tab; a run never asks, so every card becomes `wouldAsk`, while refusals stand.
+    @Test func renamingFollowsP19AndARunNeverAsks() {
+        for client in [AgentClientKind.inApp, .outside, .run] {
+            #expect(AgentPolicy.renameDecision(client: client, tab: .agentTab, allowedOnce: false) == .allow)
+            #expect(AgentPolicy.renameDecision(client: client, tab: .shared(acting: false), allowedOnce: true) == .allow)
+            #expect(AgentPolicy.renameDecision(client: client, tab: .notTheClients, allowedOnce: true) == .refuse(.p17, AgentPolicy.entry(.p17).sentence))
+        }
+        #expect(AgentPolicy.renameDecision(client: .outside, tab: .shared(acting: false), allowedOnce: false) == .ask(AgentAsk(rules: [.p19], isSensitive: false)))
+        #expect(AgentPolicy.renameDecision(client: .run, tab: .shared(acting: true), allowedOnce: false) == .refuse(nil, AgentPolicy.wouldAskSentence))
+        #expect(!AgentPolicy.sensitiveRules.contains(.p19))
+        let next = Self.click(Self.button("Next"))
+        #expect(AgentPolicy.decide(next, client: .run, mode: .askBeforeActing) == .refuse(nil, AgentPolicy.wouldAskSentence))
+        #expect(AgentPolicy.decide(next, client: .run, mode: .actInAgentTabs) == .allow)
+        #expect(AgentPolicy.decide(.approvalRequest, client: .run, mode: .actInAgentTabs) == .refuse(nil, AgentPolicy.wouldAskSentence))
+        #expect(AgentPolicy.decide(.interaction(AgentInteraction(tool: "click", tab: .notTheClients, element: Self.button("Next"))), client: .run, mode: .actInAgentTabs) == .refuse(.p17, AgentPolicy.entry(.p17).sentence))
+    }
+
     @Test func plainInteractionsByModeAndAllowances() {
         let next = Self.click(Self.button("Next"))
-        for client in AgentClientKind.allCases {
+        for client in [AgentClientKind.inApp, .outside] {
             #expect(Expected(AgentPolicy.decide(next, client: client, mode: .readOnly)) == .readOnly)
             #expect(Expected(AgentPolicy.decide(next, client: client, mode: .actInAgentTabs)) == .allow)
             // Ask Before Acting asks with Allow on This Page and Allow on <site>, and either covers the next one.

@@ -3,6 +3,7 @@ import AgentControl
 import AI
 import AppKit
 import Combine
+import Events
 import Foundation
 
 @MainActor public final class AgentService: ObservableObject {
@@ -33,6 +34,12 @@ import Foundation
     private var hookCLIs: [UUID: AgentHookCLIRun] = [:]
     /// Shell hook runs by their run's ID, whose `arch-cli` presents `ARCH_HOOK_TICKET` (`docs/hooks.md`, Shell scripts).
     private var shellHookRuns: [UUID: ShellHookRunAccess] = [:]
+    /// Outside programs' event buffers and subscriptions (`docs/hooks.md`, Outside programs).
+    let outsidePrograms = AgentOutsidePrograms()
+    /// The hook registry, for hooks that outside programs propose; the app shell sets it once both exist.
+    public weak var hookRegistrar: (any AgentHookRegistrar)? {
+        didSet { grantsInForceDidChange() }
+    }
     private var runObserver: AnyCancellable?
     private var runService: AgentRunner?
     public var runs: AgentRunner {
@@ -115,6 +122,8 @@ import Foundation
     private var states: [UUID: AgentGrantState] = [:]
     private var usedThisLaunch: Set<UUID> = []
     private var expiryTimer: Timer?
+    /// The write that Settings' agent runs a day waits to make.
+    private var runsPerDaySave: Task<Void, Never>?
     /// How long a session's call waits for the model's first output, and while the user has taken the session over; tests shorten them.
     var sessionReadyWait = AgentSession.readyWait
     var sessionTakeOverWait = AgentSession.takeOverWait
@@ -155,6 +164,7 @@ import Foundation
             subscriptionToolName: { id in AIService.shared.settings.providers.first { $0.id == id }.flatMap { $0.commandLineAgent?.title } },
             providerMessage: { AIService.shared.settings.message(for: $0) }))
         AIService.shared.register(.agent)
+        AIService.shared.register(.agentRun)
     }
 
     init(directory: URL, host: any AgentBrowserHost, version: String, dependencies: Dependencies) {
@@ -252,6 +262,7 @@ import Foundation
         }
         applyAgentOnlyPersona()
         updateListening()
+        grantsInForceDidChange()
     }
 
     /// Settings' Try Again after the Keychain did not give the key.
@@ -358,6 +369,7 @@ import Foundation
 
     /// Ends a closed connection's calls and cards and forgets it.
     private func dropConnection(_ id: UUID, because reason: String) {
+        outsidePrograms.connectionDidClose(id)
         for state in states.values { state.cancelCalls(onConnection: id) }
         approvals.end(connection: id, because: reason)
         connections.removeValue(forKey: id)?.cancelCalls()
@@ -383,6 +395,7 @@ import Foundation
     /// At quit: closes the grant sheets as Don't Allow, writes the grants' last-use dates, and removes the socket. Grants exist only once the key is in, so a launch without one writes nothing, and no write waits for the Keychain past quit. The Keychain may not record this last write's generation before Arch exits; the file before it then still opens, and it differs only in those dates, since every other change writes at once.
     public func stop() {
         expiryTimer?.invalidate()
+        runsPerDaySave?.cancel()
         dependencies.prompt.cancelAll()
         runService?.cancelAll()
         for binding in hookCLIs.values {
@@ -407,9 +420,15 @@ import Foundation
 
     /// The grant in force for a client: same identity, not expired, bound to no process that has ended, and its Persona still there, so that a grant ends at once rather than at the next expiry check.
     func grant(for identity: AgentClientIdentity) -> AgentGrant? {
+        let isInForce = grantsInForce()
+        return grants.first { $0.client.key == identity.key && isInForce($0) }
+    }
+
+    /// Whether a grant is in force now, as `grant(for:)` reads it, for the grants that events and hooks reach between expiry checks.
+    func grantsInForce() -> (AgentGrant) -> Bool {
         let personas = Set(host.personas.map(\.id))
         let now = dependencies.now()
-        return grants.first { $0.client.key == identity.key && !$0.hasExpired(at: now) && !hasProcessEnded($0) && personas.contains($0.personaID) }
+        return { [unowned self] in !$0.hasExpired(at: now) && !hasProcessEnded($0) && personas.contains($0.personaID) }
     }
 
     /// Settings' Revoke.
@@ -423,6 +442,22 @@ import Foundation
         for grant in grants { end(grant, as: .revoked, telling: "The user revoked this client's access in Arch.") }
     }
 
+    /// Settings' agent runs a day for a grant with Start Agent Tasks, kept within 1 to 2,000. The sealed file is written once the number has not changed for a second, so that stepping writes it once; quit writes what is still waiting.
+    public func setRunsPerDay(_ runs: Int, for grantID: UUID) {
+        let runs = min(max(runs, AgentGrant.runsPerDayRange.lowerBound), AgentGrant.runsPerDayRange.upperBound)
+        if let index = settings.grants.firstIndex(where: { $0.id == grantID }) {
+            settings.grants[index].runsPerDay = runs
+            runsPerDaySave?.cancel()
+            runsPerDaySave = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.save()
+            }
+        } else if let index = launchGrants.firstIndex(where: { $0.id == grantID }) {
+            launchGrants[index].runsPerDay = runs
+        }
+    }
+
     /// Ends a grant: its running calls stop, the client's connections get `revoked` and close, and its handles and events go. Its agent tabs stay in their folder, unsaved, until the user closes or keeps them or Arch quits.
     private func end(_ grant: AgentGrant, as event: AgentActivityEntry.Event, telling message: String, except connectionID: UUID? = nil) {
         let wasKept = settings.grants.contains { $0.id == grant.id }
@@ -430,6 +465,7 @@ import Foundation
         launchGrants.removeAll { $0.id == grant.id }
         states[grant.id]?.cancelCalls()
         states[grant.id] = nil
+        programGrantDidEnd(grant.id)
         approvals.end(owner: grant.id, because: message)
         if wasKept { save() }
         record(event, grant: grant)
@@ -580,6 +616,7 @@ import Foundation
         }
         save()
         record(.granted, grant: grant, decision: choice.needsAuthentication ? .approvedWithTouchID : .approved)
+        grantsInForceDidChange()
         return grant
     }
 
@@ -1027,7 +1064,8 @@ import Foundation
                                       environment: [AgentMCPServer.ticketVariable: binding.ticket.text], tools: binding.tools.map(\.name))
         var request = AIAgentSessionRequest(feature: feature, route: .models(models), instructions: instructions, toolServer: server, id: binding.id,
                                             folder: dependencies.sessionFolder(binding.id), maxTurns: turns, ephemeral: true)
-        request.knownProviders = binding.knownProviders
+        // A hook's run checks its known providers; an outside client's, which has none, checks none (`docs/hooks.md`, Known providers).
+        request.knownProviders = binding.knownProviders.isEmpty ? nil : binding.knownProviders
         hookCLIs[binding.id] = binding
         if endpoint == nil { updateListening() }
         do {
@@ -1451,7 +1489,7 @@ import Foundation
             }
             let grant = connection.identity.flatMap(grant(for:))
             let tools = grant.map { AgentToolHost.tools(for: $0.level, scopes: $0.scopes) } ?? AgentToolHost.toolsBeforeGrant
-            reply(connection, requestID, Self.json(AgentToolList(tools: tools.map(\.name))))
+            reply(connection, requestID, Self.json(AgentToolList(tools: tools.map(\.name) + Self.programTools(for: grant))))
         case (.ready, AgentControlMethod.toolsCall):
             if let sessionID = connection.sessionID {
                 if let hook = hookCLIs[sessionID] { return callHook(hook, params: params, on: connection, requestID: requestID) }
@@ -1466,6 +1504,17 @@ import Foundation
             stopTask(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.sessionsList) where connection.sessionID == nil:
             listSessions(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.eventsSubscribe) where connection.sessionID == nil:
+            subscribeEvents(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.eventsUnsubscribe) where connection.sessionID == nil:
+            unsubscribeEvents(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.hooksList) where connection.sessionID == nil, (.ready, AgentControlMethod.hooksAdd) where connection.sessionID == nil,
+             (.ready, AgentControlMethod.hooksRemove) where connection.sessionID == nil:
+            hookCall(method, params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.agentRun) where connection.sessionID == nil:
+            runAgent(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.agentRun):
+            runShellHookAgent(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.grantShow):
             // A session's connection is bound; it has no grant to show.
             let answer = connection.identity.map(answer(for:)) ?? AgentHelloAnswer(version: version, status: .bound)
@@ -1543,7 +1592,7 @@ import Foundation
             if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
             touch(grant)
             describeInPanel(grant)
-            let outcome = await toolHost(connectionID: connection.id, callID: running.callID).run(call, for: grant, state: state(for: grant))
+            let outcome = await runOutsideCall(call, for: grant, connectionID: connection.id, callID: running.callID)
             let result = outcome.result
             if call.name == "approval_wait" {
                 // A plain read: the call it waited on records its own entry and step when it ends.
@@ -1596,7 +1645,7 @@ import Foundation
         if let state = states[grant.id] { return state }
         let state = AgentGrantState()
         let now = dependencies.now()
-        state.seedCalls(activity.entries.filter { $0.grantID == grant.id && $0.event == .toolCall && Calendar.current.isDate($0.date, inSameDayAs: now) }.count, at: now)
+        state.seedCalls(activity.callsToday(of: grant.id, at: now), at: now)
         states[grant.id] = state
         return state
     }
@@ -1749,10 +1798,21 @@ extension AIFeature {
 public protocol AgentHookRunChannel: AnyObject {
     /// Opens the run's access and returns its ticket: its connections list `tools`, and `call` answers each of their calls to one of them.
     func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String
+    /// The same, with `agentRun` answering the connections' `agent/run` under the hook's grant, feature, and run tabs (`docs/hooks.md`, arch-cli agent run and rename); without it, `agent/run` is refused.
+    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String
     /// The run's script process started; connections bind only from it and its descendants.
     func hookRun(_ run: UUID, didStart processID: pid_t)
     /// The run ended: its ticket binds nothing more, and its connections close.
     func closeHookRun(_ run: UUID)
+}
+
+extension AgentHookRunChannel {
+    /// A channel that serves no `agent/run` opens the run's access without it.
+    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
+        openHookRun(run, tools: tools, call: call)
+    }
 }
 
 /// A shell hook run as the service keeps it.
@@ -1761,12 +1821,15 @@ private final class ShellHookRunAccess {
     let ticket = AgentSessionTicket.make()
     let tools: [String]
     let call: @MainActor (AgentToolCall) async -> AgentToolResult
+    /// The run's `agent/run`, when its hook may start agent runs.
+    let agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?
     /// The script process, as it was right after it started.
     var process: AgentProcessRecord?
 
-    init(tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
+    init(tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult, agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)? = nil) {
         self.tools = tools
         self.call = call
+        self.agentRun = agentRun
     }
 }
 
@@ -1781,7 +1844,12 @@ extension AgentService {
 
 extension AgentService: AgentHookRunChannel {
     public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
-        let access = ShellHookRunAccess(tools: tools, call: call)
+        openHookRun(run, tools: tools, call: call, agentRun: nil)
+    }
+
+    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
+        let access = ShellHookRunAccess(tools: tools, call: call, agentRun: agentRun)
         shellHookRuns[run] = access
         if endpoint == nil { updateListening() }
         return access.ticket.text
@@ -1817,5 +1885,326 @@ extension AgentService: AgentEndpointDelegate {
 
     func endpoint(_ endpoint: AgentEndpoint, didRefusePeer name: String, reason: String) {
         activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, clientName: name, outcome: reason))
+    }
+}
+
+// MARK: - Outside programs
+
+extension AgentService {
+    /// The session's bus, whose events reach the grants with Watch Browser Events through the outside view (`docs/hooks.md`, Outside programs). The app shell attaches it once both exist.
+    public func attach(events bus: BrowserEventBus) {
+        outsidePrograms.busSubscription?.cancel()
+        outsidePrograms.busSubscription = bus.subscribe(BrowserEventFilter(tabKinds: Set(BrowserTabKind.allCases))) { [weak self] event in self?.deliver(event) }
+    }
+
+    /// The tools of outside programs beside the tool host's: `watch_events` with Watch Browser Events, and before a grant, since the grant sheet may allow it.
+    static func programTools(for grant: AgentGrant?) -> [String] {
+        [AgentToolCatalog.renameTab.name] + (grant.map { $0.scopes.watchEvents } ?? true ? [AgentToolCatalog.watchEvents.name] : [])
+    }
+
+    /// Records the event in each watching grant's buffer and queues it for that grant's subscriptions that take it. While outside access is off, no grant records anything.
+    private func deliver(_ event: BrowserEvent) {
+        guard acceptsOutsideClients else { return }
+        // A grant whose time is up gets nothing more, also before the next expiry check ends it.
+        let isInForce = grantsInForce()
+        for grant in grants where grant.scopes.watchEvents && isInForce(grant) {
+            let buffer = outsidePrograms.buffer(for: grant.id)
+            let reader = AgentEventReader(grant: grant, state: state(for: grant), buffer: buffer, ownTabs: Set(host.agentTabs(of: grant.id).map(\.id)), allowsAI: dependencies.allowsAI)
+            guard let view = reader.view(of: event) else {
+                buffer.passed(event.sequence)
+                continue
+            }
+            let buffered = AgentBufferedEvent(event: event, view: view)
+            buffer.append(buffered)
+            for (connectionID, events) in outsidePrograms.subscriptions where events.grantID == grant.id {
+                events.enqueue(buffered, allowsAI: dependencies.allowsAI)
+                scheduleFlush(of: connectionID, events)
+            }
+        }
+    }
+
+    /// `events/subscribe`: asks for a grant first, as a tool call does, needs Watch Browser Events, checks the filter against the grant's Persona, and answers with the subscription and the last sequence before replaying the buffered events after `after`.
+    private func subscribeEvents(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let identity = connection.identity else { return }
+        guard let subscribe = try? (params ?? .object([:])).decode(as: AgentEventSubscribe.self) else {
+            return replyError(connection, requestID, .invalidParams("events/subscribe takes a filter object and an optional after."))
+        }
+        connection.runningCalls += 1
+        Task {
+            defer { connection.runningCalls -= 1 }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID), connections[connection.id] != nil else { return }
+            guard grant.scopes.watchEvents else {
+                return replyError(connection, requestID, Self.noGrantError("This client's grant does not include Watch Browser Events. Revoke it in Settings \u{25B8} AI \u{25B8} Agents and allow it again with that scope."))
+            }
+            let match: AgentEventMatch
+            switch AgentEventMatch.make(subscribe.filter, spaces: host.spaces(in: grant.personaID)) {
+            case .success(let made): match = made
+            case .failure(let error): return replyError(connection, requestID, error)
+            }
+            let events = outsidePrograms.subscriptions[connection.id] ?? AgentConnectionEvents(grantID: grant.id)
+            guard events.grantID == grant.id, !events.isFull else {
+                return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "A connection holds at most \(AgentLimits.subscriptionsPerConnection) subscriptions."))
+            }
+            outsidePrograms.subscriptions[connection.id] = events
+            let id = events.add(match)
+            if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
+            touch(grant)
+            let buffer = outsidePrograms.buffer(for: grant.id)
+            reply(connection, requestID, Self.json(AgentEventSubscription(subscription: id, sequence: buffer.lastSequence)))
+            guard let after = subscribe.after else { return }
+            for buffered in buffer.events(after: after, matching: { match.matches($0.event, allowsAI: dependencies.allowsAI) }) {
+                events.enqueue(buffered.view, for: id)
+            }
+            scheduleFlush(of: connection.id, events)
+        }
+    }
+
+    private func unsubscribeEvents(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard case .number(let number)? = params?["subscription"], let id = Int(exactly: number) else {
+            return replyError(connection, requestID, .invalidParams("events/unsubscribe takes the subscription's number."))
+        }
+        reply(connection, requestID, ["unsubscribed": .bool(outsidePrograms.subscriptions[connection.id]?.remove(id) ?? false)])
+    }
+
+    /// Writes the connection's queued events after the current event has reached every subscriber, after saying how many each subscription dropped.
+    private func scheduleFlush(of connectionID: UUID, _ events: AgentConnectionEvents) {
+        guard !events.flushScheduled else { return }
+        events.flushScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let events = self.outsidePrograms.subscriptions[connectionID] else { return }
+                events.flushScheduled = false
+                for (subscription, count) in events.dropped.sorted(by: { $0.key < $1.key }) {
+                    self.endpoint?.send(.notification(method: AgentControlMethod.eventsDroppedNotification, params: ["subscription": .number(Double(subscription)), "count": .number(Double(count))]), to: connectionID)
+                }
+                events.dropped = [:]
+                let queued = events.queue
+                events.queue = []
+                for item in queued {
+                    self.endpoint?.send(.notification(method: AgentControlMethod.eventNotification, params: ["subscription": .number(Double(item.subscription)), "event": item.view]), to: connectionID)
+                }
+            }
+        }
+    }
+
+    /// A grant ended: its events go, and the hooks its program added pause unless the identity has another grant in force.
+    private func programGrantDidEnd(_ grantID: UUID) {
+        outsidePrograms.grantDidEnd(grantID)
+        grantsInForceDidChange()
+    }
+
+    /// Tells the hook registry which identities have a grant in force, once `agent.json` was checked, so that the hooks of a program whose grant ended pause with `grantEnded`.
+    func grantsInForceDidChange() {
+        guard canChangeSettings, let hookRegistrar else { return }
+        hookRegistrar.grantsDidChange(inForce: Set(grants.filter(grantsInForce()).map(\.client.key)))
+    }
+
+    /// `hooks/list`, `hooks/add`, and `hooks/remove`, each for a client with a grant of any level, which the first asks for as a tool call does. `hooks/add` checks the proposal against the caps of hooks from outside programs, says it waits for the user, and answers once the user answered the registry's proposal sheet.
+    private func hookCall(_ method: String, _ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let identity = connection.identity else { return }
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "This connection already runs \(AgentLimits.callsPerConnection) calls."))
+        }
+        // The connection's close cancels the call, which closes an open proposal sheet unanswered.
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID, call: running), connections[connection.id] != nil, !running.isCancelled else { return }
+            guard let registrar = hookRegistrar else {
+                return replyError(connection, requestID, .internalError("Arch cannot reach its hooks now."))
+            }
+            touch(grant)
+            switch method {
+            case AgentControlMethod.hooksList:
+                var hooks = registrar.hooks(addedBy: identity.key)
+                // A last run's time would tell when the user visited the hook's sites, which only Watch Browser Events shows.
+                if !grant.scopes.watchEvents { hooks = hooks.map { var hook = $0; hook.lastRun = nil; return hook } }
+                reply(connection, requestID, Self.json(AgentHookListing(hooks: hooks)))
+            case AgentControlMethod.hooksRemove:
+                guard let text = params?["hook"]?.stringValue, let id = UUID(uuidString: text) else {
+                    return replyError(connection, requestID, .invalidParams("hooks/remove takes the hook's ID, as hooks list shows it."))
+                }
+                reply(connection, requestID, ["removed": .bool(registrar.remove(id, addedBy: identity.key))])
+            default:
+                guard let add = try? params?.decode(as: AgentHookAdd.self) else {
+                    return replyError(connection, requestID, .invalidParams("hooks/add takes the hook's name, event, filter, script, permissions, and agent options."))
+                }
+                let answer: AgentHookAddResult
+                do {
+                    let proposal = try AgentHookProposal.make(add, grant: grant, spaces: host.spaces(in: grant.personaID))
+                    endpoint?.send(.notification(method: AgentControlMethod.progressNotification, params: ["call": requestID.json, "message": "Waiting for your approval in Arch\u{2026}"]), to: connection.id)
+                    switch await registrar.propose(proposal, from: identity, grant: grant) {
+                    case .added(let id): answer = AgentHookAddResult(status: .added, hook: id)
+                    case .declined(let reason): answer = AgentHookAddResult(status: .declined, message: reason)
+                    case .refused(let reason): answer = AgentHookAddResult(status: .refused, message: reason)
+                    }
+                } catch {
+                    answer = AgentHookAddResult(status: .refused, message: (error as? AgentHookRefusal)?.message ?? "\(error)")
+                }
+                guard connections[connection.id] != nil, !running.isCancelled else { return }
+                reply(connection, requestID, Self.json(answer))
+            }
+        }
+    }
+
+    /// An outside client's call: `watch_events` reads the grant's event buffer here, with the tool host's argument check and daily count, and every other tool runs in the tool host.
+    private func runOutsideCall(_ call: AgentToolCall, for grant: AgentGrant, connectionID: UUID, callID: Int?) async -> AgentToolHost.Outcome {
+        if call.name == AgentToolCatalog.renameTab.name { return renameTab(call, for: grant) }
+        guard call.name == AgentToolCatalog.watchEvents.name else {
+            return await toolHost(connectionID: connectionID, callID: callID).run(call, for: grant, state: state(for: grant))
+        }
+        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.watchEvents) { return AgentToolHost.error("invalidArguments", problem) }
+        guard grant.scopes.watchEvents else {
+            return AgentToolHost.Outcome(result: AgentToolResult(status: .refused, code: "eventsScope", text: "This client's grant does not include Watch Browser Events, so it cannot watch events."))
+        }
+        guard state(for: grant).countCall(at: dependencies.now()) else {
+            return AgentToolHost.error("limitReached", "This client made \(AgentToolHost.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.")
+        }
+        return await AgentToolHost.watchEvents(call.arguments, buffer: outsidePrograms.buffer(for: grant.id))
+    }
+}
+
+// MARK: - Outside programs' runs and renames
+
+extension AgentService {
+    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely for the document it has committed, `stale` while it loads another address, with the first line of the name trimmed and cut to 60 characters and an empty name clearing a suggested name, through `BrowserAgentHost`'s suggested names. A tab the user shared would ask once per tab, which this build does not ask yet, so it is refused; any other tab is refused with P17, and a tab on a site excluded from AI with P16.
+    private func renameTab(_ call: AgentToolCall, for grant: AgentGrant) -> AgentToolHost.Outcome {
+        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.renameTab) { return AgentToolHost.error("invalidArguments", problem) }
+        let state = state(for: grant)
+        guard state.countCall(at: dependencies.now()) else {
+            return AgentToolHost.error("limitReached", "This client made \(AgentToolHost.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.")
+        }
+        let handle = call.arguments["tab"]?.stringValue ?? ""
+        guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return AgentToolHost.error("tabNotFound", "This client has no tab \(handle).") }
+        let access: AgentTabAccess
+        if tab.agentOwnerID == grant.id {
+            access = .agentTab
+        } else if tab.agentOwnerID == nil, state.handles.sharedTabIDs.contains(id) {
+            access = .shared(acting: state.handles.actingSharedTabIDs.contains(id))
+        } else {
+            access = .notTheClients
+        }
+        func refused(_ code: String, _ text: String) -> AgentToolHost.Outcome {
+            AgentToolHost.Outcome(result: AgentToolResult(status: .refused, code: code, text: text, structured: ["rule": .string(code)]))
+        }
+        switch AgentPolicy.renameDecision(client: .outside, tab: access, allowedOnce: false) {
+        case .refuse(let rule, let sentence): return refused(rule?.rawValue ?? AgentPolicy.wouldAskCode, sentence)
+        case .ask: return refused(AgentRule.p19.rawValue, "Renaming a tab the user shared asks the user first, which this build of Arch does not ask yet. Rename your own agent tabs.")
+        default: break
+        }
+        guard let naming = host as? AgentTabNaming else { return AgentToolHost.notAvailable("This build of Arch cannot name tabs.") }
+        // A name belongs to the document the tab has committed, which a tab that loads another address is leaving.
+        guard let url = naming.committedAddress(ofTab: id), AgentRunner.sameDocument(tab.url, url) else {
+            return AgentToolHost.Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "\(handle) is loading another page. Rename it once the page has loaded.", structured: ["tab": .string(handle)]))
+        }
+        guard AgentPolicy.showsTitle(of: url, allowsAI: dependencies.allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
+        let given = call.arguments["name"]?.stringValue ?? ""
+        let name = String(given.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces).prefix(60)).trimmingCharacters(in: .whitespaces)
+        guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: grant.id, applying: true) else {
+            return refused("userNamed", "The user's own name for this tab, or a name the user turned down, keeps the tab's name.")
+        }
+        let text = name.isEmpty ? "Cleared the suggested name of \(handle)." : "Suggested the name \u{201C}\(name)\u{201D} for \(handle)."
+        return AgentToolHost.Outcome(result: AgentToolResult(status: .ok, text: text, structured: ["tab": .string(handle), "name": .string(name), "applied": true]),
+                                     site: AgentActivityEntry.site(of: url), step: name.isEmpty ? "Cleared the name of \(handle)" : "Named \(handle) \u{201C}\(name)\u{201D}")
+    }
+
+    /// `agent/run` from an outside client with Start Agent Tasks, asked for a grant first as a tool call is: one run under `agentRun` with `AgentRunGrant.forClient(_:)`, recorded with its model and outcome in the activity log, whose tool calls the runner records too. The client's connection closing cancels it.
+    private func runAgent(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let identity = connection.identity else { return }
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "This connection already runs \(AgentLimits.callsPerConnection) calls."))
+        }
+        guard case .object(let fields)? = params else { return replyError(connection, requestID, .invalidParams("agent/run takes the run's options as one object.")) }
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID, call: running), connections[connection.id] != nil, !running.isCancelled else { return }
+            guard grant.scopes.startTasks else {
+                return replyError(connection, requestID, Self.noGrantError("This client's grant does not include Start Agent Tasks. Revoke it in Settings \u{25B8} AI \u{25B8} Agents and allow it again with that scope."))
+            }
+            if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
+            touch(grant)
+            endpoint?.send(.notification(method: AgentControlMethod.progressNotification, params: ["call": requestID.json, "message": "The agent runs in Arch\u{2026}"]), to: connection.id)
+            let runID = UUID()
+            let result = await outsideRun(fields, for: grant, identity: identity, run: runID)
+            activity.record(AgentActivityEntry(date: dependencies.now(), event: .agentRun, grantID: grant.id, clientName: identity.displayName, personaID: grant.personaID,
+                                               decision: result.status == .refused ? .refused : .auto, rule: result.status == .refused ? result.code : nil, outcome: result.status.rawValue,
+                                               model: result.model.map { "\($0.provider.rawValue)/\($0.model)" }, runID: runID))
+            guard !running.isCancelled, connections[connection.id] != nil else { return }
+            reply(connection, requestID, clientJSON(of: result, for: grant))
+        }
+    }
+
+    /// An outside run's result as its client reads it: each renamed tab by the client's handle, never by Arch's identifier.
+    func clientJSON(of result: AgentRunResult, for grant: AgentGrant) -> AgentJSON {
+        guard case .object(var fields) = Self.json(result) else { return Self.json(result) }
+        let state = state(for: grant)
+        fields["actions"] = .array(result.actions.map { action in
+            switch action {
+            case .renamedTab(let tab, let name): return ["renamedTab": ["tab": .string(state.handles.tabs.handle(for: tab)), "name": .string(name)]]
+            }
+        })
+        return .object(fields)
+    }
+
+    /// `agent/run` on a shell hook run's connection: the run's handler runs it under the hook's grant, feature, and run tabs, or refuses it with -32601 when the hook may start no agent runs. The run's end cancels it.
+    private func runShellHookAgent(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let id = connection.sessionID, let run = shellHookRuns[id], let agentRun = run.agentRun else {
+            return replyError(connection, requestID, .methodNotFound(AgentControlMethod.agentRun))
+        }
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "This connection already runs \(AgentLimits.callsPerConnection) calls."))
+        }
+        guard case .object(let fields)? = params else { return replyError(connection, requestID, .invalidParams("agent/run takes the run's options as one object.")) }
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            let result = await agentRun(fields)
+            guard !running.isCancelled, connections[connection.id] != nil else { return }
+            reply(connection, requestID, Self.json(result))
+        }
+    }
+
+    /// The run of an outside client's options: its tabs by the client's handles, or else every agent tab of the client and tab shared with it, the Standard tier, Keep Activity Only, tab access `title` with `rename_tab` or `page` with the read tools too, and the program's label.
+    private func outsideRun(_ given: [String: AgentJSON], for grant: AgentGrant, identity: AgentClientIdentity, run: UUID) async -> AgentRunResult {
+        func refused(_ code: String, _ message: String) -> AgentRunResult { AgentRunResult(status: .refused, code: code, message: message) }
+        var fields = given
+        let state = state(for: grant)
+        let own = host.agentTabs(of: grant.id)
+        let shared = host.tabs(withIDs: Set(state.handles.sharedTabIDs)).filter { $0.agentOwnerID == nil }
+        let reachable = own + shared
+        var ids = reachable.map(\.id)
+        if let value = fields.removeValue(forKey: "tabs") {
+            guard case .array(let items) = value else { return refused("invalidArguments", "tabs takes a list of this client's tab handles, such as [\"t1\"].") }
+            ids = []
+            for item in items {
+                guard let handle = item.stringValue, let id = state.handles.tabs.id(for: handle) else { return refused("tabNotFound", "This client has no tab \(item.stringValue ?? "").") }
+                guard reachable.contains(where: { $0.id == id }) else { return refused(AgentRule.p17.rawValue, AgentPolicy.entry(.p17).sentence) }
+                if !ids.contains(id) { ids.append(id) }
+            }
+        }
+        guard !ids.isEmpty else { return refused("noTab", "This client has no agent tab or shared tab to run on. Open one with open_tab first.") }
+        let page = fields["tabAccess"] == .string(AgentRunTabAccess.page.rawValue)
+        fields["tabAccess"] = fields["tabAccess"] ?? .string(AgentRunTabAccess.title.rawValue)
+        fields["tools"] = fields["tools"] ?? .array((page ? [AgentToolCatalog.renameTab.name, "read_text", "snapshot"] : [AgentToolCatalog.renameTab.name]).map(AgentJSON.string))
+        fields["record"] = fields["record"] ?? .string(AgentRunRecord.activity.rawValue)
+        fields["model"] = fields["model"] ?? ["tier": .string(AIModelTier.standard.rawValue)]
+        guard let options = try? AgentJSON.object(fields).decode(as: AgentRunOptions.self) else {
+            return refused("invalidArguments", "agent/run takes prompt, and optionally model, tabAccess, tools, record, limits, tabs, and dryRun, as arch.agent.run does.")
+        }
+        var documents: [UUID: URL] = [:]
+        var documentIDs: [UUID: UUID] = [:]
+        for tab in reachable where ids.contains(tab.id) {
+            guard let url = tab.url else { continue }
+            documents[tab.id] = url
+            documentIDs[tab.id] = tab.documentID
+        }
+        var request = AgentRunRequest(options: options, tabs: ids, allowedTabs: Set(reachable.map(\.id)), documents: documents, documentIDs: documentIDs, knownProviders: nil,
+                                      origin: .outsideClient(grant: grant.id, run: run), promptSource: .program(name: identity.displayName), feature: .agentRun, grant: .forClient(grant))
+        request.sharedTabs = Set(shared.map(\.id)).intersection(ids)
+        let naming = host as? AgentTabNaming
+        return await runs.run(request, personaID: grant.personaID) { id, name, document, applying in
+            naming?.suggestName(name, forTab: id, showing: document, byGrant: grant.id, applying: applying) ?? false
+        }
     }
 }
