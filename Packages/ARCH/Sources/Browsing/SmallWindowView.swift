@@ -55,7 +55,7 @@ private struct SmallWindowTopRow: View {
     @State private var isHoveringSite = false
 
     private var siteName: String {
-        windowModel.internalPage?.address ?? tab.url.map(AddressPillView.siteName(of:)) ?? tab.pageTitle
+        windowModel.internalPage?.address ?? tab.url.map { AddressPillView.siteName(of: $0, in: tab, session: session) } ?? tab.pageTitle
     }
 
     var body: some View {

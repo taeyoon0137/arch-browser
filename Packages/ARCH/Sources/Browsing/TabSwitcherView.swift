@@ -22,7 +22,7 @@ struct TabSwitcherView: View {
             ScrollView {
                 VStack(spacing: Self.rowSpacing) {
                     ForEach(tabs) { tab in
-                        TabSwitcherRow(tab: tab, isHighlighted: tab.id == windowModel.tabSwitcherHighlightID)
+                        TabSwitcherRow(session: session, tab: tab, isHighlighted: tab.id == windowModel.tabSwitcherHighlightID)
                             .id(tab.id)
                     }
                 }
@@ -52,13 +52,14 @@ struct TabSwitcherView: View {
 }
 
 private struct TabSwitcherRow: View {
+    let session: BrowserSession
     @ObservedObject var tab: Tab
     let isHighlighted: Bool
 
     /// The site after the title, as the address pill names it, or nil without a host or when the title already is the site, as for a page without a title.
     private var site: String? {
         guard let url = tab.url, let host = url.host, !host.isEmpty, tab.displayTitle != host else { return nil }
-        let site = AddressPillView.siteName(of: url)
+        let site = AddressPillView.siteName(of: url, in: tab, session: session)
         return site == tab.displayTitle ? nil : site
     }
 

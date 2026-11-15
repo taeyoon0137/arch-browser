@@ -1,4 +1,4 @@
-// Engine versions of one web extension plugin: the pairing rule at staging, the review's choice, update targets, entry identifiers of versions that share an identifier, pairs made from the review and by hand, their switch, failures, actions, and palette command, separation, removal of one version, a version installed again after a removal that `plugins.json` missed, records the build ignores, and when a plugin asks for another engine's version. A recording engine stands in for Chromium.
+// Engine versions of one web extension plugin: the pairing rule at staging, the review's choice, update targets, entry identifiers of versions that share an identifier, pairs made from the review and by hand, their switch, failures, actions, and palette command, separation, removal of one version, a version installed again after a removal that `plugins.json` missed, records the build ignores, when a plugin asks for another engine's version, and the name an extension's page shows. A recording engine stands in for Chromium.
 import AppKit
 import ARCHEngine
 @testable import Extensions
@@ -650,5 +650,21 @@ struct EngineVersionsTests {
         webKit.refusedNames = ["Chromium Only"]
         let chromiumOnly = try await both.installEverything(from: package("chromium-only", name: "Chromium Only"))
         #expect(both.missingEngine(of: chromiumOnly.id) == .webKit && both.versionEngines(of: chromiumOnly.id) == [.webKit])
+    }
+
+    // MARK: Pages
+
+    @Test func namesAnExtensionsPageByTheExtension() async throws {
+        let (manager, runtime) = launch()
+        _ = try await installComplementaryPair(in: manager)
+        let tool = try await manager.installEverything(from: package("tool", name: "Tool"), isEnabled: false)
+        let toolID = WebExtensionManifest.extensionID(of: tool.id)
+        // Each engine's address of a page of the pair names it by its version installed first, whatever the case of the host; an extension that is off keeps its name.
+        #expect(runtime.name(ofPageAt: URL(string: "chrome-extension://\(keyID)/options.html")!) == "Reader")
+        #expect(runtime.name(ofPageAt: URL(string: "webkit-extension://\(keyID.uppercased())/popup.html")!) == "Reader")
+        #expect(runtime.name(ofPageAt: URL(string: "webkit-extension://\(toolID)/options.html")!) == "Tool")
+        // A web page on a host of that name and a page of an extension that is not installed are not named.
+        #expect(runtime.name(ofPageAt: URL(string: "https://\(keyID)/options.html")!) == nil)
+        #expect(runtime.name(ofPageAt: URL(string: "chrome-extension://\(String(repeating: "a", count: 32))/options.html")!) == nil)
     }
 }

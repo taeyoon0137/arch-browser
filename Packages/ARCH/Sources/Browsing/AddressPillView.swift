@@ -18,7 +18,13 @@ struct AddressPillView: View {
     /// The internal page's address, the page's site, or the placeholder with no tab open.
     private var host: String {
         if let page = windowModel.internalPage { return page.address }
-        return url.map(Self.siteName(of:)) ?? "Search or enter address"
+        guard let tab, let url else { return "Search or enter address" }
+        return Self.siteName(of: url, in: tab, session: session)
+    }
+
+    /// The page's site as the address pill, the small window, and the tab switcher show it: for a web extension's page, the name of the extension in the tab's Persona instead of the identifier that its address has as the host; otherwise `siteName(of:)`. The pill's help and the palette keep the whole address.
+    static func siteName(of url: URL, in tab: Tab, session: BrowserSession) -> String {
+        session.extensionName(ofPageAt: url, in: tab.personaID) ?? siteName(of: url)
     }
 
     /// The page's site as the address pill and the small window show it: its host without `www.`, a local file's name, or the whole address of a page without a host, such as `about:blank`.

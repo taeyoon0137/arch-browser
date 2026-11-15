@@ -1457,6 +1457,11 @@ final class EngineRuntime {
         }
     }
 
+    /// The name of the Persona's installed web extension whose page is at `url` (`WebExtensionRuntime.name(ofPageAt:)`), or nil for another address. It makes no runtime, since a Persona without one has no extension's page open.
+    func extensionName(ofPageAt url: URL, in personaID: Persona.ID) -> String? {
+        personaEngines[personaID]?.webExtensions?.name(ofPageAt: url)
+    }
+
     /// The runtime of the Persona's web extensions, for their actions in the site settings popover.
     public func webExtensions(in personaID: Persona.ID) -> WebExtensionRuntime? {
         _ = plugins(in: personaID)
