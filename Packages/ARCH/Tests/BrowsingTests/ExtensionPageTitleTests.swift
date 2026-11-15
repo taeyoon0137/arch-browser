@@ -123,36 +123,43 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
         let personaID = space.resolvedPersonaID
         let otherSpace = try #require(session.spaces(in: session.addPersona(named: "Work").id).first)
         let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let quietWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let otherWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: otherSpace.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
-        defer { [window, otherWindow].forEach(session.windowWillClose) }
+        defer { [window, quietWindow, otherWindow].forEach(session.windowWillClose) }
+        window.commandPaletteMode = .newTab
+        otherWindow.commandPaletteMode = .newTab
         let page = session.adopt(UnloadedWebContents(url: options, title: "", engine: .webKit, state: nil), spaceID: space.id, personaID: personaID, pinned: false, select: false)
+        let otherPage = session.adopt(UnloadedWebContents(url: URL(string: "webkit-extension://ponmlkjihgfedcbaponmlkjihgfedcba/options.html")!, title: "", engine: .webKit, state: nil),
+                                      spaceID: space.id, personaID: personaID, pinned: false, select: false)
         let site = session.adopt(UnloadedWebContents(url: URL(string: "https://example.org/")!, title: "", engine: .webKit, state: nil), spaceID: space.id, personaID: personaID, pinned: false, select: false)
+        var changes: [String: Int] = [:]
+        let observers = [("page", page.objectWillChange), ("otherPage", otherPage.objectWillChange), ("site", site.objectWillChange),
+                         ("window", window.objectWillChange), ("quietWindow", quietWindow.objectWillChange), ("otherWindow", otherWindow.objectWillChange)]
+            .map { name, publisher in publisher.sink { changes[name, default: 0] += 1 } }
+        defer { observers.forEach { $0.cancel() } }
+
+        // A runtime whose first list names nothing announces nothing.
         let runtime = try #require(session.webExtensions(in: personaID))
         await nextTurn()
-        var (pageChanges, siteChanges, windowChanges, otherWindowChanges) = (0, 0, 0, 0)
-        let observers = [page.objectWillChange.sink { pageChanges += 1 }, site.objectWillChange.sink { siteChanges += 1 },
-                         window.objectWillChange.sink { windowChanges += 1 }, otherWindow.objectWillChange.sink { otherWindowChanges += 1 }]
-        defer { observers.forEach { $0.cancel() } }
-        #expect(session.extensionName(ofPageAt: options, in: personaID) == nil && page.shownTitle == identifier)
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == nil && page.shownTitle == identifier && changes.isEmpty)
 
-        // An install names the page at once, and on the next turn the page's tab and the Persona's window announce it, so the views that follow them draw the name; a web page's tab and another Persona's window do not.
+        // An install names the page at once, and on the next turn the page's tab and the Persona's window whose palette is open announce it, so the views that follow them draw the name; another extension's page, a web page's tab, the Persona's window without the palette, and another Persona's window do not.
         runtime.run([reader(named: "Reader")])
         #expect(session.extensionName(ofPageAt: options, in: personaID) == "Reader" && page.shownTitle == "Reader")
         await nextTurn()
-        #expect(pageChanges == 1 && windowChanges >= 1 && siteChanges == 0 && otherWindowChanges == 0)
+        #expect(changes == ["page": 1, "window": 1])
 
         // A rename, as an update brings, announces the new name; a switch off keeps the name and announces nothing.
         runtime.run([reader(named: "Reader Two")])
         await nextTurn()
-        #expect(page.shownTitle == "Reader Two" && pageChanges == 2)
-        let windowChangesBefore = windowChanges
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == "Reader Two" && page.shownTitle == "Reader Two" && changes == ["page": 2, "window": 2])
         runtime.run([reader(named: "Reader Two", isEnabled: false)])
         await nextTurn()
-        #expect(page.shownTitle == "Reader Two" && pageChanges == 2 && windowChanges == windowChangesBefore)
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == "Reader Two" && page.shownTitle == "Reader Two" && changes == ["page": 2, "window": 2])
 
         // A removal takes the name away, so the page's tab shows the identifier again.
         runtime.remove(reader(named: "Reader Two", isEnabled: false))
         await nextTurn()
-        #expect(session.extensionName(ofPageAt: options, in: personaID) == nil && page.shownTitle == identifier && pageChanges == 3 && windowChanges > windowChangesBefore && siteChanges == 0)
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == nil && page.shownTitle == identifier && changes == ["page": 3, "window": 3])
     }
 }

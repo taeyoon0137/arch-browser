@@ -1458,10 +1458,11 @@ final class EngineRuntime {
         plugins.nativeAppGate = nativeMessagingHosts
         engines.plugins = plugins
         engines.webExtensions = webExtensions
-        // Each change of the names reaches the views on the next turn of the run loop, the names of the manager's first list too, so that a tab that showed an extension's page before the runtime named it gets the name, and a view body that makes the runtime publishes nothing while it draws.
+        // The session compares each change of the names with the names before it, starting from none, as before the runtime, so that the names of the manager's first list also reach a tab that showed an extension's page before the runtime named it, and a first list that names nothing announces nothing. The manager lists its first plugins as it is made, which a view body can do, so each change reaches the session on the next turn of the run loop, after that body has drawn.
         engines.webExtensionNames = webExtensions.$pageNames
+            .scan(([String: String](), [String: String]())) { ($0.1, $1) }
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.extensionNamesDidChange(in: personaID) }
+            .sink { [weak self] names in self?.extensionNamesDidChange(from: names.0, to: names.1, in: personaID) }
         // Profiles that started before the runtime, as the default Persona's in the primary engine at launch.
         for runtime in engines.runtimes.values {
             if let extensions = runtime.context.extensions { webExtensions.profileDidStart(with: extensions, of: runtime.kind) }
@@ -1482,13 +1483,15 @@ final class EngineRuntime {
         personaEngines[personaID]?.webExtensions?.name(ofPageAt: url)
     }
 
-    /// Has the views that name the Persona's extension pages by their extensions read the names again, after an install, an update that renames an extension, or a removal (`WebExtensionRuntime.pageNames`): the Persona's windows announce a change, which the address pill, a small window's top row, the sidebar's rows, the window's title, and the palette's Go to row and its matches follow, and so does each of the Persona's tabs on a page outside the web schemes, for the views that follow the tab alone, such as the tab switcher's and the palette's rows and floating developer tools.
-    private func extensionNamesDidChange(in personaID: Persona.ID) {
-        for window in windows where window.personaID == personaID { window.objectWillChange.send() }
+    /// Has the views that name the Persona's extension pages by their extensions read the names again, after an install, an update that renames an extension, or a removal changes `WebExtensionRuntime.pageNames` from `old` to `new`. Each of the Persona's tabs on a page outside the web schemes whose host is an identifier whose name changed announces a change, which the views that name the page follow: the address pill, a small window's top row, the sidebar's row, the tab switcher's and the palette's rows, the site settings popover's header, and floating developer tools each follow the tab, and the window's title follows the window's selected tab, which the window model passes on. Each of the Persona's windows whose palette is open announces one too, since the palette's Go to row names a typed address and its matches filter every tab by its name, which no tab's change reaches. A change that names no identifier differently, as a first list that names nothing, announces nothing.
+    private func extensionNamesDidChange(from old: [String: String], to new: [String: String], in personaID: Persona.ID) {
+        let hosts = Set(old.keys).union(new.keys).filter { old[$0] != new[$0] }
+        guard !hosts.isEmpty else { return }
         for tab in allTabs where tab.personaID == personaID {
-            guard let scheme = tab.url?.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme) else { continue }
+            guard let url = tab.url, let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme), let host = url.host?.lowercased(), hosts.contains(host) else { continue }
             tab.objectWillChange.send()
         }
+        for window in windows where window.personaID == personaID && window.commandPaletteMode != nil { window.objectWillChange.send() }
     }
 
     /// The runtime of the Persona's web extensions, for their actions in the site settings popover.
