@@ -225,4 +225,8 @@ extension BrowserAgentHost: AgentTabNaming {
         guard let tab = session.tabs.first(where: { $0.id == id }) else { return false }
         return session.events.withCause(BrowserEventCause(origin: .outsideClient(grant: grant))) { BrowserHooks.suggest(name, for: document, to: tab, applying: applying) }
     }
+
+    public func committedAddress(ofTab id: UUID) -> URL? {
+        session.tabs.first { $0.id == id }?.committedURL
+    }
 }

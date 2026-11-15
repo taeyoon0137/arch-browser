@@ -194,7 +194,8 @@ public enum AgentRunOrigin: Hashable, Sendable {
     case hook(UUID, run: UUID)
     /// The editor's Test or a hook row's Run on Current Tab, with the test's hook run.
     case test(hook: UUID, run: UUID)
-    case outsideClient(grant: UUID)
+    /// An outside client's `agent/run`, with the run's ID, which the run's activity entries carry.
+    case outsideClient(grant: UUID, run: UUID)
 }
 
 /// Who wrote the prompt, which the first message names.
@@ -363,4 +364,6 @@ extension AgentPolicy {
 public protocol AgentTabNaming: AnyObject {
     /// Suggests a name for the tab while it shows `document`, ignoring the fragment, inside `withCause` with the grant's cause; nil removes a suggested name. False when the tab no longer shows that document or the user's name or refusal keeps its name.
     func suggestName(_ name: String?, forTab id: UUID, showing document: URL, byGrant grant: UUID, applying: Bool) -> Bool
+    /// The address the tab has committed, which names belong to, while its shown address may still be loading; nil before its first commit.
+    func committedAddress(ofTab id: UUID) -> URL?
 }

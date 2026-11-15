@@ -139,7 +139,7 @@ public final class AgentRunner: ObservableObject {
         if case .hook = request.origin, !reserve(request.feature, request.grant.runsPerDay) {
             return Self.refused("dailyRuns", "This hook reached its daily run limit.")
         }
-        if case .outsideClient(let grant) = request.origin, !reserve(.agentRun(grant: grant), request.grant.runsPerDay) {
+        if case .outsideClient(let grant, _) = request.origin, !reserve(.agentRun(grant: grant), request.grant.runsPerDay) {
             return Self.refused("dailyRuns", "This client started its \(request.grant.runsPerDay) agent runs for today.")
         }
 
@@ -195,7 +195,7 @@ public final class AgentRunner: ObservableObject {
 
     /// A run tab as the host shows it now, while the run may still use it: a hook's open tab of the Persona that is no agent's, an outside client's own agent tab, or a tab the user shared with the client that no agent folder holds.
     private func currentTab(_ id: UUID, of request: AgentRunRequest, personaID: UUID) -> AgentTabInfo? {
-        guard case .outsideClient(let grant) = request.origin else {
+        guard case .outsideClient(let grant, _) = request.origin else {
             return host.userTabs(in: personaID).first { $0.id == id && $0.agentOwnerID == nil }
         }
         return host.tabs(withIDs: [id]).first { request.sharedTabs.contains(id) ? $0.agentOwnerID == nil : $0.agentOwnerID == grant }
@@ -401,27 +401,35 @@ public final class AgentRunner: ObservableObject {
         }
     }
 
-    private func record(_ status: AgentResultStatus, tool: AgentTool?, in run: Execution) {
+    private func record(_ status: AgentResultStatus, code: String? = nil, tool: AgentTool?, call: AgentToolCall? = nil, in run: Execution) {
         guard run.request.options.record != .none, let activity else { return }
         let hook: UUID
         let id: UUID?
+        let cancelled = Task.isCancelled || !run.active
         switch run.request.origin {
         case .hook(let owner, let runID): (hook, id) = (owner, runID)
         case .test(let owner, _): (hook, id) = (owner, nil)
-        case .outsideClient(let grant):
-            // As the client's own calls are, so that a run reads nothing that its calls would not have logged.
+        case .outsideClient(let grant, let runID):
+            // As the client's own calls are, with the run tab's site, so that a run reads nothing that its calls would not have logged.
             var client = ""
             if case .program(let name) = run.request.promptSource { client = name }
-            activity.record(AgentActivityEntry(date: Date(), event: .toolCall, grantID: grant, clientName: client, personaID: run.personaID, tool: tool?.name, toolClass: tool?.toolClass.rawValue,
-                                               decision: status == .refused ? .refused : .auto, outcome: (Task.isCancelled || !run.active) ? "cancelled" : status.rawValue))
+            activity.recordTool(ofRun: runID, grant: grant, client: client, persona: run.personaID, tool: tool, status: status, code: code, site: site(of: call, in: run),
+                                cancelled: cancelled, dryRun: run.request.options.dryRun)
             return
         }
-        activity.recordTool(of: hook, run: id, persona: run.personaID, tool: tool, status: status, cancelled: Task.isCancelled || !run.active, dryRun: run.request.options.dryRun)
+        activity.recordTool(of: hook, run: id, persona: run.personaID, tool: tool, status: status, cancelled: cancelled, dryRun: run.request.options.dryRun)
+    }
+
+    /// The site of the document of the run tab a call names, for its activity entry.
+    private func site(of call: AgentToolCall?, in run: Execution) -> String? {
+        guard let handle = call?.arguments["tab"]?.stringValue, let index = Int(handle.dropFirst()), index > 0, index <= run.tabs.count, handle == "t\(index)",
+              let document = run.request.documents[run.tabs[index - 1].id] else { return nil }
+        return AgentActivityEntry.site(of: document)
     }
 
     private func perform(_ call: AgentToolCall, tool: AgentTool, in run: Execution) async -> AgentToolResult {
         let result = await execute(call, tool: tool, in: run)
-        record(result.status, tool: tool, in: run)
+        record(result.status, code: result.code, tool: tool, call: call, in: run)
         return result
     }
 

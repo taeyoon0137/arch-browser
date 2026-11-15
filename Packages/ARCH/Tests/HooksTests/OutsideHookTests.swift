@@ -1,4 +1,4 @@
-// Hooks from outside programs in the registry (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks): a proposal shows the sheet with its script and permissions, adds the hook only after Allow and Touch ID, with the program as its origin and the caps in its grant, and makes the program wait a minute after a decline; one program adds at most 20 hooks; the user's edits cannot lift the caps; a program's hooks pause with `grantEnded` when its grant ends, also at the launch after a grant until Arch quits, and Resume needs no Touch ID; and a program lists and removes only its own hooks.
+// Hooks from outside programs in the registry (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks): a proposal shows the sheet with its agent's instructions, script, and permissions, adds the hook only after Allow and Touch ID, with the program as its origin and the caps in its grant, and makes the program wait a minute after a decline; a program has one sheet at a time, which closes unanswered when the program leaves, and a program whose access ended while its sheet showed adds nothing without Touch ID; one program adds at most 20 hooks; the user's edits cannot lift the caps; a program's hooks run only after the first report of grants and never on a site excluded from AI; they pause with `grantEnded` when the grant ends, also at the launch after a grant until Arch quits, and Resume needs no Touch ID; and a program lists and removes only its own hooks.
 import Agent
 import AgentControl
 import AI
@@ -17,6 +17,31 @@ import Testing
     }
 
     func cancelAll() {}
+}
+
+/// A proposal sheet that stays open until `answer` or until its asking task is cancelled, as when the program leaves.
+@MainActor final class WaitingProposalPrompt: HookProposalPrompting {
+    private var waiting: [CheckedContinuation<Bool, Never>] = []
+    private(set) var asked = 0
+
+    var isWaiting: Bool { !waiting.isEmpty }
+
+    func ask(_ review: HookProposalReview) async -> Bool {
+        asked += 1
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { waiting.append($0) }
+        } onCancel: {
+            Task { @MainActor in self.answer(false) }
+        }
+    }
+
+    func answer(_ allowed: Bool) {
+        let answered = waiting
+        waiting = []
+        answered.forEach { $0.resume(returning: allowed) }
+    }
+
+    func cancelAll() { answer(false) }
 }
 
 final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
@@ -75,6 +100,7 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
         #expect(review.script == Self.script && review.clientName == "agent in Agent" && review.clientPath == program.executablePath)
         #expect(review.situation == "When a new tab loads its first page \u{00B7} Personal \u{00B7} all sites")
         #expect(review.agent.first == "Model: Fast tier \u{00B7} Test \u{2014} model-a")
+        #expect(review.prompt == "Name the tab.")
         #expect(review.permissions.contains { $0.contains("never its page") })
         #expect(HookProposalReview.tabNamesSentence == "Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read.")
         #expect(authenticator.count == 1)
@@ -105,6 +131,64 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
         guard case .added = await registry.propose(proposal(), from: program, grant: grant(for: program)) else { Issue.record("After a minute the sheet shows again."); return }
         guard case .refused = await registry.propose(proposal("arch.events.on(\"pageLoaded\", ("), from: program, grant: grant(for: program)) else { Issue.record("A script that does not parse is refused."); return }
         #expect(registry.hooks.count == 1)
+    }
+
+    @Test func aProgramHasOneSheetAtATimeAndOnlyWhileItHasAccess() async throws {
+        let harness = RegistryHarness()
+        defer { harness.cleanUp() }
+        let registry = try await harness.start()
+        let prompt = WaitingProposalPrompt()
+        let authenticator = FakeHookAuthenticator()
+        registry.proposalPrompt = prompt
+        registry.authenticator = authenticator
+        registry.grantsDidChange(inForce: [program.key, other.key])
+        let first = Task { await registry.propose(proposal(), from: program, grant: grant(for: program)) }
+        #expect(await eventually { prompt.isWaiting })
+        // The program's next proposal does not show while its first one does.
+        guard case .declined = await registry.propose(proposal(), from: program, grant: grant(for: program)) else { Issue.record("A second sheet must not show."); return }
+        #expect(prompt.asked == 1)
+        // The program leaves: its sheet closes unanswered, without Touch ID.
+        first.cancel()
+        guard case .declined = await first.value else { Issue.record("A program that left must add nothing."); return }
+        #expect(authenticator.count == 0)
+        // Another program's access ends while its sheet shows: Allow adds nothing and asks for no Touch ID.
+        let second = Task { await registry.propose(proposal(), from: other, grant: grant(for: other)) }
+        #expect(await eventually { prompt.isWaiting })
+        registry.grantsDidChange(inForce: [program.key])
+        prompt.answer(true)
+        guard case .refused = await second.value else { Issue.record("A program without access must add nothing."); return }
+        #expect(authenticator.count == 0)
+        #expect(registry.hooks.isEmpty)
+    }
+
+    @Test func aProgramsHooksRunOnlyAfterTheFirstReportAndNeverOnExcludedSites() async throws {
+        let harness = RegistryHarness()
+        defer { harness.cleanUp() }
+        let registry = try await harness.start()
+        var hook = instantHook("Name tabs", .tabOpened, filter: BrowserEventFilter(kinds: [.tabOpened], scope: .places([.persona(HookIDs.persona)])),
+                               grant: HookGrant(permissions: [.tabsRename]))
+        hook.origin = .outsideClient(program.key, name: "agent in Agent")
+        let programs = try harness.add(hook)
+        let users = try harness.add(instantHook("Mine", .tabOpened))
+        func open(_ host: String = "example.org") {
+            let tab = harness.tab(host: host)
+            harness.host.show(tab)
+            harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
+        }
+        // Until the agents' service has checked agent.json and said which programs keep a grant, a program's hook does not run.
+        open()
+        #expect(await eventually { harness.javaScript.invocations(of: users.id).count == 1 })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(harness.javaScript.invocations(of: programs.id).isEmpty)
+        registry.grantsDidChange(inForce: [program.key])
+        open()
+        #expect(await eventually { harness.javaScript.invocations(of: programs.id).count == 1 })
+        // A site excluded from AI keeps its events from a program's hook without agent, so that its last runs do not tell the program of the visit.
+        harness.service.settings.excludedSites.append(AISitePattern("excluded.example"))
+        open("excluded.example")
+        #expect(await eventually { harness.javaScript.invocations(of: users.id).count == 3 })
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(harness.javaScript.invocations(of: programs.id).count == 1)
     }
 
     @Test func oneProgramAddsAtMostTwentyHooks() async throws {

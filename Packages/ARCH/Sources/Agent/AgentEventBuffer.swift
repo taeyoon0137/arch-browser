@@ -192,7 +192,8 @@ struct AgentEventMatch: Equatable {
     let personaID: UUID
     private let state: AgentGrantState
     private let buffer: AgentEventBuffer
-    private let ownTabs: Set<UUID>
+    /// The grant's agent tabs as the host lists them, and the event's own tab when its folder is the grant's, since a tab's `tabOpened` comes before the host lists it.
+    private var ownTabs: Set<UUID>
     private let check: (URL) -> Bool
 
     init(grant: AgentGrant, state: AgentGrantState, buffer: AgentEventBuffer, ownTabs: Set<UUID>, allowsAI: @escaping (URL) -> Bool) {
@@ -218,6 +219,7 @@ struct AgentEventMatch: Equatable {
 
     /// The event as this grant sees it, as JSON with ISO 8601 dates, or nil when it does not reach the grant, as another agent's tab's events do not.
     func view(of event: BrowserEvent) -> AgentJSON? {
+        if let tab = event.tab, tab.agentOwnerID == grantID { ownTabs.insert(tab.id) }
         if let tab = event.tab, tab.kind == .agent, !ownTabs.contains(tab.id) { return nil }
         guard let view = event.view(self) else { return nil }
         let encoder = JSONEncoder()
@@ -227,12 +229,17 @@ struct AgentEventMatch: Equatable {
 }
 
 extension AgentToolHost {
-    /// `watch_events`: the grant's buffered events after `after`, of the kinds named, at most 100, or, when there are none yet, the first that arrive within `timeout_ms`. Without `after` it starts after the last event the grant saw, so it returns only new ones. Its text has one line per event, as `arch-cli events` prints them, with download names as untrusted blocks.
+    /// `watch_events`: the grant's buffered events after `after`, of the kinds named, at most 100, or, when there are none yet, the first that arrive within `timeout_ms`. Without `after` it starts after the last event the grant saw, so it returns only new ones. A kind Arch does not know is refused, as `events/subscribe` refuses it. Its text has one line per event, as `arch-cli events` prints them, with download names as untrusted blocks.
     static func watchEvents(_ arguments: [String: AgentJSON], buffer: AgentEventBuffer) async -> Outcome {
-        let kinds = Set((arguments["kinds"].flatMap { value -> [String]? in
-            guard case .array(let items) = value else { return nil }
-            return items.compactMap(\.stringValue)
-        } ?? []).compactMap(BrowserEventKind.init(rawValue:)))
+        var kinds = Set<BrowserEventKind>()
+        if case .array(let items)? = arguments["kinds"] {
+            for item in items {
+                guard let name = item.stringValue, let kind = BrowserEventKind(rawValue: name) else {
+                    return error("invalidArguments", "Arch has no event kind named \(item.stringValue ?? "that").")
+                }
+                kinds.insert(kind)
+            }
+        }
         let after = arguments["after"].flatMap(integer).map { UInt64(max($0, 0)) } ?? buffer.lastSequence
         let timeout = TimeInterval(arguments["timeout_ms"].flatMap(integer) ?? AgentLimits.toolWaitSeconds * 1000) / 1000
         func found() -> [AgentBufferedEvent] {

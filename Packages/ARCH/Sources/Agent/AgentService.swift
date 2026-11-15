@@ -122,6 +122,8 @@ import Foundation
     private var states: [UUID: AgentGrantState] = [:]
     private var usedThisLaunch: Set<UUID> = []
     private var expiryTimer: Timer?
+    /// The write that Settings' agent runs a day waits to make.
+    private var runsPerDaySave: Task<Void, Never>?
     /// How long a session's call waits for the model's first output, and while the user has taken the session over; tests shorten them.
     var sessionReadyWait = AgentSession.readyWait
     var sessionTakeOverWait = AgentSession.takeOverWait
@@ -393,6 +395,7 @@ import Foundation
     /// At quit: closes the grant sheets as Don't Allow, writes the grants' last-use dates, and removes the socket. Grants exist only once the key is in, so a launch without one writes nothing, and no write waits for the Keychain past quit. The Keychain may not record this last write's generation before Arch exits; the file before it then still opens, and it differs only in those dates, since every other change writes at once.
     public func stop() {
         expiryTimer?.invalidate()
+        runsPerDaySave?.cancel()
         dependencies.prompt.cancelAll()
         runService?.cancelAll()
         for binding in hookCLIs.values {
@@ -417,9 +420,15 @@ import Foundation
 
     /// The grant in force for a client: same identity, not expired, bound to no process that has ended, and its Persona still there, so that a grant ends at once rather than at the next expiry check.
     func grant(for identity: AgentClientIdentity) -> AgentGrant? {
+        let isInForce = grantsInForce()
+        return grants.first { $0.client.key == identity.key && isInForce($0) }
+    }
+
+    /// Whether a grant is in force now, as `grant(for:)` reads it, for the grants that events and hooks reach between expiry checks.
+    func grantsInForce() -> (AgentGrant) -> Bool {
         let personas = Set(host.personas.map(\.id))
         let now = dependencies.now()
-        return grants.first { $0.client.key == identity.key && !$0.hasExpired(at: now) && !hasProcessEnded($0) && personas.contains($0.personaID) }
+        return { [unowned self] in !$0.hasExpired(at: now) && !hasProcessEnded($0) && personas.contains($0.personaID) }
     }
 
     /// Settings' Revoke.
@@ -433,12 +442,17 @@ import Foundation
         for grant in grants { end(grant, as: .revoked, telling: "The user revoked this client's access in Arch.") }
     }
 
-    /// Settings' agent runs a day for a grant with Start Agent Tasks, kept within 1 to 2,000.
+    /// Settings' agent runs a day for a grant with Start Agent Tasks, kept within 1 to 2,000. The sealed file is written once the number has not changed for a second, so that stepping writes it once; quit writes what is still waiting.
     public func setRunsPerDay(_ runs: Int, for grantID: UUID) {
         let runs = min(max(runs, AgentGrant.runsPerDayRange.lowerBound), AgentGrant.runsPerDayRange.upperBound)
         if let index = settings.grants.firstIndex(where: { $0.id == grantID }) {
             settings.grants[index].runsPerDay = runs
-            save()
+            runsPerDaySave?.cancel()
+            runsPerDaySave = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.save()
+            }
         } else if let index = launchGrants.firstIndex(where: { $0.id == grantID }) {
             launchGrants[index].runsPerDay = runs
         }
@@ -1631,7 +1645,7 @@ import Foundation
         if let state = states[grant.id] { return state }
         let state = AgentGrantState()
         let now = dependencies.now()
-        state.seedCalls(activity.entries.filter { $0.grantID == grant.id && $0.event == .toolCall && Calendar.current.isDate($0.date, inSameDayAs: now) }.count, at: now)
+        state.seedCalls(activity.callsToday(of: grant.id, at: now), at: now)
         states[grant.id] = state
         return state
     }
@@ -1891,7 +1905,9 @@ extension AgentService {
     /// Records the event in each watching grant's buffer and queues it for that grant's subscriptions that take it. While outside access is off, no grant records anything.
     private func deliver(_ event: BrowserEvent) {
         guard acceptsOutsideClients else { return }
-        for grant in grants where grant.scopes.watchEvents {
+        // A grant whose time is up gets nothing more, also before the next expiry check ends it.
+        let isInForce = grantsInForce()
+        for grant in grants where grant.scopes.watchEvents && isInForce(grant) {
             let buffer = outsidePrograms.buffer(for: grant.id)
             let reader = AgentEventReader(grant: grant, state: state(for: grant), buffer: buffer, ownTabs: Set(host.agentTabs(of: grant.id).map(\.id)), allowsAI: dependencies.allowsAI)
             guard let view = reader.view(of: event) else {
@@ -1980,25 +1996,30 @@ extension AgentService {
     /// Tells the hook registry which identities have a grant in force, once `agent.json` was checked, so that the hooks of a program whose grant ended pause with `grantEnded`.
     func grantsInForceDidChange() {
         guard canChangeSettings, let hookRegistrar else { return }
-        let now = dependencies.now()
-        let personas = Set(host.personas.map(\.id))
-        hookRegistrar.grantsDidChange(inForce: Set(grants.filter { !$0.hasExpired(at: now) && !hasProcessEnded($0) && personas.contains($0.personaID) }.map(\.client.key)))
+        hookRegistrar.grantsDidChange(inForce: Set(grants.filter(grantsInForce()).map(\.client.key)))
     }
 
     /// `hooks/list`, `hooks/add`, and `hooks/remove`, each for a client with a grant of any level, which the first asks for as a tool call does. `hooks/add` checks the proposal against the caps of hooks from outside programs, says it waits for the user, and answers once the user answered the registry's proposal sheet.
     private func hookCall(_ method: String, _ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard let identity = connection.identity else { return }
-        connection.runningCalls += 1
-        Task {
-            defer { connection.runningCalls -= 1 }
-            guard let grant = await grantForCall(from: connection, identity, requestID: requestID), connections[connection.id] != nil else { return }
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "This connection already runs \(AgentLimits.callsPerConnection) calls."))
+        }
+        // The connection's close cancels the call, which closes an open proposal sheet unanswered.
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID, call: running), connections[connection.id] != nil, !running.isCancelled else { return }
             guard let registrar = hookRegistrar else {
                 return replyError(connection, requestID, .internalError("Arch cannot reach its hooks now."))
             }
             touch(grant)
             switch method {
             case AgentControlMethod.hooksList:
-                reply(connection, requestID, Self.json(AgentHookListing(hooks: registrar.hooks(addedBy: identity.key))))
+                var hooks = registrar.hooks(addedBy: identity.key)
+                // A last run's time would tell when the user visited the hook's sites, which only Watch Browser Events shows.
+                if !grant.scopes.watchEvents { hooks = hooks.map { var hook = $0; hook.lastRun = nil; return hook } }
+                reply(connection, requestID, Self.json(AgentHookListing(hooks: hooks)))
             case AgentControlMethod.hooksRemove:
                 guard let text = params?["hook"]?.stringValue, let id = UUID(uuidString: text) else {
                     return replyError(connection, requestID, .invalidParams("hooks/remove takes the hook's ID, as hooks list shows it."))
@@ -2020,7 +2041,7 @@ extension AgentService {
                 } catch {
                     answer = AgentHookAddResult(status: .refused, message: (error as? AgentHookRefusal)?.message ?? "\(error)")
                 }
-                guard connections[connection.id] != nil else { return }
+                guard connections[connection.id] != nil, !running.isCancelled else { return }
                 reply(connection, requestID, Self.json(answer))
             }
         }
@@ -2046,7 +2067,7 @@ extension AgentService {
 // MARK: - Outside programs' runs and renames
 
 extension AgentService {
-    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely for the document it shows now, with the first line of the name trimmed and cut to 60 characters and an empty name clearing a suggested name, through `BrowserAgentHost`'s suggested names. A tab the user shared would ask once per tab, which this build does not ask yet, so it is refused; any other tab is refused with P17, and a tab on a site excluded from AI with P16.
+    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely for the document it has committed, `stale` while it loads another address, with the first line of the name trimmed and cut to 60 characters and an empty name clearing a suggested name, through `BrowserAgentHost`'s suggested names. A tab the user shared would ask once per tab, which this build does not ask yet, so it is refused; any other tab is refused with P17, and a tab on a site excluded from AI with P16.
     private func renameTab(_ call: AgentToolCall, for grant: AgentGrant) -> AgentToolHost.Outcome {
         if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.renameTab) { return AgentToolHost.error("invalidArguments", problem) }
         let state = state(for: grant)
@@ -2071,8 +2092,12 @@ extension AgentService {
         case .ask: return refused(AgentRule.p19.rawValue, "Renaming a tab the user shared asks the user first, which this build of Arch does not ask yet. Rename your own agent tabs.")
         default: break
         }
-        guard let url = tab.url, AgentPolicy.showsTitle(of: url, allowsAI: dependencies.allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
         guard let naming = host as? AgentTabNaming else { return AgentToolHost.notAvailable("This build of Arch cannot name tabs.") }
+        // A name belongs to the document the tab has committed, which a tab that loads another address is leaving.
+        guard let url = naming.committedAddress(ofTab: id), AgentRunner.sameDocument(tab.url, url) else {
+            return AgentToolHost.Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "\(handle) is loading another page. Rename it once the page has loaded.", structured: ["tab": .string(handle)]))
+        }
+        guard AgentPolicy.showsTitle(of: url, allowsAI: dependencies.allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
         let given = call.arguments["name"]?.stringValue ?? ""
         let name = String(given.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces).prefix(60)).trimmingCharacters(in: .whitespaces)
         guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: grant.id, applying: true) else {
@@ -2100,13 +2125,26 @@ extension AgentService {
             if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
             touch(grant)
             endpoint?.send(.notification(method: AgentControlMethod.progressNotification, params: ["call": requestID.json, "message": "The agent runs in Arch\u{2026}"]), to: connection.id)
-            let result = await outsideRun(fields, for: grant, identity: identity)
+            let runID = UUID()
+            let result = await outsideRun(fields, for: grant, identity: identity, run: runID)
             activity.record(AgentActivityEntry(date: dependencies.now(), event: .agentRun, grantID: grant.id, clientName: identity.displayName, personaID: grant.personaID,
                                                decision: result.status == .refused ? .refused : .auto, rule: result.status == .refused ? result.code : nil, outcome: result.status.rawValue,
-                                               model: result.model.map { "\($0.provider.rawValue)/\($0.model)" }))
+                                               model: result.model.map { "\($0.provider.rawValue)/\($0.model)" }, runID: runID))
             guard !running.isCancelled, connections[connection.id] != nil else { return }
-            reply(connection, requestID, Self.json(result))
+            reply(connection, requestID, clientJSON(of: result, for: grant))
         }
+    }
+
+    /// An outside run's result as its client reads it: each renamed tab by the client's handle, never by Arch's identifier.
+    func clientJSON(of result: AgentRunResult, for grant: AgentGrant) -> AgentJSON {
+        guard case .object(var fields) = Self.json(result) else { return Self.json(result) }
+        let state = state(for: grant)
+        fields["actions"] = .array(result.actions.map { action in
+            switch action {
+            case .renamedTab(let tab, let name): return ["renamedTab": ["tab": .string(state.handles.tabs.handle(for: tab)), "name": .string(name)]]
+            }
+        })
+        return .object(fields)
     }
 
     /// `agent/run` on a shell hook run's connection: the run's handler runs it under the hook's grant, feature, and run tabs, or refuses it with -32601 when the hook may start no agent runs. The run's end cancels it.
@@ -2128,7 +2166,7 @@ extension AgentService {
     }
 
     /// The run of an outside client's options: its tabs by the client's handles, or else every agent tab of the client and tab shared with it, the Standard tier, Keep Activity Only, tab access `title` with `rename_tab` or `page` with the read tools too, and the program's label.
-    private func outsideRun(_ given: [String: AgentJSON], for grant: AgentGrant, identity: AgentClientIdentity) async -> AgentRunResult {
+    private func outsideRun(_ given: [String: AgentJSON], for grant: AgentGrant, identity: AgentClientIdentity, run: UUID) async -> AgentRunResult {
         func refused(_ code: String, _ message: String) -> AgentRunResult { AgentRunResult(status: .refused, code: code, message: message) }
         var fields = given
         let state = state(for: grant)
@@ -2162,7 +2200,7 @@ extension AgentService {
             documentIDs[tab.id] = tab.documentID
         }
         var request = AgentRunRequest(options: options, tabs: ids, allowedTabs: Set(reachable.map(\.id)), documents: documents, documentIDs: documentIDs, knownProviders: nil,
-                                      origin: .outsideClient(grant: grant.id), promptSource: .program(name: identity.displayName), feature: .agentRun, grant: .forClient(grant))
+                                      origin: .outsideClient(grant: grant.id, run: run), promptSource: .program(name: identity.displayName), feature: .agentRun, grant: .forClient(grant))
         request.sharedTabs = Set(shared.map(\.id)).intersection(ids)
         let naming = host as? AgentTabNaming
         return await runs.run(request, personaID: grant.personaID) { id, name, document, applying in

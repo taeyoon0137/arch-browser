@@ -105,7 +105,7 @@ struct AgentGrantSheetView: View {
                 Toggle("Search history", isOn: $choice.scopes.searchHistory)
                 Toggle(isOn: $choice.scopes.startTasks) {
                     labeled("Start agent tasks on your AI subscription",
-                            detail: choice.scopes.startTasks ? "Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change." : nil)
+                            detail: "Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change.")
                 }
                 Toggle(isOn: $choice.scopes.watchEvents) {
                     labeled("Watch browser events", detail: Self.watchSentence(persona: personaName))
@@ -129,16 +129,14 @@ struct AgentGrantSheetView: View {
         .onChange(of: choice.persona) { choice.spaceID = nil }
     }
 
-    /// A toggle's title with a sentence below it, as the sheet's other captions show.
-    private func labeled(_ title: String, detail: String?) -> some View {
+    /// A toggle's title with its sentence below it, shown whether or not the toggle is on, as the sheet's other captions show.
+    private func labeled(_ title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-            if let detail {
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

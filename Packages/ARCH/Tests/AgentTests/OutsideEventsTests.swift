@@ -1,4 +1,4 @@
-// Outside programs' events (`docs/hooks.md`, Outside programs ▸ Grants; arch-cli events; arch-mcp): a grant with Watch Browser Events reads its Persona's events in the outside view, the user's tabs by watch IDs and hosts, its own agent tabs by handles and reduced addresses, excluded sites without either, and other agents' tabs and other Personas not at all; `events/subscribe` needs the scope, checks its filter, and replays the grant's buffer of the last 500 after `after`; `watch_events` reads the same buffer with its cursor and timeout; and the tools listed follow the scope.
+// Outside programs' events (`docs/hooks.md`, Outside programs ▸ Grants; arch-cli events; arch-mcp): a grant with Watch Browser Events reads its Persona's events in the outside view, the user's tabs by watch IDs and hosts, its own agent tabs by handles and reduced addresses, also a new one's `tabOpened` before the host lists it, excluded sites without either, and other agents' tabs and other Personas not at all; a grant whose time is up reads nothing more before the expiry check ends it; `events/subscribe` needs the scope, checks its filter, and replays the grant's buffer of the last 500 after `after`; `watch_events` reads the same buffer with its cursor and timeout and refuses kinds Arch does not know; and the tools listed follow the scope.
 import AgentControl
 import ARCHEngine
 import Events
@@ -82,6 +82,47 @@ import Testing
         #expect(switched["from"]?["space"]?.stringValue?.hasPrefix("s") == true)
     }
 
+    /// The session posts a tab's `tabOpened` before it lists the tab, so the host does not list the client's new agent tab yet.
+    @Test func theClientsNewAgentTabOpensBeforeTheHostListsIt() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let (service, bus, client) = try await watching(harness)
+        _ = try await client.call(AgentControlMethod.eventsSubscribe, params: try AgentJSON(encoding: AgentEventSubscribe()))
+        let grant = try #require(service.grants.first)
+        let id = UUID()
+        bus.post(.tabOpened(tab: BrowserTabRef(id: id, personaID: Self.persona, spaceID: nil, kind: .agent, engine: .webKit, url: nil, agentOwnerID: grant.id), openerTabID: nil),
+                 cause: BrowserEventCause(origin: .outsideClient(grant: grant.id)))
+        // Another grant's new agent tab still does not reach it.
+        bus.post(.tabOpened(tab: BrowserTabRef(id: UUID(), personaID: Self.persona, spaceID: nil, kind: .agent, engine: .webKit, url: nil, agentOwnerID: UUID()), openerTabID: nil))
+        bus.post(.tabClosed(tab: tab(UUID(), "https://a.example/"), reason: .user))
+        let opened = try await nextEvent(client)
+        #expect(opened["kind"] == .string("tabOpened"))
+        #expect(opened["tab"]?["handle"] == .string("t1"))
+        #expect(opened["byThisClient"] == .bool(true))
+        let next = try await nextEvent(client)
+        #expect(next["kind"] == .string("tabClosed"))
+    }
+
+    @Test func aGrantWhoseTimeIsUpReadsNoMoreEvents() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let bus = BrowserEventBus()
+        service.attach(events: bus)
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(Self.persona), scopes: AgentGrantScopes(watchEvents: true), duration: .day)]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        _ = try await client.callTool("list_spaces")
+        let grant = try #require(service.grants.first)
+        bus.post(.tabOpened(tab: tab(UUID(), "https://a.example/"), openerTabID: nil))
+        let buffer = try #require(service.outsidePrograms.buffers[grant.id])
+        #expect(buffer.events.count == 1)
+        // A day later, before the expiry check runs, the grant gets nothing more.
+        harness.now = harness.now.addingTimeInterval(24 * 60 * 60 + 1)
+        bus.post(.tabOpened(tab: tab(UUID(), "https://b.example/"), openerTabID: nil))
+        #expect(buffer.events.count == 1)
+    }
+
     @Test func subscribingNeedsTheScopeAndAFilterOfTheGrantsPersona() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -141,6 +182,8 @@ import Testing
         let closes = try await client.callTool("watch_events", ["after": 0, "kinds": ["tabClosed"], "timeout_ms": 50])
         guard case .array(let closed)? = closes.structured?["events"] else { Issue.record("No events."); return }
         #expect(closed.map { $0["kind"] } == [.string("tabClosed")])
+        // A kind Arch does not know is refused, as events/subscribe refuses it.
+        #expect(try await client.callTool("watch_events", ["after": 0, "kinds": ["tabClosd"], "timeout_ms": 50]).code == "invalidArguments")
         // A later call waits for the next event after its cursor.
         let waiting = Task { try await client.callTool("watch_events", ["after": .number(last), "timeout_ms": 5_000]) }
         try await Task.sleep(for: .milliseconds(200))

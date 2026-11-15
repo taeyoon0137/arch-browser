@@ -428,9 +428,9 @@ public struct AgentHookSummary: Codable, Equatable, Sendable {
     public var name: String
     /// The situation in words, such as "When a new tab loads its first page".
     public var trigger: String
-    /// `active`, or `paused` with the reason's sentence.
+    /// `active`, or `paused` with the reason's name in parentheses, such as `paused (grantEnded)`.
     public var state: String
-    /// The last run's time and outcome, when it ran.
+    /// The last run's time and outcome, when it ran and the grant has Watch Browser Events.
     public var lastRun: String?
 
     public init(id: UUID, name: String, trigger: String, state: String, lastRun: String? = nil) {

@@ -29,10 +29,12 @@ public struct BrowserTabRef: Codable, Hashable, Sendable {
 
     /// Identity of the live main document, used only inside Arch.
     public var documentID: UUID?
+    /// For an agent tab, the session or outside client's grant whose folder holds it, used only inside Arch: a tab's `tabOpened` is posted before the session lists the tab.
+    public var agentOwnerID: UUID?
 
     private enum CodingKeys: String, CodingKey { case id, personaID, spaceID, kind, engine, url }
 
-    public init(id: UUID, personaID: UUID, spaceID: UUID?, kind: BrowserTabKind, engine: EngineKind, url: URL?, documentID: UUID? = nil) {
+    public init(id: UUID, personaID: UUID, spaceID: UUID?, kind: BrowserTabKind, engine: EngineKind, url: URL?, documentID: UUID? = nil, agentOwnerID: UUID? = nil) {
         self.id = id
         self.personaID = personaID
         self.spaceID = spaceID
@@ -40,6 +42,7 @@ public struct BrowserTabRef: Codable, Hashable, Sendable {
         self.engine = engine
         self.url = url
         self.documentID = documentID
+        self.agentOwnerID = agentOwnerID
     }
 }
 

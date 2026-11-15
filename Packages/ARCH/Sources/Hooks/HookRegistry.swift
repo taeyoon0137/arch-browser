@@ -286,6 +286,8 @@ public final class HookRegistry: ObservableObject {
     private var isPreparingKey = false
     /// When each program's last proposal was declined, so that its next one waits a minute.
     private var proposalDeclines: [AgentClientIdentity.Key: Date] = [:]
+    /// The programs whose proposal sheet is open, each of which has at most one.
+    private var openProposals: Set<AgentClientIdentity.Key> = []
     /// The identities with a grant in force, as the agents' service last said, and as the registry last applied them.
     private var reportedPrograms: Set<AgentClientIdentity.Key>?
     private var appliedPrograms: Set<AgentClientIdentity.Key>?
@@ -756,8 +758,9 @@ public final class HookRegistry: ObservableObject {
         for (index, hook) in hooks.enumerated() where hook.state == .active && hook.trigger.kind == event.kind {
             guard hook.filter.matches(event),
                   hook.trigger.matches(event, previousDocument: previousDocument, carriesFirstLoad: carryOvers.contains(hook.id)) else { continue }
-            // A hook that may reach a model gets nothing from a site excluded from AI, which its log therefore does not name either.
-            if hook.usesAgent, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { continue }
+            // A hook that may reach a model, or an outside program's hook, gets nothing from a site excluded from AI, which its log therefore does not name either.
+            if hook.keepsToAISites, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { continue }
+            if !mayRunProgramHook(hook) { continue }
             let chain = event.cause?.hookChain ?? []
             if chain.contains(hook.id) || chain.count >= Self.maximumHookChain {
                 recordSkip(of: hook, event: event, .loop)
@@ -810,7 +813,7 @@ public final class HookRegistry: ObservableObject {
 
     /// The registry's checks after the delay (`docs/hooks.md`, Running, step 6).
     private func mayStart(_ run: HookRun) -> Bool {
-        guard isReady, runsHooks, let hook = hook(withID: run.hookID), hook.state == .active, !hook.script.isShell || allowsShellScripts else {
+        guard isReady, runsHooks, let hook = hook(withID: run.hookID), hook.state == .active, !hook.script.isShell || allowsShellScripts, mayRunProgramHook(hook) else {
             return decline(run, .inactive)
         }
         guard dayCount(of: hook.id).runs < hook.timing.runsPerDay else { return decline(run, .dailyLimit) }
@@ -822,7 +825,7 @@ public final class HookRegistry: ObservableObject {
                 return decline(run, .documentChanged)
             }
         }
-        if hook.usesAgent, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { return decline(run, .excludedSite) }
+        if hook.keepsToAISites, !event.urls.allSatisfy(ai.settings.allowsAI(on:)) { return decline(run, .excludedSite) }
         return true
     }
 
@@ -891,7 +894,7 @@ public final class HookRegistry: ObservableObject {
                             requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) -> HookInvocation? {
         let event = run.event
         let settings = ai.settings
-        let access = BrowserEventScriptAccess.hook(tabs: hook.grant.permissions.contains(.tabs), allowsAI: hook.usesAgent ? { settings.allowsAI(on: $0) } : nil)
+        let access = BrowserEventScriptAccess.hook(tabs: hook.grant.permissions.contains(.tabs), allowsAI: hook.keepsToAISites ? { settings.allowsAI(on: $0) } : nil)
         guard let view = event.view(access) else { return nil }
         // A close's own tab is gone, and a test treats it as closed.
         let closedID = event.kind == .tabClosed ? event.subject : nil
@@ -1307,6 +1310,11 @@ extension HookOrigin {
     }
 }
 
+extension Hook {
+    /// Whether site exclusions keep events from the hook (hook decision 14): it may reach a model, or an outside program added it.
+    var keepsToAISites: Bool { usesAgent || origin.programKey != nil }
+}
+
 extension HookRegistry: AgentHookRegistrar {
     /// The hooks one program's identity may have.
     public static let hooksPerProgram = 20
@@ -1336,6 +1344,16 @@ extension HookRegistry: AgentHookRegistrar {
         applyProgramGrants()
     }
 
+    /// Whether the hook's origin lets it run now: an outside program's hook waits for the first report of the grants in force, which the agents' service sends once it has checked `agent.json`, so that a hook whose grant ended while Arch was closed never runs before it pauses.
+    func mayRunProgramHook(_ hook: Hook) -> Bool {
+        hook.origin.programKey == nil || appliedPrograms != nil
+    }
+
+    /// Whether the program had a grant in force at the last report.
+    private func hasGrant(_ client: AgentClientIdentity.Key) -> Bool {
+        appliedPrograms?.contains(client) == true
+    }
+
     /// Pauses with `grantEnded` each active hook whose program had a grant in force and now has none. The first time after launch, every program that added a hook counts as having had one, so that a hook whose grant ended while Arch was closed, as one until Arch quits does, pauses then.
     private func applyProgramGrants() {
         guard isReady, let clients = reportedPrograms else { return }
@@ -1351,6 +1369,7 @@ extension HookRegistry: AgentHookRegistrar {
         if changed { persist() }
     }
 
+    /// Shows one sheet per program at a time. The calling task's cancellation, as when the program's connection closes, closes the sheet as unanswered, and a program whose access ended or that left while the sheet showed adds nothing and is not asked for Touch ID.
     public func propose(_ proposal: AgentHookProposal, from client: AgentClientIdentity, grant: AgentGrant) async -> AgentHookDecision {
         guard isReady else { return .refused("Arch has not read its hooks yet. Try again in a moment.") }
         func capped() -> Bool { hooks.filter { $0.origin.programKey == client.key }.count >= Self.hooksPerProgram }
@@ -1358,6 +1377,7 @@ extension HookRegistry: AgentHookRegistrar {
         if let declined = proposalDeclines[client.key], now().timeIntervalSince(declined) < Self.proposalInterval {
             return .declined("You did not allow a hook from \(client.displayName) a moment ago. Arch asks again after a minute.")
         }
+        if openProposals.contains(client.key) { return .declined("Arch is already showing a hook from \(client.displayName). Wait for the answer to that one.") }
         if let problem = HookScriptRunner.problem(in: proposal.script) { return .refused(problem) }
         let hook: Hook
         do {
@@ -1367,16 +1387,21 @@ extension HookRegistry: AgentHookRegistrar {
         }
         if let problem = programCapsProblem(hook, of: nil) { return .refused(problem) }
         guard let proposalPrompt else { return .refused("Arch cannot show the proposal now.") }
-        guard await proposalPrompt.ask(review(of: hook, script: proposal.script, client: client)) else {
+        openProposals.insert(client.key)
+        defer { openProposals.remove(client.key) }
+        let allowed = await proposalPrompt.ask(review(of: hook, script: proposal.script, client: client))
+        // The program's access may have ended, or the program left, while the sheet showed.
+        guard hasGrant(client.key) else { return .refused("The program's access to Arch ended while you answered.") }
+        guard allowed, !Task.isCancelled else {
             proposalDeclines[client.key] = now()
-            return .declined("You did not allow the hook \u{201C}\(hook.name)\u{201D}.")
+            return .declined(Task.isCancelled ? "The program left before you answered." : "You did not allow the hook \u{201C}\(hook.name)\u{201D}.")
         }
         guard await authenticator.authenticate(reason: "add the hook \u{201C}\(hook.name)\u{201D} from \u{201C}\(client.displayName)\u{201D}") else {
             proposalDeclines[client.key] = now()
             return .declined("Arch did not add the hook, since Touch ID or the login password did not confirm it.")
         }
-        // The program's access or the list may have changed while the sheet showed.
-        if let applied = appliedPrograms, !applied.contains(client.key) { return .refused("The program's access to Arch ended while you answered.") }
+        guard hasGrant(client.key) else { return .refused("The program's access to Arch ended while you answered.") }
+        guard !Task.isCancelled else { return .declined("The program left before Arch added the hook.") }
         if capped() { return .refused("\(client.displayName) has added \(Self.hooksPerProgram) hooks, the most for one program. Remove one first.") }
         do {
             try add(hook, script: proposal.script)
@@ -1479,6 +1504,6 @@ extension HookRegistry: AgentHookRegistrar {
         }
         return HookProposalReview(clientName: client.displayName, clientPath: client.executablePath, name: hook.name,
                                   situation: "\(hook.trigger.situationSentence) \u{00B7} \(places) \u{00B7} \(sites)", permissions: permissions, agent: agent,
-                                  script: String(decoding: script, as: UTF8.self))
+                                  prompt: hook.agent?.prompt, script: String(decoding: script, as: UTF8.self))
     }
 }

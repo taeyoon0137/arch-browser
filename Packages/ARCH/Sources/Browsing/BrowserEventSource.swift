@@ -224,7 +224,8 @@ final class BrowserEventSource {
     }
 
     private func ref(_ tab: Tab, url: URL?) -> BrowserTabRef {
-        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: Self.kind(of: tab), engine: tab.engineKind, url: url, documentID: tab.documentID)
+        BrowserTabRef(id: tab.id, personaID: tab.personaID, spaceID: tab.spaceID, kind: Self.kind(of: tab), engine: tab.engineKind, url: url, documentID: tab.documentID,
+                      agentOwnerID: tab.agentOwnerID)
     }
 
     /// A tab that an agent folder holds (`Tab.agentOwnerID`) is an agent's, whatever else it is, and becomes the user's kind again once it leaves the folder.

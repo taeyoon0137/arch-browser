@@ -133,10 +133,10 @@ struct AgentSettingsPage: View {
         }
     }
 
-    /// The agent runs `arch-cli agent run` may start a day under the grant, which the user can type or step.
+    /// The agent runs `arch-cli agent run` may start a day under the grant, which the user can type or step, labeled as the row's other details are.
     private func runsPerDayRow(of grant: AgentGrant) -> some View {
         let runs = Binding(get: { grant.runsPerDay }, set: { service.setRunsPerDay($0, for: grant.id) })
-        return LabeledContent("Agent runs a day") {
+        return LabeledContent {
             HStack(spacing: 6) {
                 TextField("Agent runs a day", value: runs, format: .number)
                     .labelsHidden()
@@ -144,6 +144,8 @@ struct AgentSettingsPage: View {
                     .frame(width: 64)
                 Stepper("Agent runs a day", value: runs, in: AgentGrant.runsPerDayRange).labelsHidden()
             }
+        } label: {
+            Text("Agent runs a day").font(.caption).foregroundStyle(.secondary)
         }
     }
 

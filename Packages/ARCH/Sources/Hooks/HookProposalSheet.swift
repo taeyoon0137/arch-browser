@@ -1,4 +1,4 @@
-// The proposal sheet (`docs/hooks.md`, arch-cli hooks; Hooks from outside programs): a hook that an outside program proposes with `arch-cli hooks add` shows here, in Arch's frontmost main window, with a notification without content while Arch is in the background. It names the client and its path, the hook's name, its situation with "Persona / Space" entries, its permissions in sentences, its agent options, the sentence on tab names, and the script's full source, read-only. It has no default button: Escape is Don't Allow, and Allow takes only a pointer click that no other program posted, after which the registry asks for Touch ID or the login password. An unanswered sheet closes as Don't Allow after the outside clients' approval window.
+// The proposal sheet (`docs/hooks.md`, arch-cli hooks; Hooks from outside programs): a hook that an outside program proposes with `arch-cli hooks add` shows here, in Arch's frontmost main window, with a notification without content while Arch is in the background. It names the client and its path, the hook's name, its situation with "Persona / Space" entries, its permissions in sentences, its agent options, the sentence on tab names, the agent's instructions, and the script's full source, both read-only. It has no default button: Escape is Don't Allow, and Allow takes only a pointer click that no other program posted, after which the registry asks for Touch ID or the login password. An unanswered sheet closes as Don't Allow after the outside clients' approval window, and so does one whose asking task is cancelled, as when the program leaves.
 import Agent
 import AgentControl
 import AI
@@ -17,13 +17,15 @@ public struct HookProposalReview: Sendable {
     public var permissions: [String]
     /// The agent run's model, record, actions, and limits, one line each; empty without `agent`.
     public var agent: [String]
+    /// The agent run's instructions, which the program wrote; nil without `agent`.
+    public var prompt: String?
     public var script: String
 
     /// What the sheet says about the names a hook gives (`docs/hooks.md`, Hooks from outside programs).
     public static let tabNamesSentence = "Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read."
 }
 
-/// Shows the proposal sheet. `ask` returns true only for Allow, and false for Don't Allow, a sheet that closed unanswered, and one that `cancelAll()` closed.
+/// Shows the proposal sheet. `ask` returns true only for Allow, and false for Don't Allow, a sheet that closed unanswered, one that `cancelAll()` closed, and one whose asking task was cancelled.
 @MainActor
 public protocol HookProposalPrompting: AnyObject {
     func ask(_ review: HookProposalReview) async -> Bool
@@ -42,23 +44,28 @@ public final class HookProposalSheetPresenter: HookProposalPrompting {
     }
 
     public func ask(_ review: HookProposalReview) async -> Bool {
-        guard let parent = window() else { return false }
+        guard let parent = window(), !Task.isCancelled else { return false }
         if !NSApp.isActive { Self.postNotification() }
-        return await withCheckedContinuation { continuation in
-            let id = UUID()
-            var sheet: NSWindow?
-            let finish: (Bool) -> Void = { [weak self] allowed in
-                guard let self, self.openSheets.removeValue(forKey: id) != nil else { return }
-                if let sheet { parent.endSheet(sheet) }
-                continuation.resume(returning: allowed)
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                var sheet: NSWindow?
+                let finish: (Bool) -> Void = { [weak self] allowed in
+                    guard let self, self.openSheets.removeValue(forKey: id) != nil else { return }
+                    if let sheet { parent.endSheet(sheet) }
+                    continuation.resume(returning: allowed)
+                }
+                let window = NSWindow(contentViewController: NSHostingController(rootView: HookProposalSheetView(review: review, finish: finish)))
+                sheet = window
+                openSheets[id] = finish
+                parent.beginSheet(window)
+                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(AgentLimits.outsideApprovalDefaultMinutes * 60)) {
+                    MainActor.assumeIsolated { finish(false) }
+                }
             }
-            let window = NSWindow(contentViewController: NSHostingController(rootView: HookProposalSheetView(review: review, finish: finish)))
-            sheet = window
-            openSheets[id] = finish
-            parent.beginSheet(window)
-            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(AgentLimits.outsideApprovalDefaultMinutes * 60)) {
-                MainActor.assumeIsolated { finish(false) }
-            }
+        } onCancel: {
+            // The sheet opens on the main actor before this runs there.
+            Task { @MainActor [weak self] in self?.openSheets[id]?(false) }
         }
     }
 
@@ -105,6 +112,20 @@ struct HookProposalSheetView: View {
             }
             .font(.callout)
             .fixedSize(horizontal: false, vertical: true)
+            if let prompt = review.prompt {
+                Text("Agent Instructions")
+                    .font(.subheadline.weight(.semibold))
+                ScrollView {
+                    Text(prompt)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(height: 80)
+                .background(Color(nsColor: .textBackgroundColor))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor)))
+            }
             Text("Script")
                 .font(.subheadline.weight(.semibold))
             ScrollView {
