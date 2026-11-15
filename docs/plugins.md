@@ -89,7 +89,7 @@ The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions
 | `settings` | `key`, `title`, `help`, `type` (`toggle`, `text`, `number` with optional `min` and `max`, `choice` with its `options`, or `secret`), `default` (false, empty text, the minimum or 0, or the first option when missing; none for a secret) |
 | `pageScripts` | `matches`, `excludes`, `js`, `runAt` (`documentStart`, or `documentEnd` by default), `allFrames` |
 
-- Arch refuses every other key until its implementation reads it, such as `siteAccess`, `network`, a sidebar item's `panel`, `settingsPage`, a command's `takesArgument`, a page script's `css`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, and `clipboard`. `events` refuses a kind the bus does not have, and the plugin's own `settingChanged` is not built yet.
+- Arch refuses every other key until its implementation reads it, such as `siteAccess`, `network`, a sidebar item's `panel`, `settingsPage`, a command's `takesArgument`, a page script's `css`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, `clipboard`, and `ai`. `events` refuses a kind the bus does not have, and the plugin's own `settingChanged` is not built yet.
 - Commands need a background script. Menu items and sidebar items name listed commands. Command and sidebar item identifiers and setting keys are unique.
 - A path names a regular file of the package: names separated by `/`, none empty, `.`, or `..`, and no link leading out of the package. Each file in a page script's `js` becomes a separate page script with the entry's patterns and timing. It must be UTF-8 text that parses as a function body on its own, which both the review and the index check.
 - A refusal throws `PluginError.invalidPackage` with a sentence that names the field, such as `plugin.json: contributes.menus[0].command names “b”, which contributes.commands does not list.`
@@ -161,7 +161,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `downloads` | `downloadFinished` events with file names and addresses; renaming finished downloads | No download events |
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
 | `notifications` | Local notifications through UserNotifications | Calls throw `permissionDenied` |
-| `ai` | Requests through the AI interface (VII.1) under the plugin's own routing entry | No AI access |
+| `ai` | Requests through the AI interface (VII.1) under the plugin's own feature, `plugin.<id>`, with text only; with `events`, its listeners run as hooks on the shared hook scheduler (see AI hooks and plugins that AI writes) | Calls throw `permissionDenied` |
 | `agent` | Agent runs through `arch.agent.run` within the grant's tools, tab access, record level, limits, and daily count (`docs/hooks.md`, Agent run API). Hook scripts get it from their hook's grant; staging refuses it for installed plugins until their install sheet states that grant | No agent runs |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
 
@@ -185,8 +185,8 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
   - The bridge is a `WKScriptMessageHandlerWithReply` on that web view only. A user script defines `arch` in the page's world at the start of each document, and the app hands the background script commands and page script values through `callAsyncJavaScript`. The host identifies the calling plugin by the sending web view, never by the message.
   - Panels and HTML settings pages use the same configuration and bridge.
 - Web extensions run in the engines' own extension sandboxes: WebKit's for `WKWebExtensionController`, Chromium's for CEF's extension runtime.
-- Hangs and crashes: a background is hung if it leaves its start (the load of its document), an event, a command, or a page message unanswered for 10 seconds. The host releases its web view (whether WebKit then ends the process at once needs verification), fails the calls that wait for it, and starts it again at the next event. `webViewWebContentProcessDidTerminate` reports crashes the same way. WebKit immediately fails a call whose promise can no longer settle, so only a promise that stays pending or a script that keeps running counts as hung. After three failures within five minutes, the host disables the plugin. Its Settings row says why for the rest of that run, unless the user switches it on again.
-- Resources: a background starts at its first event, command, or page message and stops after 30 seconds without work. Its badges stay. A panel's web view lives only while the panel is open.
+- Hangs and crashes: a background is hung if it leaves its start (the load of its document), an event, a command, or a page message unanswered for 10 seconds, not counting the time it waits for Arch's answer to an AI request it made; the 10 seconds count again from that answer. The host releases its web view (whether WebKit then ends the process at once needs verification), fails the calls that wait for it, and starts it again at the next event. `webViewWebContentProcessDidTerminate` reports crashes the same way. WebKit immediately fails a call whose promise can no longer settle, so only a promise that stays pending or a script that keeps running counts as hung. After three failures within five minutes, the host disables the plugin. Its Settings row says why for the rest of that run, unless the user switches it on again.
+- Resources: a background starts at its first event, command, or page message and stops after 30 seconds without work, which a wait for an AI reply is not. Its badges stay. A panel's web view lives only while the panel is open.
 
 ## Lifecycle
 
@@ -364,8 +364,9 @@ VI.1 then added Chromium's `EngineExtensions` with `check(_:)` and lists `extens
 
 ## AI hooks and plugins that AI writes
 
-- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins, because plugins have no events or `ai` permission yet: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`. Once plugins have `ai`, a plugin with `ai` that declares hooks will get those events from the browser event bus and run its listeners as steps of the shared hook scheduler that the center owns, at order 200 under its own feature (`docs/hooks.md`, Plugins); it will not register with the center.
-- The plugin API has no other AI-specific part except `agent`, below. A plugin with `ai` sends requests through the AI interface (VII.1), which applies the routing table and page data rules. The plugin never sees a provider or a key.
+- The built-in AI hooks (VII.6) live in `Browsing`, not in plugins: they subscribe to `pageLoaded` and `downloadFinished` at the AI interface's hook center directly. Naming a tab uses `renameTab`; renaming a download uses `renameDownload`.
+- A plugin with `ai` that lists events declares hooks (`InstalledPlugin.runsHooks`). Its events come from the browser event bus as for any plugin, but each runs its listeners as a step of the shared hook scheduler that the center owns, at order 200 (`PluginManager.hookOrder`) under the plugin's feature (`docs/hooks.md`, Plugins); it does not register with the center. The scheduler applies the feature's checks (on, automatic, and with a model of its own; the event's addresses open to AI; room in the daily limit for automatic requests and the monthly spending limit) and its pause after three consecutive authentication or provider errors. A step runs while the plugin is enabled, within the scheduler's 30-second timeout, after the plugin's earlier steps, so the requests a listener starts belong to the running step: their errors count toward the pause, and they end with `cancelled` when the scheduler stops the step, as at the tab's next document or close or a change to the plugin's route. What a listener throws goes nowhere.
+- The plugin API has no other AI-specific part except `agent`, below. A plugin with `ai` sends requests through the AI interface (VII.1) with `PluginContext.ai()`, or `arch.ai.reply` from a script; the interface applies the routing table and page data rules, and the plugin never sees a provider or a key. Every request goes out under the plugin's own feature, `plugin.<id>`, on that feature's route, whatever feature, route, or model it names. The manager registers the feature, named after the plugin, while the plugin is enabled, and it carries text only. It is automatic while the plugin declares hooks, so its hooks and its other requests wait for a model of its own; otherwise the user starts its requests, which use the default route until the feature has models of its own. Plugins with one identifier in several Personas share the feature and its route: it stays registered while one of them is enabled and is automatic while one of them declares hooks. Settings ▸ Plugins says which models the plugin uses. A plugin's code could copy what a page script read into a text part, so a plugin with `ai` gets no page script values from a frame or a tab on a site excluded from AI.
 - Hooks (`docs/hooks.md`) reuse the script runtime. A JavaScript hook script runs as a `ScriptPlugin` with a package the hook registry creates in memory and a `PluginContext` of its own, outside the plugin manager. Its `arch.agent.run` calls the agent run API through `runAgent(_:)` under the `agent` permission. Plugin events come from the same browser event bus.
 - The composer (VII.7, `docs/ai.md`) writes a script plugin only, never a built-in plugin or a web extension, with no sites or page scripts and with its background script as its only file, and stages its files with `PluginManager.stage(_:writtenBy:)` under an identifier that Arch gives it.
 - A plugin that AI wrote uses the same review sheet, which also shows the requests it came from and every file's full source. Install installs it switched off and Install and Enable switched on, with the origin `generated`, and Settings says that AI wrote it.
@@ -439,10 +440,10 @@ public struct PluginManifest: Hashable, Codable, Sendable {
 public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable {
     case tabs
     case renameTabs = "tabs.rename"
-    case clipboard, nativeMessaging
+    case clipboard, nativeMessaging, ai
     // Not built yet.
     case manageTabs = "tabs.manage"
-    case history, downloads, notifications, ai
+    case history, downloads, notifications
     /// The permission as a plain sentence, such as "Read the titles and addresses of your tabs".
     public var summary: String { get }
 }
@@ -642,6 +643,10 @@ public protocol PluginContext: AnyObject {
     /// Needs `tabs.rename`. The tab's suggested name for the document it shows when the call arrives (a hook script: its run's document for the tab), under hook decision 13; nil removes it. Returns whether the tab took it, and throws `notGranted` for a tab the caller does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
 
+    // AI: `ai`.
+    /// The AI interface under the plugin's own feature, `plugin.<id>`, with text only: each request goes out under that feature and its route, whatever feature, route, or model it names. While one of the plugin's hook steps runs, the requests it starts count toward the scheduler's pause and stop with the step. Every request stops with `stopped` when the instance stops. A context without AI, such as a hook script's, throws `permissionDenied`.
+    func ai() throws -> any AIClient
+
     // Not built yet.
     func selectedTab() throws -> PluginTab?
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
@@ -667,7 +672,7 @@ public protocol PluginContext: AnyObject {
 }
 ```
 
-`PluginContext` gains the `ai` member when VII.1 defines the AI interface's client type. That member throws `permissionDenied` without the `ai` permission and sends every request under the plugin's own routing entry.
+`InstalledPlugin.runsHooks` says whether a plugin declares hooks: its grant has `ai`, and its manifest lists events.
 
 ### Values, events, and storage
 
@@ -992,8 +997,8 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var listWriteFailure: String?
 
     /// `directory` is the app's Application Support folder; the Persona's plugins live in `Plugins/<persona id>/` inside it. Reads `plugins.json`, registers the built-in plugins and reads the installed ones' packages, and tells each runtime the installed plugins of its kind, which runs what the enabled ones run without a command, such as a web extension's content scripts. Starts no plugin's instance.
-    /// `events` is the session's bus, whose events of the Persona reach the enabled plugins whose manifests list their kinds, and `browserHost` reaches the tabs.
-    public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], events: BrowserEventBus? = nil, browserHost: (any PluginBrowserHost)? = nil)
+    /// `events` is the session's bus, whose events of the Persona reach the enabled plugins whose manifests list their kinds, `browserHost` reaches the tabs, and `ai` is the AI interface of the plugins with `ai`, whose hook scheduler runs their hooks.
+    public init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], events: BrowserEventBus? = nil, browserHost: (any PluginBrowserHost)? = nil, ai: AIService? = nil)
     /// Copies a folder or archive into staging and validates it, refusing a `.crx` file whose signatures do not hold; the engines that run its kind check it, and the installed plugins it could update or join where they have no current answer, and the package names what the review offers. Throws, with the first engine's reason, for a package that every engine refuses.
     public func stage(_ url: URL) async throws -> PluginPackage
     /// Stages a `.crx` file that Arch downloaded with the origin `file` or `webStore`; a store package must carry the store's proof for that identifier and not be a theme (`docs/web-store.md`, Install flow).
@@ -1132,7 +1137,7 @@ public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) 
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.rename`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.rename`, `ai.reply`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
@@ -1140,6 +1145,7 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.events.on(kind, (event) => …)` | `Plugin.handle(_:)`: only the kinds in the manifest's `events` arrive, and several listeners for a kind run one after another |
 | `arch.tabs.list()`, `get(id)`, `selected()`, `open(url, options)`, `close(id)`, `select(id)`, `rename(id, name)` | The tab members of `PluginContext` |
 | `arch.agent.run(options)` | `runAgent(_:)` |
+| `arch.ai.reply(request)` | `ai()` and `reply(_:)` |
 | `arch.pages.run(tabId, file)`, `post(tabId, message)`, `onMessage((message) => reply)` | `runPageScript(.file(_:), in:)`, `postMessage(_:toTab:)`, `Plugin.receive(_:)` |
 | `arch.storage.get(key)`, `set(key, value)`, `keys()` | `PluginStorage` |
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
@@ -1152,6 +1158,7 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 - An event's listeners run one after another. The delivery function returns what the first that throws or rejects threw, as an error's message after its name unless it is a plain `Error`, or as the thrown value's text, and that no listener was set for the kind, as JSON, which `Plugin.handle(_:)` throws as `PluginError.listenerFailed` and `noListener`. The manager ignores both; a hook script's run fails with them.
 - A plugin never receives an event its own calls caused, such as the title change of its own rename, and receives at most 10 events for one subject and 60 in all within a minute (`docs/hooks.md`, Plugins). Its listeners run outside hook chains, so this cap is what stops two plugins, or a plugin and a hook, that answer each other's renames.
 - `storage.set(key)` without a value, or with `undefined`, removes the key; `storage.set(key, null)` stores `null`. `secrets.set(key)` and `ui.setBadge(itemId)` without text, or with `null`, delete the secret and the badge.
+- `ai.reply(request)` takes `{instructions, messages, schema, maxOutputTokens}`, of which only `messages` is required: each message is `{role, text}` with the role `user` or `assistant`, `schema` is a JSON Schema object for a JSON reply, and `maxOutputTokens` is a whole number from 1. It resolves with `{text, finishReason}`, the reason `completed` or `lengthLimit`, and rejects with `permissionDenied` without `ai`, `invalidCall` for a request with another key or value, or the `AIError` case the request ended with, such as `notConfigured` or `cancelled`. `arch.ai.stream` follows with script plugin panels, which can show a reply as it arrives.
 
 Page scripts get a smaller `arch` in their world: `arch.send(message)` resolves with the plugin's reply, and `arch.onMessage((message) => …)` receives `postMessage(_:toTab:)`.
 
@@ -1208,7 +1215,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 3. The engine page script members on both adapters, including the helper's renderer process handler on Chromium.
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
 5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof, IV.17 the Web Store's client and staging, IV.18 its entry points, IV.19 Chromium's store button, and IV.20 its updates; IV.21 added the password managers' host discovery and proof gate, and IV.22 the install script and the native app status in Settings; IV.17 then added the store's page hosts, and the password managers' checks with the app (IV.13) follow.
-6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) follow.
+6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) are built. `arch.ai.stream` follows with script plugin panels, and the data kinds that the `ai` permission would list follow with the page members.
 
 ## Open decisions
 
@@ -1217,5 +1224,6 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - One extension, two runtimes: each engine keeps its own copy of an extension's state and storage, so the user may unlock a password manager once per engine.
 - Engine versions by name: without a shared `key`, two packages match only by name and a matching developer field, which a package can copy, as it can copy a `key`. The review's choice, which starts on joining only for packages whose checks complement each other, and Separate Versions are the safeguards. Whether a matching name alone should pair two packages whose manifests name no developer is open; until then the user joins them with Join With… or Install \<Engine> Version….
 - Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site must use a page script on that site.
+- A plugin with `ai` and page scripts, but no events, has a feature that the user starts, although its page script values can start requests as pages load. Whether such a plugin's feature should be automatic, so that it waits for a model of its own and counts toward the daily limit for automatic requests, is open.
 - Site access defaults to `whenInvoked` when a manifest asks for all sites.
 - The 10-second hang limit, 30-second idle stop, and 5 MB storage limit are starting values.

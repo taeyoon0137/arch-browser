@@ -304,7 +304,7 @@ The first features:
 | `hook.tabName` | VII.6 | automatic | page, with text limited to 2,000 characters | - |
 | `hook.downloadName` | VII.6 | automatic | download | - |
 | `pluginComposer` | VII.7 | user | text only | `jsonOutput` |
-| `plugin.<id>` | not built | automatic when the manifest declares hooks, otherwise user | the kinds in the manifest's `ai` permission | - |
+| `plugin.<id>` | V.11 | automatic when the plugin declares hooks (`ai` and events), otherwise user | text only | - |
 | `agent` | VII.17 registers it; VII.16 runs its sessions on Claude Code and Codex (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
@@ -510,7 +510,7 @@ The service resolves the route when a request starts and keeps it for the whole 
 | `default` | on | the first model of the first provider the user connects |
 | `pageReader`, `pageQuestion`, `pluginComposer` | on | none (uses `default`) |
 | `hook.tabName`, `hook.downloadName` | off | none |
-| `plugin.<id>` | on once the user enables the plugin | none (uses `default` unless the plugin declares hooks, which makes it an automatic feature) |
+| `plugin.<id>` | on, registered while the user has the plugin enabled | none (uses `default` unless the plugin declares hooks, which makes it an automatic feature) |
 | `tier.fast`, `tier.standard`, `tier.deep` | on (not read) | none |
 
 ### Fallbacks
@@ -653,7 +653,7 @@ public protocol AIPageSource: Sendable {
 
 Hooks let features act on browser events (row 54). The hook center lives in `AI`; `Browsing` posts the events and applies the actions.
 
-`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center). Its scheduling is `AIHookScheduler` beside it, which the center owns (`AIHookCenter.scheduler`) and plugin hooks and the hook registry are to share, so one event's hooks from all three run in one chain under the rules below (`docs/hooks.md`, The shared scheduler).
+`docs/hooks.md` describes the design around this center: one browser event bus shared by the center, hooks, plugins, and outside programs; hooks that run scripts; and agent runs. The center keeps `AIHookEvent`, which `BrowserHooks` creates from the bus's events (`docs/hooks.md`, The AI hook center). Its scheduling is `AIHookScheduler` beside it, which the center owns (`AIHookCenter.scheduler`) and plugin hooks and the hook registry share, so one event's hooks from all three run in one chain under the rules below (`docs/hooks.md`, The shared scheduler).
 
 ### Events
 
@@ -778,7 +778,7 @@ public enum AIHookError: Error, Sendable {
 
 ### Ordering
 
-- Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once. Once built, plugin hooks join the same chain at 200 and the hook registry's hooks at 1,000 and above, in the registry's order.
+- Hooks for one event run one at a time in ascending `priority`, with ties broken by feature ID. This lets later hooks see earlier actions and keeps one page load from starting several requests at once. Plugin hooks join the same chain at 200 and the hook registry's hooks at 1,000 and above, in the registry's order.
 - Each hook's actions apply as soon as it returns, before the next hook runs. Actions of kinds the registration does not allow never reach the host, and only actions the host applied appear in `appliedActions`.
 - Events for different subjects run independently within the providers' rate limits.
 - The scheduler skips the center's hooks without sending a request, after each hook's delay, when their feature is not a registered automatic feature, is switched off, has no usable model of its own, or is paused, and when it has reached the daily limit for automatic requests or the monthly spending limit, which the center keeps as the feature's last error. It checks the event's site when the center posts the event and again after each delay.
@@ -831,7 +831,7 @@ AI writes a script plugin (row 55) from the user's request. The plugin runs on t
 2. `PluginComposer` in `Plugins` sends the description as the only message. Its instructions contain Arch's plugin reference (`PluginComposerInstructions.swift`, kept in step with `plugin.json`, the bridge, and the checks below): the reply's form and its limit of 8,192 output tokens, which the request also sets; the manifest keys plugins that AI writes may use; the background script, the only file that runs, with its sandbox and limits; the `arch` calls; and the rules to ask for the fewest permissions and use only what the reference describes. It asks for a `.json` reply with the schema `{"manifest": {…}, "files": {"<name>.js": "…"}}`. It sends no page data.
 3. Arch checks the reply: it is a JSON object with a manifest object and a files object; the manifest asks for no `sites` and no `contributes.pageScripts`, so the plugin does not reach pages; the files hold only the background script that the manifest names, since the background document loads no other file; its name consists of letters, digits, `-`, `_`, and `.`, does not start with a dot, and ends in `.js`; it parses as a classic script, the form the background document runs, which `JSCheckScriptSyntax` checks without running it; and the files with `plugin.json` total at most 256 KB, a limit only a command-line tool can exceed because it has no output limit. Arch writes `plugin.json` from the manifest with the current `apiVersion` and an identifier of its own, `xyz.taeyoon.arch.generated.<UUID>`, which the composer gives every version it writes so no version can replace another plugin. `PluginManager.stage(_:writtenBy:)` writes the files into `Staging/<UUID>/` and reads the package with the same checks as every package (keys the runtime reads, permissions, commands with a background script, shortcuts, and settings).
 4. A reply that fails a check goes back to the model with the problem in a sentence, and the model replies with the whole plugin again, at most twice. A reply that is not JSON is requested again without being sent back. A reply over 256 KB ends the request at once, since it would cost more to send back than the model can fix. A reply cut by the output limit (`replyTooLong`) also ends it at once, reporting that the plugin is too long for one reply, since the same request would be cut again. The request ends with `PluginComposerError.unusableReply` and the last problem. The AI interface's errors end it at once; for those that Settings ▸ AI fixes (`notConfigured`, `authentication`, and `budgetReached`), the sheet offers Open AI Settings.
-5. Plugins that AI writes may ask for the permissions the script runtime has, `tabs` and `clipboard`, and run in the same sandbox as any script plugin: no network, no files, and no page scripts. Nothing runs before the user installs and enables the plugin.
+5. Plugins that AI writes may ask for the permissions that the composer's reference offers, `tabs`, `tabs.rename`, and `clipboard`, but not `ai`, and run in the same sandbox as any script plugin: no network, no files, and no page scripts. Nothing runs before the user installs and enables the plugin.
 
 ### Review
 
@@ -844,7 +844,7 @@ The review uses the install sheet in `docs/plugins.md` (Lifecycle), with additio
 ### Lifetime
 
 - `plugins.json` records a plugin that AI wrote with `generated`, the requests and the model's name, in place of `source` (`docs/plugins.md`, Storage). Its section in Settings ▸ Plugins says that AI wrote it, with which model, when, and from which requests. It switches off and is removed like any installed plugin.
-- Not built yet: the `ai` permission, which would let a plugin send requests under its own feature `plugin.<id>` through `arch.ai.stream` and `arch.ai.reply`, with parts limited to the kinds it lists; plugin hooks, which would run a plugin's event listeners as steps of the shared hook scheduler at order 200 under that feature, making it automatic, rather than register with the center (`docs/hooks.md`, Plugins); reading pages through host calls, which a plugin with `ai` could do only off excluded sites, since its code could copy page text into a text part; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
+- The `ai` permission lets a plugin send requests with text only under its own feature `plugin.<id>` through `PluginContext.ai()` and `arch.ai.reply`, and plugin hooks run the event listeners of a plugin with `ai` and events as steps of the shared hook scheduler at order 200 under that feature, which they make automatic, rather than register with the center (`docs/hooks.md`, Plugins; `docs/plugins.md`, AI hooks and plugins that AI writes). Not built yet: `arch.ai.stream`; the data kinds beyond text that the `ai` permission would list; reading pages through host calls, which a plugin with `ai` could do only off excluded sites, since its code could copy page text into a text part; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
 
 ## Errors
 

@@ -331,6 +331,10 @@ private struct PluginSection: View {
                     Text(note)
                         .foregroundStyle(.secondary)
                 }
+                if let note = plugin.aiNote {
+                    Text(note)
+                        .foregroundStyle(.secondary)
+                }
                 if !isPair, let note = plugin.enginesNote {
                     Text(note)
                         .foregroundStyle(.secondary)
@@ -774,6 +778,15 @@ extension PluginKind {
     /// What Settings and the install sheet say about plugins of the kind, if anything, before where the plugin runs.
     var note: String? {
         self == .webExtension ? "A web extension." : nil
+    }
+}
+
+extension InstalledPlugin {
+    /// Which models a plugin with `ai` uses, for its section: those Settings ▸ AI ▸ Features gives its feature, which it needs of its own when its events run as hooks.
+    var aiNote: String? {
+        guard grant.permissions.contains(.ai) else { return nil }
+        return runsHooks ? "Its events reach it, and its AI requests go out, once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own."
+                         : "Its AI requests use the model that Settings \u{25B8} AI \u{25B8} Features gives it, or the default model."
     }
 }
 

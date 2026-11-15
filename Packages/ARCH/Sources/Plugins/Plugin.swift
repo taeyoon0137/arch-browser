@@ -1,4 +1,5 @@
 // The plugin API: the protocols a plugin implements, the context through which it reaches the browser, and the values it receives. Every kind of plugin calls the same API, and a plugin gains a capability only when `PluginContext` gains a member.
+import AI
 import AppKit
 import ARCHEngine
 import Events
@@ -61,6 +62,15 @@ public protocol PluginContext: AnyObject {
     func tab(_ id: PluginTab.ID) throws -> PluginTab?
     /// Needs `tabs.rename`. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
+    /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. While one of the plugin's hook steps runs, the requests it starts count toward the scheduler's pause and stop with the step. Every request stops when the instance stops.
+    func ai() throws -> any AIClient
+}
+
+extension PluginContext {
+    /// A context that offers no AI, such as a hook script's, refuses it.
+    public func ai() throws -> any AIClient {
+        throw PluginError.permissionDenied(.ai)
+    }
 }
 
 /// A sandbox that may hand a script's agent options to a user-authorized browser hook.
