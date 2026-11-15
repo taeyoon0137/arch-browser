@@ -977,7 +977,7 @@ final class EngineRuntime {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.personas.count > 1, ask: { makeContent, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.remembersAnswersInSeveralPersonas(self.personas), ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
@@ -1510,6 +1510,11 @@ final class EngineRuntime {
     var agentOnlyPersonaID: Persona.ID? {
         get { permissionAnswers.agentOnlyPersonaID }
         set { permissionAnswers.agentOnlyPersonaID = Self.agentOnly(newValue) }
+    }
+
+    /// Whether remembered permission answers reach more than one of `personas`: the Agents Persona takes none.
+    public func remembersAnswersInSeveralPersonas(_ personas: [Persona]) -> Bool {
+        personas.filter { $0.id != agentOnlyPersonaID }.count > 1
     }
 
     /// The rule of `agentOnlyPersonaID`: the default Persona is never agent-only.

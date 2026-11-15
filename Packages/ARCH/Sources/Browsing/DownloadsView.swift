@@ -123,27 +123,35 @@ struct DownloadRowView: View {
             Image(nsImage: icon)
                 .resizable()
                 .frame(width: 32, height: 32)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.filename)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    // Keeps the extension, as the Finder does.
-                    .truncationMode(.middle)
-                // Without a known size the bar is indeterminate, as the library button's is, so a running download always shows one.
-                if entry.state == .inProgress {
-                    Group {
-                        if entry.totalBytes > 0 {
-                            ProgressView(value: Double(entry.completedBytes), total: Double(entry.totalBytes))
-                        } else {
-                            ProgressView()
+                // VoiceOver reads the name, progress, and status as one element, which opens a finished file; the buttons around it stay elements of their own.
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.filename)
+                        .font(.system(size: 13))
+                        .lineLimit(1)
+                        // Keeps the extension, as the Finder does.
+                        .truncationMode(.middle)
+                    // Without a known size the bar is indeterminate, as the library button's is, so a running download always shows one.
+                    if entry.state == .inProgress {
+                        Group {
+                            if entry.totalBytes > 0 {
+                                ProgressView(value: Double(entry.completedBytes), total: Double(entry.totalBytes))
+                            } else {
+                                ProgressView()
+                            }
                         }
+                        .progressViewStyle(.linear)
                     }
-                    .progressViewStyle(.linear)
+                    Text(fileIssue?.rawValue ?? status)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Text(fileIssue?.rawValue ?? status)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(opensFile ? .isButton : [])
+                // A tap gesture alone does not answer the accessibility press, so VoiceOver could not open the file.
+                .accessibilityAction { openFile() }
                 if fileIssue != nil {
                     HStack {
                         if entry.containingFolder != nil {
@@ -200,9 +208,5 @@ struct DownloadRowView: View {
             }
             Button("Remove from List") { session.removeDownload(entry) }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(opensFile ? .isButton : [])
-        // A tap gesture alone does not answer the accessibility press, so VoiceOver could not open the file.
-        .accessibilityAction { openFile() }
     }
 }

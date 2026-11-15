@@ -93,6 +93,18 @@ import Testing
         #expect(cards == 0)
     }
 
+    /// The permission card and Settings ▸ Websites say "in every Persona" only while answers reach more than one Persona, and the Agents Persona takes none.
+    @Test func theAgentsPersonaDoesNotCountAmongThePersonasThatTakeAnswers() throws {
+        let folder = try Folder()
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: folder.url)
+        session.agentOnlyPersonaID = session.addPersona(named: "Agents").id
+        #expect(!session.remembersAnswersInSeveralPersonas(session.personas))
+        _ = session.addPersona(named: "Work")
+        #expect(session.remembersAnswersInSeveralPersonas(session.personas))
+    }
+
     @Test func appleScriptAndListTabsReadOneSidebarOrder() {
         let personaID = Persona.defaultID
         let first = Space(name: "First", personaID: personaID)
