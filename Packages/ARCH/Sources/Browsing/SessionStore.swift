@@ -322,7 +322,7 @@ final class SessionStore {
         var version: Int?
     }
 
-    /// Capture on the main queue after half a quiet second, or after five seconds of continuous changes. The file is written on the serial writer.
+    /// Runs the newest `snapshot` closure on the main thread half a second after the last call, or five seconds after the first call since the last capture while calls continue, and writes nothing when it returns nil. The file is written on `writeQueue`. `now` and `enqueue` let tests supply the clock and the main queue.
     func scheduleSave(at now: DispatchTime = .now(),
                       enqueue: (DispatchTime, DispatchWorkItem) -> Void = { DispatchQueue.main.asyncAfter(deadline: $0, execute: $1) },
                       _ snapshot: @escaping () -> SessionSnapshot?) {

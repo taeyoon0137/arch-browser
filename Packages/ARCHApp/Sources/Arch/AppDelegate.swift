@@ -72,14 +72,15 @@ import Terminal
         guard profileOwnership == nil, !isAbandoningLaunch else { return }
         let alert = NSAlert()
         if let error = error as? POSIXError, error.code == .EWOULDBLOCK {
-            alert.messageText = "This Arch profile is already open."
-            alert.informativeText = "Quit the other copy of Arch, then try again. Links sent to this copy will open if you try again successfully."
+            alert.messageText = "Another copy of Arch is open."
+            alert.informativeText = "Quit the other copy of Arch, then click Try Again. Links sent to this copy open once it starts."
         } else {
             alert.messageText = "Arch couldn’t open its data folder."
             alert.informativeText = error.localizedDescription
         }
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Try Again")
+        NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertSecondButtonReturn {
             startWithProfile(in: directory)
         } else {
@@ -887,7 +888,7 @@ import Terminal
 
     // MARK: Page fullscreen
 
-    /// A page that fills its window in fullscreen leaves it on Escape in that window, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself. While the region capture overlay is up, Escape cancels the capture first.
+    /// A page that fills its window in fullscreen leaves it on Escape in that window, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself. While the region capture overlay is up, Escape cancels the capture first. While the page composes text, Escape goes to the input method.
     private func installFullscreenEscape() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
