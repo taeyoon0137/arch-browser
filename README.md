@@ -84,7 +84,7 @@ git config core.hooksPath .githooks
 ### Start a task from a tab
 
 1. Right-click an open web tab or favorite in the sidebar, choose **Ask Agent About This Tab…**, and type your question. The tab you were reading stays selected. For a question from the command palette, the **Ask Agent** row shows which page it will share. If you close the panel during setup, return to the same space and choose **View ▸ Show Agent Panel** to resume your draft.
-2. If the draft shows **Open Providers**, add an HTTP model with tool calling or a Claude Code or Codex preset. For a preset, sign in through Arch’s terminal. **Open Features** takes you to the **Agent Tasks** switch when it is off. Return to the draft, review the tab and model, and choose **Start**. If the agent asks a question, choose a suggested answer, enter your own, or cancel.
+2. If the draft shows **Open Providers**, add an HTTP model with tool calling or a Claude Code or Codex preset. For a preset, sign in through Arch’s terminal. Return to the draft, review the tab and model, and choose **Start**. If the agent asks a question, choose a suggested answer, enter your own, or cancel.
 3. Open **Shared Tabs** in the session to add or remove a tab. If the agent requests a tab, review the address in the panel before choosing **Share**. To read a link from a shared page, open the session menu and choose **Open in Research Tab…**. Pick a link from the page outline, review its full address, and confirm. The new tab opens in the background. To continue a question from the page reader, choose **Continue as Agent Task**. You can preview and attach the reader excerpt before starting.
 
 <a id="docs"></a>
