@@ -300,7 +300,7 @@ private let notRunning = AgentClientError.notRunning.message
         // A listener that is not Arch is refused before anything is sent, with its own sentence.
         _ = transcript.client(#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_tabs"}}"#)
         let refused = transcript.failed(.notArch(.otherCode))
-        #expect(refused.last?.contains("The socket is not Arch's") == true)
+        #expect(refused.last?.contains("is not the Arch that contains this arch-cli") == true)
         // A request from Arch is not something arch-mcp serves.
         _ = transcript.client(#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_tabs"}}"#)
         _ = transcript.connected()
