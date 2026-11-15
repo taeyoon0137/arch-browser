@@ -59,9 +59,11 @@ final class ChromiumInput: EngineInput {
         return kinds.map { KeyEvent(kind: $0, keyCode: keyCode, character: character, unmodifiedCharacter: unmodified) }
     }
 
-    /// Text goes as a character event per character, as CEF's input method calls work only for pages it draws offscreen; the page receives a keypress and input events for each. A character event carries one UTF-16 unit, so text outside the Basic Multilingual Plane, such as most emoji, cannot go. A line break as a character of its own submits a single-line field's form, as Enter does, so no text with a line break goes.
+    /// Text goes as a character event per character, as CEF's input method calls work only for pages it draws offscreen; the page receives a keypress and input events for each. A character event carries one UTF-16 unit, so text outside the Basic Multilingual Plane, such as most emoji, cannot go. A line break as a character of its own submits a single-line field's form, as Enter does, and a control character may map to Return's key, so no text with a line break or a control character goes.
     static func textEvents(for text: String) throws -> [KeyEvent] {
-        guard !text.contains(where: \.isNewline), text.unicodeScalars.allSatisfy({ $0.value <= 0xFFFF }) else { throw EngineInputError.unsupported }
+        guard !text.contains(where: \.isNewline), text.unicodeScalars.allSatisfy({ $0.value <= 0xFFFF && $0.properties.generalCategory != .control }) else {
+            throw EngineInputError.unsupported
+        }
         return text.flatMap { character in
             let keyCode = EngineKey.keyCode(typing: character).map(Int32.init) ?? noKeyCode
             return String(character).utf16.map { KeyEvent(kind: .character, keyCode: keyCode, character: $0, unmodifiedCharacter: $0) }
