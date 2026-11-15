@@ -531,11 +531,6 @@ public protocol Engine: AnyObject {
 
 `./scripts/check_engine_restore/run.py` checks that a pinned tab in a named Persona keeps its Chromium choice through a WebKit-only launch.
 
-In separate signed Chromium and WebKit checks, deleting a Persona cancelled a retryable failed download. A retry delivered after deletion issued no new request. An active transfer in another Persona continued. Reopening a closed tab after deleting only its space restored it to the surviving Persona. Reopening after deleting the Persona created a page with the receiving Persona’s storage. The app-wide history retained the visit.
-
-Six signed launches exercised a larger edit with 32 mixed-engine tabs in four spaces across two Personas. Two windows changed pane ordering and selection. A pin moved into a nested folder, and its name, Persona name and space name changed. A synchronous quit flush and a kill after the scheduled write both restored the edits. The six visible panes returned their expected local page text, and the other 26 tabs stayed unloaded. A kill before the write restored the complete prior state with seven visible panes. This fixture suppressed window ordering and did not measure native focus or frame placement.
-
-
 Before migrations or session setup, Arch takes an exclusive advisory lock on its Application Support directory and holds it through process exit. Copies using this guard compete for the same directory even through a symlink. Distinct directories can open independently. If the directory is busy, Quit closes this copy and Try Again starts it after the other copy exits. The waiting copy keeps incoming web links in memory until a successful retry or discards them on Quit. The operating system releases ownership after a crash. Older builds do not take the lock and can still overwrite the saved session. Quit any older copy before opening the same folder in another build. On a volume without advisory locks, Arch starts without the guard.
 
 While Arch starts, including while it waits on a locked folder, it queues HTTP and HTTPS addresses and opens them in arrival order as tabs of the restored main window. Once startup finishes, links follow the small-window preference. Delivery from Mail or Notes during startup has not been checked.
