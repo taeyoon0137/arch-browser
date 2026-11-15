@@ -1,4 +1,4 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `events`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `events`, `hooks`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
 import AgentControl
 import Foundation
 
@@ -54,6 +54,8 @@ enum CLICommands {
             return screenshot(call, output: output, json: request.json)
         case .events(let subscribe):
             return events(subscribe, json: request.json)
+        case .hooks(let action):
+            return hooks(action, json: request.json)
         }
     }
 
@@ -223,6 +225,71 @@ enum CLICommands {
                 default:
                     continue
                 }
+            }
+        }
+    }
+
+    // MARK: - hooks
+
+    /// Lists the hooks this client added, proposes one, or removes one. `add` reads the script and the agent options, which must be a JSON object, sends the proposal, says on standard error that it waits for the user, and prints the new hook's ID on Allow; Don't Allow exits 3 and a refusal, by Arch or of a script over 256 KB, exits 4.
+    private static func hooks(_ action: AgentHooksAction, json: Bool) -> AgentExitCode {
+        var proposal: AgentHookAdd?
+        if case .add(var add, let scriptPath, let agentPath) = action {
+            guard let script = FileManager.default.contents(atPath: scriptPath) else {
+                printError("arch-cli could not read the script at \(scriptPath).")
+                return .usage
+            }
+            guard script.count <= AgentHookAdd.scriptBytes, let text = String(data: script, encoding: .utf8) else {
+                printError("A hook's script is UTF-8 text of at most 256 KB.")
+                return .refused
+            }
+            add.script = text
+            if let agentPath {
+                guard let data = FileManager.default.contents(atPath: agentPath) else {
+                    printError("arch-cli could not read the agent options at \(agentPath).")
+                    return .usage
+                }
+                guard let options = try? AgentJSON.decode(data), options.objectValue != nil else {
+                    printError("The agent options must be one JSON object, as arch.agent.run takes them.")
+                    return .refused
+                }
+                add.agent = options
+            }
+            proposal = add
+        }
+        return withConnection { connection, _ in
+            do {
+                switch action {
+                case .list:
+                    let listing = try connection.call(AgentControlMethod.hooksList) { printError($0) }.decode(as: AgentHookListing.self)
+                    if json { return printJSON(try AgentJSON(encoding: listing)) }
+                    if listing.hooks.isEmpty { print("This client has added no hooks.") }
+                    for hook in listing.hooks {
+                        print("\(hook.id.uuidString)  \(terminalSafe(hook.name))\n  \(hook.trigger) \u{00B7} \(hook.state)\(hook.lastRun.map { " \u{00B7} last run \($0)" } ?? "")")
+                    }
+                    return .done
+                case .remove(let id):
+                    let removed = try connection.call(AgentControlMethod.hooksRemove, params: ["hook": .string(id.uuidString)])["removed"] == .bool(true)
+                    if json { return printJSON(["removed": .bool(removed)]) }
+                    print(removed ? "Removed the hook." : "This client added no hook with that ID.")
+                    return removed ? .done : .toolError
+                case .add:
+                    let result = try connection.call(AgentControlMethod.hooksAdd, params: AgentJSON(encoding: proposal)) { printError($0) }.decode(as: AgentHookAddResult.self)
+                    if json {
+                        if printJSON(try AgentJSON(encoding: result)) != .done { return .internalError }
+                    } else if let hook = result.hook {
+                        print(hook.uuidString)
+                    }
+                    if !json, let message = result.message { printError(message) }
+                    switch result.status {
+                    case .added: return .done
+                    case .declined: return .denied
+                    case .refused: return .refused
+                    }
+                }
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .refused
             }
         }
     }

@@ -31,13 +31,16 @@ final class HookScriptContext: PluginAgentContext {
         grant = PluginGrant(permissions: HookScriptContext.permissions(of: hook.grant), sites: [])
         usesAgent = hook.usesAgent
         callAgent = runAgent
-        if case .outsideClient = hook.origin {
-            permitsAgentRuns = false
-        } else {
-            permitsAgentRuns = hook.usesAgent && hook.grant.agent != nil && hook.agent != nil && runAgent != nil
-        }
+        // A program's hook runs its agent within the caps its grant holds: the event's tab, titles and addresses only, and no reply.
+        permitsAgentRuns = hook.usesAgent && hook.grant.agent != nil && hook.agent != nil && runAgent != nil
         self.host = host
         self.allowsAI = allowsAI
+    }
+
+    /// Who wrote the hook's prompt, which the run's first message names, so that the model does not take a program's words for the user's.
+    static func promptSource(of hook: Hook) -> AgentRunPromptSource {
+        if case .outsideClient(_, let name) = hook.origin { return .program(name: name) }
+        return .user
     }
 
     /// `xyz.taeyoon.arch.hook.<hook id>`, the identifier of the hook's package and its sandbox's origin.
@@ -106,7 +109,7 @@ final class HookScriptContext: PluginAgentContext {
         let request = AgentRunRequest(options: options, tabs: tabs, allowedTabs: invocation.tabs, documents: invocation.documents, documentIDs: invocation.documentIDs,
                                       closedTab: options.closedTab == nil ? nil : invocation.closedTab, knownProviders: invocation.knownProviders,
                                       origin: invocation.isTest ? .test(hook: invocation.hook.id, run: invocation.run) : .hook(invocation.hook.id, run: invocation.run),
-                                      promptSource: .user, feature: .agentHook(invocation.hook.id), grant: grant)
+                                      promptSource: Self.promptSource(of: invocation.hook), feature: .agentHook(invocation.hook.id), grant: grant)
         let id = UUID()
         let task = Task { await callAgent(request, invocation) }
         pending[id] = task

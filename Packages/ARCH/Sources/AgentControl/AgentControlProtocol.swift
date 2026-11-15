@@ -343,3 +343,110 @@ public enum AgentEventLine {
         return words.joined(separator: " ")
     }
 }
+
+// MARK: - Outside programs' hooks
+
+/// Hooks an outside program proposes (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks): `hooks/add` shows the proposal sheet in Arch and waits for the user, and the hook takes effect only after Allow with Touch ID or the login password. `hooks/list` and `hooks/remove` reach only the hooks the client's identity added. No method edits, pauses, or resumes a hook.
+extension AgentControlMethod {
+    /// Answered with an `AgentHookListing` of the hooks this client's identity added.
+    public static let hooksList = "hooks/list"
+    /// Params `AgentHookAdd`, answered with an `AgentHookAddResult` once the user answers the proposal sheet; `progress` notifications come while it waits.
+    public static let hooksAdd = "hooks/add"
+    /// Params `{"hook": <id>}`, answered with `{"removed": true}`, or false for a hook this identity did not add.
+    public static let hooksRemove = "hooks/remove"
+}
+
+/// `hooks/add`'s params: the hook as `arch-cli hooks add` describes it. Arch checks every member and the script's syntax before it shows the proposal sheet.
+public struct AgentHookAdd: Codable, Equatable, Sendable {
+    public var name: String
+    /// The event kind, such as `pageLoaded` (`AgentEventFilter.kinds`).
+    public var event: String
+    /// For `pageLoaded`: `first`, `new`, the default, or `every`.
+    public var loads: String?
+    /// The places, sites, engines, and tab kinds; its kinds are the event's. Its spaces are the grant's Persona's, and none means the whole Persona.
+    public var filter: AgentEventFilter
+    /// The wait after the event, in milliseconds; the trigger's default when absent.
+    public var delay: Int?
+    /// The run's time limit in seconds; the default when absent.
+    public var timeout: Int?
+    /// The JavaScript script, at most 256 KB of UTF-8 text.
+    public var script: String
+    /// `tabs.rename` and `agent`.
+    public var permissions: [String]
+    /// The agent run's options with `agent`, as `arch.agent.run` takes them.
+    public var agent: AgentJSON?
+    /// `activity`, the default, or `session`.
+    public var record: String?
+
+    public init(name: String, event: String, loads: String? = nil, filter: AgentEventFilter = AgentEventFilter(), delay: Int? = nil, timeout: Int? = nil, script: String,
+                permissions: [String] = [], agent: AgentJSON? = nil, record: String? = nil) {
+        self.name = name
+        self.event = event
+        self.loads = loads
+        self.filter = filter
+        self.delay = delay
+        self.timeout = timeout
+        self.script = script
+        self.permissions = permissions
+        self.agent = agent
+        self.record = record
+    }
+
+    /// The largest script `hooks add` sends, as for every JavaScript hook.
+    public static let scriptBytes = 256 * 1024
+    public static let permissions = ["tabs.rename", "agent"]
+    public static let loads = ["first", "new", "every"]
+    public static let records = ["activity", "session"]
+}
+
+/// `hooks/add`'s answer.
+public struct AgentHookAddResult: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Sendable {
+        /// The user allowed the hook, which runs from now on.
+        case added
+        /// The user did not allow it, or the sheet closed unanswered; `arch-cli` exits 3.
+        case declined
+        /// A rule refused it before or after the sheet; `arch-cli` exits 4.
+        case refused
+    }
+
+    public var status: Status
+    public var hook: UUID?
+    /// The refusal's or the decline's sentence.
+    public var message: String?
+
+    public init(status: Status, hook: UUID? = nil, message: String? = nil) {
+        self.status = status
+        self.hook = hook
+        self.message = message
+    }
+}
+
+/// One hook a client's identity added, as `hooks list` shows it.
+public struct AgentHookSummary: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    /// The situation in words, such as "When a new tab loads its first page".
+    public var trigger: String
+    /// `active`, or `paused` with the reason's sentence.
+    public var state: String
+    /// The last run's time and outcome, when it ran.
+    public var lastRun: String?
+
+    public init(id: UUID, name: String, trigger: String, state: String, lastRun: String? = nil) {
+        self.id = id
+        self.name = name
+        self.trigger = trigger
+        self.state = state
+        self.lastRun = lastRun
+    }
+}
+
+/// `hooks/list`'s result.
+public struct AgentHookListing: Codable, Equatable, Sendable {
+    public var hooks: [AgentHookSummary]
+
+    public init(hooks: [AgentHookSummary]) {
+        self.hooks = hooks
+    }
+}

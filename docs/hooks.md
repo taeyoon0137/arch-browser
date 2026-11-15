@@ -890,6 +890,14 @@ arch-cli hooks remove <id>
 - An allowed hook is an ordinary active hook with origin `outsideClient`, limited to the grant's Persona and to the caps above, which the user's later edits in Arch cannot lift; a hook without them is one the user makes in Arch.
 - `remove` removes a hook this identity added, without a sheet; any other identifier returns not found. No command edits, pauses, or resumes a hook; the user does that in Settings.
 
+What VII.30 decided while building hooks from outside programs (`Agent/AgentHookRegistrar.swift`, `Hooks/HookRegistry.swift`, `Hooks/HookProposalSheet.swift`):
+
+- `AgentHookRegistrar` gains `grantsDidChange(inForce:)`: the service reports the identities with a grant in force, and the registry pauses with `grantEnded` the active hooks of an identity that had one and has none now. The first report after a launch counts every program as having had one, so a hook whose grant ended while Arch was closed, as one until Arch quits does, pauses then. A hook the user resumed while its program has no grant stays active until that program's next grant ends.
+- The service checks the form and the caps (`AgentHookProposal.make`), and the registry the script's syntax, the 20 hooks per identity, the minute after a decline, which a refused Touch ID also starts, and the caps once more on the hook it would add. `hooks/add` answers with a result whose status is `added`, `declined`, or `refused`, rather than an error, so that `arch-cli` tells exit 3 from exit 4. `hooks list` and `hooks remove` need a grant, which the first command asks for.
+- A proposal without places covers the grant's Persona, never everywhere. The user's later edit keeps the hook in that Persona and within the caps (`HookRegistryError.outsideCaps`).
+- An agent hook from a program gets the agent run's time limit and 5 seconds as its timeout, or the proposal's when longer, and 200 runs a day. Its runs carry the program's label in the first message, and the runner refuses such a run whose grant would return a reply, keep less than activity, or read pages.
+- The sheet names places as "Persona / Space", or a whole Persona by its name, and the tier with its first model.
+
 ### arch-cli agent run and rename
 
 ```

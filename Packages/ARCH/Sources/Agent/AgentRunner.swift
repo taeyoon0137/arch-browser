@@ -88,10 +88,13 @@ public final class AgentRunner: ObservableObject {
         case .hook(let id, _), .test(let id, _): hook = id
         case .outsideClient: return Self.refused("notGranted", "Outside programs cannot start this hook run.")
         }
-        guard request.feature == .agentHook(hook), case .user = request.promptSource,
-              let allowed = request.allowedTabs, Set(request.tabs).isSubset(of: allowed),
+        guard request.feature == .agentHook(hook), let allowed = request.allowedTabs, Set(request.tabs).isSubset(of: allowed),
               (options.closedTab == nil) == (request.closedTab == nil), let knownProviders = request.knownProviders else {
             return Self.refused("notGranted", "The requested tabs or caller are outside this hook's grant.")
+        }
+        // A program's hook keeps the caps of its origin (`docs/hooks.md`, Hooks from outside programs).
+        if case .program = request.promptSource, request.grant.returnsReply || request.grant.minimumRecord < .activity || request.grant.tabAccess != .title {
+            return Self.refused("notGranted", "A program's hook runs see titles and addresses only, keep their activity, and return no reply.")
         }
         // A run beyond two waits for a slot within its time limit, so that hooks that fire together do not fail.
         let waitStarted = ContinuousClock.now
@@ -218,7 +221,7 @@ public final class AgentRunner: ObservableObject {
         }
 
         var message: AIMessage {
-            var parts: [AIPart] = [.text("The user's instructions:\n" + request.options.prompt)]
+            var parts: [AIPart] = [.text(AgentRunner.label(of: request.promptSource) + request.options.prompt)]
             for (i, tab) in tabs.enumerated() {
                 guard let url = request.documents[tab.id] else { continue }
                 parts.append(.text("Tab t\(i + 1)"))
@@ -229,6 +232,14 @@ public final class AgentRunner: ObservableObject {
                 parts.append(.page(AIPageContent(url: AgentAddress.reduced(url), title: closed.name, text: "")))
             }
             return AIMessage(role: .user, parts: parts)
+        }
+    }
+
+    /// The line above the prompt, which says whose words follow (`docs/hooks.md`, Tools).
+    static func label(of source: AgentRunPromptSource) -> String {
+        switch source {
+        case .user: return "The user's instructions:\n"
+        case .program(let name): return "Instructions from \(name), a program the user allowed:\n"
         }
     }
 

@@ -36,6 +36,10 @@ import Foundation
     private var shellHookRuns: [UUID: ShellHookRunAccess] = [:]
     /// Outside programs' event buffers and subscriptions (`docs/hooks.md`, Outside programs).
     let outsidePrograms = AgentOutsidePrograms()
+    /// The hook registry, for hooks that outside programs propose; the app shell sets it once both exist.
+    public weak var hookRegistrar: (any AgentHookRegistrar)? {
+        didSet { grantsInForceDidChange() }
+    }
     private var runObserver: AnyCancellable?
     private var runService: AgentRunner?
     public var runs: AgentRunner {
@@ -255,6 +259,7 @@ import Foundation
         }
         applyAgentOnlyPersona()
         updateListening()
+        grantsInForceDidChange()
     }
 
     /// Settings' Try Again after the Keychain did not give the key.
@@ -445,7 +450,7 @@ import Foundation
         launchGrants.removeAll { $0.id == grant.id }
         states[grant.id]?.cancelCalls()
         states[grant.id] = nil
-        outsidePrograms.grantDidEnd(grant.id)
+        programGrantDidEnd(grant.id)
         approvals.end(owner: grant.id, because: message)
         if wasKept { save() }
         record(event, grant: grant)
@@ -596,6 +601,7 @@ import Foundation
         }
         save()
         record(.granted, grant: grant, decision: choice.needsAuthentication ? .approvedWithTouchID : .approved)
+        grantsInForceDidChange()
         return grant
     }
 
@@ -1486,6 +1492,9 @@ import Foundation
             subscribeEvents(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.eventsUnsubscribe) where connection.sessionID == nil:
             unsubscribeEvents(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.hooksList) where connection.sessionID == nil, (.ready, AgentControlMethod.hooksAdd) where connection.sessionID == nil,
+             (.ready, AgentControlMethod.hooksRemove) where connection.sessionID == nil:
+            hookCall(method, params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.grantShow):
             // A session's connection is bound; it has no grant to show.
             let answer = connection.identity.map(answer(for:)) ?? AgentHelloAnswer(version: version, status: .bound)
@@ -1933,6 +1942,61 @@ extension AgentService {
                 for item in queued {
                     self.endpoint?.send(.notification(method: AgentControlMethod.eventNotification, params: ["subscription": .number(Double(item.subscription)), "event": item.view]), to: connectionID)
                 }
+            }
+        }
+    }
+
+    /// A grant ended: its events go, and the hooks its program added pause unless the identity has another grant in force.
+    private func programGrantDidEnd(_ grantID: UUID) {
+        outsidePrograms.grantDidEnd(grantID)
+        grantsInForceDidChange()
+    }
+
+    /// Tells the hook registry which identities have a grant in force, once `agent.json` was checked, so that the hooks of a program whose grant ended pause with `grantEnded`.
+    func grantsInForceDidChange() {
+        guard canChangeSettings, let hookRegistrar else { return }
+        let now = dependencies.now()
+        let personas = Set(host.personas.map(\.id))
+        hookRegistrar.grantsDidChange(inForce: Set(grants.filter { !$0.hasExpired(at: now) && !hasProcessEnded($0) && personas.contains($0.personaID) }.map(\.client.key)))
+    }
+
+    /// `hooks/list`, `hooks/add`, and `hooks/remove`, each for a client with a grant of any level, which the first asks for as a tool call does. `hooks/add` checks the proposal against the caps of hooks from outside programs, says it waits for the user, and answers once the user answered the registry's proposal sheet.
+    private func hookCall(_ method: String, _ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let identity = connection.identity else { return }
+        connection.runningCalls += 1
+        Task {
+            defer { connection.runningCalls -= 1 }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID), connections[connection.id] != nil else { return }
+            guard let registrar = hookRegistrar else {
+                return replyError(connection, requestID, .internalError("Arch cannot reach its hooks now."))
+            }
+            touch(grant)
+            switch method {
+            case AgentControlMethod.hooksList:
+                reply(connection, requestID, Self.json(AgentHookListing(hooks: registrar.hooks(addedBy: identity.key))))
+            case AgentControlMethod.hooksRemove:
+                guard let text = params?["hook"]?.stringValue, let id = UUID(uuidString: text) else {
+                    return replyError(connection, requestID, .invalidParams("hooks/remove takes the hook's ID, as hooks list shows it."))
+                }
+                reply(connection, requestID, ["removed": .bool(registrar.remove(id, addedBy: identity.key))])
+            default:
+                guard let add = try? params?.decode(as: AgentHookAdd.self) else {
+                    return replyError(connection, requestID, .invalidParams("hooks/add takes the hook's name, event, filter, script, permissions, and agent options."))
+                }
+                let answer: AgentHookAddResult
+                do {
+                    let proposal = try AgentHookProposal.make(add, grant: grant, spaces: host.spaces(in: grant.personaID))
+                    endpoint?.send(.notification(method: AgentControlMethod.progressNotification, params: ["call": requestID.json, "message": "Waiting for your approval in Arch\u{2026}"]), to: connection.id)
+                    switch await registrar.propose(proposal, from: identity, grant: grant) {
+                    case .added(let id): answer = AgentHookAddResult(status: .added, hook: id)
+                    case .declined(let reason): answer = AgentHookAddResult(status: .declined, message: reason)
+                    case .refused(let reason): answer = AgentHookAddResult(status: .refused, message: reason)
+                    }
+                } catch {
+                    answer = AgentHookAddResult(status: .refused, message: (error as? AgentHookRefusal)?.message ?? "\(error)")
+                }
+                guard connections[connection.id] != nil else { return }
+                reply(connection, requestID, Self.json(answer))
             }
         }
     }

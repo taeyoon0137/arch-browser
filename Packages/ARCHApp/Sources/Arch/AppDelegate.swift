@@ -158,6 +158,9 @@ import Terminal
         self.hooks = hooks
         PreferencesWindowController.hooks = hooks
         agents.didStopAll = { [weak hooks] in hooks?.stopAgentHooks() }
+        // Hooks that outside programs propose show their sheet in the front main window, as the grant sheet does, and pause when the program's grant ends.
+        hooks.proposalPrompt = HookProposalSheetPresenter(window: { [weak agents] in agents?.host.windowForSheet() })
+        agents.hookRegistrar = hooks
         hooks.featureDidEnd = { [weak agents] in agents?.runs.deleteKeptRuns(of: $0) }
         hooks.runsDidLeave = { [weak agents] in agents?.runs.deleteKeptRuns(ofHookRuns: $0) }
         hooks.activityDidClear = { [weak agents] in agents?.runs.deleteAllKeptRuns() }
@@ -303,7 +306,10 @@ import Terminal
     func setQuitting(_ quitting: Bool) {
         session?.isQuitting = quitting
         // AppKit calls the quit on the main thread, where the agents' grant sheets show.
-        if quitting { agents?.cancelQuestions() }
+        if quitting {
+            agents?.cancelQuestions()
+            hooks?.proposalPrompt?.cancelAll()
+        }
     }
 
     /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits. The agents' socket goes with the app.
