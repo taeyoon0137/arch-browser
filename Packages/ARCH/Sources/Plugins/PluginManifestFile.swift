@@ -1,4 +1,5 @@
 // `plugin.json`, the manifest of a script plugin's package, read into a `PluginManifest`. Arch refuses the keys it does not read, so that a plugin never goes without a field it relies on, and reads each page script from the package file the manifest names.
+import AI
 import ARCHEngine
 import Events
 import Foundation
@@ -31,11 +32,7 @@ struct ScriptManifest {
         let name = givenName.isEmpty ? id.rawValue : givenName
         let version = try object.string("version")
         let summary = try object.string("summary")
-        let permissions = try object.strings("permissions").map { name in
-            guard let permission = PluginPermission(rawValue: name) else { throw invalidManifest("permissions lists “\(name)”, which Arch does not grant") }
-            guard permission != .nativeMessaging else { throw invalidManifest("permissions lists “\(name)”, which only web extensions may ask for") }
-            return permission
-        }
+        let (permissions, aiDataKinds) = try Self.permissions(object.value("permissions"))
         let sites = try object.strings("sites").map(MatchPattern.init)
         let events = try object.strings("events").map { name in
             guard let kind = BrowserEventKind(rawValue: name) else { throw invalidManifest("events lists “\(name)”, which is not an event Arch sends") }
@@ -47,8 +44,42 @@ struct ScriptManifest {
         try object.finish()
         guard background != nil || contributions.commands.isEmpty else { throw invalidManifest("commands need a background script") }
         guard background != nil || events.isEmpty else { throw invalidManifest("events need a background script") }
-        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: Set(permissions), sites: sites, contributions: contributions, events: Set(events))
+        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, sites: sites,
+                                  contributions: contributions, events: Set(events))
         self.background = background
+    }
+
+    /// The data kinds beyond text that the `ai` permission may list, those whose content plugins reach: the text of pages through page calls, and selected text through commands.
+    static let aiDataKinds: [AIDataKind] = [.page, .selection]
+
+    /// `permissions` lists names of `PluginPermission`, and the `ai` permission either by its name, for requests with text only, or as `{"ai": [kinds]}` with the data kinds beyond text that its requests carry.
+    private static func permissions(_ value: PluginValue?) throws -> (Set<PluginPermission>, Set<AIDataKind>) {
+        guard let value else { return ([], []) }
+        let malformed = invalidManifest("permissions must be an array of permission names, with ai also as an object such as {\"ai\": [\"page\"]}")
+        guard case let .array(items) = value else { throw malformed }
+        var permissions: Set<PluginPermission> = []
+        var aiDataKinds: Set<AIDataKind> = []
+        for item in items {
+            switch item {
+            case let .string(name):
+                guard let permission = PluginPermission(rawValue: name) else { throw invalidManifest("permissions lists “\(name)”, which Arch does not grant") }
+                guard permission != .nativeMessaging else { throw invalidManifest("permissions lists “\(name)”, which only web extensions may ask for") }
+                permissions.insert(permission)
+            case let .object(fields):
+                guard fields.count == 1, case let .array(kinds)? = fields[PluginPermission.ai.rawValue] else { throw malformed }
+                for kind in kinds {
+                    guard case let .string(name) = kind else { throw malformed }
+                    guard let dataKind = AIDataKind(rawValue: name), Self.aiDataKinds.contains(dataKind) else {
+                        throw invalidManifest("permissions lists ai with “\(name)”, which is not page or selection")
+                    }
+                    aiDataKinds.insert(dataKind)
+                }
+                permissions.insert(.ai)
+            default:
+                throw malformed
+            }
+        }
+        return (permissions, aiDataKinds)
     }
 
     private static func contributions(_ object: ManifestObject, packageAt root: URL) throws -> PluginContributions {

@@ -304,7 +304,7 @@ The first features:
 | `hook.tabName` | VII.6 | automatic | page, with text limited to 2,000 characters | - |
 | `hook.downloadName` | VII.6 | automatic | download | - |
 | `pluginComposer` | VII.7 | user | text only | `jsonOutput` |
-| `plugin.<id>` | V.11 | automatic when the plugin declares hooks (`ai` and events), otherwise user | text only | - |
+| `plugin.<id>` | V.11 | automatic when the plugin declares hooks (`ai` and events), otherwise user | text, and page and selection as the plugin's `ai` lists them | - |
 | `agent` | VII.17 registers it; VII.16 runs its sessions on Claude Code and Codex (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
 - When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
@@ -844,7 +844,7 @@ The review uses the install sheet in `docs/plugins.md` (Lifecycle), with additio
 ### Lifetime
 
 - `plugins.json` records a plugin that AI wrote with `generated`, the requests and the model's name, in place of `source` (`docs/plugins.md`, Storage). Its section in Settings ▸ Plugins says that AI wrote it, with which model, when, and from which requests. It switches off and is removed like any installed plugin.
-- The `ai` permission lets a plugin send requests with text only under its own feature `plugin.<id>` through `PluginContext.ai()`, `arch.ai.reply`, and `arch.ai.stream`, which hands on the reply's text as it arrives, and plugin hooks run the event listeners of a plugin with `ai` and events as steps of the shared hook scheduler at order 200 under that feature, which they make automatic, rather than register with the center (`docs/hooks.md`, Plugins; `docs/plugins.md`, AI hooks and plugins that AI writes). A plugin with `ai` reads pages through its page calls only off excluded sites, since its code could copy page text into a text part. Not built yet: the data kinds beyond text that the `ai` permission would list; digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
+- The `ai` permission lets a plugin send requests under its own feature `plugin.<id>` through `PluginContext.ai()`, `arch.ai.reply`, and `arch.ai.stream`, which hands on the reply's text as it arrives, with text and the data kinds beyond text that the permission lists in the manifest, `page` and `selection` (`{"ai": ["page"]}`), which the feature declares and Settings ▸ AI states; plugin hooks run the event listeners of a plugin with `ai` and events as steps of the shared hook scheduler at order 200 under that feature, which they make automatic, rather than register with the center (`docs/hooks.md`, Plugins; `docs/plugins.md`, AI hooks and plugins that AI writes). A plugin with `ai` reads pages through its page calls only off excluded sites, since its code could copy page text into a text part. Not built yet: digests of the approved files that keep a changed plugin off until the user reviews it again; and changing an installed plugin with AI, with a review of what changed.
 
 ## Errors
 

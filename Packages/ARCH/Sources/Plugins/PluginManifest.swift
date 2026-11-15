@@ -1,4 +1,5 @@
 // A plugin's identity and manifest: what it declares before any of its code runs, where it came from and what its signatures prove, and what the user grants it. `docs/plugins.md` describes the whole plugin system.
+import AI
 import Events
 import Foundation
 
@@ -36,6 +37,8 @@ public struct PluginManifest: Hashable, Sendable {
     /// What the plugin does, in one sentence.
     public var summary: String
     public var permissions: Set<PluginPermission>
+    /// The data kinds beyond text that the plugin's AI requests carry, which its `ai` permission lists: `page` for the text of pages that its page calls read, and `selection` for selected text. They come with `ai`, as a web extension's other API permissions come with its install, and the install sheet and Settings state them in one sentence (`aiDataSummary`). Empty without `ai`.
+    public var aiDataKinds: Set<AIDataKind>
     /// The pages the plugin may reach. Without `tabs`, the plugin still sees the title and address of a tab whose page they cover.
     public var sites: [MatchPattern]
     /// The API permissions of a web extension that no `PluginPermission` stands for, as its manifest names them, such as `storage`. They come with the install, as in other browsers, and the install sheet and Settings list them. Empty for other kinds.
@@ -48,19 +51,29 @@ public struct PluginManifest: Hashable, Sendable {
     /// A web extension's `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, lowercased, so that two projects on one hosting site differ. Nil for other kinds and without the field.
     public var homepage: String?
 
-    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], sites: [MatchPattern] = [],
-                extensionPermissions: [String] = [], contributions: PluginContributions, events: Set<BrowserEventKind> = [], author: String? = nil, homepage: String? = nil) {
+    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [],
+                sites: [MatchPattern] = [], extensionPermissions: [String] = [], contributions: PluginContributions, events: Set<BrowserEventKind> = [],
+                author: String? = nil, homepage: String? = nil) {
         self.id = id
         self.name = name
         self.version = version
         self.summary = summary
         self.permissions = permissions
+        self.aiDataKinds = permissions.contains(.ai) ? aiDataKinds : []
         self.sites = sites
         self.extensionPermissions = extensionPermissions
         self.contributions = contributions
         self.events = events
         self.author = author
         self.homepage = homepage
+    }
+
+    /// The data kinds that AI requests carry as the sentence that the install sheet and Settings show after the `ai` permission's, such as "Send the text of pages and selected text to the AI models you connected", or nil without any.
+    public var aiDataSummary: String? {
+        let names: [(AIDataKind, String)] = [(.page, "the text of pages"), (.selection, "selected text"), (.file, "files"), (.download, "download details")]
+        let listed = names.filter { aiDataKinds.contains($0.0) }.map(\.1)
+        guard !listed.isEmpty else { return nil }
+        return "Send \(ListFormatter.localizedString(byJoining: listed)) to the AI models you connected"
     }
 
     /// The extension permissions as the sentence that the install sheet and Settings show, or nil without any.
@@ -123,7 +136,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case clipboard
     /// Messages to native apps on the Mac that the plugin names. Web extensions only; granting it asks for Touch ID or the login password.
     case nativeMessaging
-    /// Requests through the AI interface under the plugin's own feature, `plugin.<id>`, with text only (`PluginContext.ai()`). With `events`, the plugin's listeners run as hooks on the shared hook scheduler, which makes that feature automatic (`InstalledPlugin.runsHooks`).
+    /// Requests through the AI interface under the plugin's own feature, `plugin.<id>`, with text and the data kinds that the manifest lists for it (`PluginManifest.aiDataKinds`), through `PluginContext.ai()`. With `events`, the plugin's listeners run as hooks on the shared hook scheduler, which makes that feature automatic (`InstalledPlugin.runsHooks`).
     case ai
 
     /// What the permission lets a plugin do, as a sentence that Settings shows.

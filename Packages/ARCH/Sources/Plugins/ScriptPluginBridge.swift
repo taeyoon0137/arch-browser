@@ -335,7 +335,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
-    /// The request of `arch.ai.reply(request)`, which sends `{instructions, messages, schema, maxOutputTokens}`, where each message is `{role, text}` with the role `user` or `assistant`, `schema` a JSON Schema object for a JSON reply, and only `messages` required. The plugin's context checks the grant first.
+    /// The request of `arch.ai.reply(request)`, which sends `{instructions, messages, schema, maxOutputTokens}`, where each message is `{role, text}` or `{role, parts}` with the role `user` or `assistant`, `schema` a JSON Schema object for a JSON reply, and only `messages` required. The plugin's context checks the grant first, and its AI client the parts' kinds.
     private func aiRequest(of call: Call) throws -> AIRequest {
         guard call.args.count == 1, case .object(var fields)? = call.value(0) else { throw BridgeFailure.invalidCall }
         var instructions: String?
@@ -345,9 +345,14 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         guard case let .array(items)? = fields.removeValue(forKey: "messages"), !items.isEmpty else { throw BridgeFailure.invalidCall }
         let messages = try items.map { item -> AIMessage in
-            guard case let .object(message) = item, message.count == 2, case let .string(text)? = message["text"],
-                  case let .string(name)? = message["role"], let role = AIMessage.Role(rawValue: name) else { throw BridgeFailure.invalidCall }
-            return AIMessage(role: role, parts: [.text(text)])
+            guard case let .object(message) = item, message.count == 2, case let .string(name)? = message["role"], let role = AIMessage.Role(rawValue: name) else {
+                throw BridgeFailure.invalidCall
+            }
+            switch (message["text"], message["parts"]) {
+            case let (.string(text)?, nil): return AIMessage(role: role, parts: [.text(text)])
+            case let (nil, .array(parts)?) where !parts.isEmpty: return AIMessage(role: role, parts: try parts.map(Self.part))
+            default: throw BridgeFailure.invalidCall
+            }
         }
         var output = AIOutputFormat.text
         if let schema = fields.removeValue(forKey: "schema"), schema != .null {
@@ -362,6 +367,15 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         // A key the bridge does not read, such as a model, would go without effect.
         guard fields.isEmpty else { throw BridgeFailure.invalidCall }
         return AIRequest(feature: .plugin(context.pluginID.rawValue), instructions: instructions, messages: messages, output: output, maxOutputTokens: maxOutputTokens)
+    }
+
+    /// A message's part: `{type: "text", text}`, or `{type: "page", url, title, text}` and `{type: "selection", url, title, text}` with the page's address and title, which the plugin's `ai` permission must list.
+    private static func part(_ value: PluginValue) throws -> AIPart {
+        guard case let .object(fields) = value, case let .string(type)? = fields["type"], case let .string(text)? = fields["text"] else { throw BridgeFailure.invalidCall }
+        if type == "text", fields.count == 2 { return .text(text) }
+        guard type == "page" || type == "selection", fields.count == 4, case let .string(address)? = fields["url"], let url = URL(string: address), url.scheme != nil,
+              case let .string(title)? = fields["title"] else { throw BridgeFailure.invalidCall }
+        return type == "page" ? .page(AIPageContent(url: url, title: title, text: text)) : .selection(AISelection(pageURL: url, pageTitle: title, text: text))
     }
 
     /// What `arch.ai.reply` resolves with: `{text, finishReason}`.

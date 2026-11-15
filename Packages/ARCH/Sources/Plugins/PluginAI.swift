@@ -3,11 +3,11 @@ import AI
 import Foundation
 
 extension AIFeature {
-    /// The plugin's own feature, named after it, whose requests carry text only. It is automatic while the plugin's events run as hooks, so that neither its hooks nor its other requests run before the user gives it a model of its own, and they count toward the daily limit for automatic requests. Otherwise the user starts its requests, which use the default route until the feature has models of its own.
+    /// The plugin's own feature, named after it, whose requests carry text and the data kinds that come with the plugin's `ai` (`InstalledPlugin.aiDataKinds`). It is automatic while the plugin's events run as hooks, so that neither its hooks nor its other requests run before the user gives it a model of its own, and they count toward the daily limit for automatic requests. Otherwise the user starts its requests, which use the default route until the feature has models of its own.
     static func plugin(_ installed: InstalledPlugin) -> AIFeature {
         AIFeature(id: .plugin(installed.id.rawValue), name: installed.manifest.name,
                   summary: installed.runsHooks ? "Sends the text this plugin writes, as you use it and as browser events reach it." : "Sends the text this plugin writes, as you use it.",
-                  trigger: installed.runsHooks ? .automatic : .user, data: .textOnly)
+                  trigger: installed.runsHooks ? .automatic : .user, data: AIDataScope(kinds: installed.aiDataKinds))
     }
 }
 
@@ -15,6 +15,11 @@ extension InstalledPlugin {
     /// Whether the plugin's event listeners run as hooks on the shared hook scheduler under its AI feature: its grant has `ai`, and its manifest lists events. Other plugins' listeners get events as they arrive.
     public var runsHooks: Bool {
         grant.permissions.contains(.ai) && !manifest.events.isEmpty
+    }
+
+    /// The data kinds beyond text that the plugin's AI requests may carry: those its manifest lists for `ai` while its grant has `ai`.
+    public var aiDataKinds: Set<AIDataKind> {
+        grant.permissions.contains(.ai) ? manifest.aiDataKinds : []
     }
 }
 
@@ -53,15 +58,18 @@ final class PluginHookStep {
 final class PluginAIRequests {
     private let service: AIService
     private let feature: AIFeatureID
+    /// The data kinds beyond text that the plugin's requests may carry. Plugins with one identifier in several Personas share the feature, whose scope holds the kinds of each, so each instance holds its requests to its own.
+    private let dataKinds: Set<AIDataKind>
     /// The hook step whose listener runs now.
     var step: PluginHookStep?
     private var hasEnded = false
     /// The requests that have not ended, each with the step it belongs to.
     private var requests: [UUID: (continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation, step: PluginHookStep?)] = [:]
 
-    init(service: AIService, feature: AIFeatureID) {
+    init(service: AIService, feature: AIFeatureID, dataKinds: Set<AIDataKind> = []) {
         self.service = service
         self.feature = feature
+        self.dataKinds = dataKinds
     }
 
     /// A client whose requests belong to the step that runs now, if any, or with `inStep` false to no step.
@@ -69,10 +77,13 @@ final class PluginAIRequests {
         PluginAIClient(requests: self, step: inStep ? step : nil)
     }
 
-    /// Sends the request under the plugin's feature, passes its events on, and reports its end to its step. A stopped step's request never goes out.
+    /// Sends the request under the plugin's feature, passes its events on, and reports its end to its step. A stopped step's request never goes out, nor does one with a part of a kind that the plugin does not list, which ends as the service ends it.
     fileprivate func forward(_ request: AIRequest, step: PluginHookStep?, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async {
         guard !hasEnded else { return continuation.finish(throwing: PluginError.stopped) }
         guard step?.isStopped != true else { return continuation.finish(throwing: AIError.cancelled) }
+        if let kind = Self.dataKinds(of: request.messages.flatMap(\.parts)).first(where: { !dataKinds.contains($0) }) {
+            return continuation.finish(throwing: AIError.blockedByPolicy(.dataNotDeclared(kind)))
+        }
         var request = request
         request.feature = feature
         request.route = nil
@@ -91,6 +102,20 @@ final class PluginAIRequests {
         } catch {
             if !Task.isCancelled { step?.requestDidEnd(error) }
             continuation.finish(throwing: error)
+        }
+    }
+
+    /// The data kinds of the parts beyond text, those of tool results' parts among them.
+    private static func dataKinds(of parts: [AIPart]) -> [AIDataKind] {
+        parts.flatMap { part -> [AIDataKind] in
+            switch part {
+            case .text, .toolCall: return []
+            case .page: return [.page]
+            case .selection: return [.selection]
+            case .file: return [.file]
+            case .download: return [.download]
+            case let .toolResult(result): return dataKinds(of: result.parts)
+            }
         }
     }
 

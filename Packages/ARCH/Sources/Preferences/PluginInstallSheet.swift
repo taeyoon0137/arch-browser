@@ -252,6 +252,9 @@ private struct PluginReviewView: View {
                     ForEach(permissions, id: \.self) { permission in
                         RequestRow(text: permission.summary, isNew: target.map { !$0.manifest.permissions.contains(permission) } ?? false)
                     }
+                    if let summary = manifest.aiDataSummary {
+                        RequestRow(text: summary, isNew: target.map { !manifest.aiDataKinds.isSubset(of: $0.manifest.aiDataKinds) } ?? false)
+                    }
                     if let summary = manifest.extensionPermissionsSummary {
                         RequestRow(text: summary, isNew: target.map { !Set(manifest.extensionPermissions).isSubset(of: $0.manifest.extensionPermissions) } ?? false)
                     }

@@ -71,9 +71,14 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         versionEngines(among: running).first { engineChecks[$0] != nil && !engines.contains($0) && !dismissedVersionNotes.contains($0) }
     }
 
-    /// What the plugin may do, one sentence each, as Settings states it: its grant, then the API permissions that come with a web extension.
+    /// What the plugin may do, one sentence each, as Settings states it: its grant, then the data kinds that come with `ai` and the API permissions that come with a web extension.
     public var accessSummaries: [String] {
-        grant.summaries + [manifest.extensionPermissionsSummary].compactMap { $0 }
+        grant.summaries + includedSummaries
+    }
+
+    /// The sentences of what comes with the grant: the data kinds that its AI requests carry and a web extension's other API permissions.
+    private var includedSummaries: [String] {
+        [grant.permissions.contains(.ai) ? manifest.aiDataSummary : nil, manifest.extensionPermissionsSummary].compactMap { $0 }
     }
 
     /// The most sites whose sentences Settings lists among `accessSummaries`; with more, it states them in one (`accessBrief`).
@@ -82,7 +87,7 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
     public var accessBrief: [String]? {
         guard grant.sites.count > Self.listedSiteLimit, let sites = MatchPattern.briefAccessSummary(of: grant.sites) else { return nil }
-        return PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary) + [sites, manifest.extensionPermissionsSummary].compactMap { $0 }
+        return PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary) + [sites] + includedSummaries
     }
 }
 
@@ -1110,7 +1115,7 @@ public final class PluginManager: ObservableObject {
 
     // MARK: AI features
 
-    /// Registers the feature of each enabled plugin with `ai` and unregisters those that no plugin has any more. The managers of several Personas can hold plugins with one identifier, which share the feature `plugin.<id>` and its route: it stays registered while one of them has it, and is automatic while one of them runs hooks.
+    /// Registers the feature of each enabled plugin with `ai` and unregisters those that no plugin has any more. The managers of several Personas can hold plugins with one identifier, which share the feature `plugin.<id>` and its route: it stays registered while one of them has it, is automatic while one of them runs hooks, and declares the data kinds that any of them lists, while each instance holds its requests to its own plugin's kinds (`PluginAIRequests`).
     private func registerAIFeatures() {
         guard let ai else { return }
         let enabled = isClosed ? [] : plugins.filter { $0.isEnabled && $0.unavailability == nil && $0.grant.permissions.contains(.ai) }
@@ -1118,11 +1123,14 @@ public final class PluginManager: ObservableObject {
         let previous = aiFeatures
         aiFeatures = wanted
         // A feature's summary follows its trigger.
-        let changed = Set(previous.keys).union(wanted.keys).filter { previous[$0]?.name != wanted[$0]?.name || previous[$0]?.trigger != wanted[$0]?.trigger }
+        let changed = Set(previous.keys).union(wanted.keys).filter {
+            previous[$0]?.name != wanted[$0]?.name || previous[$0]?.trigger != wanted[$0]?.trigger || previous[$0]?.data.kinds != wanted[$0]?.data.kinds
+        }
         let managers = Self.liveManagers.allObjects.filter { $0.ai === ai }
         for id in changed {
             let holders = managers.compactMap { $0.aiFeatures[id] }
-            if let feature = holders.first(where: { $0.trigger == .automatic }) ?? holders.first {
+            if var feature = holders.first(where: { $0.trigger == .automatic }) ?? holders.first {
+                feature.data.kinds = holders.reduce(into: []) { $0.formUnion($1.data.kinds) }
                 ai.register(feature)
             } else {
                 ai.unregister(id)
@@ -1224,7 +1232,7 @@ public final class PluginManager: ObservableObject {
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
         ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant,
                             storage: ScopedPluginStorage(file: storage(for: installed.id)), secrets: secrets(for: installed.id),
-                            ai: installed.grant.permissions.contains(.ai) ? ai.map { PluginAIRequests(service: $0, feature: .plugin(installed.id.rawValue)) } : nil)
+                            ai: installed.grant.permissions.contains(.ai) ? ai.map { PluginAIRequests(service: $0, feature: .plugin(installed.id.rawValue), dataKinds: installed.aiDataKinds) } : nil)
     }
 
     /// The Persona's tabs before the grant applies.
