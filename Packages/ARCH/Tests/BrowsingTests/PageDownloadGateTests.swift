@@ -32,7 +32,7 @@ import Testing
         var gate = PageDownloadGate()
         gate.documentDidCommit(site: "files.example")
         #expect(gate.admit { _ in } == .allow)
-        gate.userDidClick()
+        gate.userDidAct()
         #expect(gate.admit { _ in } == .allow)
         #expect(gate.admit { _ in } == .ask)
     }
@@ -91,7 +91,7 @@ import Testing
         #expect(gate.admit { _ in } == .allow)
         #expect(gate.admit { _ in } == .ask)
         #expect(gate.answer(false).count == 1)
-        gate.userDidClick()
+        gate.userDidAct()
         gate.documentDidCommit(site: "files.example")
         #expect(gate.admit { _ in } == .allow)
         #expect(gate.admit { _ in } == .ask)
@@ -119,7 +119,7 @@ import Testing
         var gate = PageDownloadGate()
         gate.userDidNavigate()
         gate.documentDidCommit(site: "files.example")
-        gate.userDidClick()
+        gate.userDidAct()
         #expect(gate.admit { _ in } == .allow)
         #expect(gate.admit { _ in } == .ask)
     }
@@ -127,8 +127,8 @@ import Testing
     /// A tab that a plugin opened asks before each download of its pages, its first included, on every site it moves to on its own, until the user clicks in it or loads an address there.
     @Test func aTabThatAPluginOpenedHasNoFirstDownloadUntilTheUserActs() {
         var gate = PageDownloadGate()
-        gate.pluginDidOpen()
-        #expect(gate.isOpenedByPlugin)
+        gate.holdUntilUserActs()
+        #expect(gate.isHeldUntilUserActs)
         gate.documentDidCommit(site: "files.example")
         #expect(gate.admit { _ in } == .ask)
         #expect(gate.answer(true).count == 1)
@@ -136,16 +136,16 @@ import Testing
         gate.documentDidCommit(site: "other.example")
         #expect(gate.admit { _ in } == .ask)
         #expect(gate.answer(false).count == 1)
-        gate.userDidClick()
-        #expect(!gate.isOpenedByPlugin)
+        gate.userDidAct()
+        #expect(!gate.isHeldUntilUserActs)
         gate.documentDidCommit(site: "other.example")
         #expect(gate.admit { _ in } == .allow)
         #expect(gate.admit { _ in } == .ask)
 
         var loaded = PageDownloadGate()
-        loaded.pluginDidOpen()
+        loaded.holdUntilUserActs()
         loaded.userDidNavigate()
-        #expect(!loaded.isOpenedByPlugin)
+        #expect(!loaded.isHeldUntilUserActs)
         loaded.documentDidCommit(site: "files.example")
         #expect(loaded.admit { _ in } == .allow)
     }

@@ -37,7 +37,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         session?.activeWindow?.selectedPluginTab(of: persona)?.id
     }
 
-    /// The tab goes where a new tab that the user opens in the space goes, and its `tabOpened`, `tabSelected`, the `spaceSwitched` that the selection brings, and its first `addressChanged` and `pageLoaded` carry the cause, which the tab keeps for its first load. Its downloads ask until the user clicks in its page or loads an address in it, and an address of a file downloads nothing (`PageDownloadGate.pluginDidOpen()`).
+    /// The tab goes where a new tab that the user opens in the space goes, and its `tabOpened`, `tabSelected`, the `spaceSwitched` that the selection brings, and its first `addressChanged` and `pageLoaded` carry the cause, which the tab keeps for its first load. Its downloads ask until the user acts in its page or loads an address in it, and an address of a file downloads nothing (`PageDownloadGate.holdUntilUserActs()`).
     public func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID {
         guard let session, session.personas.contains(where: { $0.id == persona }) else { throw PluginError.closed }
         let space: Space
@@ -49,7 +49,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         }
         return session.events.withCause(cause) {
             let tab = session.openTab(url: url, in: space.id, select: false, engine: options.engine)
-            tab.pageDownloads.pluginDidOpen()
+            tab.pageDownloads.holdUntilUserActs()
             if options.select { select(tab, in: session) }
             return tab.id
         }

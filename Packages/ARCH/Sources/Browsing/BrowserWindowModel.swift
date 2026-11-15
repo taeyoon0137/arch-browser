@@ -1622,11 +1622,19 @@ public enum BrowserWindowKind {
         return [selected] + paneTabs.filter { $0.id != selected.id && shows($0) }
     }
 
-    /// The tab of `tabsOnScreen` whose page lies under the event's place in the window, as for a click in a pane of the split view that the click is about to select.
+    /// The tab of `tabsOnScreen` whose page the click at the event's place in the window reaches, as one in a pane of the split view that the click is about to select. A click on a prompt card, its dimming, or another view over the page reaches none (`NSView.takesClick(at:)`).
     public func tabOnScreen(at event: NSEvent) -> Tab? {
         tabsOnScreen.first { tab in
             let view = tab.webContents.view
-            return view.window === event.window && view.bounds.contains(view.convert(event.locationInWindow, from: nil))
+            return view.window === event.window && view.takesClick(at: event.locationInWindow)
+        }
+    }
+
+    /// The tab of `tabsOnScreen` whose page has the window's keys when `event` is a key press that activates the page's focused link or button, as a click does (`NSView.takesActivation(by:)`).
+    public func tabOnScreen(activatedBy event: NSEvent) -> Tab? {
+        tabsOnScreen.first { tab in
+            let view = tab.webContents.view
+            return view.window === event.window && view.takesActivation(by: event)
         }
     }
 

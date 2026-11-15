@@ -285,9 +285,9 @@ import LiveFolders
         return url?.host ?? "New Tab"
     }
 
-    /// The user clicked in the tab's page, which lets the page start one more download without asking, as for the link of a file.
-    public func userDidClickInPage() {
-        pageDownloads.userDidClick()
+    /// The user acted in the tab's page, with a click that reaches it or a key that activates its focused link or button (`PageDownloadGate`), which lets the page start one more download without asking, as for the link of a file.
+    public func userDidActInPage() {
+        pageDownloads.userDidAct()
     }
 
     /// Arch loads a page in the tab for the user, as an address typed in the palette, Back, or Reload, so a download it starts is not the page's (`PageDownloadGate`).
@@ -408,7 +408,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         requestPermission(request, completion)
     }
 
-    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again, and a tab that a plugin or a web extension opened onto a file, before the user clicked in it or loaded an address there, downloads nothing and closes at once (`PageDownloadGate.isOpenedByPlugin`). An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
+    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again, and a tab that a plugin or a web extension opened onto a file, or that a page of such a tab opened onto one, before the user acted in it or loaded an address there, downloads nothing and closes at once (`PageDownloadGate.isHeldUntilUserActs`). An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
         if let owner = agentOwnerID {
             guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
@@ -421,7 +421,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         // The engine can report no current document while a link to an attachment navigates away.
         guard !hasPage, engineCommittedURL == nil else { return true }
         isDownloadOnly = true
-        let downloads = !isRestored && !pageDownloads.isOpenedByPlugin
+        let downloads = !isRestored && !pageDownloads.isHeldUntilUserActs
         didOpenOnlyDownload?(downloads)
         return downloads
     }

@@ -81,12 +81,29 @@ struct WebContentsHostView: NSViewRepresentable {
             }
         }
 
-        /// Counts a click only where it reaches the page, not where a view above the page takes it, such as the find bar or a pane's close control. The monitor sees a click before the window does, so it also skips one that the window refuses while a sheet or a modal window blocks it.
+        /// Counts a click only where it reaches the page (`takesClick(at:)`).
         private func handleClick(_ event: NSEvent) {
-            guard let window, event.window === window, window.attachedSheet == nil, NSApp.modalWindow == nil, let content = window.contentView,
-                  let hit = content.hitTest(content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow),
-                  hit.isDescendant(of: self) else { return }
+            guard let window, event.window === window, takesClick(at: event.locationInWindow) else { return }
             onClick?()
         }
     }
+}
+
+extension NSView {
+    /// Whether a click at `locationInWindow` reaches the view or one inside it, as the window hands the click on: not where a view above takes it, such as a prompt card, its dimming, the find bar, or a pane's close control. A local monitor sees a click before the window does, so this also says no while a sheet or a modal window keeps the window from taking clicks.
+    func takesClick(at locationInWindow: NSPoint) -> Bool {
+        guard let window, window.attachedSheet == nil, NSApp.modalWindow == nil, let content = window.contentView,
+              let hit = content.hitTest(content.superview?.convert(locationInWindow, from: nil) ?? locationInWindow) else { return false }
+        return hit.isDescendant(of: self)
+    }
+
+    /// Whether `event` is a key press that activates the focused link or button of the view's page, as a click does: Return, Enter, or Space, not held down, without Command, Control, or Option, while the view or one inside it has its window's keys.
+    func takesActivation(by event: NSEvent) -> Bool {
+        guard event.type == .keyDown, !event.isARepeat, event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
+              Self.activationKeyCodes.contains(event.keyCode), let responder = window?.firstResponder as? NSView else { return false }
+        return responder.isDescendant(of: self)
+    }
+
+    /// Return, the keypad's Enter, and Space.
+    private static let activationKeyCodes: Set<UInt16> = [36, 76, 49]
 }

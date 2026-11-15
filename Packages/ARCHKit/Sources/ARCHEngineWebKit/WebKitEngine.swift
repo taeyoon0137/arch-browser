@@ -289,6 +289,8 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         webConfiguration.applicationNameForUserAgent = Self.applicationNameForUserAgent
         // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
         webConfiguration.preferences.isElementFullscreenEnabled = true
+        // A page opens a window only from the user's click or key, as Blink holds Chromium's pages to. WebKit on macOS lets a script open windows without one by default, so a page, or an extension's script in it, could open tab after tab, each with a first download of its own. Popups take this configuration, so the rule holds for them too.
+        webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false
         if WebKitInspectorAPI.isAllowed { WebKitInspectorAPI.enableDeveloperExtras(in: webConfiguration.preferences) }
         if #available(macOS 15.4, *) { webConfiguration.webExtensionController = context.webExtensions?.controller }
         self.userContent = WebKitUserContentController()
