@@ -123,6 +123,8 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case clipboard
     /// Messages to native apps on the Mac that the plugin names. Web extensions only; granting it asks for Touch ID or the login password.
     case nativeMessaging
+    /// Requests through the AI interface under the plugin's own feature, `plugin.<id>`, with text only (`PluginContext.ai()`). With `events`, the plugin's listeners run as hooks on the shared hook scheduler, which makes that feature automatic (`InstalledPlugin.runsHooks`).
+    case ai
 
     /// What the permission lets a plugin do, as a sentence that Settings shows.
     public var summary: String {
@@ -131,6 +133,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         case .renameTabs: return "Suggest names for your tabs"
         case .clipboard: return "Write text to the clipboard"
         case .nativeMessaging: return "Exchange messages with apps on this Mac"
+        case .ai: return "Send text to the AI models you connected"
         }
     }
 }

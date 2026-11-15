@@ -124,9 +124,9 @@ private struct AIFeaturesPage: View {
         AIModelTierSections(settings: settings)
     }
 
-    /// An automatic feature's hooks can also stop before a request, as for a budget or a timeout, so its last error comes from the hook center.
+    /// An automatic feature's hooks can also stop before a request, as for a budget or a timeout, so its last error comes from the hook center. A plugin's feature runs no hooks there, so its last error is its last request's, as for a feature the user starts.
     private func lastError(of feature: AIFeature) -> String? {
-        if feature.trigger == .automatic { return hooks.lastErrors[feature.id].map(settings.message(for:)) }
+        if feature.trigger == .automatic, !feature.id.rawValue.hasPrefix(AIFeatureID.plugin("").rawValue) { return hooks.lastErrors[feature.id].map(settings.message(for:)) }
         guard case .failed(let error) = service.activity.last(where: { $0.feature == feature.id })?.result else { return nil }
         return settings.message(for: error)
     }

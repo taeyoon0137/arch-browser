@@ -1,4 +1,4 @@
-// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, page script value, or event starts. A call the background script leaves unanswered past the hang limit, or the end of its web content process, fails the instance; an instance without calls for the idle limit stops. Either way it releases its web view and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
+// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, page script value, or event starts. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted, or the end of its web content process, fails the instance; an instance without calls for the idle limit stops. Either way it releases its web view and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
 import JavaScriptCore
 import WebKit
 
@@ -38,6 +38,10 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     /// Settles the call that waits for the background document to load.
     private var settleLoad: (@MainActor (Result<Any?, any Error>) -> Void)?
     private var idleStop: Task<Void, Never>?
+    /// The background script's calls that wait for Arch's own answer, an AI request's reply; when the current stretch of such waits began; and how long the earlier stretches lasted. That time does not count toward the hang limit of the script's unanswered calls, and the instance does not stop for being idle meanwhile.
+    private var archWaits = 0
+    private var archWaitBegan: ContinuousClock.Instant?
+    private var archWaitedBefore: Duration = .zero
     /// While true, the instance does not stop for being idle. The hook runner holds an instance from when it picks it for a run until the run ends, so the idle stop cannot end it between the pick and the event's delivery.
     public var isHeld = false {
         didSet {
@@ -76,7 +80,9 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     /// Loads the background document in a new web view and waits, at most for the hang limit, until the background script has run and set its listeners.
     public func activate(in context: any PluginContext) async throws {
         guard package.background != nil else { return }
-        let webView = WKWebView(frame: .zero, configuration: try await PluginSandbox.configuration(for: package, bridge: ScriptPluginBridge(context: context)))
+        let bridge = ScriptPluginBridge(context: context)
+        bridge.waitsForArch = { [weak self] waits in self?.archWait(began: waits) }
+        let webView = WKWebView(frame: .zero, configuration: try await PluginSandbox.configuration(for: package, bridge: bridge))
         webView.navigationDelegate = self
         self.webView = webView
         do {
@@ -125,29 +131,62 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         }
     }
 
-    /// Starts a call that settles through the closure `start` receives, and waits for it at most for the hang limit. A call still unsettled then means that the background script hangs: the instance fails, and every waiting call throws `timedOut`.
+    /// Starts a call that settles through the closure `start` receives, and waits for it at most for the hang limit, not counting the time the background script waits for Arch's answer to an AI request. A call still unsettled then means that the background script hangs: the instance fails, and every waiting call throws `timedOut`.
     private func call(_ start: (@escaping @MainActor (Result<Any?, any Error>) -> Void) -> Void) async throws -> Any? {
         let number = nextCallNumber
         nextCallNumber += 1
         idleStop?.cancel()
         defer { stopWhenIdle() }
+        let startedAt = ContinuousClock.now
+        let waitedBefore = archWaited
         return try await withCheckedThrowingContinuation { continuation in
             waitingCalls[number] = continuation
             start { [weak self] result in
                 self?.waitingCalls.removeValue(forKey: number)?.resume(with: result)
             }
-            Task { [weak self, hang = limits.hang] in
-                try? await Task.sleep(for: .seconds(hang))
-                guard let self, waitingCalls[number] != nil else { return }
-                fail("The background script left a call unanswered for \(String(format: "%g", hang)) seconds.", throwing: .timedOut)
+            Task { [weak self, hang = Duration.seconds(limits.hang)] in
+                var deadline = startedAt + hang
+                while true {
+                    try? await Task.sleep(until: deadline, clock: .continuous)
+                    guard let self, waitingCalls[number] != nil else { return }
+                    // The time the script waited for Arch's answers is Arch's, not the call's.
+                    let counted = ContinuousClock.now - startedAt - (archWaited - waitedBefore)
+                    guard counted < hang else {
+                        return fail("The background script left a call unanswered for \(String(format: "%g", limits.hang)) seconds.", throwing: .timedOut)
+                    }
+                    deadline = .now + max(hang - counted, .milliseconds(100))
+                }
             }
         }
     }
 
-    /// Stops the instance once it has gone without calls for the idle limit, unless it is held.
+    /// How long the background script has waited for Arch's answers in all.
+    private var archWaited: Duration {
+        archWaitedBefore + (archWaitBegan.map { ContinuousClock.now - $0 } ?? .zero)
+    }
+
+    /// Counts the background script's calls that wait for Arch's answer, and the time they cover.
+    private func archWait(began: Bool) {
+        if began {
+            if archWaits == 0 { archWaitBegan = .now }
+            archWaits += 1
+            idleStop?.cancel()
+            idleStop = nil
+        } else {
+            guard archWaits > 0 else { return }
+            archWaits -= 1
+            if archWaits == 0, let began = archWaitBegan {
+                archWaitedBefore += .now - began
+                archWaitBegan = nil
+            }
+            stopWhenIdle()
+        }
+    }
+
+    /// Stops the instance once it has gone without calls for the idle limit, unless it is held or waits for Arch's answer to an AI request.
     private func stopWhenIdle() {
         idleStop?.cancel()
-        guard waitingCalls.isEmpty, webView != nil, !isHeld else { return }
+        guard waitingCalls.isEmpty, archWaits == 0, webView != nil, !isHeld else { return }
         idleStop = Task { [weak self, idle = limits.idle] in
             try? await Task.sleep(for: .seconds(idle))
             guard let self, !Task.isCancelled else { return }
