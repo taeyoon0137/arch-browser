@@ -192,7 +192,7 @@ public enum AgentToolCatalog {
             AgentToolParameter("mode", .choice(["interactive", "full"]), "What to outline: interactive, the default, or full."),
             ref(required: false, "Outline only this element and what it contains."),
             AgentToolParameter("max_chars", .integer, "The outline's length in characters, \(number(AgentLimits.snapshotDefaultCharacters)) by default and at most \(number(AgentLimits.snapshotMaximumCharacters)).", minimum: 1, maximum: AgentLimits.snapshotMaximumCharacters),
-            AgentToolParameter("diff", .boolean, "Return only the lines added, removed, or changed since this session's last snapshot of the tab."),
+            AgentToolParameter("diff", .boolean, "Return only the lines added, removed, or changed since your last snapshot of the same document in the tab; a new document returns the whole outline."),
         ]),
         AgentTool("read_text", .reads, [], "Returns the page's readable text from offset, at most max_chars characters per call, with the text's length so that further calls can read the rest.", [
             tab(),

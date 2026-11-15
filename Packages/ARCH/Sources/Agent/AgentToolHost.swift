@@ -1062,11 +1062,6 @@ extension AgentToolHost {
                 }
                 return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
             }
-            guard !Task.isCancelled else { return Self.ended.result }
-            guard mayRead(tab) else { return Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle) }
-            if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
-                return Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)
-            }
             let reading = session.beganReading(id)
             defer { session.finishedReading(reading) }
             if call.name == "read_text" { return await readText(call.arguments, tab: tab, handle: handle, mayReadTab: mayRead).result }

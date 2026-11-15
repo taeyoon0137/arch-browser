@@ -66,7 +66,7 @@ public struct AgentSessionPanel: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer()
-                if session.isTakenOver {
+                if session.isTakenOver && !session.hasEnded {
                     Button("Hand Back", action: session.handBack).controlSize(.small)
                 }
                 if session.isTurnRunning {
@@ -210,7 +210,7 @@ public struct AgentSessionPanel: View {
                                            retry: item.id == session.transcript.retryableErrorID && !session.hasEnded ? { retry(item.id) } : nil)
                             .id(item.id)
                     }
-                    if session.isTakenOver {
+                    if session.isTakenOver && !session.hasEnded {
                         note("You took over. The agent waits until you hand the session back.")
                     }
                     ForEach(cards) { card in

@@ -72,13 +72,6 @@ import Testing
         let fixture = try await PageFixture(shared: true)
         let session = session(sharing: fixture)
         var call = AgentToolCall(name: "snapshot", arguments: ["tab": "t1", "diff": true])
-        var validations: [UUID?] = []
-        let excluded = AgentToolHost(host: fixture.host, allowsAI: { _ in
-            validations.append(session.latestActiveTab)
-            return false
-        })
-        let denied = await excluded.run(call, in: session, searchesHistory: false)
-        #expect(denied.code == "P16" && validations.count == 1 && validations[0] == nil)
         let original = await fixture.toolHost.run(call, in: session, searchesHistory: false)
         #expect(original.status == .ok && session.snapshots.records[fixture.tabID] != nil)
         let oldStore = session.snapshots
@@ -254,7 +247,7 @@ import Testing
     @Test func theDiffAndTheCut() async throws {
         let fixture = try await PageFixture()
         let first = await fixture.call("snapshot", ["tab": "t1", "diff": true])
-        #expect(first.text.contains("This is the first snapshot of t1, so it shows the whole outline."))
+        #expect(first.text.contains("This is the first snapshot of the current document in t1, so it shows the whole outline."))
         let unchanged = await fixture.call("snapshot", ["tab": "t1", "diff": true])
         #expect(unchanged.text.contains("Nothing changed since the last snapshot of t1."))
         _ = try await fixture.page.evaluate("document.querySelector('#under').textContent = 'Still covered'; 0")

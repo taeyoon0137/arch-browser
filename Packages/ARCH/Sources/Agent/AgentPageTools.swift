@@ -166,7 +166,7 @@ extension AgentToolHost {
                     + difference.insertions.map { if case .insert(_, let line, _) = $0 { return "+ " + line } else { return "" } }
                 if shown.isEmpty { note = "Nothing changed since the last snapshot of \(handle)." }
             } else {
-                note = "This is the first snapshot of \(handle), so it shows the whole outline."
+                note = "This is the first snapshot of the current document in \(handle), so it shows the whole outline."
             }
         }
         let limit = arguments["max_chars"].flatMap(Self.integer) ?? AgentLimits.snapshotDefaultCharacters
