@@ -25,7 +25,9 @@ struct ScriptManifest {
         guard apiVersion <= PluginManifest.apiVersion else { throw PluginError.unsupportedAPIVersion(apiVersion) }
         let idText = try object.string("id")
         guard let id = PluginID(rawValue: idText) else { throw invalidManifest("id “\(idText)” is not a reverse-DNS identifier") }
-        let name = try object.string("name")
+        // The name loses the spaces at either end, so every view shows it alike, and a name of nothing but spaces, which would show as no name, leaves the plugin to go by its identifier, as a web extension does.
+        let givenName = try object.string("name").trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = givenName.isEmpty ? id.rawValue : givenName
         let version = try object.string("version")
         let summary = try object.string("summary")
         let permissions = try object.strings("permissions").map { name in
@@ -217,11 +219,12 @@ private struct ManifestObject {
         return text
     }
 
-    /// Text that is not empty.
+    /// Text that is not empty. Empty text is refused as empty, as an empty `name` is, as Chromium refuses an extension's, while a `name` of nothing but spaces takes the plugin's `id`.
     mutating func optionalString(_ key: String) throws -> String? {
         switch value(key) {
         case nil: return nil
         case let .string(text)? where !text.isEmpty: return text
+        case .string?: throw invalidManifest("\(name(key)) must not be empty")
         default: throw invalidManifest("\(name(key)) must be text")
         }
     }

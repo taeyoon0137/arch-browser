@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -57,6 +57,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             ("not JSON", ["plugin.json": "{"], .invalidPackage("plugin.json is not valid JSON.")),
             ("newer API", ["plugin.json": #"{"apiVersion": 2, "events": ["pageLoaded"]}"#], .unsupportedAPIVersion(2)),
             ("unread key", ["plugin.json": manifest + #", "network": ["example.org"]}"#], .invalidPackage("plugin.json: network is not a field Arch reads.")),
+            ("empty name", ["plugin.json": #"{"id": "org.example.bad", "name": "", "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must not be empty.")),
+            ("name not text", ["plugin.json": #"{"id": "org.example.bad", "name": 1, "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must be text.")),
             ("unknown permission", ["plugin.json": manifest + #", "permissions": ["notifications"]}"#],
              .invalidPackage("plugin.json: permissions lists “notifications”, which Arch does not grant.")),
             ("native messaging", ["plugin.json": manifest + #", "permissions": ["nativeMessaging"]}"#],
@@ -109,6 +111,14 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             folder.url.appendingPathComponent("Plugins/\($0)/Staging").path
         }
         #expect(try staging.allSatisfy { try FileManager.default.contentsOfDirectory(atPath: $0).isEmpty })
+    }
+
+    /// A name of nothing but spaces would show as no name, so the plugin goes by its identifier. Any other name loses the spaces at either end.
+    @Test func namesAPluginWithoutANameByItsIdentifier() async throws {
+        let package = try writePackage("blank", ["plugin.json": #"{"id": "org.example.Blank", "name": " ", "version": "1", "apiVersion": 1, "summary": "Blank."}"#])
+        #expect(try await manager().stage(package).manifest.name == "org.example.blank")
+        let padded = try writePackage("padded", ["plugin.json": #"{"id": "org.example.Padded", "name": " Padded ", "version": "1", "apiVersion": 1, "summary": "Padded."}"#])
+        #expect(try await manager().stage(padded).manifest.name == "Padded")
     }
 
     @Test func stagesTheFilesThatAIWrote() async throws {

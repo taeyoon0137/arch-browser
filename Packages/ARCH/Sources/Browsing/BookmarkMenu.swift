@@ -48,7 +48,7 @@ public enum BookmarkMenu {
             let contents = Self.entries(folders: tree.subfolders(of: folder.id), tabs: tree.tabs(inFolder: folder.id), tree: tree, unreadCounts: unreadCounts)
             return contents.isEmpty ? nil : .submenu(title: folder.name, entries: contents, unreadCount: folder.live == nil ? 0 : unreadCounts[folder.id] ?? 0)
         }
-        return submenus + tabs.map { .tab(id: $0.id, title: $0.displayTitle, url: $0.url, isUnread: $0.liveItemID != nil && $0.isUnread) }
+        return submenus + tabs.map { .tab(id: $0.id, title: $0.shownTitle, url: $0.url, isUnread: $0.liveItemID != nil && $0.isUnread) }
     }
 }
 

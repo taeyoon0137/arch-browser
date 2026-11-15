@@ -100,7 +100,7 @@ import LiveFolders
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
-    /// The session sets this callback to name the web extension of the tab's Persona whose page is at an address (`BrowserSession.extensionName(ofPageAt:in:)`), which the tab's prompts name in place of the identifier that the address has as its host (`PromptSiteIdentity`). Without it they name the identifier.
+    /// The session sets this callback to name the web extension of the tab's Persona whose page is at an address (`BrowserSession.extensionName(ofPageAt:in:)`), which the tab's prompts name in place of the identifier that the address has as its host (`PromptSiteIdentity`), `shownTitle` and `shownPageTitle` put in place of a title that only repeats such a page's address, and Now Playing names as the page's site. Without it they show the identifier, or the address that Chromium reports as the title.
     var extensionName: ((URL) -> String?)?
     /// Opens a link in a new tab, optionally selecting it in the source window.
     var openURLInNewTab: ((URL, Bool) -> Void)?
@@ -246,6 +246,30 @@ import LiveFolders
 
     /// The page's title, or its host if it has no title.
     public var pageTitle: String { Self.pageTitle(title: title, url: url) }
+
+    /// `displayTitle`, with the name of the web extension whose own page the tab shows (`extensionName`), as its options page in a tab, in place of a page title that only repeats the address (`titleRepeatsAddress(_:of:)`), which would show the extension's identifier. A user's name, a hook's name, a live folder item's title, and a page's own title stay. The sidebar's rows, the window's title, the tab switcher, the palette's tab rows, the pane of a tab shown in another window, the Bookmarks menu, floating developer tools, Edit Saved Address…, a new favorite, the print job, and the file names of Export as PDF and a capture show it; plugins, hooks, agents, scripts, and the tab close log read `displayTitle`.
+    var shownTitle: String {
+        guard let name = extensionPageName else { return displayTitle }
+        return Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: name, url: url, livePage: liveItemID == nil ? nil : savedPage)
+    }
+
+    /// `pageTitle` as `shownTitle` names the page: the extension's name in place of a title that only repeats the address of the extension's page. Renaming the tab to it restores the page's title, as renaming it to `pageTitle` does for any other page (`BrowserWindowModel.renameTab(_:to:)`). Sharing the page, Now Playing without the page's media metadata, and Use Current Page as Saved Page take it.
+    var shownPageTitle: String { extensionPageName ?? pageTitle }
+
+    /// The name of the web extension whose own page the tab shows (`extensionName`), while the page's title only repeats its address; nil otherwise.
+    private var extensionPageName: String? {
+        guard let url, Self.titleRepeatsAddress(title, of: url) else { return nil }
+        return extensionName?(url)
+    }
+
+    /// Whether `title` names the page at `url` by nothing but its address: empty, as WebKit reports a page without a title and `pageTitle` then shows the host, the host itself, or the address, as Chromium reports a page without a title (`NavigationEntryImpl::GetTitleForDisplay`), compared without percent escapes and a trailing `/`.
+    nonisolated static func titleRepeatsAddress(_ title: String, of url: URL) -> Bool {
+        let plain = { (text: String) -> String in
+            let decoded = text.removingPercentEncoding ?? text
+            return decoded.hasSuffix("/") ? String(decoded.dropLast()) : decoded
+        }
+        return title.isEmpty || title == url.host || plain(title) == plain(url.absoluteString)
+    }
 
     /// The name a tab with these inputs shows, which the event source computes from a change's new value before the tab publishes it.
     nonisolated static func displayTitle(customTitle: String?, suggestedTitle: SuggestedTitle?, title: String, url: URL?, livePage: SavedPage?) -> String {

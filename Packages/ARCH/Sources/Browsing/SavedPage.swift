@@ -112,12 +112,12 @@ extension Tab {
 // MARK: The favorite's side
 
 extension Favorite {
-    /// Use Current Page as Saved Page for the favorite's tab: the favorite at the tab's address with its page title, or nil while the tab has no address or another favorite of the Persona has it, since a Persona's favorites come once per address (`BrowserSession.addFavorite(_:)`).
+    /// Use Current Page as Saved Page for the favorite's tab: the favorite at the tab's address with its page title as the tab's row names the page (`Tab.shownPageTitle`), or nil while the tab has no address or another favorite of the Persona has it, since a Persona's favorites come once per address (`BrowserSession.addFavorite(_:)`).
     @MainActor func usingCurrentPage(of tab: Tab, among favorites: [Favorite]) -> Favorite? {
         guard let url = tab.url, BrowserSession.canUse(url, asAddressOf: self, among: favorites) else { return nil }
         var favorite = self
         favorite.url = url
-        favorite.title = tab.pageTitle
+        favorite.title = tab.shownPageTitle
         return favorite
     }
 

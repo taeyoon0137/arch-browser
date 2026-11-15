@@ -666,8 +666,9 @@ struct EngineVersionsTests {
         // A web page on a host of that name and a page of an extension that is not installed are not named.
         #expect(runtime.name(ofPageAt: URL(string: "https://\(keyID)/options.html")!) == nil)
         #expect(runtime.name(ofPageAt: URL(string: "chrome-extension://\(String(repeating: "a", count: 32))/options.html")!) == nil)
-        // A name of nothing but spaces, as a localized name whose message is empty, leaves the identifier to show.
+        // A name of nothing but spaces, as a localized name whose message is empty, names the extension by its identifier, as everywhere else.
         let blank = try await manager.installEverything(from: package("blank", name: "  "), isEnabled: false)
-        #expect(runtime.name(ofPageAt: URL(string: "webkit-extension://\(WebExtensionManifest.extensionID(of: blank.id))/options.html")!) == nil)
+        let blankID = WebExtensionManifest.extensionID(of: blank.id)
+        #expect(blank.manifest.name == blankID && runtime.name(ofPageAt: URL(string: "webkit-extension://\(blankID)/options.html")!) == blankID)
     }
 }

@@ -40,7 +40,7 @@ struct CommandPaletteView: View {
         guard !query.isEmpty, windowModel.kind == .main else { return [] }
         return Array(session.allTabs.filter { tab in
             tab.id != windowModel.selectedTabID && tab.isListedInSidebar && tab.personaID == windowModel.personaID &&
-                (tab.displayTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
+                (tab.shownTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
         }.prefix(5))
     }
 
@@ -602,7 +602,7 @@ struct PaletteTabRow: View {
             TabIconView(tab: tab, symbolSize: 15)
                 .frame(width: 18, height: 18)
                 .frame(width: 20)
-            Text(tab.displayTitle)
+            Text(tab.shownTitle)
                 .font(.system(size: 15))
                 .lineLimit(1)
             Spacer(minLength: 0)

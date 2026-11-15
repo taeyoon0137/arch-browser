@@ -125,8 +125,8 @@ public final class DevToolsDock: ObservableObject {
     @MainActor private static func titles(of tab: Tab) -> AnyPublisher<String, Never> {
         tab.objectWillChange
             .receive(on: DispatchQueue.main)
-            .compactMap { [weak tab] _ in tab?.displayTitle }
-            .prepend(tab.displayTitle)
+            .compactMap { [weak tab] _ in tab?.shownTitle }
+            .prepend(tab.shownTitle)
             .removeDuplicates()
             .eraseToAnyPublisher()
     }

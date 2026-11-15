@@ -238,11 +238,11 @@ public enum BrowserWindowKind {
         renamingSpaceID = nil
     }
 
-    /// The name the tab shows already changes nothing. An empty name or the page's own title restores the page's title, which hooks then leave until the tab moves to another address. The session saves the name, as it saves every change to a tab.
+    /// The name the tab's row shows already (`Tab.shownTitle`), which its rename field starts with, changes nothing. An empty name or the page's own title as the row names the page (`Tab.shownPageTitle`), the extension's name for an extension's page without a title, restores the page's title, which hooks then leave until the tab moves to another address. The session saves the name, as it saves every change to a tab.
     public func renameTab(_ id: UUID, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let tab = session.tabs.first(where: { $0.id == id }), trimmed != tab.displayTitle {
-            if trimmed.isEmpty || trimmed == tab.pageTitle {
+        if let tab = session.tabs.first(where: { $0.id == id }), trimmed != tab.shownTitle {
+            if trimmed.isEmpty || trimmed == tab.shownPageTitle {
                 tab.customTitle = nil
                 tab.suggestedTitle = tab.url.map { SuggestedTitle(title: nil, url: $0) }
             } else {
@@ -416,7 +416,7 @@ public enum BrowserWindowKind {
     func promptToEditSavedAddress(of tab: Tab) {
         guard tab.isPinned, tab.liveItemID == nil else { return }
         let address = (tab.savedPage?.url ?? tab.url)?.absoluteString ?? ""
-        askForText(title: "Edit Saved Address", message: "Go Back to Saved Page returns \u{201C}\(tab.displayTitle)\u{201D} to this address.", fields: [("Address", address)], button: "Save") { [weak tab] texts in
+        askForText(title: "Edit Saved Address", message: "Go Back to Saved Page returns \u{201C}\(tab.shownTitle)\u{201D} to this address.", fields: [("Address", address)], button: "Save") { [weak tab] texts in
             if tab?.setSavedAddress(fromInput: texts[0]) != true { NSSound.beep() }
         }
     }
@@ -1242,7 +1242,7 @@ public enum BrowserWindowKind {
     public func printPage() {
         renderSelectedPageAsPDF(failureMessage: "The page could not be printed.") { tab, document, window in
             guard let operation = document.printOperation(for: NSPrintInfo.shared, scalingMode: .pageScaleDownToFit, autoRotate: true) else { return }
-            operation.jobTitle = tab.displayTitle
+            operation.jobTitle = tab.shownTitle
             operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
         }
     }
@@ -1253,7 +1253,7 @@ public enum BrowserWindowKind {
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.pdf]
             // A slash would name a folder, and a colon shows as a slash in the Finder.
-            panel.nameFieldStringValue = tab.displayTitle.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + ".pdf"
+            panel.nameFieldStringValue = tab.shownTitle.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + ".pdf"
             panel.beginSheetModal(for: window) { response in
                 guard response == .OK, let url = panel.url else { return }
                 if !document.write(to: url) {
@@ -1325,7 +1325,7 @@ public enum BrowserWindowKind {
     /// Writes a capture to the captures folder and shows the file in the Finder. Encoding a long page takes a moment, so it runs off the main thread. A capture that failed or could not be written shows a notice card on its tab, if the tab is still open.
     private func saveCapture(_ image: NSImage?, of tab: Tab) {
         guard let image else { return showCaptureFailure("The page could not be captured.", for: tab) }
-        let title = tab.displayTitle
+        let title = tab.shownTitle
         let date = Date()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { try PageCapture.save(image, title: title, date: date) }
@@ -1357,7 +1357,7 @@ public enum BrowserWindowKind {
     /// Shows the system share picker for the selected tab's address and title, below the share button, or from the top of the window while the sidebar or the library hides the button.
     public func shareSelectedPage() {
         guard !isSelectedPageCovered, let tab = selectedTab, let url = tab.url, let anchor = siteControlAnchor(shareButtonView) else { return }
-        let picker = PageSharePicker(url: url, title: tab.pageTitle, icon: tab.favicon)
+        let picker = PageSharePicker(url: url, title: tab.shownPageTitle, icon: tab.favicon)
         sharePicker = picker
         picker.show(relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.edge)
     }

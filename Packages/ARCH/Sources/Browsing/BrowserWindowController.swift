@@ -100,11 +100,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         return CGRect(x: area.midX - fitted.width / 2, y: area.midY - fitted.height / 2, width: fitted.width, height: fitted.height)
     }
 
-    /// The title bar hides the title. The Window menu and Mission Control show it, with the window's Persona and current space as `title(tabTitle:spaceName:place:)` builds it. While an internal page covers the page area, the title names that page, as the page area and the address pill do, not the tab under it.
+    /// The title bar hides the title. The Window menu and Mission Control show it, with the window's Persona and current space as `title(tabTitle:spaceName:place:)` builds it, and the selected tab's title as its row shows it (`Tab.shownTitle`). While an internal page covers the page area, the title names that page, as the page area and the address pill do, not the tab under it.
     private func updateTitle() {
         guard let window else { return }
         let space = model.currentSpace
-        let title = Self.title(tabTitle: model.internalPage?.title ?? model.selectedTab?.displayTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
+        let title = Self.title(tabTitle: model.internalPage?.title ?? model.selectedTab?.shownTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
         if window.title != title { window.title = title }
     }
 

@@ -61,26 +61,20 @@ private struct TabSwitcherRow: View {
         tab.url.flatMap { AddressPillView.extensionName(ofPageAt: $0, in: tab, session: session) }
     }
 
-    /// The tab's title, or for an extension's page whose title is its address's host, as for a page without a title, the extension's name in place of that identifier.
-    private func title(extensionName: String?) -> String {
-        guard let extensionName, tab.displayTitle == tab.url?.host else { return tab.displayTitle }
-        return extensionName
-    }
-
-    /// The site after the title, as the address pill names it, or nil without a host or when the title already is the site, as for a page without a title.
-    private func site(extensionName: String?) -> String? {
+    /// The site after `title`, the tab's title as its sidebar row shows it (`Tab.shownTitle`): the site as the address pill names it, or nil without a host or when the title already is the site, as for a page without a title.
+    private func site(title: String, extensionName: String?) -> String? {
         guard let url = tab.url, let host = url.host, !host.isEmpty, tab.displayTitle != host else { return nil }
         let site = extensionName ?? AddressPillView.siteName(of: url)
-        return site == tab.displayTitle ? nil : site
+        return site == title ? nil : site
     }
 
     var body: some View {
-        let extensionName = self.extensionName
-        let site = self.site(extensionName: extensionName)
+        let title = tab.shownTitle
+        let site = self.site(title: title, extensionName: extensionName)
         HStack(spacing: 10) {
             TabIconView(tab: tab)
                 .frame(width: 18, height: 18)
-            Text(title(extensionName: extensionName))
+            Text(title)
                 .font(.system(size: 14))
                 .lineLimit(1)
             Spacer(minLength: 8)

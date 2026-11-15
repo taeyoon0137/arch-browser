@@ -13,23 +13,25 @@ struct WebExtensionManifest {
 
     let manifest: PluginManifest
 
-    /// Reads `manifest.json` in the package folder at `root`, which the user installs from `source`. Throws `PluginError.invalidPackage` with a sentence that names the field for a manifest Arch cannot install.
+    /// Reads `manifest.json` in the package folder at `root`, which the user installs from `source`. Throws `PluginError.invalidPackage` with a sentence that names the field for a manifest Arch cannot install. The name and the action title lose the spaces at either end, so every view shows them alike; a name of nothing but spaces gives the extension its identifier as its name, and an action title of nothing but spaces the name.
     init(packageAt root: URL, source: URL) throws {
         guard let data = try? Data(contentsOf: root.appendingPathComponent(Self.fileName)),
               let object = try? JSONSerialization.jsonObject(with: data) else { throw PluginError.invalidPackage("manifest.json is not valid JSON.") }
         guard let fields = object as? [String: Any] else { throw invalidManifest("the manifest must be a JSON object") }
         guard fields["manifest_version"] as? Int == 3 else { throw invalidManifest("manifest_version must be 3, as Arch runs Manifest V3 extensions only") }
         let messages = try LocalizedMessages(packageAt: root, defaultLocale: fields["default_locale"] as? String)
-        let name = try messages.text(of: "name", in: fields, required: true)
+        let givenName = try messages.text(of: "name", in: fields, required: true).trimmingCharacters(in: .whitespacesAndNewlines)
         let version = try messages.text(of: "version", in: fields, required: true)
         let summary = try messages.text(of: "description", in: fields, required: false)
         let requested = Self.unique(try Self.permissionNames(of: "permissions", in: fields))
         // Chromium refuses a manifest whose optional permissions do not read, and requests at run time read them.
         _ = try Self.permissionNames(of: "optional_permissions", in: fields)
         let extensionID = try Self.extensionID(key: fields["key"], source: source)
+        // A name of nothing but spaces, as a localized name whose message is empty, would show as no name, so the extension goes by its identifier, as the address of its pages names it. Chromium runs a name of only spaces, and the user's languages, which pick the message, can change between launches, so the package is not refused.
+        let name = givenName.isEmpty ? extensionID : givenName
         var commands: [PluginCommand] = []
         if let action = fields["action"] as? [String: Any] {
-            let title = try messages.text(of: "default_title", in: action, required: false)
+            let title = try messages.text(of: "default_title", in: action, required: false).trimmingCharacters(in: .whitespacesAndNewlines)
             commands.append(PluginCommand(id: Self.actionCommand, title: title.isEmpty ? name : title, symbol: "puzzlepiece.extension", keywords: [name]))
         }
         manifest = PluginManifest(
