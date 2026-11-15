@@ -92,7 +92,7 @@ import Foundation
         var attention: (UUID) -> Void = AgentAttention.notify
     }
 
-    /// Don't Allow remembers nothing, but the next call of the same client asks again only after this long, so that a looping client cannot flood the user.
+    /// Don't Allow remembers nothing, but Arch shows one grant sheet at a time and no new one for this long after any Don't Allow or timeout, so that a looping client, even one that changes its identity, cannot flood the user.
     static let askInterval: TimeInterval = 60
     static let settingsFileName = "agent.json"
     static let activityFileName = "agent-activity.json"
@@ -104,6 +104,8 @@ import Foundation
     /// The Persona that `agent.json` names while its seal cannot be checked, which stays agent-only: an unverified ID only restricts a Persona, never widens one.
     private var unverifiedAgentsPersonaID: UUID?
     private var declinedAt: [AgentClientIdentity.Key: Date] = [:]
+    /// The last Don't Allow or timeout of any client, after which no new sheet opens for a minute.
+    private var lastDeclinedAt: Date?
     /// The grant sheet each client waits on, so that its calls share one sheet.
     private var questions: [AgentClientIdentity.Key: Task<AgentGrant?, Never>] = [:]
     /// What the tool host keeps for each grant in force since its first call this launch.
@@ -315,6 +317,8 @@ import Foundation
 
     /// Listens while outside clients may connect or a session needs the channel, and otherwise removes the socket, so that clients report that agent access is off.
     func updateListening() {
+        // A grant sheet open when outside access goes off closes without a decline.
+        if !acceptsOutsideClients { dependencies.prompt.cancelAll() }
         let isNeeded = acceptsOutsideClients || sessionsNeedChannel || !hookCLIs.isEmpty
         if isNeeded, endpoint == nil {
             guard let location = dependencies.location else {
@@ -331,9 +335,12 @@ import Foundation
                 channelProblem = (error as? AgentEndpointError)?.message ?? "\(error)"
             }
         } else if !isNeeded, let endpoint {
+            // The endpoint reports no close once it stops, so its connections' calls and cards end here.
+            for (id, connection) in connections {
+                dropConnection(id, because: connection.identity == nil ? Self.clientLeft : "Outside access was turned off in Arch.")
+            }
             endpoint.stop()
             self.endpoint = nil
-            connections = [:]
             updateConnectedGrants()
         } else if isNeeded, !acceptsOutsideClients {
             // Outside access went off while a session keeps the channel: only the sessions' own connections stay.
@@ -341,6 +348,15 @@ import Foundation
             // A session an outside client started stops with its access.
             endClientSessions(of: nil, because: "Outside access was turned off in Arch.")
         }
+    }
+
+    private static let clientLeft = "The client left before the user answered."
+
+    /// Ends a closed connection's calls and cards and forgets it.
+    private func dropConnection(_ id: UUID, because reason: String) {
+        for state in states.values { state.cancelCalls(onConnection: id) }
+        approvals.end(connection: id, because: reason)
+        connections.removeValue(forKey: id)?.cancelCalls()
     }
 
     /// Ends the sessions an outside client started, those of one grant or all of them, with their connections: a session never outlives the access that started it.
@@ -459,7 +475,7 @@ import Foundation
         }
     }
 
-    /// The grant for a call from a client without one: the sheet, at most once a minute per client, then Touch ID where the choice needs it. Replies the error itself when there is none.
+    /// The grant for a call from a client without one: the sheet, one at a time and at most once a minute after a refusal, then Touch ID where the choice needs it. Replies the error itself when there is none.
     private func grantForCall(from connection: ClientConnection, _ identity: AgentClientIdentity, requestID: AgentRPCID, call: ConnectionCall? = nil) async -> AgentGrant? {
         if let grant = grant(for: identity) { return grant }
         guard acceptsOutsideClients else {
@@ -469,6 +485,16 @@ import Foundation
         if let declined = declinedAt[identity.key], dependencies.now().timeIntervalSince(declined) < Self.askInterval {
             replyError(connection, requestID, Self.noGrantError("You did not allow \(identity.displayName) to use Arch a moment ago. Arch asks again after a minute."))
             return nil
+        }
+        if questions[identity.key] == nil {
+            if !questions.isEmpty {
+                replyError(connection, requestID, Self.noGrantError("Arch is already asking about another program. Try again once that is answered."))
+                return nil
+            }
+            if let declined = lastDeclinedAt, dependencies.now().timeIntervalSince(declined) < Self.askInterval {
+                replyError(connection, requestID, Self.noGrantError("Arch asked about another program a moment ago and was not allowed. It asks again after a minute."))
+                return nil
+            }
         }
         endpoint?.send(.notification(method: AgentControlMethod.progressNotification, params: ["call": requestID.json, "message": "Waiting for your answer in Arch\u{2026}"]), to: connection.id)
         let question: Task<AgentGrant?, Never>
@@ -495,12 +521,15 @@ import Foundation
         let personas = host.personas.filter { $0.id != agentsID }
         let request = AgentGrantRequest(client: identity, personas: personas, agentsSpaces: agentsID.map(host.spaces(in:)) ?? [],
                                         spacesByPersona: Dictionary(uniqueKeysWithValues: personas.map { ($0.id, host.spaces(in: $0.id)) }))
-        guard let choice = await dependencies.prompt.ask(request) else {
+        let answer = await dependencies.prompt.ask(request)
+        // A sheet that closed because outside access went off records no decline and asks for no Touch ID.
+        guard acceptsOutsideClients else { return nil }
+        guard let choice = answer else {
             decline(identity)
             return nil
         }
         if choice.needsAuthentication {
-            guard await dependencies.authenticator.authenticate(reason: "allow \(identity.displayName) to use Arch") else {
+            guard await dependencies.authenticator.authenticate(reason: "give \u{201C}\(identity.displayName)\u{201D} access to its agent tools") else {
                 decline(identity)
                 return nil
             }
@@ -522,6 +551,7 @@ import Foundation
 
     private func decline(_ identity: AgentClientIdentity) {
         declinedAt[identity.key] = dependencies.now()
+        lastDeclinedAt = dependencies.now()
         activity.record(AgentActivityEntry(date: dependencies.now(), event: .declined, clientName: identity.displayName))
     }
 
@@ -1817,9 +1847,7 @@ extension AgentService: AgentEndpointDelegate {
 
     func endpoint(_ endpoint: AgentEndpoint, didClose connection: UUID) {
         guard endpoint === self.endpoint else { return }
-        for state in states.values { state.cancelCalls(onConnection: connection) }
-        approvals.end(connection: connection, because: "The client left before the user answered.")
-        connections.removeValue(forKey: connection)?.cancelCalls()
+        dropConnection(connection, because: Self.clientLeft)
         updateConnectedGrants()
     }
 

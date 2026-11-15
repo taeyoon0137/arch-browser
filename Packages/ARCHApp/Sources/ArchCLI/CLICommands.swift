@@ -130,6 +130,7 @@ enum CLICommands {
             let result = try callWaiting(call, on: connection)
             if json {
                 if printJSON(result.structured ?? .null) != .done { return .internalError }
+                if result.status != .ok { printError(result.text) }
             } else if result.status == .ok {
                 print(result.text)
             } else {
@@ -144,7 +145,8 @@ enum CLICommands {
         withConnection { connection, _ in
             let result = try callWaiting(call, on: connection)
             guard result.status == .ok, let image = result.content.lazy.compactMap(\.imageData).first else {
-                if json { _ = printJSON(result.structured ?? .null) } else { printError(result.text) }
+                if json { _ = printJSON(result.structured ?? .null) }
+                if !json || result.status != .ok { printError(result.text) }
                 return result.status == .ok ? .internalError : AgentExitCode(status: result.status)
             }
             let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withYear, .withMonth, .withDay, .withTime]).replacingOccurrences(of: ":", with: "")

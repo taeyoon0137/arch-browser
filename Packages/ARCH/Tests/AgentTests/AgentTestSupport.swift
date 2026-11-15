@@ -309,11 +309,12 @@ import Testing
     var answers: [AgentGrantChoice?] = []
     var holdsAnswers = false
     private(set) var requests: [AgentGrantRequest] = []
-    private var held: [CheckedContinuation<Void, Never>] = []
+    /// Each waiting sheet, resumed with whether it is answered.
+    private var held: [CheckedContinuation<Bool, Never>] = []
 
     func ask(_ request: AgentGrantRequest) async -> AgentGrantChoice? {
         requests.append(request)
-        if holdsAnswers { await withCheckedContinuation { held.append($0) } }
+        if holdsAnswers, await !withCheckedContinuation({ held.append($0) }) { return nil }
         return answers.isEmpty ? nil : answers.removeFirst()
     }
 
@@ -322,10 +323,15 @@ import Testing
         holdsAnswers = false
         let waiting = held
         held = []
-        waiting.forEach { $0.resume() }
+        waiting.forEach { $0.resume(returning: true) }
     }
 
-    func cancelAll() {}
+    /// Closes the sheets that wait, as AppKit's sheets end without a choice.
+    func cancelAll() {
+        let waiting = held
+        held = []
+        waiting.forEach { $0.resume(returning: false) }
+    }
 }
 
 final class FakeAuthenticator: AgentAuthenticating, @unchecked Sendable {

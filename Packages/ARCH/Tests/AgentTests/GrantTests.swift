@@ -246,4 +246,47 @@ import Testing
         #expect(service.grants.count == 1)
         #expect(!harness.socketExists)
     }
+
+    /// With no session keeping the channel, the endpoint stops without reporting closes, so the service itself ends the client's waiting card.
+    @Test func turningOutsideAccessOffEndsAWaitingCard() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.defaultPersona.id), level: .askBeforeActing, duration: .day)]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        _ = try await client.callTool("session_info")
+        let waiting = Task { try? await client.callTool("request_approval", ["summary": "Post the comment", "kind": "send"]) }
+        try await waitUntil { !service.approvals.pending.isEmpty }
+        let card = try #require(service.approvals.pending.first)
+        try await service.setAllowsOutsideClients(false)
+        #expect(service.approvals.outcomes[card.id] == .ended("Outside access was turned off in Arch."))
+        #expect(await !service.approvals.answer(card.id, with: .allowOnce))
+        _ = await waiting.value
+    }
+
+    /// A sheet open when outside access goes off closes without a decline or Touch ID, so the client is asked again at once when access is back.
+    @Test func aSheetClosedByOutsideAccessGoingOffRecordsNoDecline() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.holdsAnswers = true
+        harness.prompt.answers = [AgentGrantChoice(level: .askBeforeActing)]
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let call = Task { try? await client.callTool("list_tabs") }
+        try await waitUntil { harness.prompt.requests.count == 1 }
+        try await service.setAllowsOutsideClients(false)
+        _ = await call.value
+        #expect(harness.authenticator.count == 0)
+        #expect(!service.activity.entries.contains { $0.event == .declined })
+        #expect(service.grants.isEmpty)
+        try await service.setAllowsOutsideClients(true)
+        harness.prompt.holdsAnswers = false
+        harness.prompt.answers = []
+        let again = try TestClient(harness.location)
+        _ = try await again.hello()
+        await #expect(throws: AgentClientError.noGrant("You did not allow agent in Agent to use Arch.")) { try await again.callTool("list_tabs") }
+        #expect(harness.prompt.requests.count == 2)
+    }
 }
