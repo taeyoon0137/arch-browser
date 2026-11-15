@@ -20,7 +20,6 @@ struct AgentReadPage: Hashable {
     let documentID: UUID
     let url: URL
     let ownerID: UUID?
-    let takeoverGeneration: Int
 }
 
 /// What the panel offers beside an error, one action each (`docs/ai.md`, Errors).

@@ -709,8 +709,7 @@ import Foundation
 
     /// A read source remains local to its session. Choosing it can only select the same live document.
     func currentReadPage(_ page: AgentReadPage, in session: AgentSession) -> AgentTabInfo? {
-        guard canEditAttachments(of: session), !session.isTakenOver, session.takeoverGeneration == page.takeoverGeneration,
-              session.handles.tabs.id(for: page.handle) == page.tabID,
+        guard canEditAttachments(of: session), session.handles.tabs.id(for: page.handle) == page.tabID,
               let tab = host.tabs(withIDs: [page.tabID]).first, tab.documentID == page.documentID,
               tab.url == page.url, tab.isLoaded, tab.agentOwnerID == page.ownerID,
               AgentPolicy.mayRead(tab.url, allowsAI: dependencies.allowsAI) == .allowed else { return nil }
@@ -1239,12 +1238,14 @@ import Foundation
             let pages = tabs.compactMap { tab -> AgentReadPage? in
                 guard let url = tab.url else { return nil }
                 return AgentReadPage(tabID: tab.id, handle: session.handles.tabs.handle(for: tab.id), documentID: tab.documentID,
-                                     url: url, ownerID: tab.agentOwnerID, takeoverGeneration: generation)
+                                     url: url, ownerID: tab.agentOwnerID)
             }
             let sources = Dictionary(uniqueKeysWithValues: pages.map { ($0.handle, $0) })
             return { [weak service, weak session] result in
+                // A result from before a Take Over stays withheld after Hand Back, while the panel still lists its page.
                 @MainActor func permits(_ handle: String) -> Bool {
-                    guard let service, let session, let source = sources[handle] else { return false }
+                    guard let service, let session, !session.isTakenOver, session.takeoverGeneration == generation,
+                          let source = sources[handle] else { return false }
                     return service.currentReadPage(source, in: session) != nil
                 }
                 if call.name == "list_tabs" {
@@ -1313,7 +1314,7 @@ import Foundation
         if session.origin == .app, call.name == "snapshot" || call.name == "read_text",
            let handle = call.arguments["tab"]?.stringValue, let id = session.handles.tabs.id(for: handle),
            let tab = host.tabs(withIDs: [id]).first, let url = tab.url {
-            read = AgentReadPage(tabID: id, handle: handle, documentID: tab.documentID, url: url, ownerID: tab.agentOwnerID, takeoverGeneration: generation)
+            read = AgentReadPage(tabID: id, handle: handle, documentID: tab.documentID, url: url, ownerID: tab.agentOwnerID)
         } else {
             read = nil
         }

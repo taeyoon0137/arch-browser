@@ -18,12 +18,13 @@ import Testing
         }
         store.set(.allow, for: [.notifications, .clipboard], origin: Self.origin)
         #expect(note(ordinary) == nil)
+        // Agent tabs deny requests themselves, so a denial needs no note.
         store.set(.deny, for: [.microphone], origin: Self.origin)
-        #expect(note(ordinary) == "Sites previously denied access to microphone remain blocked for those permissions.")
+        #expect(note(ordinary) == nil)
         store.set(.allow, for: [.camera, .microphone, .geolocation], origin: "https://other.example")
         let mixed = try #require(note(ordinary))
-        for name in ["camera", "microphone", "location", "Chromium agent tabs"] { #expect(mixed.contains(name)) }
-        #expect(mixed.contains("previously denied") && !mixed.contains("example"))
+        for name in ["Sites you allowed to use the camera", "the microphone", "your location", "keep that access in agent tabs that run in Chromium."] { #expect(mixed.contains(name)) }
+        #expect(!mixed.contains("example"))
         #expect(note(Persona.defaultID) == mixed && note(agents) == nil)
         store.set(nil, for: [.camera, .microphone, .geolocation], origin: "https://other.example")
         store.set(nil, for: [.microphone], origin: Self.origin)

@@ -482,10 +482,10 @@ private struct AgentTranscriptRow: View {
                                 if let current = readTab(row.page) { actions.showReadTab(current.id) }
                             }
                             .buttonStyle(.link)
-                            .font(.caption)
+                            .font(.system(size: 11))
                         }
                     }
-                    .font(.caption)
+                    .font(.system(size: 11))
                 }
             }
         }
