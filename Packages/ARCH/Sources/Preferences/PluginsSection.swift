@@ -497,15 +497,31 @@ private struct UpdateRow: View {
     }
 }
 
-/// What the plugin's grant lets it do.
+/// What the plugin's grant lets it do: its one sentence, or, with more, a few words that name the broadest of its sites and count its permissions (`InstalledPlugin.accessBrief`), with every sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down.
 private struct AccessRow: View {
     let plugin: InstalledPlugin
 
     var body: some View {
-        LabeledContent("Access") {
-            let summaries = plugin.accessSummaries
-            Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
-                .multilineTextAlignment(.trailing)
+        let summaries = plugin.accessSummaries
+        if summaries.count < 2 {
+            LabeledContent("Access") {
+                Text(summaries.first ?? "None")
+                    .multilineTextAlignment(.trailing)
+            }
+        } else {
+            DisclosureGroup {
+                Text(summaries.joined(separator: "\n"))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                LabeledContent("Access") {
+                    Text(plugin.accessBrief)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
         }
     }
 }

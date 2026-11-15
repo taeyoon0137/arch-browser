@@ -64,6 +64,18 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
         "Run scripts on pages from \(siteName)"
     }
 
+    /// The sites of `patterns` in a few words, as Settings names them before the whole list, by the broadest: "All websites" when one covers every host; the site's name when all name one site, such as `example.com and its subdomains`; for several with one that covers a top-level domain, that domain with the number of the others, such as "Every .com website and 3 more"; else the number of sites, such as "14 websites". Nil without patterns.
+    static func briefSiteName(of patterns: [MatchPattern]) -> String? {
+        var names: [String] = []
+        for name in patterns.map(\.siteName) where !names.contains(name) { names.append(name) }
+        guard !names.isEmpty else { return nil }
+        if patterns.contains(where: { $0.host == nil }) { return "All websites" }
+        let domain = patterns.first(where: \.coversTopLevelDomain).flatMap(\.host).map { "Every .\($0) website" }
+        if names.count == 1 { return domain ?? names[0] }
+        if let domain { return "\(domain) and \(names.count - 1) more" }
+        return "\(names.count) websites"
+    }
+
     /// Whether the pattern covers every host, or every host under a top-level domain, as `*://*.com/*` does, which granting asks the user to confirm with Touch ID or the login password. A few such patterns would otherwise reach most of the web without the confirmation.
     public var coversEverySite: Bool {
         host == nil || coversTopLevelDomain

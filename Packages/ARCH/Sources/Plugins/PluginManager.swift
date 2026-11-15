@@ -74,6 +74,13 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public var accessSummaries: [String] {
         grant.summaries + [manifest.extensionPermissionsSummary].compactMap { $0 }
     }
+
+    /// What the plugin may do in a few words, as Settings states it before the sentences of `accessSummaries`: its sites by the broadest (`MatchPattern.briefSiteName(of:)`), then the number of its other permissions, those of its grant and the API permissions of a web extension, such as "All websites, 5 permissions", or "None".
+    public var accessBrief: String {
+        let permissions = grant.permissions.count + manifest.extensionPermissions.count
+        let parts = [MatchPattern.briefSiteName(of: grant.sites), permissions == 0 ? nil : permissions == 1 ? "1 permission" : "\(permissions) permissions"].compactMap { $0 }
+        return parts.isEmpty ? "None" : parts.joined(separator: ", ")
+    }
 }
 
 /// The proof gate on native apps, which the app supplies for web extensions (`docs/password-managers.md`, Proof gate): a version of an extension reaches a native app through one of Arch's links to another browser's host manifest only when Arch has proof of its identifier, since a package can copy another extension's public key and the native app trusts the identifier that the browser passes it.
