@@ -1,4 +1,4 @@
-// Sidebar drags (`SidebarDragState.swift`): the reorder hover that moves a row once per crossing, the slot a release commits, the favorites bar as a drop destination, the favorites grid's row capacities, and a first pin into an empty pinned list. The gestures themselves need the app.
+// Sidebar drags (`SidebarDragState.swift`): the reorder hover that moves a row once per crossing, a release whose slot is scrolled out of sight, the slot a release commits, the favorites bar as a drop destination, the favorites grid's row capacities, and a first pin into an empty pinned list. The gestures themselves need the app.
 import ARCHEngine
 import Foundation
 import Testing
@@ -25,6 +25,30 @@ import Testing
         let left = drag.canMove(at: CGPoint(x: point.x, y: row.maxY + 12))
         let returned = drag.canMove(at: point)
         #expect(left && returned)
+    }
+
+    @Test func aReleasedRowWhoseSlotIsScrolledOutOfSightFadesOutAtTheListsEdge() {
+        let list = CGRect(x: 0, y: 40, width: 240, height: 500), owner = UUID(), drag = SidebarDragState()
+        func release(into y: CGFloat, within list: CGRect?) {
+            drag.begin(.tab(UUID()), frame: CGRect(x: 11, y: 300, width: 218, height: 36), grabbedAt: CGPoint(x: 120, y: 310), owner: owner)
+            drag.settle(into: CGRect(x: 11, y: y, width: 218, height: 36), within: list, ownedBy: owner)
+        }
+        // A slot above the visible list takes the row to its top edge, where it fades out, and one below it to its bottom edge.
+        release(into: -60, within: list)
+        #expect(drag.isSettling && drag.isFadingOut && drag.frame == CGRect(x: 11, y: 40, width: 218, height: 36))
+        drag.end(ownedBy: owner)
+        #expect(!drag.isFadingOut)
+        release(into: 560, within: list)
+        #expect(drag.isFadingOut && drag.frame.minY == 504)
+        drag.end(ownedBy: owner)
+        // A slot whose middle shows, partly under the edge, takes the row, which does not fade.
+        release(into: 30, within: list)
+        #expect(!drag.isFadingOut && drag.frame.minY == 30)
+        drag.end(ownedBy: owner)
+        // Without a list, as for a favorite, the item returns to its slot wherever it is.
+        release(into: -60, within: nil)
+        #expect(!drag.isFadingOut && drag.frame.minY == -60)
+        drag.end(ownedBy: owner)
     }
 
     @Test func aCoalescedReleaseOutsideTheViewportClearsTheDividerHover() {

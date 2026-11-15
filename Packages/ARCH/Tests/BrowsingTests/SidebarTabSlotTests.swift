@@ -1,4 +1,4 @@
-// Dragging a tab between a space's pinned and open lists (bookmark rule 2): the slot it takes beside the row under the pointer (`SidebarTabSlot.placement`), at each list's end (`SidebarTabSlot.listEnd`), and under the divider where no row takes it (`SidebarTabSlot.unpinning`), also after the list scrolls under a pointer held near its end (`DragAutoScroll`), the rows the sidebar then shows (`project`), and what release commits, which leaves the tab as Pin Tab or Unpin Tab leaves it, saved page, unloading, live folder items, and agent tabs included. The frames stand in for a column whose pinned tabs, divider, open tabs, and New Tab row are stacked 2 points apart; the lifted row, the gesture, and the animation are app checks.
+// Dragging a tab between a space's pinned and open lists (bookmark rule 2): the slot it takes beside the row under the pointer (`SidebarTabSlot.placement`), at each list's end (`SidebarTabSlot.listEnd`), and under the divider where no row takes it (`SidebarTabSlot.unpinning`), also after the list scrolls under a pointer held near its end (`DragAutoScroll`), as the chain that picks the slot sees the rows' new frames (`SidebarTabSlot.next`), the rows the sidebar then shows (`project`), and what release commits, which leaves the tab as Pin Tab or Unpin Tab leaves it, saved page, unloading, live folder items, and agent tabs included. The frames stand in for a column whose pinned tabs, divider, open tabs, and New Tab row are stacked 2 points apart; the lifted row, the gesture, and the animation are app checks.
 import ARCHEngine
 import CoreGraphics
 import Foundation
@@ -18,6 +18,11 @@ import Testing
 
     private func point(_ y: CGFloat) -> CGPoint {
         CGPoint(x: 120, y: y)
+    }
+
+    /// The frames of rows stacked from `top`, 2 points apart, in a list scrolled `scrolled` points further down, which moves each up as far.
+    private func stacked(_ ids: [UUID], from top: CGFloat, scrolled: CGFloat = 0) -> [UUID: CGRect] {
+        Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, frame(y: top + CGFloat($0) * 38 - scrolled)) })
     }
 
     /// A session in a new temporary folder, which the caller removes.
@@ -378,34 +383,50 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let open = (1...12).map { tab("o\($0)", pinned: false, in: session, space) }
         let dragged = open[0], o9 = open[8], o10 = open[9]
-        // The slot took o9's place, which shows the dragged tab after o9 at 492, and the pointer rests over it in the bottom band.
+        let tree = session.folderTree
+        // Under the empty pinned list's divider, the slot took o9's place, which shows the dragged tab after o9 at 492, and the pointer rests over it in the bottom band.
         let held = point(520)
         #expect(DragAutoScroll.step(at: held, in: list) > 0)
-        let current = SidebarTabSlot.beside(o9.id, folder: nil, pinned: false, after: true)
+        var current = SidebarTabSlot.beside(o9.id, folder: nil, pinned: false, after: true)
+        let shown = Array(open[1...8]) + [dragged] + Array(open[9...])
+        // The slot that `rows`, shown from 188 and moved up `scrolled` points by the scroll, give the tab at the pointer.
+        func next(_ rows: [Tab], scrolled: CGFloat) -> (slot: SidebarTabSlot, holding: CGRect?)? {
+            SidebarTabSlot.next(for: dragged, at: held, current: current, in: space.id, tree: tree, rowFrames: stacked(rows.map(\.id), from: 188, scrolled: scrolled),
+                                divider: frame(y: 160 - scrolled, height: 26), newTabRow: frame(y: 188 + CGFloat(rows.count) * 38 - scrolled), list: list)
+        }
         var hover = SidebarReorderHover()
         hover.moved(into: frame(y: 492))
-        // The list scrolls 40 points down: the slot rises to 452, and o10, at 490, comes under the pointer. If the slot's place did not move with the rows, it would still hold the pointer and keep the slot.
+        // Before the scroll, only the slot is under the pointer, and its frame holds the hysteresis.
+        #expect(next(shown, scrolled: 0) == nil)
         var unmoved = hover
         let staysUnmoved = !unmoved.canMove(at: held)
+        // The list scrolls 40 points down: the slot rises to 452, and o10, at 490, comes under the pointer past its middle from above. If the slot's place did not move with the rows, it would still hold the pointer and keep the slot.
         hover.scrolled(by: 40)
         let movesAfterScroll = hover.canMove(at: held)
         #expect(staysUnmoved && movesAfterScroll)
-        // Past o10's middle from above, the tab's slot goes after o10, under the pointer, whose row then holds the hysteresis.
-        let placement = try #require(SidebarTabSlot.placement(beside: o10, rowFrame: frame(y: 490), dragging: dragged, slotFrame: frame(y: 452), current: current, at: held))
-        #expect(placement.slot == .beside(o10.id, folder: nil, pinned: false, after: true) && placement.takesRowsPlace)
+        let move = try #require(next(shown, scrolled: 40))
+        #expect(move.slot == .beside(o10.id, folder: nil, pinned: false, after: true) && move.holding == frame(y: 490))
         hover.moved(into: frame(y: 490))
         let repeatsInPlace = hover.canMove(at: held)
         #expect(!repeatsInPlace)
-
-        // Released there, the tab lands after o10, where the slot shows.
-        var pins = session.folderTree.rows(in: space.id, pinned: true), rows = session.folderTree.rows(in: space.id, pinned: false)
-        placement.slot.project(dragged, pinnedRows: &pins, openRows: &rows)
+        // The rows then show the tab after o10, under the pointer, so that the next frames keep the slot.
+        current = move.slot
+        var pins = tree.rows(in: space.id, pinned: true), rows = tree.rows(in: space.id, pinned: false)
+        move.slot.project(dragged, pinnedRows: &pins, openRows: &rows)
         let expected = open[1...9].map(\.id) + [dragged.id] + open[10...].map(\.id)
         #expect(rows.map(\.id) == expected)
-        placement.slot.commit(dragged, in: space, session: session)
+        let reshown = Array(open[1...9]) + [dragged] + Array(open[10...])
+        #expect(next(reshown, scrolled: 40) == nil)
+        // Another 90 points down, the New Tab row comes under the pointer at 514 and takes the tab to the open list's end.
+        hover.scrolled(by: 90)
+        let movesAtEnd = hover.canMove(at: held)
+        #expect(movesAtEnd)
+        let end = try #require(next(reshown, scrolled: 130))
+        #expect(end.slot == .end(pinned: false) && end.holding == frame(y: 514))
+
+        // Released after the first scroll, the tab lands after o10, where the slot showed.
+        move.slot.commit(dragged, in: space, session: session)
         #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == expected)
-        // Scrolled to the end, the New Tab row in the band ends the open list.
-        #expect(SidebarTabSlot.listEnd(at: held, divider: nil, newTabRow: frame(y: 500), list: list) == false)
     }
 
     @Test func aListScrollingUpUnderTheHeldPointerBringsThePinnedRowsThatPinTheTab() throws {
@@ -414,22 +435,31 @@ import Testing
         let p1 = tab("p1", pinned: true, in: session, space), p2 = tab("p2", pinned: true, in: session, space)
         let open = (1...12).map { tab("o\($0)", pinned: false, in: session, space) }
         let dragged = open[11], o5 = open[4]
-        // In a list scrolled 300 points down, the last open tab's slot took o5's place at the list's top, before o5, and the pointer rests in the top band.
+        let tree = session.folderTree
+        // In a list scrolled 300 points down, the last open tab's slot took o5's place at the list's top, at 40 before o5, and the pointer rests in the top band. The pinned tabs, the divider, and o1 to o4 are above it, out of sight.
         let held = point(48)
         #expect(DragAutoScroll.step(at: held, in: list) < 0)
         let current = SidebarTabSlot.beside(o5.id, folder: nil, pinned: false, after: false)
+        let shown = Array(open[0...3]) + [dragged] + Array(open[4...10])
+        // The slot that the rows give the tab at the pointer once the list scrolls `scrolled` more points down.
+        func next(scrolled: CGFloat) -> (slot: SidebarTabSlot, holding: CGRect?)? {
+            let frames = stacked([p1.id, p2.id], from: -200, scrolled: scrolled).merging(stacked(shown.map(\.id), from: -112, scrolled: scrolled)) { $1 }
+            return SidebarTabSlot.next(for: dragged, at: held, current: current, in: space.id, tree: tree, rowFrames: frames,
+                                       divider: frame(y: -124 - scrolled, height: 10), newTabRow: frame(y: 344 - scrolled), list: list)
+        }
         var hover = SidebarReorderHover()
         hover.moved(into: frame(y: 40))
+        #expect(next(scrolled: 0) == nil)
         // The list scrolls 200 points up, the pinned rows come back into view, and p2, at 38, comes under the pointer.
         hover.scrolled(by: -200)
         let movesAfterScroll = hover.canMove(at: held)
         #expect(movesAfterScroll)
         // A row of the other list takes the tab as soon as the pointer reaches it: before p2 in its upper half.
-        let placement = try #require(SidebarTabSlot.placement(beside: p2, rowFrame: frame(y: 38), dragging: dragged, slotFrame: frame(y: 240), current: current, at: held))
-        #expect(placement.slot == .beside(p2.id, folder: nil, pinned: true, after: false) && placement.takesRowsPlace)
+        let move = try #require(next(scrolled: -200))
+        #expect(move.slot == .beside(p2.id, folder: nil, pinned: true, after: false) && move.holding == frame(y: 38))
 
         // Released there, it pins between p1 and p2 with the page it shows as its saved page, as Pin Tab pins it.
-        placement.slot.commit(dragged, in: space, session: session)
+        move.slot.commit(dragged, in: space, session: session)
         #expect(session.tabsOutsideFolders(in: space.id, pinned: true).map(\.id) == [p1.id, dragged.id, p2.id])
         #expect(dragged.isPinned && dragged.savedPage?.url == dragged.url)
         #expect(PinState(dragged) == PinState(p1))

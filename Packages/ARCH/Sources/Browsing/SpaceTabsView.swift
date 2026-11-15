@@ -84,6 +84,8 @@ struct SpaceTabsView: View {
     @State private var hiddenRowsHeight: CGFloat = 0
     /// The pointer of the last move of a row's drag that this list started, in the window.
     @State private var dragPoint: CGPoint?
+    /// Set once that drag may scroll the list from a band (`DragAutoScroll.arms(from:at:in:)`).
+    @State private var autoScrollArmed = false
     /// Set when the list scrolls under the pointer during a drag, until the rows report their new frames.
     @State private var scrolledUnderPointer = false
 
@@ -190,8 +192,8 @@ struct SpaceTabsView: View {
         sidebarDrag.folderID != nil && !sidebarDrag.isSettling && sidebarDrag.owner == dragOwner ? hiddenRowsHeight : 0
     }
 
-    /// The pointer of a lifted tab or folder row that this list's current page drags, which scrolls the list near its top or bottom. A favorite's or space symbol's drag does not scroll it.
-    private var autoScrollPoint: CGPoint? {
+    /// The pointer of a lifted tab or folder row that this list's current page drags, under which the list's scrolls move the rows, and which scrolls the list near its top or bottom once armed. A favorite's or space symbol's drag does neither.
+    private var rowDragPoint: CGPoint? {
         guard windowModel.currentSpaceID == space.id, sidebarDrag.owner == dragOwner, sidebarDrag.item?.isRow == true,
               sidebarDrag.isLifted, !sidebarDrag.isSettling else { return nil }
         return dragPoint
@@ -218,8 +220,8 @@ struct SpaceTabsView: View {
                     .onAppear { contentFrame = frame }
                     .onChange(of: frame) { contentFrame = $1 }
             })
-            // A lifted row held near the list's top or bottom scrolls it, down to the end of its rows, and the drop targets follow the rows that pass under the pointer.
-            .background(DragAutoScroller(point: autoScrollPoint, visible: listFrame, limit: max(0, contentFrame.height - keptHeight - listFrame.height), onScroll: listScrolled(by:))
+            // A lifted row held near the list's top or bottom scrolls it, down to the end of its rows, and the drop targets follow the rows that this scroll or a mouse's wheel moves under the pointer.
+            .background(DragAutoScroller(point: rowDragPoint, scrolls: autoScrollArmed, visible: listFrame, limit: max(0, contentFrame.height - keptHeight - listFrame.height), onScroll: listScrolled(by:))
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true))
@@ -307,16 +309,18 @@ struct SpaceTabsView: View {
             startedWithoutPins = session.folderTree.rows(in: space.id, pinned: true).isEmpty
             if case .folder(let id) = item { hiddenRowsHeight = contentsHeight(ofFolder: id, below: frame) }
             scrolledUnderPointer = false
+            autoScrollArmed = false
             sidebarDrag.begin(item, frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
             // The row appears without a shadow, which then fades in.
             DispatchQueue.main.async { withAnimation(.easeInOut(duration: SidebarDragState.liftDuration)) { sidebarDrag.isLifted = true } }
         }
         sidebarDrag.move(to: value.location)
         dragPoint = value.location
+        if !autoScrollArmed, DragAutoScroll.arms(from: value.startLocation, at: value.location, in: listFrame) { autoScrollArmed = true }
         return true
     }
 
-    /// The list scrolled `distance` points under the pointer (`DragAutoScroller`), toward its bottom for a positive distance. The row whose place the tab's slot took moves with the content, and once the rows report their new frames, the drop targets are found again at the pointer.
+    /// The list scrolled `distance` points under the pointer, from a band or by a mouse's wheel (`DragAutoScroller`), toward its bottom for a positive distance. The row whose place the tab's slot took moves with the content, and once the rows report their new frames, the drop targets are found again at the pointer.
     private func listScrolled(by distance: CGFloat) {
         tabReorder.scrolled(by: distance)
         scrolledUnderPointer = true
@@ -367,32 +371,12 @@ struct SpaceTabsView: View {
             if tabSlot != nil { tabSlot = nil }
             return
         }
-        guard sidebarDrag.targetSpaceID == nil, sidebarDrag.targetFolderID == nil,
-              tabReorder.canMove(at: point) else { return }
-        let tabs = tree.tabs(in: space.id, pinned: true) + tree.tabs(in: space.id, pinned: false)
-        let frame: CGRect?
-        let next: SidebarTabSlot
-        if let pinned = SidebarTabSlot.listEnd(at: point, divider: rowFrames[Self.pinnedListEndID], newTabRow: rowFrames[Self.openListEndID], list: listFrame),
-           let endFrame = rowFrames[pinned ? Self.pinnedListEndID : Self.openListEndID] {
-            if tabSlot == nil && tree.tabsOutsideFolders(in: space.id, pinned: pinned).last?.id == tab.id { return }
-            next = .end(pinned: pinned)
-            frame = endFrame
-        } else if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(point) == true }),
-                  let rowFrame = rowFrames[target.id], let slot = rowFrames[tab.id],
-                  let placement = SidebarTabSlot.placement(beside: target, rowFrame: rowFrame, dragging: tab, slotFrame: slot, current: tabSlot, at: point),
-                  target.agentOwnerID == nil || target.folderID == tab.folderID {
-            next = placement.slot
-            frame = placement.takesRowsPlace ? rowFrame : nil
-        } else if let unpinned = SidebarTabSlot.unpinning(tab, current: tabSlot, at: point, divider: rowFrames[Self.pinnedListEndID], newTabRow: rowFrames[Self.openListEndID],
-                                                          openTabs: tree.tabsOutsideFolders(in: space.id, pinned: false), rowFrames: rowFrames) {
-            next = unpinned
-            frame = nil
-        } else {
-            return
-        }
-        guard next != tabSlot else { return }
-        withAnimation(.easeOut(duration: 0.15)) { tabSlot = next }
-        if let frame { tabReorder.moved(into: frame) }
+        guard sidebarDrag.targetSpaceID == nil, sidebarDrag.targetFolderID == nil, tabReorder.canMove(at: point),
+              let move = SidebarTabSlot.next(for: tab, at: point, current: tabSlot, in: space.id, tree: tree, rowFrames: rowFrames,
+                                             divider: rowFrames[Self.pinnedListEndID], newTabRow: rowFrames[Self.openListEndID], list: listFrame),
+              move.slot != tabSlot else { return }
+        withAnimation(.easeOut(duration: 0.15)) { tabSlot = move.slot }
+        if let frame = move.holding { tabReorder.moved(into: frame) }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
@@ -439,7 +423,7 @@ struct SpaceTabsView: View {
         if target != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
     }
 
-    /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the row reappears in the list, unless a drop target under it takes it.
+    /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the row reappears in the list, unless a drop target under it takes it. A slot that the list scrolled out of sight takes the row only to the list's edge, where it fades out.
     private func dragEnded() {
         guard sidebarDrag.owner == dragOwner, windowModel.currentSpaceID == space.id, let item = sidebarDrag.item,
               let slot = rowFrames[item.id] else { return sidebarDrag.end(ownedBy: dragOwner) }
@@ -474,7 +458,7 @@ struct SpaceTabsView: View {
         } else if case .tab(let id) = item, let tab = session.tabs.first(where: { $0.id == id }) {
             tabSlot?.commit(tab, in: space, session: session)
         }
-        sidebarDrag.settle(into: slot, ownedBy: dragOwner)
+        sidebarDrag.settle(into: slot, within: listFrame, ownedBy: dragOwner)
     }
 }
 
