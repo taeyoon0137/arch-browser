@@ -222,8 +222,8 @@ import Testing
             let original = session.sidebarSyncState
             let oldSpace = try #require(original.spaces.first)
             let oldFolder = session.makeFolder(in: oldSpace.id, pinned: true)
-            let pin = session.adopt(PageStub(engine: .webKit, url: URL(string: "about:blank#pin")),
-                                    spaceID: oldSpace.id, personaID: oldSpace.resolvedPersonaID, pinned: true, select: false, folderID: oldFolder.id)
+            let pinPage = PageStub(engine: .webKit, url: URL(string: "about:blank#pin"))
+            let pin = session.adopt(pinPage, spaceID: oldSpace.id, personaID: oldSpace.resolvedPersonaID, pinned: true, select: false, folderID: oldFolder.id)
             let open = session.adopt(PageStub(engine: .webKit, url: nil), spaceID: oldSpace.id, personaID: oldSpace.resolvedPersonaID,
                                      pinned: false, select: false, folderID: oldFolder.id)
             let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Local", personaID: oldSpace.resolvedPersonaID)
@@ -248,6 +248,8 @@ import Testing
             for _ in 0..<2 { session.applyFirstSidebarSync(state, replacements: replacements) }
             #expect(session.sidebarSyncState == state)
             #expect(window.currentSpaceID == newSpace.id && window.selectedTabID == newPin.id)
+            // The loaded local pin's page, with its history and input, is the server tab's now.
+            #expect(session.tabs.first { $0.id == newPin.id }?.webContents === pinPage)
             #expect(open.spaceID == newSpace.id && open.folderID == newFolder.id)
             #expect(session.openTab(for: remoteFavorite) === favoriteTab)
             #expect(!session.hasClosedTabs && session.undoableCloseCount == 0)

@@ -2113,6 +2113,17 @@ extension BrowserSession {
         for index in windowsToReopen.indices {
             if let id = windowsToReopen[index].selectedTabID, let target = replacedTabs[id] { windowsToReopen[index].selectedTabID = target }
         }
+        // A loaded local pin's page, with its history and typed input, moves to the server's tab before a window selects that tab, so the server's saved page never loads in its place. The local tab closes on a stand-in.
+        for (old, new) in replacedTabs {
+            guard let local = tabs.first(where: { $0.id == old }), local.isLoaded, let remote = tabs.first(where: { $0.id == new }) else { continue }
+            let page = local.webContents
+            let synced = remote.preferredEngine
+            local.replaceWebContents(with: UnloadedWebContents(url: local.savedPage?.url, title: local.title, engine: local.engineKind, state: nil))
+            replaceWebContents(of: remote, with: page)
+            remote.webContentsDidChangeTitle(page)
+            remote.webContentsDidChangeFavicon(page)
+            remote.pendingSyncEngine = synced == page.engineKind ? nil : synced
+        }
         for (window, target) in selections where window.selectedTabID.flatMap({ replacedTabs[$0] }) == target { window.selectTab(target) }
         for tab in tabs where replacedTabs[tab.id] != nil { _ = removeTab(tab, closedRecord: nil, reason: .sync) }
         spaces.removeAll { changedSpaces[$0.id] != nil }

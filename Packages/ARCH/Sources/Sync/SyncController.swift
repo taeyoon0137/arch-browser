@@ -11,12 +11,6 @@ import Foundation
     @Published public private(set) var isEnabled: Bool
     @Published public private(set) var isDeletingCloudData = false
     @Published public private(set) var offReason: SyncOffReason?
-    public var statusExplanation: String? {
-        switch availability {
-        case .unavailable(let reason): reason.message
-        case .available: offReason?.message
-        }
-    }
     @Published public private(set) var lastError: String?
     @Published public private(set) var lastSync: Date?
     @Published public private(set) var hasCheckedAvailability = false
@@ -50,6 +44,9 @@ import Foundation
     private var refusedSaves: [String: SyncRecord] = [:]
     private static let offReasonKey = "ARCHSyncOffReason"
     private static let discardStateKey = "ARCHSyncDiscardPreviousState"
+    /// Set while a confirmed Delete iCloud Data waits for the server, so that a launch after a quit in that time can say the data is still there.
+    private static let deletionRequestedKey = "ARCHSyncDeletionRequested"
+    private var quitBeforeDeletion: (any SyncEngineClient)?
     private var first = false
     private var fetching = false
     private var applying = false
@@ -91,12 +88,12 @@ import Foundation
         settings = SyncedSettings(defaults: defaults)
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         offReason = defaults.string(forKey: Self.offReasonKey).flatMap(SyncOffReason.init(rawValue:))
-        observeSidebarSaves()
         observers.append(notifications.addObserver(forName: UserDefaults.didChangeNotification, object: defaults, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.settingsChanged() }
         })
     }
 
+    /// Only while an engine runs, so that a session save with sync off builds no projection.
     private func observeSidebarSaves() {
         sidebar.onSidebarSyncSave = { [weak self] state in self?.sidebarSaved(state) }
     }
@@ -127,6 +124,7 @@ import Foundation
         guard let engine, isEnabled, !isDeletingCloudData else { return }
         isDeletingCloudData = true
         lastError = nil
+        defaults.set(true, forKey: Self.deletionRequestedKey)
         engine.add([.deleteZone])
         await sendZoneDeletion(on: engine)
     }
@@ -153,11 +151,13 @@ import Foundation
             message: lastError ?? "Arch could not delete its iCloud data. Try again when connected.")
     }
 
+    /// The engine dropped what it fetched while the deletion waited but kept its change token past it, so a new engine starts from `sync.json`, which kept the state from before the deletion, and fetches those changes again.
     private func resumeAfterDeleteFailure(on engine: any SyncEngineClient, message: String) async {
-        engine.remove([.deleteZone])
-        isDeletingCloudData = false
-        await requestFetch()
-        if self.engine === engine { lastError = message }
+        guard self.engine === engine else { return }
+        defaults.removeObject(forKey: Self.deletionRequestedKey)
+        await stop()
+        await refresh()
+        if self.engine != nil { lastError = message }
     }
 
     /// Launch and activation can read the local toggle and entitlements. The first account
@@ -182,9 +182,10 @@ import Foundation
         isCheckingAvailability = false
         hasCheckedAvailability = true
         availability = result
-        if case .unavailable(.noAccount) = result, isEnabled {
+        if case .unavailable(.noAccount) = result, isEnabled, engine != nil || FileManager.default.fileExists(atPath: url.path) {
             // The availability notification can arrive before the engine's sign-out event.
-            // Invalidate its token now so a subsequent account cannot resume it.
+            // Invalidate its token now so a subsequent account cannot resume it. Before any
+            // sync there is no token, and the opt-in waits for an account as for the other reasons.
             disableAfterLoss(.accountChanged)
             return
         }
@@ -211,6 +212,12 @@ import Foundation
             let delegate = Delegate(self)
             self.delegate = delegate
             engine = factory(target, mirror.engineState, delegate)
+            observeSidebarSaves()
+            if defaults.bool(forKey: Self.deletionRequestedKey) {
+                // The deletion never reached the server: `sync.json` kept its state from before it.
+                defaults.removeObject(forKey: Self.deletionRequestedKey)
+                quitBeforeDeletion = engine
+            }
         }
         if isDeletingCloudData {
             if let engine { await sendZoneDeletion(on: engine) }
@@ -219,6 +226,10 @@ import Foundation
         refusedSaves.removeAll()
         if awaitingZoneSave { engine?.add([.saveZone]) }
         await requestFetch()
+        if let quit = quitBeforeDeletion, quit === engine {
+            quitBeforeDeletion = nil
+            lastError = "Arch quit before it deleted its iCloud data. Delete it again to remove it."
+        }
     }
 
     private func stop() async {
@@ -227,6 +238,8 @@ import Foundation
 
     private func detach() -> (any SyncEngineClient)? {
         let previous = engine
+        sidebar.onSidebarSyncSave = nil
+        quitBeforeDeletion = nil
         engine = nil
         delegate = nil
         isDeletingCloudData = false
@@ -271,8 +284,8 @@ import Foundation
         await task.value
     }
 
-    public var canSendRecords: Bool { engine != nil && !first && !fetching && !applying && !isDeletingCloudData }
-    public func record(toSave name: String) -> CKRecord? {
+    var canSendRecords: Bool { engine != nil && !first && !fetching && !applying && !isDeletingCloudData }
+    func record(toSave name: String) -> CKRecord? {
         guard canSendRecords, let save = mirror.pendingSaves.first(where: { $0.recordName == name }) else { return nil }
         let base = mirror.records[name]
         guard base.map({ $0.recordType == save.recordType.rawValue }) ?? true else { return nil }
@@ -381,7 +394,10 @@ import Foundation
                 }
                 return
             }
-            if sent.savedZone { awaitingZoneSave = false }
+            if sent.savedZone {
+                awaitingZoneSave = false
+                if let engine { flushHeldChanges(on: engine) }
+            }
             if sent.failedSave != nil { awaitingZoneSave = true }
             if let code = sent.failedSave ?? sent.failedDelete { lastError = "The sync zone change failed (\(code.rawValue))." }
         case .accountChange(let account):
@@ -440,6 +456,7 @@ import Foundation
 
     private func disableAfterLoss(_ reason: SyncOffReason) {
         recordOffReason(reason)
+        defaults.removeObject(forKey: Self.deletionRequestedKey)
         lastError = nil
         lastSync = nil
         isCheckingAvailability = false
@@ -509,6 +526,7 @@ import Foundation
             applying = false
             lastError = nil
             lastSync = date
+            flushHeldChanges(on: engine)
         } catch {
             applying = false
             fetching = true
@@ -603,6 +621,15 @@ import Foundation
                 persist()
             }
             catch { lastError = "The pending sidebar changes could not be compared." }
+        }
+    }
+
+    /// `CKSyncEngine` asks for a batch when changes are added, and gets none while records are held; the comparisons add no change it already holds. So once a hold ends, the held changes go now.
+    private func flushHeldChanges(on engine: any SyncEngineClient) {
+        guard engine.pendingChanges.contains(where: { if case .saveRecord = $0 { true } else if case .deleteRecord = $0 { true } else { false } }) else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.engine === engine, canSendRecords, !awaitingZoneSave else { return }
+            try? await engine.sendChanges()
         }
     }
 
