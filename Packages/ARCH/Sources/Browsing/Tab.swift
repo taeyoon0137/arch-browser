@@ -247,6 +247,21 @@ import LiveFolders
     /// The page's title, or its host if it has no title.
     public var pageTitle: String { Self.pageTitle(title: title, url: url) }
 
+    /// `displayTitle`, with the name of the web extension whose own page the tab shows (`extensionName`), as its options page in a tab, in place of a page title that only repeats the address (`titleRepeatsAddress(_:of:)`), which would show the extension's identifier. A user's name, a hook's name, a live folder item's title, and a page's own title stay. The sidebar's rows, the window's title, the tab switcher, the palette's tab rows, the pane of a tab shown in another window, the Bookmarks menu, and floating developer tools show it; plugins, hooks, agents, and scripts read `displayTitle`.
+    var shownTitle: String {
+        guard let url, Self.titleRepeatsAddress(title, of: url), let name = extensionName?(url) else { return displayTitle }
+        return Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: name, url: url, livePage: liveItemID == nil ? nil : savedPage)
+    }
+
+    /// Whether `title` names the page at `url` by nothing but its address: empty, as WebKit reports a page without a title and `pageTitle` then shows the host, the host itself, or the address, as Chromium reports a page without a title (`NavigationEntryImpl::GetTitleForDisplay`), compared without percent escapes and a trailing `/`.
+    nonisolated static func titleRepeatsAddress(_ title: String, of url: URL) -> Bool {
+        let plain = { (text: String) -> String in
+            let decoded = text.removingPercentEncoding ?? text
+            return decoded.hasSuffix("/") ? String(decoded.dropLast()) : decoded
+        }
+        return title.isEmpty || title == url.host || plain(title) == plain(url.absoluteString)
+    }
+
     /// The name a tab with these inputs shows, which the event source computes from a change's new value before the tab publishes it.
     nonisolated static func displayTitle(customTitle: String?, suggestedTitle: SuggestedTitle?, title: String, url: URL?, livePage: SavedPage?) -> String {
         if let customTitle { return customTitle }

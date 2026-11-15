@@ -33,10 +33,10 @@ struct TabRowView: View {
                 .frame(width: 18, height: 18)
                 .opacity(isDimmed ? SidebarDimming.unopened : 1)
             if windowModel.renamingTabID == tab.id {
-                SidebarNameField(placeholder: "Tab Name", name: tab.displayTitle,
+                SidebarNameField(placeholder: "Tab Name", name: tab.shownTitle,
                                  onRename: { windowModel.renameTab(tab.id, to: $0) }, onEnd: { windowModel.endRenaming(tab.id) })
             } else {
-                Text(tab.displayTitle)
+                Text(tab.shownTitle)
                     .font(.system(size: 14))
                     .lineLimit(1)
                     .opacity(isDimmed ? SidebarDimming.unopened : 1)
@@ -78,7 +78,7 @@ struct TabRowView: View {
         .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
         // The row truncates long titles, so the tooltip has the whole title and the address, and for a GitHub item what its row cannot show.
-        .help(([tab.displayTitle] + (tab.liveItem?.gitHub.map(Self.details) ?? []) + [tab.url?.absoluteString].compactMap { $0 }).joined(separator: "\n"))
+        .help(([tab.shownTitle] + (tab.liveItem?.gitHub.map(Self.details) ?? []) + [tab.url?.absoluteString].compactMap { $0 }).joined(separator: "\n"))
         .onTapGesture { windowModel.selectTab(tab.id) }
         // The first click selects the tab at once; the second starts renaming it.
         .simultaneousGesture(TapGesture(count: 2).onEnded { windowModel.renamingTabID = tab.id })

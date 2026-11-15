@@ -197,7 +197,7 @@ private struct ShownElsewherePaneView: View {
             Image(systemName: "macwindow.on.rectangle")
                 .font(.system(size: 30))
                 .foregroundStyle(.secondary)
-            Text(tab.displayTitle)
+            Text(tab.shownTitle)
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
             Text("This tab is shown in another window.")
