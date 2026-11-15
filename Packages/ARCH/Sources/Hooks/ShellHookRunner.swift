@@ -321,7 +321,7 @@ public final class ShellHookRunner: HookScriptRunning {
         if tools.permitsAgentRuns {
             agentRun = { @MainActor fields in await tools.runAgent(fields) }
         }
-        let ticket = channel?.openHookRun(invocation.run, tools: tools.names, call: { call in tools.call(call) }, agentRun: agentRun) ?? ""
+        let ticket = channel?.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun) ?? ""
         state.accessEnd = { [channel] in
             tools.end()
             channel?.closeHookRun(invocation.run)
@@ -454,7 +454,7 @@ public final class ShellHookRunner: HookScriptRunning {
 @MainActor
 final class ShellHookRunTools {
     let invocation: HookInvocation
-    /// Each run tab's handle.
+    /// Each run tab's handle, by which `arch-cli`'s calls and the answer of its `agent run` name the tab.
     let handles: [UUID: String]
     private(set) var actions: [AgentRunAction] = []
     /// The model and usage of the agent runs the script started.

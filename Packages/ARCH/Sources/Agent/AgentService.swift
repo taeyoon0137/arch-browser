@@ -1849,8 +1849,8 @@ extension AIFeature {
 public protocol AgentHookRunChannel: AnyObject {
     /// Opens the run's access and returns its ticket: its connections list `tools`, and `call` answers each of their calls to one of them.
     func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String
-    /// The same, with `agentRun` answering the connections' `agent/run` under the hook's grant, feature, and run tabs (`docs/hooks.md`, arch-cli agent run and rename); without it, `agent/run` is refused.
-    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+    /// The same, with `agentRun` answering the connections' `agent/run` under the hook's grant, feature, and run tabs (`docs/hooks.md`, arch-cli agent run and rename), whose answer names each renamed tab by its handle in `handles`, the run tabs' handles; without `agentRun`, `agent/run` is refused.
+    func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
                      agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String
     /// The run's script process started; connections bind only from it and its descendants.
     func hookRun(_ run: UUID, didStart processID: pid_t)
@@ -1860,7 +1860,7 @@ public protocol AgentHookRunChannel: AnyObject {
 
 extension AgentHookRunChannel {
     /// A channel that serves no `agent/run` opens the run's access without it.
-    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+    public func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
                             agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
         openHookRun(run, tools: tools, call: call)
     }
@@ -1874,11 +1874,15 @@ private final class ShellHookRunAccess {
     let call: @MainActor (AgentToolCall) async -> AgentToolResult
     /// The run's `agent/run`, when its hook may start agent runs.
     let agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?
+    /// The run tabs' handles, by which `agent/run`'s answer names the tabs it renamed.
+    let handles: [UUID: String]
     /// The script process, as it was right after it started.
     var process: AgentProcessRecord?
 
-    init(tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult, agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)? = nil) {
+    init(tools: [String], handles: [UUID: String] = [:], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+         agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)? = nil) {
         self.tools = tools
+        self.handles = handles
         self.call = call
         self.agentRun = agentRun
     }
@@ -1895,12 +1899,12 @@ extension AgentService {
 
 extension AgentService: AgentHookRunChannel {
     public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
-        openHookRun(run, tools: tools, call: call, agentRun: nil)
+        openHookRun(run, tools: tools, handles: [:], call: call, agentRun: nil)
     }
 
-    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+    public func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
                             agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
-        let access = ShellHookRunAccess(tools: tools, call: call, agentRun: agentRun)
+        let access = ShellHookRunAccess(tools: tools, handles: handles, call: call, agentRun: agentRun)
         shellHookRuns[run] = access
         if endpoint == nil { updateListening() }
         return access.ticket.text
@@ -2146,17 +2150,22 @@ extension AgentService {
 
     /// An outside run's result as its client reads it: each renamed tab by the client's handle, never by Arch's identifier.
     func clientJSON(of result: AgentRunResult, for grant: AgentGrant) -> AgentJSON {
-        guard case .object(var fields) = Self.json(result) else { return Self.json(result) }
         let state = state(for: grant)
-        fields["actions"] = .array(result.actions.map { action in
+        return Self.json(of: result) { state.handles.tabs.handle(for: $0) }
+    }
+
+    /// A run's result as its caller reads it: each renamed tab by the caller's handle for it, never by Arch's identifier, and a tab the caller has no handle for left out.
+    static func json(of result: AgentRunResult, handle: (UUID) -> String?) -> AgentJSON {
+        guard case .object(var fields) = json(result) else { return json(result) }
+        fields["actions"] = .array(result.actions.compactMap { action in
             switch action {
-            case .renamedTab(let tab, let name): return ["renamedTab": ["tab": .string(state.handles.tabs.handle(for: tab)), "name": .string(name)]]
+            case .renamedTab(let tab, let name): return handle(tab).map { ["renamedTab": ["tab": .string($0), "name": .string(name)]] }
             }
         })
         return .object(fields)
     }
 
-    /// `agent/run` on a shell hook run's connection: the run's handler runs it under the hook's grant, feature, and run tabs, or refuses it with -32601 when the hook may start no agent runs. The run's end cancels it.
+    /// `agent/run` on a shell hook run's connection: the run's handler runs it under the hook's grant, feature, and run tabs, or refuses it with -32601 when the hook may start no agent runs, and the answer names each renamed tab by its run handle, as `arch-cli rename` inside the run names it. The run's end cancels it.
     private func runShellHookAgent(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard let id = connection.sessionID, let run = shellHookRuns[id], let agentRun = run.agentRun else {
             return replyError(connection, requestID, .methodNotFound(AgentControlMethod.agentRun))
@@ -2170,7 +2179,7 @@ extension AgentService {
             defer { connection.endCall(running) }
             let result = await agentRun(fields)
             guard !running.isCancelled, connections[connection.id] != nil else { return }
-            reply(connection, requestID, Self.json(result))
+            reply(connection, requestID, Self.json(of: result) { run.handles[$0] })
         }
     }
 
