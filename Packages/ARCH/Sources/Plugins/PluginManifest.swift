@@ -70,8 +70,7 @@ public struct PluginManifest: Hashable, Sendable {
 
     /// The data kinds that AI requests carry as the sentence that the install sheet and Settings show after the `ai` permission's, such as "Send the text of pages and selected text to the AI models you connected", or nil without any.
     public var aiDataSummary: String? {
-        let names: [(AIDataKind, String)] = [(.page, "the text of pages"), (.selection, "selected text"), (.file, "files"), (.download, "download details")]
-        let listed = names.filter { aiDataKinds.contains($0.0) }.map(\.1)
+        let listed = AIDataKind.allCases.filter(aiDataKinds.contains).map(\.sentenceName)
         guard !listed.isEmpty else { return nil }
         return "Send \(ListFormatter.localizedString(byJoining: listed)) to the AI models you connected"
     }

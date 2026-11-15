@@ -863,11 +863,11 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public func versionEngines(among running: Set<EngineKind>) -> [EngineKind]
     /// The engine whose version the plugin asks for, by the rule in Guidance, or nil.
     public func missingEngine(among running: Set<EngineKind>) -> EngineKind?
-    /// The grant's sentences, then a web extension's other API permissions.
+    /// The sentences of the grant's permissions, then those that come with them, the data kinds of `ai` and a web extension's other API permissions, then the sites', in the install sheet's order.
     public var accessSummaries: [String] { get }
     /// The most sites whose sentences Settings lists among those; with more, it states them in one.
     public static let listedSiteLimit: Int
-    /// Those sentences as Settings states them while the grant has more than `listedSiteLimit` sites, with each site's behind a disclosure, or nil with fewer: each permission's, and in place of the sites' one that names them by the broadest, every website, the one site's name, a top-level domain's sites with the number of the others, or the number of sites, such as "Run scripts on pages from every .com website and 3 more" or "Run scripts on pages from 14 websites", counting a site that another pattern's subdomains take in once.
+    /// Those sentences as Settings states them while the grant has more than `listedSiteLimit` sites, with each site's behind a disclosure, or nil with fewer: each permission's and those that come with them, and in place of the sites' one that names them by the broadest, every website, the one site's name, a top-level domain's sites with the number of the others, or the number of sites, such as "Run scripts on pages from every .com website and 3 more" or "Run scripts on pages from 14 websites", counting a site that another pattern's subdomains take in once.
     public var accessBrief: [String]? { get }
 }
 

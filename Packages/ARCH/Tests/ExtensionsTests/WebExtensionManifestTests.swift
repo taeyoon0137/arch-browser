@@ -105,7 +105,7 @@ import Testing
         try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
         let installed = try #require(manager.plugins.first)
         #expect(installed.kind == .webExtension)
-        #expect(installed.accessSummaries == ["Read the titles and addresses of your tabs", "Run scripts on pages from example.org", "Use the extension APIs storage"])
+        #expect(installed.accessSummaries == ["Read the titles and addresses of your tabs", "Use the extension APIs storage", "Run scripts on pages from example.org"])
         let archive = folder.url.appendingPathComponent("Sample.zip")
         let ditto = try Process.run(URL(fileURLWithPath: "/usr/bin/ditto"), arguments: ["-c", "-k", "--keepParent", sampleExtensionFolder.path, archive.path])
         ditto.waitUntilExit()

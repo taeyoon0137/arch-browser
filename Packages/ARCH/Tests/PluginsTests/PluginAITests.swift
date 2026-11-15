@@ -756,7 +756,7 @@ extension PluginAITests {
         let manager = manager(ai: nil)
         func stage(_ permissions: String) async throws -> PluginPackage {
             try await manager.stage(try writePackage([
-                "plugin.json": #"{"id": "org.example.ai-data", "name": "AI Data", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": \#(permissions)}"#,
+                "plugin.json": #"{"id": "org.example.ai-data", "name": "AI Data", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": \#(permissions), "sites": ["https://example.org/*"]}"#,
             ]))
         }
         let package = try await stage(#"["tabs", {"ai": ["page", "selection"]}]"#)
@@ -767,11 +767,13 @@ extension PluginAITests {
         let id = try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: false)
         let installed = try #require(manager.plugins.first { $0.id == id })
         #expect(installed.aiDataKinds == [.page, .selection])
-        #expect(installed.accessSummaries == ["Read the titles and addresses of your tabs", "Send text to the AI models you connected", sentence])
+        // Settings states the kinds right after the permissions and before the sites, as the install sheet does.
+        let site = "Run scripts on pages from example.org"
+        #expect(installed.accessSummaries == ["Read the titles and addresses of your tabs", "Send text to the AI models you connected", sentence, site])
         // Without `ai` in the grant, the kinds do not come with it.
         var withoutAI = installed
         withoutAI.grant.permissions = [.tabs]
-        #expect(withoutAI.aiDataKinds.isEmpty && withoutAI.accessSummaries == ["Read the titles and addresses of your tabs"])
+        #expect(withoutAI.aiDataKinds.isEmpty && withoutAI.accessSummaries == ["Read the titles and addresses of your tabs", site])
         let textOnly = try await stage(#"["ai"]"#)
         #expect(textOnly.manifest.aiDataKinds.isEmpty && textOnly.manifest.aiDataSummary == nil)
 

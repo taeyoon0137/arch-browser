@@ -135,8 +135,7 @@ private struct AIFeaturesPage: View {
 
     /// What the feature sends, in words.
     private static func sentence(for feature: AIFeature) -> String {
-        let names: [(AIDataKind, String)] = [(.page, "the page\u{2019}s text"), (.selection, "the selection"), (.file, "files"), (.download, "download details")]
-        let kinds = names.filter { feature.data.kinds.contains($0.0) }.map(\.1)
+        let kinds = AIDataKind.allCases.filter(feature.data.kinds.contains).map(\.sentenceName)
         let sends = kinds.isEmpty ? "It sends text only." : "It sends \(ListFormatter.localizedString(byJoining: kinds)) with its requests."
         return feature.trigger == .automatic ? "\(sends) It runs on its own." : sends
     }

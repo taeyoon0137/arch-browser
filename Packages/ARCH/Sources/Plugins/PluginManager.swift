@@ -71,9 +71,14 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         versionEngines(among: running).first { engineChecks[$0] != nil && !engines.contains($0) && !dismissedVersionNotes.contains($0) }
     }
 
-    /// What the plugin may do, one sentence each, as Settings states it: its grant, then the data kinds that come with `ai` and the API permissions that come with a web extension.
+    /// What the plugin may do, one sentence each, as Settings states it in the install sheet's order: the grant's permissions, the data kinds that come with `ai` and the API permissions that come with a web extension, then the grant's sites.
     public var accessSummaries: [String] {
-        grant.summaries + includedSummaries
+        permissionSummaries + includedSummaries + grant.sites.map(\.accessSummary)
+    }
+
+    /// The sentence of each permission of the grant, in a fixed order.
+    private var permissionSummaries: [String] {
+        PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary)
     }
 
     /// The sentences of what comes with the grant: the data kinds that its AI requests carry and a web extension's other API permissions.
@@ -84,10 +89,10 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     /// The most sites whose sentences Settings lists among `accessSummaries`; with more, it states them in one (`accessBrief`).
     public static let listedSiteLimit = 3
 
-    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
+    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence and those that come with the grant, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
     public var accessBrief: [String]? {
         guard grant.sites.count > Self.listedSiteLimit, let sites = MatchPattern.briefAccessSummary(of: grant.sites) else { return nil }
-        return PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary) + [sites] + includedSummaries
+        return permissionSummaries + includedSummaries + [sites]
     }
 }
 
