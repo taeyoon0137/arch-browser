@@ -111,11 +111,13 @@ public enum HookShellScript {
         Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers", isDirectory: true)
     }
 
-    /// The PATH the script gets: the bundle's `Contents/Helpers`, where `arch-cli` is, then the login shell's PATH, or this app's when the shell could not tell.
-    public static func searchPath(helpers: URL?, loginPath: String?) -> String {
-        let login = loginPath ?? LoginShell.baseEnvironment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        return ([helpers?.path].compactMap { $0 } + [login]).joined(separator: ":")
+    /// The PATH the script gets: the bundle's `Contents/Helpers`, where `arch-cli` is, then the login shell's PATH. Without the login shell's, neither the trust sheet nor a run goes on, since the script's commands and a `/usr/bin/env` interpreter would then come from other folders.
+    public static func searchPath(helpers: URL?, loginPath: String) -> String {
+        ([helpers?.path].compactMap { $0 } + [loginPath]).joined(separator: ":")
     }
+
+    /// What a run that could not read the login shell's PATH fails with, and what the trust sheet says then.
+    public static let loginPathSentence = "Arch could not read the PATH of your login shell, which this script runs with."
 
     /// The first line's interpreter as an absolute path with links resolved, with its SHA-256: a `/usr/bin/env` program is looked up in `searchPath`, the PATH the script gets.
     public static func resolve(_ line: InterpreterLine, searchPath: String) -> Result<HookInterpreterResolution, HookShellScriptProblem> {
@@ -145,13 +147,17 @@ public enum HookShellScript {
         return resolve(line, searchPath: searchPath)
     }
 
-    /// Before a run: why the script's first line no longer resolves to the recorded interpreter, by path and digest, or nil when it still does.
+    /// Before a run: the path the first line names the recorded interpreter by, before links resolve, which the run passes as the interpreter's first argument as the system's `#!` handling would, or why the line no longer resolves to it, by path and digest.
+    static func checkInterpreter(_ recorded: HookInterpreter, script: Data, searchPath: String) -> Result<String, HookShellScriptProblem> {
+        guard let line = interpreterLine(of: script) else { return .failure(HookShellScriptProblem(firstLineSentence)) }
+        guard case .success(let resolution) = resolve(line, searchPath: searchPath), resolution.interpreter == recorded else { return .failure(HookShellScriptProblem(changedSentence)) }
+        return .success(resolution.named)
+    }
+
+    /// Why the script's first line no longer resolves to the recorded interpreter, or nil when it still does.
     static func interpreterProblem(_ recorded: HookInterpreter, script: Data, searchPath: String) -> String? {
-        guard let line = interpreterLine(of: script) else { return firstLineSentence }
-        switch resolve(line, searchPath: searchPath) {
-        case .failure: return changedSentence
-        case .success(let resolution): return resolution.interpreter == recorded ? nil : changedSentence
-        }
+        if case .failure(let problem) = checkInterpreter(recorded, script: script, searchPath: searchPath) { return problem.sentence }
+        return nil
     }
 
     /// The lines of `new` that `old` does not hold in the same order, by index, and how many lines of `old` are gone, for Update from File….
@@ -285,40 +291,52 @@ public final class ShellHookRunner: HookScriptRunning {
         let state = Running()
         running[invocation.run] = state
         defer { running[invocation.run] = nil }
-        let searchPath = HookShellScript.searchPath(helpers: helpers, loginPath: await loginPath())
-        let script = invocation.script
-        guard let line = HookShellScript.interpreterLine(of: script) else { return .failed(code: "invalidScript", message: HookShellScript.firstLineSentence) }
-        let problem = await Task.detached { HookShellScript.interpreterProblem(recorded, script: script, searchPath: searchPath) }.value
+        let login = await loginPath()
         if state.isCancelled { return .cancelled }
         if ContinuousClock.now >= invocation.deadline { return .timedOut }
-        if let problem { return .failed(code: "scriptChanged", message: problem) }
+        // A failure that pauses nothing; the next run reads the login shell again.
+        guard let login else { return .failed(code: "loginShell", message: HookShellScript.loginPathSentence) }
+        let searchPath = HookShellScript.searchPath(helpers: helpers, loginPath: login)
+        let script = invocation.script
+        guard let line = HookShellScript.interpreterLine(of: script) else { return .failed(code: "invalidScript", message: HookShellScript.firstLineSentence) }
+        let checked = await Task.detached { HookShellScript.checkInterpreter(recorded, script: script, searchPath: searchPath) }.value
+        if state.isCancelled { return .cancelled }
+        if ContinuousClock.now >= invocation.deadline { return .timedOut }
+        let named: String
+        switch checked {
+        case .success(let name): named = name
+        case .failure(let problem): return .failed(code: "scriptChanged", message: problem.sentence)
+        }
 
         let folder = temporaryFolder.appendingPathComponent("Arch-Hook-\(invocation.run.uuidString)", isDirectory: true)
         guard mkdir(folder.path, 0o700) == 0 else { return .failed(code: "notStarted", message: "Arch could not make the run's folder: \(String(cString: strerror(errno))).") }
         defer { try? FileManager.default.removeItem(at: folder) }
+        state.folder = folder
         let tools = ShellHookRunTools(invocation: invocation, host: host, allowsAI: allowsAI)
         let ticket = channel?.openHookRun(invocation.run, tools: tools.names) { call in tools.call(call) } ?? ""
-        defer {
+        state.accessEnd = { [channel] in
             tools.end()
             channel?.closeHookRun(invocation.run)
         }
+        defer { state.endAccess() }
         let environment = Self.environment(of: invocation, searchPath: searchPath, folder: folder, ticket: ticket)
         let process: CommandLineProcess
         do {
+            // The executable is the recorded path; the first argument is the name the first line gave it, which a program that serves several tools under several names reads.
             process = try CommandLineProcess(executable: URL(fileURLWithPath: recorded.path), arguments: line.arguments + ["/dev/fd/3"], environment: environment, directory: folder,
-                                             input: Self.input(of: invocation, handles: tools.handles), script: script)
+                                             input: Self.input(of: invocation, handles: tools.handles), script: script, argumentZero: named)
         } catch {
             return .failed(code: "notStarted", message: "Arch could not start \(recorded.path): \(error.localizedDescription)")
         }
         // Before any message of the script's `arch-cli` can arrive, which the main actor delivers after this.
         channel?.hookRun(invocation.run, didStart: process.id)
         state.process = process
-        if state.isCancelled { process.terminate() }
+        if state.isCancelled { state.end() }
         Task.detached { for await _ in process.output {} }
         let watchdog = Task { [weak state] in
             try await Task.sleep(until: invocation.deadline, clock: .continuous)
             state?.didTimeOut = true
-            process.terminate()
+            state?.end()
         }
         let termination = await process.termination()
         watchdog.cancel()
@@ -338,7 +356,7 @@ public final class ShellHookRunner: HookScriptRunning {
         }
     }
 
-    /// Ends the run's process group: SIGTERM, then SIGKILL two seconds later.
+    /// Ends the run's tools and its `arch-cli` connections at once, then its process group: SIGTERM, then SIGKILL two seconds later.
     public func cancel(run: UUID) {
         running[run]?.cancel()
     }
@@ -347,9 +365,18 @@ public final class ShellHookRunner: HookScriptRunning {
         errorOutputs.removeValue(forKey: run)
     }
 
-    /// Ends every running script, as at quit.
-    public func endAll() {
-        for state in running.values { state.cancel() }
+    /// Seconds that quit gives the scripts' process groups after SIGTERM before SIGKILL.
+    public nonisolated static let quitGrace: TimeInterval = 0.5
+
+    /// Ends every running script at quit: their access to Arch, then SIGTERM to each process group and, after at most `grace` seconds, SIGKILL to whatever of them still runs, and removes the runs' folders. It waits here, on the main thread, since the timer that would send SIGKILL and the runs' own cleanup end with Arch.
+    public func endAll(grace: TimeInterval = ShellHookRunner.quitGrace) {
+        let states = Array(running.values)
+        states.forEach { $0.cancel() }
+        let groups = states.compactMap { $0.process?.id }
+        let deadline = Date().addingTimeInterval(grace)
+        while groups.contains(where: { kill(-$0, 0) == 0 }), Date() < deadline { usleep(20_000) }
+        for group in groups { kill(-group, SIGKILL) }
+        for folder in states.compactMap(\.folder) { try? FileManager.default.removeItem(at: folder) }
     }
 
     /// The script's whole environment (`HookShellScript.environmentNames`): PATH, the account's home folder, the app's language, the run's folder as TMPDIR, and the hook, the event's kind, and the run's ticket.
@@ -365,14 +392,17 @@ public final class ShellHookRunner: HookScriptRunning {
         ]
     }
 
-    /// The event as one line of JSON in the hook's script view, dates in ISO 8601, with `tab.handle` for the event's tab when the run reaches it and `hook: {id, name, agent}` as a JavaScript hook's listener gets it.
+    /// The event as one line of JSON in the hook's script view, dates in ISO 8601, with the event's tab's handle as `tab.handle`, or `download.handle` for the tab a download came from, when the run reaches it, and `hook: {id, name, agent}` as a JavaScript hook's listener gets it.
     static func input(of invocation: HookInvocation, handles: [UUID: String]) -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let encoded = try? encoder.encode(invocation.event), case .object(var members)? = try? AgentJSON.decode(encoded) else { return Data() }
-        if let id = invocation.event.tab?.id, let handle = handles[id], case .object(var tab)? = members["tab"] {
-            tab["handle"] = .string(handle)
-            members["tab"] = .object(tab)
+        if let id = invocation.eventTab, let handle = handles[id] {
+            for key in ["tab", "download"] {
+                guard case .object(var member)? = members[key] else { continue }
+                member["handle"] = .string(handle)
+                members[key] = .object(member)
+            }
         }
         let hook = invocation.hook
         members["hook"] = .object(["id": .string(hook.id.uuidString), "name": .string(hook.name), "agent": hook.agent.flatMap { try? AgentJSON(encoding: $0) } ?? .null])
@@ -383,12 +413,29 @@ public final class ShellHookRunner: HookScriptRunning {
     @MainActor
     private final class Running {
         var process: CommandLineProcess?
+        /// The run's working folder, which quit removes, since the run's own cleanup does not get to.
+        var folder: URL?
+        /// Ends the run's tools and closes its `arch-cli` connections.
+        var accessEnd: (() -> Void)?
         var isCancelled = false
         var didTimeOut = false
 
         func cancel() {
             isCancelled = true
+            end()
+        }
+
+        /// Ends the run's access to Arch before its processes, so that no `arch-cli` call of a script that ignores SIGTERM, or of a run the scheduler has already left, lands after a cancel, a pause, or the time limit; then sends the group SIGTERM, and SIGKILL two seconds later.
+        func end() {
+            endAccess()
             process?.terminate()
+        }
+
+        /// Ends the run's access to Arch, once.
+        func endAccess() {
+            let end = accessEnd
+            accessEnd = nil
+            end?()
         }
     }
 }

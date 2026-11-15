@@ -450,6 +450,21 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(await process.termination() == .exited(0))
     }
 
+    @Test func aScriptPipeThatAChildKeepsOpenClosesWhenTheProcessEnds() async throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // The interpreter leaves a child that inherits descriptor 3 without reading it and exits long before it reads a script larger than the pipe holds.
+        let script = Data("sleep 20 &\nexit 0\n".utf8) + Data(repeating: UInt8(ascii: "#"), count: 512 * 1024) + Data("\n".utf8)
+        let process = try CommandLineProcess(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["/dev/fd/3"], environment: ["PATH": "/usr/bin:/bin"],
+                                             directory: directory, input: Data(), script: script, argumentZero: "fixture-shell")
+        defer { process.terminate() }
+        #expect(await process.termination() == .exited(0))
+        // The child still holds the read end, so only the process's end closes the write end.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !process.isScriptClosed, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(process.isScriptClosed)
+    }
+
     @Test func aClaudeCodeSessionReplaysTheRecordedStreamWithUsageUnderAgent() async throws {
         let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
         let fixture = try AgentFixture(cli: cli, model: "haiku")

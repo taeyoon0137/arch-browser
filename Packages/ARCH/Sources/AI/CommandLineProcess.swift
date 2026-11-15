@@ -29,11 +29,13 @@ public final class CommandLineProcess: @unchecked Sendable {
     private let errorTail: Task<Data, Never>
     private let exit = ExitRecord()
     private let input: InputPipe
+    private let scriptInput: ScriptPipe?
     private let lock = NSLock()
     private var isTerminating = false
 
-    /// Starts the process. Throws a `POSIXError` when it cannot start, for example because the executable does not exist. `input` goes to standard input, which then closes, or with `keepsInputOpen` stays open for `write(_:)` until `closeInput()` or the process ends. `script`, when given, goes to a pipe at descriptor 3, which then closes, so that an interpreter started with `/dev/fd/3` runs exactly these bytes.
-    public init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data, keepsInputOpen: Bool = false, script: Data? = nil) throws {
+    /// Starts the process. Throws a `POSIXError` when it cannot start, for example because the executable does not exist. `input` goes to standard input, which then closes, or with `keepsInputOpen` stays open for `write(_:)` until `closeInput()` or the process ends. `script`, when given, goes to a pipe at descriptor 3, which closes once it is written or the process ends, so that an interpreter started with `/dev/fd/3` runs exactly these bytes. `argumentZero` is the name the process gets as its first argument, the executable's path when nil.
+    public init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data, keepsInputOpen: Bool = false, script: Data? = nil,
+                argumentZero: String? = nil) throws {
         let pipes = try Self.makePipes()
         var scriptPipe: [Int32] = [-1, -1]
         if script != nil {
@@ -76,7 +78,7 @@ public final class CommandLineProcess: @unchecked Sendable {
         posix_spawnattr_setsigmask(&attributes, &signals)
 
         var processID: pid_t = 0
-        let status = Self.withCStrings([executable.path] + arguments) { argv in
+        let status = Self.withCStrings([argumentZero ?? executable.path] + arguments) { argv in
             Self.withCStrings(environment.map { "\($0.key)=\($0.value)" }) { envp in
                 posix_spawn(&processID, executable.path, &actions, &attributes, argv, envp)
             }
@@ -96,13 +98,8 @@ public final class CommandLineProcess: @unchecked Sendable {
         self.input = inputPipe
         inputPipe.write(input)
         if !keepsInputOpen { inputPipe.close() }
-        if let script {
-            // An interpreter that exits before it reads its whole script ends the write with EPIPE instead of a signal.
-            _ = fcntl(scriptPipe[1], F_SETNOSIGPIPE, 1)
-            let scriptInput = InputPipe(descriptor: scriptPipe[1])
-            scriptInput.write(script)
-            scriptInput.close()
-        }
+        let scriptInput = script.map { ScriptPipe(descriptor: scriptPipe[1], script: $0) }
+        self.scriptInput = scriptInput
         let standardOutput = Self.stream(reading: pipes.outputRead)
         output = standardOutput.stream
         let outputSource = standardOutput.source
@@ -121,6 +118,7 @@ public final class CommandLineProcess: @unchecked Sendable {
             while waitpid(processID, &status, 0) == -1, errno == EINTR {}
             exit.record(CommandLineTermination(waitStatus: status))
             inputPipe.close()
+            scriptInput?.close()
             // A background process the tool started, such as an update check, can hold standard output open after the tool exits; reading stops once the tool's own output has been read.
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + Self.outputGrace) { outputSource.cancel() }
         }
@@ -139,6 +137,11 @@ public final class CommandLineProcess: @unchecked Sendable {
     /// Closes standard input, after what was written before.
     func closeInput() {
         input.close()
+    }
+
+    /// Whether the script's pipe at descriptor 3 has closed, or there is none.
+    var isScriptClosed: Bool {
+        scriptInput?.isClosed ?? true
     }
 
     /// Sends SIGTERM to the process group, then SIGKILL two seconds later to whatever of the group still runs. Calls after the first do nothing.
@@ -266,6 +269,46 @@ private final class InputPipe: @unchecked Sendable {
             isOpen = false
             Darwin.close(descriptor)
         }
+    }
+}
+
+/// The writing end of a shell hook's script pipe at descriptor 3. Every process the interpreter starts inherits that descriptor, and one that keeps it open without reading would block a plain write for good once the interpreter has exited, so the bytes go out without blocking, as the pipe takes them, and the pipe closes once they are all written, the reader is gone, or the process ends.
+private final class ScriptPipe: @unchecked Sendable {
+    private let source: DispatchSourceWrite
+    private let lock = NSLock()
+    /// Set by the source's cancel handler; read under `lock`.
+    private var hasClosed = false
+
+    init(descriptor: Int32, script: Data) {
+        // An interpreter that exits before it reads its whole script ends the write with EPIPE instead of a signal.
+        _ = fcntl(descriptor, F_SETNOSIGPIPE, 1)
+        _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
+        let source = DispatchSource.makeWriteSource(fileDescriptor: descriptor, queue: .global(qos: .userInitiated))
+        self.source = source
+        var offset = 0
+        // A source's event handler never runs twice at once, so `offset` needs no lock.
+        source.setEventHandler {
+            let written = script.withUnsafeBytes { buffer in buffer.baseAddress.map { Darwin.write(descriptor, $0 + offset, buffer.count - offset) } ?? 0 }
+            if written > 0 { offset += written }
+            if offset >= script.count || (written < 0 && errno != EAGAIN && errno != EINTR) { source.cancel() }
+        }
+        source.setCancelHandler { [self] in
+            Darwin.close(descriptor)
+            lock.lock()
+            hasClosed = true
+            lock.unlock()
+        }
+        source.resume()
+    }
+
+    var isClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hasClosed
+    }
+
+    func close() {
+        source.cancel()
     }
 }
 

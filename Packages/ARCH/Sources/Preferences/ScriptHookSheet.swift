@@ -675,14 +675,19 @@ struct ScriptHookSheet: View {
         }
     }
 
-    /// Resolves the first line in the PATH the script will get, off the main thread, since the interpreter's digest reads the whole program.
+    /// Resolves the first line in the PATH the script will get, off the main thread, since the interpreter's digest reads the whole program. Without the login shell's PATH nothing resolves, so the sheet records no interpreter that the runs would not find, and Choose Another File… or Update from File… tries again.
     private func resolveInterpreter() {
         guard let contents = draft.shell?.contents else { return }
         draft.shell?.resolution = nil
         draft.shell?.problem = nil
         resolving?.cancel()
         resolving = Task { @MainActor in
-            let searchPath = HookShellScript.searchPath(helpers: HookShellScript.appHelpers, loginPath: await AILoginShell.path())
+            guard let login = await AILoginShell.path() else {
+                guard !Task.isCancelled, draft.shell?.contents == contents else { return }
+                draft.shell?.problem = HookShellScript.loginPathSentence
+                return
+            }
+            let searchPath = HookShellScript.searchPath(helpers: HookShellScript.appHelpers, loginPath: login)
             let result = await Task.detached { HookShellScript.inspect(contents, searchPath: searchPath) }.value
             guard !Task.isCancelled, draft.shell?.contents == contents else { return }
             switch result {

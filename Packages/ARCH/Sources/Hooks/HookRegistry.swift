@@ -165,7 +165,7 @@ public struct HookRunSummary: Identifiable, Sendable {
     }
 
     /// The failures whose message is Arch's own sentence, never a script's or a model's words.
-    static let archSentenceCodes: Set<String> = ["notConfigured", "unknownProvider", "scriptChanged", "notStarted"]
+    static let archSentenceCodes: Set<String> = ["notConfigured", "unknownProvider", "scriptChanged", "notStarted", "loginShell"]
 
     /// What Keep Nothing keeps of the last run or skip: its time, outcome, code, and reason, and Arch's own sentence for a failure.
     var reduced: HookRunSummary {
@@ -846,6 +846,14 @@ public final class HookRegistry: ObservableObject {
         let outcome = await perform(invocation, run: run, on: runner)
         run.errorOutput = runner.takeErrorOutput(of: run.id)
         run.outcome = outcome
+        attachErrorOutput(of: run)
+    }
+
+    /// The scheduler records a run whose time passed, or that it stopped and that did not end within its time, as that happens, before the script has ended and its standard error is read; the error output then joins the run's summary in the hook's last runs.
+    private func attachErrorOutput(of run: HookRun) {
+        guard let output = run.errorOutput, let hook = hook(withID: run.hookID), hook.record != .none,
+              let index = lastRuns[run.hookID]?.lastIndex(where: { $0.id == run.id }) else { return }
+        lastRuns[run.hookID]?[index].errorOutput = output
     }
 
     private func runner(for hook: Hook) -> any HookScriptRunning {
@@ -1085,7 +1093,8 @@ public final class HookRegistry: ObservableObject {
             return
         }
         // The agent runs' daily count, which `ai-usage.json` keeps across launches, says so in the row without pausing the hook.
-        guard countsAsFailure, entry.code != "dailyRuns", entry.code != "scriptChanged" else { return }
+        // Nor does a shell run that could not read the login shell's PATH, which no setting of the hook's own changes.
+        guard countsAsFailure, entry.code != "dailyRuns", entry.code != "scriptChanged", entry.code != "loginShell" else { return }
         let count = (failureCounts[hook.id] ?? 0) + 1
         failureCounts[hook.id] = count
         if count >= Self.failuresBeforePause { pauseHook(hook.id, .failures) }

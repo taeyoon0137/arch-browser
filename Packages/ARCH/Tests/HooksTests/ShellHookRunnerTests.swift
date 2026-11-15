@@ -170,8 +170,9 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         let shell = runner(helpers: helpers)
         let run = invocation(of: hook, script: script, loading: tab)
         #expect(await shell.run(run).actions == [])
+        let output = shell.takeErrorOutput(of: run.run)
         var environment: [String: String] = [:]
-        for entry in values("env", in: shell.takeErrorOutput(of: run.run)) {
+        for entry in values("env", in: output) {
             let parts = entry.split(separator: "=", maxSplits: 1).map(String.init)
             environment[parts[0]] = parts.count > 1 ? parts[1] : ""
         }
@@ -181,6 +182,25 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         #expect(environment["TMPDIR"] == temporary.appendingPathComponent("Arch-Hook-\(run.run.uuidString)").path + "/")
         #expect(environment["ARCH_HOOK_ID"] == hook.id.uuidString && environment["ARCH_HOOK_EVENT"] == "pageLoaded")
         #expect(environment[AgentControlProtocol.hookTicketVariable] == channel.ticket)
+        // The interpreter starts under the name its first line gives it.
+        #expect(values("zero", in: output) == ["/usr/bin/awk"])
+    }
+
+    @Test func theInterpreterStartsUnderTheNameTheFirstLineGivesIt() async throws {
+        defer { harness.cleanUp() }
+        // A program that serves several tools reads which one it is from that name, while the link resolves to the recorded program.
+        let link = programs.appendingPathComponent("fixture-awk")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/usr/bin/awk")
+        let body = String(decoding: try shellFixture("environment.awk"), as: UTF8.self).split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)[1]
+        let script = Data("#!\(link.path) -f\n\(body)".utf8)
+        let hook = try shellHook(script)
+        let tab = harness.tab()
+        harness.host.show(tab)
+        let shell = runner()
+        let run = invocation(of: hook, script: script, loading: tab)
+        #expect(await shell.run(run).actions == [])
+        #expect(values("zero", in: shell.takeErrorOutput(of: run.run)) == [link.path])
+        if case .shell(_, _, let interpreter) = hook.script { #expect(interpreter.path != link.path) } else { Issue.record("Not a shell hook.") }
     }
 
     @Test func aNonzeroStatusFailsTheRunWithItsLastErrorLine() async throws {
@@ -219,8 +239,64 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         let run = invocation(of: try shellHook(script), script: script, loading: tab)
         let running = Task { await shell.run(run) }
         try #require(await eventually { channel.started[run.run] != nil })
+        let handler = try #require(channel.handlers[run.run])
         shell.cancel(run: run.run)
+        // The run's tools and connections end with the cancel, before the script does, so no call of a script that ignores SIGTERM lands meanwhile.
+        #expect(channel.closed == [run.run])
+        #expect(await handler(AgentToolCall(name: "list_tabs")).code == "runEnded")
         #expect(await running.value.isCancelled)
+        #expect(channel.closed == [run.run])
+    }
+
+    @Test func quitEndsAScriptThatIgnoresSIGTERMAndRemovesItsFolder() async throws {
+        defer { harness.cleanUp() }
+        let script = try shellFixture("ignores-term.sh")
+        let tab = harness.tab()
+        harness.host.show(tab)
+        let shell = runner()
+        let run = invocation(of: try shellHook(script), script: script, loading: tab)
+        let folder = temporary.appendingPathComponent("Arch-Hook-\(run.run.uuidString)", isDirectory: true)
+        let running = Task { await shell.run(run) }
+        try #require(await eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("ready").path) })
+        let group = try #require(channel.started[run.run])
+        let started = ContinuousClock.now
+        // A short grace keeps the main actor, which the other suites' timed runs share, free.
+        shell.endAll(grace: 0.1)
+        #expect(started.duration(to: .now) < .seconds(1))
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+        // SIGKILL reached the whole group at quit, before a cancel's own two seconds.
+        #expect(await eventually(within: .milliseconds(800)) { kill(-group, 0) == -1 && errno == ESRCH })
+        #expect(await running.value.isCancelled)
+    }
+
+    @Test func aRunWithoutTheLoginShellsPathFailsWithoutStartingOrPausingTheHook() async throws {
+        defer { harness.cleanUp() }
+        let recorder = RecordingShellRunner(ShellHookRunner(host: plugins, allowsAI: { _ in true }, channel: channel, helpers: nil, temporaryFolder: temporary, loginPath: { nil }))
+        harness.shellRunner = recorder
+        let registry = try await harness.start()
+        registry.setAllowsShellScripts(true)
+        let script = try shellFixture("input.sh")
+        let hook = try harness.add(try shellHook(script), script: String(decoding: script, as: UTF8.self))
+        for path in ["/one", "/two", "/three"] {
+            let failed = try await outcome(loading: harness.tab(path), recorder: recorder)
+            #expect(failed.code == "loginShell" && failed.failure == HookShellScript.loginPathSentence)
+        }
+        try #require(await eventually { registry.lastRuns[hook.id]?.count == 3 })
+        #expect(channel.tools.isEmpty && channel.started.isEmpty)
+        #expect(registry.hooks.first?.state == .active)
+    }
+
+    @Test func aDownloadsEventGivesTheHandleOfItsTab() throws {
+        defer { harness.cleanUp() }
+        let tab = harness.tab("/files")
+        harness.host.show(tab)
+        let script = try shellFixture("input.sh")
+        var run = invocation(of: try shellHook(script), script: script, loading: tab)
+        let download = BrowserDownloadRef(id: UUID(), personaID: tab.personaID, tabID: tab.id, filename: "report.pdf", mediaType: "application/pdf", byteCount: 10,
+                                          sourceURL: nil, pageURL: nil, isNamedByUser: false)
+        run.event = try #require(BrowserEvent(id: UUID(), sequence: 2, date: Date(), payload: .downloadFinished(download: download), cause: nil).view(.hook(tabs: false, allowsAI: nil)))
+        let input = try AgentJSON.decode(ShellHookRunner.input(of: run, handles: [tab.id: "t1"]))
+        #expect(input["download"]?["handle"] == "t1" && input["download"]?["tabId"]?.stringValue == tab.id.uuidString && input["tab"] == nil)
     }
 
     // MARK: The interpreter
@@ -382,6 +458,34 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         try #require(await eventually { registry.lastRuns[quiet.id]?.last != nil })
         let reduced = try #require(registry.lastRuns[quiet.id]?.last)
         #expect(reduced.errorOutput == nil && reduced.message == nil && reduced.code == "exitStatus")
+    }
+
+    @Test func aTimedOutRunKeepsItsErrorOutputAndAPauseEndsARunsAccessAtOnce() async throws {
+        defer { harness.cleanUp() }
+        let (registry, recorder) = try await startRegistry()
+        let script = try shellFixture("sleeps.sh")
+        var slow = try shellHook(script)
+        slow.timing = HookTiming(delay: .zero, timeout: .seconds(1))
+        slow = try harness.add(slow, script: String(decoding: script, as: UTF8.self))
+        // The runner's own limit or the scheduler's cancel at the same limit ends the script, whichever comes first.
+        _ = try await outcome(loading: harness.tab("/slow"), recorder: recorder)
+        // The scheduler may record the run as its time passes; the error output, read once the script has ended, joins it then.
+        try #require(await eventually { registry.lastRuns[slow.id]?.last?.errorOutput != nil })
+        let summary = try #require(registry.lastRuns[slow.id]?.last)
+        #expect(summary.outcome == .timedOut && values("child", in: summary.errorOutput).count == 1)
+
+        registry.remove(slow.id)
+        let paused = try harness.add(try shellHook(script), script: String(decoding: script, as: UTF8.self))
+        let count = recorder.invocations.count
+        harness.load(harness.tab("/paused"))
+        try #require(await eventually { recorder.invocations.count > count && channel.started[recorder.invocations[count].run] != nil })
+        let run = recorder.invocations[count].run
+        let handler = try #require(channel.handlers[run])
+        registry.pause(paused.id)
+        #expect(channel.closed.contains(run))
+        #expect(await handler(AgentToolCall(name: "list_tabs")).code == "runEnded")
+        try #require(await eventually { recorder.outcomes.count > count })
+        #expect(recorder.outcomes[count].isCancelled)
     }
 
     // MARK: Grants and tools
