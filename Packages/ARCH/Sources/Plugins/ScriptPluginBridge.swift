@@ -261,6 +261,17 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         return try context.renameTab(id, to: name)
     }
 
+    /// Closes or selects the tab for a call of the document: a panel's call belongs to no hook step of the plugin.
+    private func manageTab(_ id: PluginTab.ID, closing: Bool) throws {
+        if role == .panel, let context = context as? any PluginPanelContext {
+            if closing { try context.panelCloseTab(id) } else { try context.panelSelectTab(id) }
+        } else if closing {
+            try context.closeTab(id)
+        } else {
+            try context.selectTab(id)
+        }
+    }
+
     /// Starts reading the reply of an `arch.ai.stream` call and returns the stream's number, with which the script asks for its text.
     private func startStream(_ request: AIRequest, with client: any AIClient) -> PluginValue {
         let number = nextRequestNumber
@@ -420,7 +431,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return .string(try context.openTab(url, try Self.openTabOptions(call.value(1))).uuidString)
         case "tabs.close", "tabs.select":
             guard call.args.count == 1, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
-            if call.call == "tabs.close" { try context.closeTab(id) } else { try context.selectTab(id) }
+            try manageTab(id, closing: call.call == "tabs.close")
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try renameTab(id, to: try call.optionalText(1)))

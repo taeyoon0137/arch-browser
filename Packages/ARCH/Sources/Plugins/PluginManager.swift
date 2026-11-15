@@ -1792,7 +1792,7 @@ final class ScopedPluginContext: PluginPanelContext {
         return manager.shown(tab, to: grant, of: pluginID)
     }
 
-    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, and selecting do not belong to the running hook step: they act on the tab as it is when the call arrives.
+    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, and selecting do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes and selects its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)
@@ -1804,17 +1804,28 @@ final class ScopedPluginContext: PluginPanelContext {
     }
 
     func closeTab(_ id: PluginTab.ID) throws {
-        guard !hasEnded else { throw PluginError.stopped }
-        try require(.manageTabs)
-        guard let manager else { throw PluginError.notGranted(id) }
-        try manager.closeTab(id, by: pluginID)
+        try manageTab(id, inStep: true) { try $0.closeTab(id, by: pluginID) }
+    }
+
+    func panelCloseTab(_ id: PluginTab.ID) throws {
+        try manageTab(id, inStep: false) { try $0.closeTab(id, by: pluginID) }
     }
 
     func selectTab(_ id: PluginTab.ID) throws {
+        try manageTab(id, inStep: true) { try $0.selectTab(id, by: pluginID) }
+    }
+
+    func panelSelectTab(_ id: PluginTab.ID) throws {
+        try manageTab(id, inStep: false) { try $0.selectTab(id, by: pluginID) }
+    }
+
+    /// A close or a selection of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
+    private func manageTab(_ id: PluginTab.ID, inStep: Bool, _ change: (PluginManager) throws -> Void) throws {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)
         guard let manager else { throw PluginError.notGranted(id) }
-        try manager.selectTab(id, by: pluginID)
+        if inStep, let step = hookStep, step.tab == id, step.isStopped { throw PluginError.stopped }
+        try change(manager)
     }
 
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
