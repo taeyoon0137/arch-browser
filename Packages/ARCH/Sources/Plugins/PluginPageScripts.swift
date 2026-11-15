@@ -11,21 +11,28 @@ extension PluginID {
 }
 
 extension PluginPageScript {
-    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address as `covers(_:)` and the granted sites do, and, with `within`, as one of those patterns does too, as the host of a tab's `whenInvoked` access does, then runs the script's body with the world's channel as `arch`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
+    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address as `covers(_:)` and the granted sites do, and, with `within`, as one of those patterns does too, as the host of a tab's `whenInvoked` access does, then runs the script's body with the world's channel as `arch`. With `once`, it runs the body only the first time it runs in a frame's world under that key, so a script that a command runs at once in a document that already ran it from the tab's list runs no second time. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
     @MainActor
-    func engineScript(world: String, sites: [MatchPattern], within: [MatchPattern]? = nil) -> EnginePageScript? {
+    func engineScript(world: String, sites: [MatchPattern], within: [MatchPattern]? = nil, once key: String? = nil) -> EnginePageScript? {
         guard FunctionBodyCheck.shared.accepts(source) else { return nil }
         let guarded = """
         (channel) => {
           const covers = \(MatchPattern.javaScriptMatcher);
           if (!covers(location, \(MatchPattern.javaScriptLiteral(matches))) || covers(location, \(MatchPattern.javaScriptLiteral(excludes)))
-            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(PluginPageRun.withinCheck(within))) return;
+            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(PluginPageRun.withinCheck(within))) return;\(Self.onceCheck(key))
           ((arch) => {
         \(source)
           })(channel);
         }
         """
         return EnginePageScript(world: world, source: guarded, injectionTime: runAt, mainFrameOnly: !allFrames)
+    }
+
+    /// The lines that end the function when the frame's world already ran a script under `key` and otherwise mark it, or none without a key.
+    private static func onceCheck(_ key: String?) -> String {
+        guard let key else { return "" }
+        let literal = String(decoding: (try? JSONEncoder().encode(key)) ?? Data("\"\"".utf8), as: UTF8.self)
+        return "\n  if (globalThis[\(literal)]) return;\n  globalThis[\(literal)] = true;"
     }
 }
 

@@ -1,4 +1,4 @@
-// Site access modes (`docs/plugins.md`, Permissions; Page scripts): a manifest's `siteAccess`, the grant that keeps it in `plugins.json` where builds before it cannot read it, the review's first offer, the sentences and the confirmation for it, and a `whenInvoked` plugin reaching a tab's pages only after one of its commands ran there, on the host of that page: its page scripts run in that page at once and in the tab's later documents on the host, its page calls, page script values, and the tab's title and address reach it there, and the access ends when the tab commits a document of another host, gets another page, or closes, or the plugin is switched off.
+// Site access modes (`docs/plugins.md`, Permissions; Page scripts): a manifest's `siteAccess`, the grant that keeps it in `plugins.json` where builds before it cannot read it, the review's first offer, the sentences and the confirmation for it, and a `whenInvoked` plugin reaching a tab's pages only after one of its commands ran there, on the host of that page, while the tab still showed the document the command ran on: its page scripts run in that page at once, again at a later command, and once in a document, and in the tab's later documents on the host, its page calls, page script values, and the tab's title and address reach it there, and the access ends when the tab commits a document of another host, gets another page, or closes, or the plugin is switched off.
 import ARCHEngine
 import Events
 import Foundation
@@ -120,9 +120,55 @@ private final class ListedPlugin: BuiltInPlugin {
         #expect(await manager.receive(message(from: "https://a.example.org/x"), from: sameHost) == nil)
         // A frame of another host in the tab is outside the access, although the granted sites cover it.
         #expect(await manager.receive(message(from: "https://b.example.org/frame"), from: tab) == nil)
-        // Running a command again in the same document leaves the access and the scripts as they are.
+        // Running a command again in the same document leaves the access as it is, and the scripts run once in a document.
         await invoke(manager, on: tab)
         #expect(runs(in: host.pages[tab.id]) == 1)
+    }
+
+    /// The access is for the document the user ran the command on: a command whose tab shows another document by the time it runs, as one that a page loads while its context menu is open, gives no access and does not run, nor does one on a host that no match pattern can name.
+    @Test func aCommandRunsOnlyWithAccessToTheDocumentItRanOn() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        let context = try context(in: manager)
+        let tab = host.show("https://a.example.org/x")
+        var stale = tab
+        stale.documentID = UUID()
+        await invoke(manager, on: stale)
+        #expect(manager.tabPageScripts.isEmpty && runs(in: host.pages[tab.id]) == nil && context.storage.value(forKey: "invokedAt") == nil)
+        // The page moved to another host of the granted sites while the user chose the item on the first.
+        host.tabs[0].url = URL(string: "https://mail.example.org/")
+        host.tabs[0].documentURL = URL(string: "https://mail.example.org/")
+        host.tabs[0].documentID = UUID()
+        host.pages[tab.id]?.address = "https://mail.example.org/"
+        await invoke(manager, on: tab)
+        #expect(manager.tabPageScripts.isEmpty && runs(in: host.pages[tab.id]) == nil && context.storage.value(forKey: "invokedAt") == nil)
+        await #expect(throws: PluginError.siteNotGranted) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
+        // The granted sites cover a host with `_`, which no match pattern can name.
+        let unnamed = host.show("https://a_b.example.org/x")
+        await invoke(manager, on: unnamed)
+        #expect(manager.tabPageScripts.isEmpty && runs(in: host.pages[unnamed.id]) == nil && context.storage.value(forKey: "invokedAt") == nil)
+        // A page outside the granted sites gives no access, and the command runs there without its address.
+        let outside = host.show("https://other.example/")
+        await invoke(manager, on: outside)
+        #expect(manager.tabPageScripts.isEmpty && context.storage.value(forKey: "invokedAt") == .string("none"))
+    }
+
+    /// A later command in the tab runs the scripts at once again, so a document that did not run them, as one that began while WebKit's flags switched plugins' page runs off, runs them then; each runs once in a document, whether the command or the tab's list ran it first.
+    @Test func aLaterCommandRunsTheScriptsInADocumentThatDidNotRunThem() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        let tab = host.show("https://a.example.org/x")
+        let page = try #require(host.pages[tab.id])
+        page.needsGesture = true
+        await invoke(manager, on: tab)
+        #expect(manager.tabPageScripts[tab.id] != nil && runs(in: page) == nil)
+        page.needsGesture = false
+        await invoke(manager, on: tab)
+        await invoke(manager, on: tab)
+        #expect(runs(in: page) == 1)
+        let script = try #require(manager.tabPageScripts[tab.id]?.first)
+        page.executeJavaScriptWithoutUserGesture(script.source, inWorld: script.world) { _ in }
+        #expect(runs(in: page) == 1)
     }
 
     /// The tab's scripts check the access's host, so a later document of another host that the granted sites cover runs none of them.

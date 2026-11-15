@@ -979,10 +979,10 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Contributions
 
-    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`). The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, or whose plugin fails to start, beeps.
+    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
         guard let installed = enabledPlugin(command.plugin), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
-        grantSiteAccess(to: installed, for: invocation)
+        guard grantSiteAccess(to: installed, for: invocation) else { return NSSound.beep() }
         do {
             try await start(installed)?.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
         } catch {
@@ -1076,17 +1076,33 @@ public final class PluginManager: ObservableObject {
         contributions.pageScripts + (tabPageScripts[id] ?? [])
     }
 
-    /// Gives a plugin that reaches its sites `whenInvoked` access in the invocation's tab, on the host of the document it shows, when the tab is one of the Persona's and the granted sites cover that document. The plugin's page scripts that cover the document then run in it at once, without the user's gesture as a page run, which on WebKit needs the flags for plugins' page runs and otherwise leaves them to the tab's next document, and run in the tab's later documents on the host (`tabPageScripts`). A tab that has the access keeps it as it is.
-    private func grantSiteAccess(to installed: InstalledPlugin, for invocation: PluginInvocation) {
-        guard installed.grant.siteAccess == .whenInvoked, let id = invocation.tab?.id, let tab = personaTabs().first(where: { $0.id == id }),
-              let document = tab.documentURL, installed.grant.covers(document), currentSiteAccess(of: installed.id, in: tab) == nil,
-              let scheme = document.scheme, let host = document.host(), let site = try? MatchPattern("\(scheme)://\(host)/*"),
-              let contents = browserHost?.webContents(forTab: id) else { return }
-        siteAccess[installed.id, default: [:]][id] = TabSiteAccess(site: site, contents: contents, grant: installed.grant, manifest: installed.manifest)
-        publishTabPageScripts()
-        for script in installed.manifest.contributions.pageScripts where script.covers(document) {
-            guard let engineScript = script.engineScript(world: installed.id.pageScriptWorld, sites: installed.grant.sites, within: [site]) else { continue }
+    /// Gives a plugin that reaches its sites `whenInvoked` access in the invocation's tab when the user ran the command on a document of one of the Persona's tabs that the granted sites cover: the tab's pages on the host of that document, which run the plugin's page scripts from then on (`tabPageScripts`). The scripts that cover the document also run in it at once, without the user's gesture as a page run, which on WebKit needs the flags for plugins' page runs and otherwise leaves them to the tab's next document on the host. A later command in the tab keeps the access as it is and runs them at once again, so that a document that did not run them, as one that began while the flags switched page runs off, runs them then; each runs once in a document (`accessScripts(of:grant:world:site:)`).
+    /// Returns false, and the command does not run, when the access cannot be for the document the user ran the command on: the tab shows another document by now, as one that the page or one of its scripts loaded while its context menu was open, the granted sites no longer cover it, or no match pattern can name its host, as for an IPv6 address.
+    private func grantSiteAccess(to installed: InstalledPlugin, for invocation: PluginInvocation) -> Bool {
+        guard installed.grant.siteAccess == .whenInvoked, let shown = invocation.tab, let tab = personaTabs().first(where: { $0.id == shown.id }),
+              let shownDocument = shown.documentURL, installed.grant.covers(shownDocument) else { return true }
+        guard let documentID = tab.documentID, documentID == shown.documentID, let document = tab.documentURL, document.host() == shownDocument.host(),
+              installed.grant.covers(document), let contents = browserHost?.webContents(forTab: tab.id) else { return false }
+        let access: TabSiteAccess
+        if let current = currentSiteAccess(of: installed.id, in: tab) {
+            access = current
+        } else {
+            guard let scheme = document.scheme, let host = document.host(), let site = try? MatchPattern("\(scheme)://\(host)/*") else { return false }
+            access = TabSiteAccess(site: site, contents: contents, grant: installed.grant, manifest: installed.manifest)
+            siteAccess[installed.id, default: [:]][tab.id] = access
+            publishTabPageScripts()
+        }
+        for (script, engineScript) in Self.accessScripts(of: access.manifest, grant: access.grant, world: installed.id.pageScriptWorld, site: access.site)
+        where script.covers(document) {
             contents.executeJavaScriptWithoutUserGesture(engineScript.source, inWorld: engineScript.world) { _ in }
+        }
+        return true
+    }
+
+    /// The plugin's page scripts as a tab with its access on `site` runs them, with their own scripts: each checks the site besides its patterns and the granted sites, and runs once in a document under its world and its place in the manifest.
+    private static func accessScripts(of manifest: PluginManifest, grant: PluginGrant, world: String, site: MatchPattern) -> [(script: PluginPageScript, engineScript: EnginePageScript)] {
+        manifest.contributions.pageScripts.enumerated().compactMap { index, script in
+            script.engineScript(world: world, sites: grant.sites, within: [site], once: "\(world)#\(index)").map { (script, $0) }
         }
     }
 
@@ -1143,14 +1159,12 @@ public final class PluginManager: ObservableObject {
         publishTabPageScripts()
     }
 
-    /// Sets `tabPageScripts` from each tab's access, in the order of the plugins in the list, each script checking the access's host besides its patterns and the granted sites.
+    /// Sets `tabPageScripts` from each tab's access, in the order of the plugins in the list (`accessScripts(of:grant:world:site:)`).
     private func publishTabPageScripts() {
         var scripts: [UUID: [EnginePageScript]] = [:]
         for plugin in plugins {
             for (tab, access) in siteAccess[plugin.id] ?? [:] {
-                scripts[tab, default: []] += access.manifest.contributions.pageScripts.compactMap {
-                    $0.engineScript(world: plugin.id.pageScriptWorld, sites: access.grant.sites, within: [access.site])
-                }
+                scripts[tab, default: []] += Self.accessScripts(of: access.manifest, grant: access.grant, world: plugin.id.pageScriptWorld, site: access.site).map(\.engineScript)
             }
         }
         if scripts != tabPageScripts { tabPageScripts = scripts }
