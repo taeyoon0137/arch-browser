@@ -41,12 +41,15 @@ public enum HookShellScript {
     public static let inputSentence = "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File\u{2026}."
     /// What Let Agent Runs Read Pages says on the trust sheet.
     public static let readsPagesSentence = "The script and every command it runs can then read the event's page through agent runs."
-    static let firstLineSentence = "Its first line must be #! and the absolute path of a program, with at most one option, or /usr/bin/env and one program's name."
+    static let firstLineSentence = "Its first line must be #! and the absolute path of a program, with at most one option made of the letters e, f, u, v, w, and x, as in -eu, or /usr/bin/env and one program's name."
+    static let hiddenCharacterSentence = "The script holds a control or formatting character other than tab and line feed, such as a carriage return or a text direction mark, which Arch cannot show as the interpreter reads it."
     static let changedSentence = "Its interpreter changed."
+    /// The letters a first line's option may hold. Across shells, awk, Python, Perl, and Ruby they stop at errors, trace, warn, or name the program's file, and none makes the interpreter read its program from standard input, which carries the event, as `-s`, `-i`, or `-` would.
+    static let optionLetters: Set<Character> = ["e", "f", "u", "v", "w", "x"]
 
     /// What the first line names.
     public enum InterpreterLine: Equatable, Sendable {
-        /// An absolute path, and at most one word that the interpreter gets before the script's path, as in `#!/bin/sh -e`.
+        /// An absolute path, and at most one option that the interpreter gets before the script's path, as in `#!/bin/sh -e`.
         case path(String, argument: String?)
         /// `/usr/bin/env` and one program's name, which PATH resolves.
         case env(String)
@@ -58,25 +61,38 @@ public enum HookShellScript {
         }
     }
 
-    /// Why Arch would not trust or run the bytes, or nil: at most 1 MB of UTF-8 text whose first line names its interpreter.
+    /// Why Arch would not trust or run the bytes, or nil: at most 1 MB of UTF-8 text without hidden characters whose first line names its interpreter.
     public static func problem(in script: Data) -> String? {
         guard script.count <= maximumSize else { return "The script is larger than 1 MB." }
-        guard String(data: script, encoding: .utf8) != nil else { return "The script is not UTF-8 text." }
+        guard let text = String(data: script, encoding: .utf8) else { return "The script is not UTF-8 text." }
+        if text.unicodeScalars.contains(where: isHidden) { return hiddenCharacterSentence }
         return interpreterLine(of: script) == nil ? firstLineSentence : nil
     }
 
-    /// The first line's interpreter: `#!` with an absolute path and at most one word after it, or `/usr/bin/env` and one program's name without options or a path. One word keeps the line's meaning the same however a system splits it.
+    /// A character that the trust sheet cannot show as the interpreter reads it: a control character other than tab and line feed, a formatting character such as a text direction mark or a zero-width space, which hides or reorders the text around it, or a line or paragraph separator, where the sheet would break a line that the interpreter reads as one.
+    static func isHidden(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .control: return scalar != "\t" && scalar != "\n"
+        case .format, .lineSeparator, .paragraphSeparator: return true
+        default: return false
+        }
+    }
+
+    /// The first line's interpreter: `#!` with an absolute path and at most one option of `optionLetters` after it, or `/usr/bin/env` and one program's name without options or a path. One word keeps the line's meaning the same however a system splits it.
     public static func interpreterLine(of script: Data) -> InterpreterLine? {
         guard script.starts(with: Array("#!".utf8)) else { return nil }
         let end = script.firstIndex(of: UInt8(ascii: "\n")) ?? script.endIndex
         guard let line = String(data: script[script.startIndex.advanced(by: 2) ..< end], encoding: .utf8) else { return nil }
-        let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\r" }).map(String.init)
+        let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
         guard let program = words.first, program.hasPrefix("/"), words.count <= 2 else { return nil }
         if program == "/usr/bin/env" {
             guard words.count == 2, !words[1].hasPrefix("-"), !words[1].contains("/"), !words[1].contains("=") else { return nil }
             return .env(words[1])
         }
-        return .path(program, argument: words.count == 2 ? words[1] : nil)
+        guard words.count == 2 else { return .path(program, argument: nil) }
+        let option = words[1]
+        guard option.count > 1, option.first == "-", option.dropFirst().allSatisfy(optionLetters.contains) else { return nil }
+        return .path(program, argument: option)
     }
 
     /// Reads a file for the trust sheet: a regular file, or a link to one, of at most 1 MB that `problem(in:)` accepts.
@@ -152,8 +168,9 @@ public enum HookShellScript {
         return (changed, removed)
     }
 
+    /// The text's lines as an interpreter reads them, split at line feeds only.
     public static func lines(of text: String) -> [String] {
-        text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).map { String(String.UnicodeScalarView($0)) }
     }
 
     /// A shell hook's agent grant as the trust sheet leaves it: without Let Agent Runs Read Pages, no page reads and tab access `title`, so that its runs get titles and addresses only.

@@ -243,14 +243,39 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         } else {
             Issue.record("A program outside PATH resolved.")
         }
-        // The first line names one interpreter and at most one option, never `env`'s options or a relative path.
+        // The first line names one interpreter and at most one option of the allowed letters, never `env`'s options or a relative path.
         #expect(HookShellScript.interpreterLine(of: Data("#!/bin/sh -e\n".utf8)) == .path("/bin/sh", argument: "-e"))
+        #expect(HookShellScript.interpreterLine(of: Data("#!/bin/sh -eux\n".utf8)) == .path("/bin/sh", argument: "-eux"))
+        #expect(HookShellScript.interpreterLine(of: Data("#!/usr/bin/awk -f\n".utf8)) == .path("/usr/bin/awk", argument: "-f"))
         #expect(HookShellScript.interpreterLine(of: Data("#! /usr/bin/env  python3\n".utf8)) == .env("python3"))
-        for refused in ["#!sh\n", "#!/bin/sh -e -u\n", "#!/usr/bin/env\n", "#!/usr/bin/env -S sh -e\n", "#!/usr/bin/env ./sh\n", "#!/usr/bin/env A=1 sh\n", "echo hi\n"] {
+        for refused in ["#!sh\n", "#!/bin/sh -e -u\n", "#!/usr/bin/env\n", "#!/usr/bin/env -S sh -e\n", "#!/usr/bin/env ./sh\n", "#!/usr/bin/env A=1 sh\n", "echo hi\n",
+                        // Options that make the interpreter read its program from standard input, where the event is, or run another file or command.
+                        "#!/bin/sh -s\n", "#!/bin/sh -es\n", "#!/bin/sh -\n", "#!/bin/sh --\n", "#!/bin/sh -c\n", "#!/bin/zsh -i\n", "#!/bin/bash -l\n",
+                        "#!/usr/bin/python3 -i\n", "#!/usr/bin/python3 other.py\n", "#!/bin/sh e\n"] {
             #expect(HookShellScript.problem(in: Data(refused.utf8)) == HookShellScript.firstLineSentence, "\(refused)")
         }
         #expect(HookShellScript.problem(in: Data([0x23, 0x21, 0x2F, 0xFF])) == "The script is not UTF-8 text.")
         #expect(HookShellScript.problem(in: Data("#!/bin/sh\n".utf8) + Data(repeating: 0x20, count: HookShellScript.maximumSize)) == "The script is larger than 1 MB.")
+    }
+
+    @Test func aScriptWithCharactersTheTrustSheetCannotShowIsRefused() async throws {
+        defer { harness.cleanUp() }
+        // Carriage returns, form feeds, escapes, text direction marks, zero-width characters, and line separators other than the line feed.
+        for hidden in ["\r", "\u{0B}", "\u{0C}", "\u{1B}[2K", "\u{00}", "\u{85}", "\u{202E}", "\u{2066}", "\u{200B}", "\u{FEFF}", "\u{2028}", "\u{2029}"] {
+            let script = Data("#!/bin/sh\necho \"safe\(hidden)\"\n".utf8)
+            #expect(HookShellScript.problem(in: script) == HookShellScript.hiddenCharacterSentence, "\(hidden.unicodeScalars.map { String($0.value, radix: 16) })")
+        }
+        #expect(HookShellScript.problem(in: Data("#!/bin/sh\n\techo \"caf\u{E9}\"\n".utf8)) == nil)
+        // The sheet breaks lines where the interpreter does, at line feeds only.
+        #expect(HookShellScript.lines(of: "one\u{2028}still one\ntwo\r\n") == ["one\u{2028}still one", "two\r", ""])
+        // The runner refuses such a copy too.
+        let tab = harness.tab()
+        harness.host.show(tab)
+        let trusted = Data("#!/bin/sh\nexit 0\n".utf8)
+        let script = Data("#!/bin/sh\necho \"done\" \u{202E}; exit 0\n".utf8)
+        let outcome = await runner().run(invocation(of: try shellHook(trusted), script: script, loading: tab))
+        #expect(outcome.code == "invalidScript" && outcome.failure == HookShellScript.hiddenCharacterSentence)
+        #expect(channel.started.isEmpty)
     }
 
     @Test func aReplacedInterpreterPausesTheHookUntilTheUserTrustsItAgain() async throws {
