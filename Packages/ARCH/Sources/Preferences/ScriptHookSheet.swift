@@ -1,4 +1,4 @@
-// New Script Hook… and Edit… in Settings ▸ AI ▸ Agent Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Agent Hooks): a JavaScript hook's name, situation, places, sites, engines, and tabs, what its script may do with tabs, and the script, which Save checks before the registry records it with its digest. Review opens the sheet on a script that changed outside Arch; saving it lets the hook run again. The user's edits in Arch need no Touch ID.
+// New Script Hook… and Edit… in Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): a JavaScript hook's name, situation, places, sites, engines, and tabs, what its script may do with tabs, and the script, which Save checks before the registry records it with its digest. Review opens the sheet on a script that changed outside Arch; saving it lets the hook run again. The user's edits in Arch need no Touch ID.
 import Agent
 import AI
 import ARCHEngine
@@ -31,6 +31,8 @@ struct ScriptHookDraft: Identifiable {
     var closeReasons: Set<BrowserTabCloseReason> = []
     var personaChangesOnly = false
     var isEverywhere = true
+    /// The stored scope that Where shows as Everywhere because it names the only Persona, which a save keeps, so that the hook does not reach a Persona added later.
+    var scopeShownAsEverywhere: BrowserEventScope?
     var chosenPlaces: Set<BrowserPlace> = []
     var siteChoice = SiteChoice.all
     var siteList = ""
@@ -48,7 +50,6 @@ struct ScriptHookDraft: Identifiable {
     var guided = false
     var generated = false
     var origin: HookOrigin = .user
-    var startsEnabled = true
     var agentRecord: AgentRunRecord = .none
     var seconds = 30
     var rounds = 2
@@ -75,7 +76,6 @@ struct ScriptHookDraft: Identifiable {
     init(editing hook: Hook, script: String, places: [HookPersonaPlaces], reviewing: Bool, isNew: Bool = false) {
         id = hook.id
         stored = isNew ? nil : hook
-        startsEnabled = hook.state == .active
         isReview = reviewing
         self.places = places
         name = hook.name
@@ -109,6 +109,7 @@ struct ScriptHookDraft: Identifiable {
             // With one Persona, Where names no Persona (Persona rule 7), and the Persona's place covers every place, as Everywhere does.
             if places.count == 1, let only = places.first, chosenPlaces.contains(.persona(only.id)) {
                 isEverywhere = true
+                scopeShownAsEverywhere = hook.filter.scope
                 chosenPlaces = []
             }
         }
@@ -138,6 +139,12 @@ struct ScriptHookDraft: Identifiable {
         generated = false
     }
 
+    /// Arch's script runs the agent, so restoring it turns agent runs back on.
+    mutating func restoreGeneratedScript() {
+        generated = true
+        enablesAgent = true
+    }
+
     func makeHook() throws -> (hook: Hook, script: Data) {
         let bytes = Data(scriptText.utf8)
         func invalid(_ reason: String) -> HookRegistryError { .invalidAgentOptions(reason) }
@@ -145,17 +152,19 @@ struct ScriptHookDraft: Identifiable {
         guard isEverywhere || !chosenPlaces.isEmpty else { throw invalid("Choose where the hook runs.") }
         guard kind != .titleChanged || !titleSources.isEmpty else { throw invalid("Choose which title changes start the hook.") }
         guard tabKinds.isEmpty || !tabKinds.isDisjoint(with: Self.offeredTabKinds) else { throw invalid("Choose its tab kinds.") }
-        var hook = stored ?? Hook(id: id, name: name, trigger: trigger, state: startsEnabled ? .active : .paused(.user), origin: origin)
+        var hook = stored ?? Hook(id: id, name: name, trigger: trigger, origin: origin)
         hook.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !hook.name.isEmpty else { throw invalid("Name the hook.") }
         if hook.trigger.kind != kind { hook.timing = HookTiming(for: trigger) }
         hook.trigger = trigger
         hook.filter = filter
         hook.grant.permissions = hook.grant.permissions.intersection([.agent])
-        if readsTabs { hook.grant.permissions.insert(.tabs) }
+        // An outside program's hook never reads other tabs' titles and addresses (`docs/hooks.md`, Hooks from outside programs).
+        if readsTabs, !origin.isOutsideProgram { hook.grant.permissions.insert(.tabs) }
         if renamesTabs { hook.grant.permissions.insert(.tabsRename) }
         if !hook.origin.isOutsideProgram { try configureAgent(in: &hook) }
-        if guided, let model = agentModel {
+        // A hand-written script hook that opens guided can still turn its agent runs off.
+        if guided, enablesAgent, let model = agentModel {
             let tools = (agentRenamesTabs ? ["rename_tab"] : []) + (readsPageText ? ["read_text"] : []) + (readsPageOutline ? ["snapshot"] : [])
             let options = AgentRunOptions(prompt: agentPrompt, tabAccess: readsPageText || readsPageOutline ? .page : .title, model: model, record: agentRecord,
                                           tools: tools, limits: AgentRunLimits(timeout: .seconds(seconds), rounds: rounds, toolCalls: toolCalls))
@@ -175,6 +184,8 @@ struct ScriptHookDraft: Identifiable {
         }
         guard let agentModel else { throw HookRegistryError.invalidAgentOptions("Choose the model for this hook.") }
         var grant = hook.grant.agent ?? AgentRunGrant(tools: [], maximumRecord: .none)
+        // The agent runs' daily count agrees with the hook's, so that the runner does not refuse runs the registry starts.
+        grant.runsPerDay = min(max(hook.timing.runsPerDay, 1), 2_000)
         let previouslyGranted = grant.tools
         if agentRenamesTabs { grant.tools.insert("rename_tab") } else { grant.tools.remove("rename_tab") }
         if readsPageText { grant.tools.insert("read_text") } else { grant.tools.remove("read_text") }
@@ -215,7 +226,7 @@ struct ScriptHookDraft: Identifiable {
 
     var filter: BrowserEventFilter {
         var filter = stored?.filter ?? BrowserEventFilter()
-        filter.scope = isEverywhere ? .everywhere : .places(Self.ordered(chosenPlaces, in: places))
+        filter.scope = isEverywhere ? scopeShownAsEverywhere ?? .everywhere : .places(Self.ordered(chosenPlaces, in: places))
         let patterns = sitePatterns().patterns
         filter.sites = siteChoice == .only ? patterns : []
         filter.exceptSites = siteChoice == .except ? patterns : []
@@ -226,6 +237,26 @@ struct ScriptHookDraft: Identifiable {
         }
         filter.tabKinds = tabKinds
         return filter
+    }
+
+    /// The close reasons When offers: every reason but closes by plugins and hooks, which cannot close tabs yet.
+    static let offeredCloseReasons = BrowserTabCloseReason.allCases.filter { $0 != .plugin && $0 != .hook }
+
+    /// A close reason in words, as `TabCloseReason` describes the closes it stands for.
+    static func label(of reason: BrowserTabCloseReason) -> String {
+        switch reason {
+        case .user: return "You close it"
+        case .page: return "The page closes itself"
+        case .crash: return "Its page\u{2019}s process quits"
+        case .archive: return "Arch archives it"
+        case .download: return "It only opened a download"
+        case .webExtension: return "A web extension closes it"
+        case .plugin: return "A plugin closes it"
+        case .hook: return "A hook closes it"
+        case .agent: return "An agent closes it"
+        case .spaceDeleted: return "Its Persona is deleted"
+        case .sync: return "Sync removes it"
+        }
     }
 
     /// The tab kinds Where offers, which all on stand for an empty set.
@@ -302,19 +333,19 @@ struct ScriptHookSheet: View {
                 }
                 Section {
                     TextField("Name", text: $draft.name)
-                    if draft.stored == nil, case .preset = draft.origin { Toggle("Enable this hook when saved", isOn: $draft.startsEnabled) }
                     if draft.guided { TabNamesWarning(settings: aiSettings, renames: draft.agentRenamesTabs, kind: draft.kind) }
                 }
                 whenSection
                 whereSection
                 if !draft.guided || !draft.generated {
                     Section("Script permissions") {
-                        Toggle("Read Tab Titles and Addresses", isOn: $draft.readsTabs)
+                        if !draft.origin.isOutsideProgram { Toggle("Read Tab Titles and Addresses", isOn: $draft.readsTabs) }
                         Toggle("Rename Tabs", isOn: $draft.renamesTabs)
                     }
                 }
                 if draft.stored?.origin.isOutsideProgram != true { agentSettings }
-                if draft.guided { testSection }
+                // Bytes that another program wrote run only once the user has read and saved them (hook decision 8).
+                if draft.guided && draft.enablesAgent && !draft.isReview { testSection }
                 scriptSection
             }
             .formStyle(.grouped)
@@ -341,13 +372,15 @@ struct ScriptHookSheet: View {
 
     @ViewBuilder private var agentSettings: some View {
         Section("Agent") {
-            if !draft.guided { Toggle("Allow Agent Runs", isOn: $draft.enablesAgent) }
+            if !draft.guided || !draft.generated { Toggle("Allow Agent Runs", isOn: $draft.enablesAgent) }
             if draft.enablesAgent {
                 TextField("Instructions", text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language."), axis: .vertical)
                 Toggle(draft.kind == .tabClosed ? "Read Text of the Tabs Left" : "Read Page Text", isOn: $draft.readsPageText)
                 Toggle(draft.kind == .tabClosed ? "Read Outlines of the Tabs Left" : "Read Page Outline", isOn: $draft.readsPageOutline)
-                if draft.readsPageOutline { Text("Outlines include page labels and links. Form values are hidden.").font(.caption) }
-                if draft.readsPageText || draft.readsPageOutline {
+                if draft.readsPageOutline { Text("Outlines include headings, labels, and links, not the page\u{2019}s text. Form values are hidden.").font(.caption) }
+                if draft.readsPageText {
+                    Text("The model may read page text on the allowed tabs. Sites excluded from AI are skipped.").font(.caption)
+                } else if draft.readsPageOutline {
                     Text("Sites excluded from AI are skipped.").font(.caption)
                 } else {
                     Text("The model receives titles and reduced addresses on the allowed tabs.").font(.caption)
@@ -371,7 +404,7 @@ struct ScriptHookSheet: View {
                     }
                     ForEach(refs, id: \.self) { model in
                         if let provider = aiSettings.providers.first(where: { $0.id == model.provider }) {
-                            let destination = AgentRunRequest.destination(of: provider)
+                            let destination = provider.hookDestination
                             Text("\(aiSettings.title(of: model)) · \(destination)").font(.caption).textSelection(.enabled)
                             if case .commandLine = provider.kind { Text("Each run starts the signed-in command-line tool and can take a few seconds.").font(.caption) }
                         }
@@ -391,12 +424,26 @@ struct ScriptHookSheet: View {
                     Text(recordDetail).font(.caption)
                 }
                 Section("Limits") {
-                    Stepper("Time limit · \(draft.seconds) seconds", value: $draft.seconds, in: 5...600)
-                    Stepper("Model rounds · \(draft.rounds)", value: $draft.rounds, in: 1...20)
-                    Stepper("Tool calls · \(draft.toolCalls)", value: $draft.toolCalls, in: 1...50)
-                    Stepper("Runs per day · \(draft.dailyLimit)", value: $draft.dailyLimit, in: 1...2000)
+                    numberRow("Time limit", value: $draft.seconds, in: 5...600, unit: "seconds")
+                    numberRow("Model rounds", value: $draft.rounds, in: 1...20, unit: nil)
+                    numberRow("Tool calls", value: $draft.toolCalls, in: 1...50, unit: nil)
+                    numberRow("Runs per day", value: $draft.dailyLimit, in: 1...2_000, unit: nil)
                     Stepper("Wait before running · \(draft.delay.formatted()) seconds", value: $draft.delay, in: 0...60, step: 0.5)
                 }
+            }
+        }
+    }
+
+    /// A number the user can type or step, since some ranges are too wide to step through; Save refuses a typed value outside the range.
+    private func numberRow(_ title: String, value: Binding<Int>, in range: ClosedRange<Int>, unit: String?) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 6) {
+                TextField(title, value: value, format: .number)
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 64)
+                if let unit { Text(unit).foregroundStyle(.secondary) }
+                Stepper(title, value: value, in: range).labelsHidden()
             }
         }
     }
@@ -418,7 +465,9 @@ struct ScriptHookSheet: View {
                         Text(draft.scriptText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                         Button("Edit Script") { draft.editGeneratedScript() }
                     }
-                } else { Button("Restore Arch’s Script") { draft.generated = true; showsScript = true } }
+                } else {
+                    Button("Restore Arch’s Script") { draft.restoreGeneratedScript(); showsScript = true }
+                }
             }
             if !draft.guided || !draft.generated {
                 TextEditor(text: $draft.script).font(.system(.body, design: .monospaced)).frame(minHeight: 140)
@@ -488,7 +537,7 @@ struct ScriptHookSheet: View {
                 setToggle("Names from hooks and agents", .suggested, in: $draft.titleSources)
             case .tabClosed:
                 if draft.guided {
-                    ForEach(BrowserTabCloseReason.allCases, id: \.self) { reason in setToggle(reason.rawValue.capitalized, reason, in: $draft.closeReasons) }
+                    ForEach(ScriptHookDraft.offeredCloseReasons, id: \.self) { reason in setToggle(ScriptHookDraft.label(of: reason), reason, in: $draft.closeReasons) }
                     Text("Leave all reasons off to include every close.").font(.caption)
                 } else { Toggle("Only when you close the tab", isOn: Binding(get: { draft.closeReasons == [.user] }, set: { draft.closeReasons = $0 ? [.user] : [] })) }
             case .spaceSwitched:
@@ -601,8 +650,7 @@ struct ScriptHookSheet: View {
     }
 }
 
-
-private extension HookOrigin {
+extension HookOrigin {
     var isOutsideProgram: Bool {
         if case .outsideClient = self { return true }
         return false

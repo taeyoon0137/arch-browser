@@ -965,7 +965,11 @@ import Foundation
         for state in states.values { state.cancelCalls() }
         approvals.end(because: "The user stopped all agents in Arch.")
         for connection in connections.values where connection.sessionID == nil { endpoint?.close(connection.id) }
+        didStopAll?()
     }
+
+    /// Called at the end of Stop All Agents, from any menu, so that the app shell pauses the agent hooks too.
+    public var didStopAll: (() -> Void)?
 
     /// Whether any agent acts now: a session's turn runs or an outside client is connected, for the bottom bar's indicator.
     public var isAnyAgentActing: Bool {

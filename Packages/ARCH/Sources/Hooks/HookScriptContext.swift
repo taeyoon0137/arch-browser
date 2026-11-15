@@ -117,7 +117,8 @@ final class HookScriptContext: PluginAgentContext {
         actions.append(contentsOf: result.actions)
         agentUse = HookAgentUse(model: result.model ?? agentUse?.model, usage: (agentUse?.usage ?? AIUsage(inputTokens: 0, outputTokens: 0)) + result.usage)
         if invocation.isTest { agentUse?.reply = result.reply }
-        if result.status != .completed, failure == nil || result.code == "unknownProvider" {
+        // A run that Stop All Agents or the hook's own end cancelled is no failure of the hook.
+        if result.status != .completed, result.status != .cancelled, failure == nil || result.code == "unknownProvider" {
             failure = .failed(code: result.code ?? result.status.rawValue, message: result.message ?? "The agent run did not finish.")
         }
         return try decoder.decode(PluginValue.self, from: encoder.encode(result))
@@ -152,11 +153,12 @@ final class HookScriptContext: PluginAgentContext {
         return took
     }
 
-    /// The tab without its title and address unless the grant has `tabs`, and for a hook with `agent` also when the address it shows or the document it committed is on a site excluded from AI, since a tab that leaves such a page still shows that page's title until the next one commits.
+    /// The tab with the run's document as its address, which its renames belong to, rather than a navigation's address that WebKit shows before it commits; without its title and address unless the grant has `tabs`, and for a hook with `agent` also when the address it shows or the document it committed is on a site excluded from AI, since a tab that leaves such a page still shows that page's title until the next one commits.
     private func shown(_ tab: PluginTab, document: URL?) -> PluginTab {
         let excluded = usesAgent && [tab.url, document].contains { $0.map { !allowsAI($0) } ?? false }
-        guard !grant.permissions.contains(.tabs) || excluded else { return tab }
         var tab = tab
+        tab.url = document
+        guard !grant.permissions.contains(.tabs) || excluded else { return tab }
         tab.title = nil
         tab.url = nil
         return tab

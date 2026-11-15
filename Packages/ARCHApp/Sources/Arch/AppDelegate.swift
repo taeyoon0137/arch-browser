@@ -151,6 +151,8 @@ import Terminal
                                  javaScript: javaScript, shell: UnavailableHookScriptRunner())
         self.hooks = hooks
         PreferencesWindowController.hooks = hooks
+        agents.didStopAll = { [weak hooks] in hooks?.stopAgentHooks() }
+        hooks.featureDidEnd = { [weak agents] in agents?.runs.deleteKeptRuns(of: $0) }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.becameActiveAt = Date() }
             Task { @MainActor [weak self] in await self?.sync?.refreshIfRequested() }
@@ -572,9 +574,9 @@ import Terminal
     /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
     @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
     @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
+    /// The agents' service pauses the agent hooks too (`AgentService.didStopAll`).
     @objc private func stopAllAgents() {
         agents?.stopAllAgents()
-        hooks?.stopAgentHooks()
     }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func stopLoading() { session.activeWindow?.stopLoading() }

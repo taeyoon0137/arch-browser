@@ -473,7 +473,7 @@ public struct AIRoute: Codable, Sendable {
 }
 ```
 
-A request can also name its route, as agent runs do (`docs/hooks.md`, Model choice and tiers): a model tier, whose models the user assigns in Settings ▸ AI ▸ Model Tiers, or models of its own.
+A request can also name its route, as agent runs do (`docs/hooks.md`, Model choice and tiers): a model tier, whose models the user assigns in Settings ▸ AI ▸ Features, or models of its own.
 
 ```swift
 public enum AIModelTier: String, Codable, Hashable, Sendable, CaseIterable {
@@ -957,8 +957,7 @@ public struct AIPrice: Codable, Sendable {
 ## Settings ▸ AI
 
 - Providers: Add Provider chooses HTTP API or Command-Line Tool. An HTTP provider has a name, format, base URL, key (entered once, then shown only as set, with Replace and Remove), extra headers, and models (Refresh from the provider or add by name). Each model has an input limit, price, and capability overrides. A command-line tool has a name, executable (found in the login shell's PATH or chosen with `NSOpenPanel`), arguments, environment, output format and paths, the Runs Without Its Own Tools checkbox with its explanation, Open Terminal, and Check. Each provider has its limits.
-- Features: one row per registered `stored` feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request. A `perRequest` feature has no row, since its requests name their routes.
-- Model Tiers: a sentence on what a tier does and that the features under Features use the models chosen there, then Fast, Standard, and Deep, each with the Features rows' model menus (a model and up to two fallbacks, starting at None) and a sentence on what the tier is for, which names no feature. Every connected model is listed.
+- Features: one row per registered `stored` feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request. A `perRequest` feature has no row, since its requests name their routes. The page ends with Fast Tier, Standard Tier, and Deep Tier, each with the feature rows' model menus (a model and up to two fallbacks, starting at None) and a sentence on what the tier is for, which names no feature; the first also says that the features above use the models chosen for them. Every connected model is listed.
 - Sites: the exclusion list.
 - Usage: the totals, the monthly spending limit, and the daily limit for automatic features. Totals keep each feature's name, so a `perRequest` feature is listed by name.
 - Activity: the in-memory request list. Show Content appears only for an entry with content.

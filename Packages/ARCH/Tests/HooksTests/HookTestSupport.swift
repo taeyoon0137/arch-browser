@@ -93,6 +93,8 @@ final class FakeScriptRunner: HookScriptRunning {
     enum Behavior {
         case complete([AgentRunAction])
         case fail(String)
+        /// Fails with this code, as the agent runner's refusals do.
+        case failCode(String)
         /// Waits until `release` or a cancel.
         case hold
         /// Reports these ends of AI requests to the scheduler, then completes.
@@ -127,6 +129,8 @@ final class FakeScriptRunner: HookScriptRunning {
             return .completed(actions: actions, agent: nil)
         case .fail(let message):
             return .failed(code: "scriptError", message: message)
+        case .failCode(let code):
+            return .failed(code: code, message: "")
         case .hold:
             return await withCheckedContinuation { held[invocation.run] = $0 }
         case .requests(let ends):

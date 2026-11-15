@@ -725,7 +725,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let log = AgentEventLog(session)
         try session.send("Read the attached tab.")
         try await log.waitForEnd()
-        #expect(log.events.contains("finished:completed"))
+        // The turn names its limit, which the hook runner reports as `roundLimit`.
+        #expect(log.events.contains("finished:turnLimit"))
         let args = try #require(cli.calls().first { $0.contains("--input-format") })
         let i = try #require(args.firstIndex(of: "--max-turns"))
         #expect(args[i + 1] == "2")

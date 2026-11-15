@@ -402,7 +402,7 @@ public final class AIAgentSession {
         switch outcome {
         case .finished(let end):
             if !reply.isEmpty { transcript.append((.assistant, reply)) }
-            continuation.yield(.turnFinished(request.ephemeral && end == .turnLimit ? .completed : end))
+            continuation.yield(.turnFinished(end))
         case .failed(let error) where model != nil:
             continuation.yield(.turnFailed(error))
         case .failed(let error), .refused(let error):

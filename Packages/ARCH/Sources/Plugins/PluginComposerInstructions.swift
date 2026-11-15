@@ -14,8 +14,9 @@ extension PluginComposer {
     - "name": a few words.
     - "version": such as "1.0".
     - "summary": what the plugin does, in one sentence.
-    - "permissions": the permissions the code needs, if any. "tabs" lets the plugin see the title and address of the tab a command runs on, and "clipboard" lets it copy text.
-    - "background": the file that runs as the plugin's background script. A plugin with commands needs one.
+    - "permissions": the permissions the code needs, if any. "tabs" lets the plugin see the titles and addresses of tabs, "tabs.rename" lets it suggest names for tabs, and "clipboard" lets it copy text.
+    - "events": the browser events the plugin hears, if any: "tabOpened", "tabClosed", "pageLoaded", "addressChanged", "titleChanged", "tabSelected", "downloadFinished", and "spaceSwitched".
+    - "background": the file that runs as the plugin's background script. A plugin with commands or events needs one.
     - "contributes": an object with any of these lists.
       - "commands": objects with "id", unique among the commands, and "title", and optionally "symbol", an SF Symbols name such as "doc.on.doc", "keywords", more words that the command palette matches, and "shortcut", such as "ctrl+opt+c". A shortcut joins "ctrl", "opt", "shift", and "cmd", each at most once, with "+" to a key: one printable ASCII character other than "+", or "plus", "space", "up", "down", "left", "right", or "f1" to "f20". It needs "cmd" or "ctrl" unless its key is a function key. Every command shows in the command palette.
       - "menus": objects with "command", the id of a listed command, and "location": "pluginsMenu" for the Plugins menu in the menu bar, "pageContextMenu" for a page's context menu, with "contexts" listing what the click must be on ("page", "link", "image", "selection", "editable"), "tabContextMenu" for a tab's context menu, or "spaceMenu" for a space's menu. "title" is optional and is the command's by default.
@@ -26,13 +27,16 @@ extension PluginComposer {
     The background script runs as a classic script, not a module, in a sandboxed page of its own. It cannot reach the network, other pages, or files, and cannot use eval. It sets its listeners when it runs. It stops after 30 seconds without calls and runs again at the next one, so keep lasting state in arch.storage, not in variables. A listener must finish within 10 seconds.
 
     The script reaches Arch through the global object arch. Every call returns a promise, which rejects with an Error whose message names the failure, such as "permissionDenied".
-    - arch.commands.onRun(id, async (invocation) => { … }) runs the listener when the user runs the command. Set one for every command. The invocation holds "tab", the tab the command runs on, as {id, spaceId, title, url, engine, isPinned, isSelected}, with title and url only under the "tabs" permission, and for a page context menu item "linkUrl", "imageUrl", and "selection", what the user clicked on. Absent values are left out.
+    - arch.commands.onRun(id, async (invocation) => { … }) runs the listener when the user runs the command. Set one for every command. The invocation holds "tab", the tab the command runs on, as {id, spaceId, title, url, engine, kind, isPinned, isSelected}, with title and url only under the "tabs" permission, and for a page context menu item "linkUrl", "imageUrl", and "selection", what the user clicked on. Absent values are left out.
     - arch.storage.get(key), arch.storage.set(key, value), and arch.storage.keys() keep the plugin's own JSON values, up to 5 MB. set(key) without a value removes the key. Keys that start with "arch.setting:" are reserved.
     - arch.secrets.get(key) and arch.secrets.set(key, text) keep text in the Keychain. set(key) without text deletes it. A secret setting's value is the secret under its key.
     - arch.settings.get(key) returns a setting's value, which is its default until the user changes it, and nothing for a secret setting.
     - arch.ui.setBadge(itemId, text) shows the text as the badge of one of the plugin's sidebar items. Without text it removes the badge.
     - arch.ui.copy(text) copies the text to the clipboard. It needs the "clipboard" permission.
-    Nothing else is available: no other members of arch, and no browser APIs for tabs, pages, the network, or notifications.
+    - arch.events.on(kind, async (event) => { … }) runs the listener for each event of a kind that the manifest's "events" lists. An event holds "id", "kind", "date", and for a tab event "tab" as {id, personaId, spaceId, kind, engine, url}, with url only under the "tabs" permission. It never holds a title or page text. A plugin does not hear the events its own calls cause, and hears at most 10 events for one tab and 60 in all within a minute.
+    - arch.tabs.list() and arch.tabs.get(id) give the open tabs of the plugin's Persona as {id, spaceId, title, url, engine, kind, isPinned, isSelected}, with title and url only under the "tabs" permission; get gives null for a tab the plugin does not reach.
+    - arch.tabs.rename(id, name) suggests the first line of name, at most 60 characters, as the tab's name, and without a name removes the suggestion. It needs the "tabs.rename" permission. It resolves false when the tab keeps its name: the user named the tab or turned the suggestion down for its page.
+    Nothing else is available: no other members of arch, and no browser APIs for pages, the network, or notifications.
 
     When the user asks for a change, reply with the whole plugin again, changed.
     """#

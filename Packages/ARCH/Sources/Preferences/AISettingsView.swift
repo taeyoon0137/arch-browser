@@ -16,12 +16,11 @@ struct AISettingsView: View {
     enum Page: String, CaseIterable {
         case providers = "Providers"
         case features = "Features"
-        case modelTiers = "Model Tiers"
         case sites = "Sites"
         case usage = "Usage"
         case activity = "Activity"
         case agents = "Agents"
-        case agentHooks = "Agent Hooks"
+        case agentHooks = "Hooks"
     }
 
     final class Navigation: ObservableObject {
@@ -57,7 +56,6 @@ struct AISettingsView: View {
                 switch navigation.page {
                 case .providers: AIProvidersPage(service: service, settings: settings)
                 case .features: AIFeaturesPage(service: service, settings: settings, hooks: service.hooks, testPromptTask: $testPromptTask)
-                case .modelTiers: AIModelTiersPage(settings: settings)
                 case .sites: AISitesPage(settings: settings)
                 case .usage: AIUsagePage(usage: service.usage, settings: settings)
                 case .activity: AIActivityPage(service: service, settings: settings)
@@ -80,7 +78,7 @@ struct AISettingsView: View {
 
 // MARK: - Features
 
-/// The default route, then one section per registered feature with a stored route, with its switch, its models, what it sends, and its last error, and for a feature whose hooks paused, a way to resume them. The Test Prompt feature's section also holds the prompt. A feature whose requests name their own routes has no models to choose here; Usage lists it by name.
+/// The default route, then one section per registered feature with a stored route, with its switch, its models, what it sends, and its last error, and for a feature whose hooks paused, a way to resume them, then the model tiers. The Test Prompt feature's section also holds the prompt. A feature whose requests name their own routes has no models to choose here; Usage lists it by name.
 private struct AIFeaturesPage: View {
     @ObservedObject var service: AIService
     @ObservedObject var settings: AISettingsStore
@@ -123,6 +121,7 @@ private struct AIFeaturesPage: View {
                 formFootnote("\(feature.summary) \(Self.sentence(for: feature))")
             }
         }
+        AIModelTierSections(settings: settings)
     }
 
     /// An automatic feature's hooks can also stop before a request, as for a budget or a timeout, so its last error comes from the hook center.
@@ -265,22 +264,20 @@ private struct AITestPromptRows: View {
 
 // MARK: - Model tiers
 
-/// One section per tier with the Features rows' model menus and a sentence on what the tier is for. The sentences name no feature: a feature under Features uses the models chosen there, and only a request that names a tier uses one. A tier starts empty and lists every connected model; a request that names the tier drops the models that cannot serve it.
-private struct AIModelTiersPage: View {
+/// The end of the Features page: one section per tier with the feature rows' model menus and a sentence on what the tier is for, which names no feature, since a feature uses the models chosen for it and only a request that names a tier uses one. The first tier's footer says how a tier serves. A tier starts empty and lists every connected model; a request that names the tier drops the models that cannot serve it.
+private struct AIModelTierSections: View {
     @ObservedObject var settings: AISettingsStore
 
     var body: some View {
-        Section {
-            Text("A request that names a tier, such as an agent hook's, uses the tier's first model and its fallbacks; the features under Features use the models chosen there. A tier without a model fails; it never uses another tier or the default model.")
-                .foregroundStyle(.secondary)
-        }
         ForEach(AIModelTier.allCases, id: \.self) { tier in
             Section {
                 AIRoutePickers(settings: settings, feature: .tier(tier), emptyChoice: "None")
             } header: {
-                Text(tier.title)
+                Text("\(tier.title) Tier")
             } footer: {
-                formFootnote(Self.purpose(of: tier))
+                formFootnote(tier == AIModelTier.allCases.first
+                             ? "\(Self.purpose(of: tier)) A request that names a tier, such as an agent hook\u{2019}s, uses its model and fallbacks; the features above use the models chosen for them. A tier without a model fails and never uses another tier or the default model."
+                             : Self.purpose(of: tier))
             }
         }
     }

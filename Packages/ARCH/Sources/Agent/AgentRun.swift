@@ -228,7 +228,7 @@ public struct AgentRunRequest: Sendable {
     public var documentIDs: [UUID: UUID]
     /// A close run's closed tab, from the registry.
     public var closedTab: AgentRunClosedTab?
-    /// For a hook, the providers in `knownProviders`, by `destination(of:)`; a route that resolves to another provider, or to one whose destination changed, is refused (`docs/hooks.md`, Known providers).
+    /// For a hook, the providers in `knownProviders`, by `AIProviderConfiguration.hookDestination`; a route that resolves to another provider, or to one whose destination changed, is refused (`docs/hooks.md`, Known providers).
     public var knownProviders: [AIProviderID: String]?
     public var origin: AgentRunOrigin
     public var promptSource: AgentRunPromptSource
@@ -249,11 +249,6 @@ public struct AgentRunRequest: Sendable {
         self.promptSource = promptSource
         self.feature = feature
         self.grant = grant
-    }
-
-    /// Where the provider's requests go, as `knownProviders` records it: an HTTP provider's base address, whose headers and format cannot send them to another host, or a command-line tool's executable path followed by the SHA-256 of its preset, arguments, and environment, any of which can, such as through a variable that names another server.
-    public static func destination(of provider: AIProviderConfiguration) -> String {
-        provider.hookDestination
     }
 }
 

@@ -17,7 +17,7 @@ import Testing
         host.tabs = [AgentTabInfo(id: tab, spaceID: nil, title: "Title", url: page, isLoading: false, engine: .webKit)]
         host.userTabIDs = [tab]
         return AgentRunRequest(options: AgentRunOptions(prompt: "Name it", model: .tier(.fast), tools: ["rename_tab"], limits: AgentRunLimits(rounds: 1), dryRun: true),
-                               tabs: [tab], allowedTabs: [tab], documents: [tab: page], documentIDs: [tab: host.tabs[0].documentID], knownProviders: [provider.id: AgentRunRequest.destination(of: provider)],
+                               tabs: [tab], allowedTabs: [tab], documents: [tab: page], documentIDs: [tab: host.tabs[0].documentID], knownProviders: [provider.id: provider.hookDestination],
                                origin: .hook(hook, run: UUID()), promptSource: .user, feature: .agentHook(hook), grant: AgentRunGrant(tools: ["rename_tab"]))
     }
 
@@ -84,6 +84,26 @@ import Testing
         let text = answer.parts.compactMap { part -> String? in if case .page(let page) = part { return page.text }; return nil }.joined()
         #expect(answer.isError == reload && text.contains("Place order") == !reload)
         #expect(!text.contains("Alex Kim") && !text.contains("session=secret"))
+    }
+
+    /// A full outline holds the page's text, so a hook granted only `snapshot` gets interactive outlines.
+    @Test func aFullOutlineNeedsThePageTextGrant() async throws {
+        let page = try await FixturePage("form")
+        let req = outlineRequest(page)
+        let client = ScriptedClient { index in
+            index == 0 ? [.event(.toolCall(AIToolCall(id: "full", name: "snapshot", arguments: Data(#"{"tab":"t1","mode":"full"}"#.utf8)))),
+                          .event(.toolCall(AIToolCall(id: "outline", name: "snapshot", arguments: Data(#"{"tab":"t1"}"#.utf8)))), .event(.finished(.toolUse))]
+                : [.event(.finished(.completed))]
+        }
+        _ = await runner(client).run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        let answers = (client.requests.last?.messages.last?.parts ?? []).compactMap { part -> AIToolResult? in
+            if case .toolResult(let result) = part { return result }
+            return nil
+        }
+        try #require(answers.count == 2)
+        let texts = answers.map { $0.parts.compactMap { part -> String? in if case .page(let page) = part { return page.text }; if case .text(let text) = part { return text }; return nil }.joined() }
+        #expect(answers[0].isError && texts[0].contains("may not read"))
+        #expect(!answers[1].isError && texts[1].contains("Place order") && !texts[1].contains("asks the user"))
     }
 
     @Test func pageAccessAndAnExplicitOutlineGrantAreBothRequired() async {
@@ -332,7 +352,7 @@ import Testing
         let preset = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/fixture/codex"))
         let model = AIModelRef(provider: preset.id, model: "chosen")
         var req = request()
-        req.knownProviders = [preset.id: AgentRunRequest.destination(of: preset)]
+        req.knownProviders = [preset.id: preset.hookDestination]
         req.options.record = .activity
         req.options.tools = ["read_text"]
         req.options.tabAccess = .page
@@ -368,6 +388,36 @@ import Testing
         #expect(runner.keptRuns.isEmpty && service.sessions.isEmpty)
     }
 
+    /// A rename request already queued on the main actor when the caller cancels the run finds it ended, before the run's task takes the cancel.
+    @Test func aQueuedRenameAfterTheCallerCancelsTheRunChangesNothing() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        let preset = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/fixture/codex"))
+        let model = AIModelRef(provider: preset.id, model: "chosen")
+        var req = request()
+        req.knownProviders = [preset.id: preset.hookDestination]
+        req.options.dryRun = false
+        let runner = AgentRunner(host: host, client: ScriptedClient { _ in [] }, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
+        var binding: AgentHookCLIRun?
+        runner.startCLI = {
+            binding = $0
+            return try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4)
+        }
+        runner.finishCLI = { service.finishHookCLI($0) }
+        let renames = RenameLog()
+        let task = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, name, _, _ in renames.names.append(name); return true } }
+        try await waitUntil { !harness.runners.isEmpty }
+        try #require(harness.runners.first).emit(.ready(model))
+        let call = try #require(binding)
+        let late = Task { await call.dispatch(AgentToolCall(name: "rename_tab", arguments: ["tab": "t1", "name": "Late"])) }
+        task.cancel()
+        #expect(await late.value.code == "cancelled")
+        #expect(await task.value.status == .cancelled)
+        #expect(renames.names.isEmpty)
+    }
+
     @Test(arguments: [AgentRunRecord.none, .activity])
     func aCLIRunUsesItsOwnBoundConnectionAndLeavesNoTask(level: AgentRunRecord) async throws {
         let harness = try Harness()
@@ -378,7 +428,7 @@ import Testing
         let model = AIModelRef(provider: preset.id, model: "chosen")
         var req = request()
         req.options.record = level
-        req.knownProviders = [preset.id: AgentRunRequest.destination(of: preset)]
+        req.knownProviders = [preset.id: preset.hookDestination]
         let client = ScriptedClient { _ in [] }
         let runner = AgentRunner(host: host, client: client, activity: service.activity, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
         runner.startCLI = { try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4) }
@@ -423,18 +473,31 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: harness.location.path))
     }
 
-    @Test func stopAllCancelsBothRunsAndTheThirdIsRefusedAtCapacity() async throws {
+    /// Hooks that fire together wait for one of the two slots instead of failing, and Stop All Agents ends the waiting runs too.
+    @Test func aThirdRunWaitsForASlotAndStopAllCancelsEveryRun() async throws {
         let req = request()
         let client = ScriptedClient { _ in [.hold] }
         let runner = runner(client)
         let first = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
         let second = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
         try await waitUntil { client.requests.count == 2 }
-        let third = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
-        #expect(third.code == "busy")
-        runner.cancelAll()
+        let third = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
+        let fourth = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false } }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(client.requests.count == 2)
+        first.cancel()
         #expect(await first.value.status == .cancelled)
-        #expect(await second.value.status == .cancelled)
-        try await waitUntil { client.terminations == 2 }
+        try await waitUntil { client.requests.count == 3 }
+        runner.cancelAll()
+        for run in [second, third, fourth] {
+            #expect(await run.value.status == .cancelled)
+        }
+        #expect(client.requests.count == 3)
     }
+}
+
+/// The names a run's renames gave, in order.
+@MainActor
+private final class RenameLog {
+    var names: [String?] = []
 }
