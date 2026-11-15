@@ -390,6 +390,21 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         #expect(next.store.folders.isEmpty)
     }
 
+    /// An entry that the store cannot decode counts as its folder's: a kept folder keeps it with its address, and another folder that no register lists loses both.
+    @Test func entriesThatDoNotDecodeAreKeptAndRemovedLikeOthers() async throws {
+        let keychain = InMemoryLiveFolderKeychain()
+        let kept = UUID(), stale = UUID()
+        let fileURL = try temporaryDirectory().appendingPathComponent(LiveFolderStore.fileName)
+        let entry = #"{"source": {"laterSource": {}}, "failureCount": 0}"#
+        try Data(#"{"version": 1, "folders": {"\#(kept)": \#(entry), "\#(stale)": \#(entry)}}"#.utf8).write(to: fileURL)
+        for folder in [kept, stale] { try await keychain.setAddress(URL(string: "https://tracker.example.org/feed.atom?token=abc123")!, for: folder, folderName: "Later") }
+        let service = LiveFolderService(store: LiveFolderStore(fileURL: fileURL), addresses: keychain, fetchers: StubFetchers(), isLowPowerMode: { false }, keptFolders: [kept])
+        #expect(service.store.folderIDs == [kept, stale])
+        service.register([:])
+        #expect(await waitUntil { keychain.folders == [kept] })
+        #expect(service.store.folderIDs == [kept])
+    }
+
     @Test func aFetchThatQuittingCancelsRecordsNoAttempt() async throws {
         let fetchers = StubFetchers(delay: .seconds(5))
         let service = try service(fetchers)

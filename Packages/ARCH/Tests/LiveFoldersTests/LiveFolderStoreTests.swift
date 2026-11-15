@@ -39,6 +39,39 @@ private let date = Date(timeIntervalSinceReferenceDate: 800_000_000)
         #expect(!FileManager.default.fileExists(atPath: file.path))
     }
 
+    /// An entry that this build cannot decode, as one with a source that a later build adds, stays in the file as it was beside the entries that decode, through other folders' changes, until its folder goes.
+    @Test func keepsAnEntryItCannotDecodeAsTheFileHasIt() throws {
+        let file = try temporaryDirectory().appendingPathComponent(LiveFolderStore.fileName)
+        let known = UUID(), later = UUID()
+        let laterEntry = #"{"source": {"laterSource": {"query": "x"}}, "failureCount": 2, "dismissed": ["a"], "viewedAt": {"a": 800000000.5}, "laterField": [1, true, null, "x"]}"#
+        let store = LiveFolderStore(fileURL: file)
+        store.update(known) { $0.dismiss("b") }
+        store.saveNow()
+        var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        var folders = try #require(json["folders"] as? [String: Any])
+        folders[later.uuidString] = try JSONSerialization.jsonObject(with: Data(laterEntry.utf8))
+        json["folders"] = folders
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+
+        let reloaded = LiveFolderStore(fileURL: file)
+        #expect(!reloaded.replacedUnreadableFile)
+        #expect(Set(reloaded.folders.keys) == [known] && reloaded.folderIDs == [known, later])
+        #expect(reloaded[known].dismissed == ["b"] && reloaded[later] == LiveFolderState())
+        reloaded.update(known) { $0.dismiss("c") }
+        reloaded.saveNow()
+        let written = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        let entry = try #require((written["folders"] as? [String: Any])?[later.uuidString] as? NSDictionary)
+        #expect(entry == (try JSONSerialization.jsonObject(with: Data(laterEntry.utf8)) as? NSDictionary))
+        #expect(LiveFolderStore(fileURL: file)[known].dismissed == ["b", "c"])
+
+        reloaded.removeFolders(notIn: [known])
+        reloaded.saveNow()
+        #expect(LiveFolderStore(fileURL: file).folderIDs == [known])
+        reloaded.update(later) { $0.dismiss("d") }
+        reloaded.remove(later)
+        #expect(reloaded.folderIDs == [known])
+    }
+
     @Test func dropsTheEntriesOfFoldersThatAreNoLiveFolders() throws {
         let store = LiveFolderStore(fileURL: try temporaryDirectory().appendingPathComponent(LiveFolderStore.fileName))
         let kept = UUID(), removed = UUID()

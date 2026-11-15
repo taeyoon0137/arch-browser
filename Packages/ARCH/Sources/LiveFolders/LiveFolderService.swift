@@ -78,8 +78,8 @@ public final class LiveFolderService {
         }
         self.folders = folders
         unregisteredAddresses.subtract(Self.privateFeeds(in: folders))
-        let stale = keepsUnknownFolders ? [] : Set(store.folders.keys).subtracting(folders.keys).subtracting(keptFolders)
-        store.removeFolders(notIn: keepsUnknownFolders ? Set(store.folders.keys).subtracting(gone) : Set(folders.keys).union(keptFolders.subtracting(gone)))
+        let stale = keepsUnknownFolders ? [] : store.folderIDs.subtracting(folders.keys).subtracting(keptFolders)
+        store.removeFolders(notIn: keepsUnknownFolders ? store.folderIDs.subtracting(gone) : Set(folders.keys).union(keptFolders.subtracting(gone)))
         let candidates = gone.union(Self.privateFeeds(in: previous)).union(stale)
         afterEarlierAddressWork { [weak self] in await self?.removeUnusedAddresses(among: candidates) }
         for (folder, configuration) in folders {
