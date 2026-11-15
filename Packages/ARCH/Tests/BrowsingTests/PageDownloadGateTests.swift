@@ -1,4 +1,4 @@
-// When a page's downloads wait for the user: the first goes through, and so does one after a click in the page or one that an address Arch loads for the user starts; the others ask once, and the answer decides them all and the page's later ones. An Allow ends with the document, and the gate starts over at a document the user asked for or one on another site, but not at one the page loads on its own on its site.
+// When a page's downloads wait for the user: the first goes through, and so does one after a click in the page or one that an address Arch loads for the user starts; the others ask once, and the answer decides them all and the page's later ones. An Allow ends with the document, and the gate starts over at a document the user asked for or one on another site, but not at one the page loads on its own on its site. A tab that a plugin opened has no first download on any site until the user clicks in it or loads an address there.
 import Testing
 @testable import Browsing
 
@@ -122,5 +122,31 @@ import Testing
         gate.userDidClick()
         #expect(gate.admit { _ in } == .allow)
         #expect(gate.admit { _ in } == .ask)
+    }
+
+    /// A tab that a plugin opened asks before each download of its pages, its first included, on every site it moves to on its own, until the user clicks in it or loads an address there.
+    @Test func aTabThatAPluginOpenedHasNoFirstDownloadUntilTheUserActs() {
+        var gate = PageDownloadGate()
+        gate.pluginDidOpen()
+        #expect(gate.isOpenedByPlugin)
+        gate.documentDidCommit(site: "files.example")
+        #expect(gate.admit { _ in } == .ask)
+        #expect(gate.answer(true).count == 1)
+        #expect(gate.admit { _ in } == .allow)
+        gate.documentDidCommit(site: "other.example")
+        #expect(gate.admit { _ in } == .ask)
+        #expect(gate.answer(false).count == 1)
+        gate.userDidClick()
+        #expect(!gate.isOpenedByPlugin)
+        gate.documentDidCommit(site: "other.example")
+        #expect(gate.admit { _ in } == .allow)
+        #expect(gate.admit { _ in } == .ask)
+
+        var loaded = PageDownloadGate()
+        loaded.pluginDidOpen()
+        loaded.userDidNavigate()
+        #expect(!loaded.isOpenedByPlugin)
+        loaded.documentDidCommit(site: "files.example")
+        #expect(loaded.admit { _ in } == .allow)
     }
 }

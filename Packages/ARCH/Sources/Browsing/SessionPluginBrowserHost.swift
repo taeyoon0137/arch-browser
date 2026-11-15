@@ -29,7 +29,58 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
 
     /// The page of an open tab, a favorite's among them; the manager has checked that the tab is its Persona's.
     public func webContents(forTab id: UUID) -> (any EngineWebContents)? {
+        pluginTab(id)?.webContents
+    }
+
+    /// The tab that a command from the window that last became main gets (`BrowserWindowModel.selectedPluginTab(of:)`).
+    public func selectedTab(in persona: PersonaID) -> UUID? {
+        session?.activeWindow?.selectedPluginTab(of: persona)?.id
+    }
+
+    /// The tab goes where a new tab that the user opens in the space goes, and its `tabOpened`, `tabSelected`, the `spaceSwitched` that the selection brings, and its first `addressChanged` and `pageLoaded` carry the cause, which the tab keeps for its first load. Its downloads ask until the user clicks in its page or loads an address in it, and an address of a file downloads nothing (`PageDownloadGate.pluginDidOpen()`).
+    public func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID {
+        guard let session, session.personas.contains(where: { $0.id == persona }) else { throw PluginError.closed }
+        let space: Space
+        if let id = options.spaceID {
+            guard let named = session.spaces.first(where: { $0.id == id }), named.resolvedPersonaID == persona else { throw PluginError.notGranted(id) }
+            space = named
+        } else {
+            space = session.preferredSpace(in: persona)
+        }
+        return session.events.withCause(cause) {
+            let tab = session.openTab(url: url, in: space.id, select: false, engine: options.engine)
+            tab.pageDownloads.pluginDidOpen()
+            if options.select { select(tab, in: session) }
+            return tab.id
+        }
+    }
+
+    /// The tab closes as a web extension's `tabs.remove` closes it, without asking its page (`BrowserSession.closeTab(_:reason:)`), and its `tabClosed` and the `tabSelected` of each window that moves to another tab carry the cause. ⌘Z reopens only the tabs the user just closed, newest first, so a close that puts its record ahead of theirs ends that, as a page's own close does; Reopen Last Closed Tab and the Library still reopen it.
+    public func closeTab(_ id: UUID, cause: BrowserEventCause) {
+        guard let session, let tab = pluginTab(id) else { return }
+        let remembers = TabCloseAction.of(tab, reason: .plugin) == .close(remember: true)
+        let closed = session.events.withCause(cause) { session.closeTab(tab, reason: .plugin) }
+        if closed, remembers { session.forgetUndoableCloses() }
+    }
+
+    /// The `tabSelected` and the `spaceSwitched` that the selection brings carry the cause.
+    public func selectTab(_ id: UUID, cause: BrowserEventCause) {
+        guard let session, let tab = pluginTab(id) else { return }
+        session.events.withCause(cause) { select(tab, in: session) }
+    }
+
+    /// Selects the tab in a window of its Persona only, so that a window of another Persona keeps its Persona / Space, which selecting a favorite's tab of another Persona would change: the window of the Persona that shows it, else the front main window on its space, else the front main window of its Persona, which then shows the tab's space, or for a favorite's tab stays on its own. None selects it without such a window. A window that has the tab selected already stays as it is, so that the internal page, palette, or find bar that the user has open there stays.
+    private func select(_ tab: Tab, in session: BrowserSession) {
+        let window = session.windows.first { $0.personaID == tab.personaID && $0.shows(tab) }
+            ?? session.windows.first { $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
+            ?? session.windows.first { $0.kind == .main && $0.personaID == tab.personaID }
+        guard let window, window.selectedTabID != tab.id else { return }
+        window.selectTab(tab.id)
+    }
+
+    /// An open tab other than an agent tab, a favorite's among them.
+    private func pluginTab(_ id: UUID) -> Tab? {
         guard let tab = session?.allTabs.first(where: { $0.id == id }), BrowserEventSource.kind(of: tab) != .agent else { return nil }
-        return tab.webContents
+        return tab
     }
 }

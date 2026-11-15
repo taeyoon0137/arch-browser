@@ -17,6 +17,8 @@ public enum TabCloseReason: String {
     case download
     /// A web extension closed it with `tabs.remove`.
     case webExtension
+    /// A plugin closed it with `PluginContext.closeTab(_:)`.
+    case plugin
     /// Delete Persona closed it with the rest of its Persona.
     case persona
     /// A sidebar sync deletion or a first-sync match from another Mac removed it.
@@ -30,6 +32,7 @@ public enum TabCloseReason: String {
         case .archive: return "Archive"
         case .download: return "Download"
         case .webExtension: return "Extension"
+        case .plugin: return "Plugin"
         case .persona: return "Persona"
         case .sync: return "Sync"
         }
@@ -43,6 +46,7 @@ public enum TabCloseReason: String {
         case .archive: return "Archived after the archive delay"
         case .download: return "Closed because it only pointed at a file"
         case .webExtension: return "Closed by a web extension"
+        case .plugin: return "Closed by a plugin"
         case .persona: return "Closed because its Persona was deleted"
         case .sync: return "Removed by sidebar sync"
         }

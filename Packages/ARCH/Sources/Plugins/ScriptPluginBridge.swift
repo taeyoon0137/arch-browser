@@ -1,5 +1,6 @@
 // The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says. A panel's document gets the same `arch` without the listeners, since the app hands commands, page script values, and events to the background script only, and without page calls, which only the background script makes for now.
 import AI
+import ARCHEngine
 import WebKit
 
 @MainActor
@@ -102,6 +103,10 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           tabs: Object.freeze({
             list: () => call("tabs.list", []),
             get: (id) => call("tabs.get", [id]),
+            selected: () => call("tabs.selected", []),
+            open: (url, options) => call("tabs.open", [url, ...given(options)]),
+            close: (id) => call("tabs.close", [id]),
+            select: (id) => call("tabs.select", [id]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
           storage: Object.freeze({
@@ -256,6 +261,17 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         return try context.renameTab(id, to: name)
     }
 
+    /// Closes or selects the tab for a call of the document: a panel's call belongs to no hook step of the plugin.
+    private func manageTab(_ id: PluginTab.ID, closing: Bool) throws {
+        if role == .panel, let context = context as? any PluginPanelContext {
+            if closing { try context.panelCloseTab(id) } else { try context.panelSelectTab(id) }
+        } else if closing {
+            try context.closeTab(id)
+        } else {
+            try context.selectTab(id)
+        }
+    }
+
     /// Starts reading the reply of an `arch.ai.stream` call and returns the stream's number, with which the script asks for its text.
     private func startStream(_ request: AIRequest, with client: any AIClient) -> PluginValue {
         let number = nextRequestNumber
@@ -408,6 +424,14 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "tabs.get":
             // A tab the script does not reach is null, as is text that names no tab.
             return try UUID(uuidString: try call.text(0)).flatMap { try context.tab($0) }?.scriptValue ?? .null
+        case "tabs.selected":
+            return try context.selectedTab()?.scriptValue ?? .null
+        case "tabs.open":
+            guard call.args.count <= 2, let url = URL(string: try call.text(0)), url.scheme != nil else { throw BridgeFailure.invalidCall }
+            return .string(try context.openTab(url, try Self.openTabOptions(call.value(1))).uuidString)
+        case "tabs.close", "tabs.select":
+            guard call.args.count == 1, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
+            try manageTab(id, closing: call.call == "tabs.close")
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try renameTab(id, to: try call.optionalText(1)))
@@ -418,6 +442,28 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             throw BridgeFailure.invalidCall
         }
         return nil
+    }
+
+    /// The options of `arch.tabs.open(url, options)`: `{spaceId, select, engine}`, each optional, with the engine named as tab objects name it, `webKit` or `chromium`. A missing or null value takes the default.
+    private static func openTabOptions(_ value: PluginValue?) throws -> PluginOpenTabOptions {
+        guard let value, value != .null else { return PluginOpenTabOptions() }
+        guard case var .object(fields) = value else { throw BridgeFailure.invalidCall }
+        var options = PluginOpenTabOptions()
+        if let space = fields.removeValue(forKey: "spaceId"), space != .null {
+            guard case let .string(text) = space, let id = UUID(uuidString: text) else { throw BridgeFailure.invalidCall }
+            options.spaceID = id
+        }
+        if let select = fields.removeValue(forKey: "select"), select != .null {
+            guard case let .bool(flag) = select else { throw BridgeFailure.invalidCall }
+            options.select = flag
+        }
+        if let engine = fields.removeValue(forKey: "engine"), engine != .null {
+            guard case let .string(name) = engine, let kind = EngineKind(rawValue: name) else { throw BridgeFailure.invalidCall }
+            options.engine = kind
+        }
+        // A key the bridge does not read would go without effect.
+        guard fields.isEmpty else { throw BridgeFailure.invalidCall }
+        return options
     }
 
     /// A secret call's result, or nil for none.
@@ -520,6 +566,8 @@ private extension PluginError {
         case .invalidPageScript: return "invalidPageScript"
         case .pageScriptFailed: return "pageScriptFailed"
         case .pageRunUnavailable: return "pageRunUnavailable"
+        case .invalidAddress: return "invalidAddress"
+        case .tooManyTabs: return "tooManyTabs"
         }
     }
 }

@@ -90,10 +90,10 @@ import Testing
     @Test func closesPostEachReasonWithTheTabsLastAddress() {
         let (tab, _) = makeTab("https://example.org/last", space: space, pinned: true)
         source.follow(tabs: [tab], postingNewTabs: false)
-        let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .persona, .sync]
+        let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .plugin, .persona, .sync]
         for reason in reasons { source.tabWillClose(tab, reason: BrowserTabCloseReason(reason)) }
         let ref = BrowserTabRef(id: tab.id, personaID: persona, spaceID: space, kind: .pinned, engine: .chromium, url: URL(string: "https://example.org/last"), documentID: tab.documentID)
-        #expect(recorder.payloads == [.user, .page, .crash, .archive, .download, .webExtension, .spaceDeleted, .sync].map { .tabClosed(tab: ref, reason: $0) })
+        #expect(recorder.payloads == [.user, .page, .crash, .archive, .download, .webExtension, .plugin, .spaceDeleted, .sync].map { .tabClosed(tab: ref, reason: $0) })
     }
 
     @Test func loadsMarkARestoredTabsFirstLoadAndANewTabsFirstWebLoad() {

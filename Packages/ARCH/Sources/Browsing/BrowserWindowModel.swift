@@ -746,8 +746,8 @@ public enum BrowserWindowKind {
         Task { await session.plugins(in: space.resolvedPersonaID).run(command, invocation) }
     }
 
-    /// The selected tab, for the plugins of `personaID`, before the manager applies a plugin's grant. A plugin sees only its Persona's tabs, so it gets no tab of another Persona, such as a favorite's, and none while an internal page or the preview panel covers the tab's page.
-    private func selectedPluginTab(of personaID: Persona.ID) -> PluginTab? {
+    /// The selected tab, for the plugins of `personaID`, before the manager applies a plugin's grant: for their commands, and for their `selectedTab()` from the window that last became main. A plugin sees only its Persona's tabs, so it gets no tab of another Persona, such as a favorite's, and none while an internal page or the preview panel covers the tab's page.
+    func selectedPluginTab(of personaID: Persona.ID) -> PluginTab? {
         guard !isSelectedPageCovered, let tab = selectedTab, tab.personaID == personaID else { return nil }
         return session.pluginTab(tab)
     }

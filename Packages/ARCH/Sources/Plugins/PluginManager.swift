@@ -168,6 +168,8 @@ public final class PluginManager: ObservableObject {
     private var events: BrowserEventSubscription?
     /// The events each plugin received in the last minute, which loop protection's rate caps (`docs/hooks.md`, Plugins).
     private var eventLimiter = BrowserEventRateLimiter()
+    /// When each plugin opened the tabs it opened in the last minute, which `tabOpenLimit` caps.
+    private var tabOpenings: [PluginID: [Date]] = [:]
     /// The AI interface that the plugins with `ai` send their requests through, whose hook scheduler runs their hooks; without one, they get no AI and their events arrive as for other plugins.
     private let ai: AIService?
     /// The features this manager registered in `ai`, those of its enabled plugins with `ai`, by identifier.
@@ -1460,7 +1462,44 @@ public final class PluginManager: ObservableObject {
 
     /// Renames a tab of the Persona for `document`, or for the document it shows now when that is nil, with the plugin as the cause of the change.
     fileprivate func renameTab(_ id: UUID, to name: String?, showing document: URL?, by plugin: PluginID) -> Bool {
-        browserHost?.renameTab(id, to: name, showing: document, cause: BrowserEventCause(origin: .plugin(id: plugin.rawValue)), applying: true) ?? false
+        browserHost?.renameTab(id, to: name, showing: document, cause: Self.cause(plugin), applying: true) ?? false
+    }
+
+    /// The selected tab of the window that last became main, before the grant applies, while it is one of the Persona's tabs that `personaTabs()` lists.
+    fileprivate func selectedTab() -> PluginTab? {
+        guard let id = browserHost?.selectedTab(in: persona) else { return nil }
+        return personaTabs().first { $0.id == id }
+    }
+
+    /// A plugin opens at most this many tabs within a minute. Each new tab is an event subject of its own, so the event rate's cap for one subject never stops plugins that open a tab for each other's `tabOpened`, and each tab costs a web content process.
+    static let tabOpenLimit = 10
+
+    /// Opens a tab of the Persona with the plugin as the cause of its events, unless the plugin has opened `tabOpenLimit` tabs within the last minute, which throws `PluginError.tooManyTabs`. Throws as the host does, and `PluginError.closed` without the host.
+    fileprivate func openTab(_ url: URL, _ options: PluginOpenTabOptions, by plugin: PluginID) throws -> UUID {
+        guard let browserHost else { throw PluginError.closed }
+        let date = Date()
+        let recent = (tabOpenings[plugin] ?? []).filter { date.timeIntervalSince($0) < BrowserEventRateLimiter.window }
+        tabOpenings[plugin] = recent.isEmpty ? nil : recent
+        guard recent.count < Self.tabOpenLimit else { throw PluginError.tooManyTabs }
+        let id = try browserHost.openTab(url, options, in: persona, cause: Self.cause(plugin))
+        tabOpenings[plugin] = recent + [date]
+        return id
+    }
+
+    /// Closes or selects one of the Persona's tabs that `personaTabs()` lists, with the plugin as the cause of its events. Throws `PluginError.notGranted` for any other tab.
+    fileprivate func closeTab(_ id: UUID, by plugin: PluginID) throws {
+        guard personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        browserHost?.closeTab(id, cause: Self.cause(plugin))
+    }
+
+    fileprivate func selectTab(_ id: UUID, by plugin: PluginID) throws {
+        guard personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        browserHost?.selectTab(id, cause: Self.cause(plugin))
+    }
+
+    /// The cause of a change that the plugin's call makes, by which the plugin hears of none of the events it posts.
+    private static func cause(_ plugin: PluginID) -> BrowserEventCause {
+        BrowserEventCause(origin: .plugin(id: plugin.rawValue))
     }
 
     /// `<plugin id>/storage.json` in the Persona's folder.
@@ -1747,6 +1786,48 @@ final class ScopedPluginContext: PluginPanelContext {
         try tabs().first { $0.id == id }
     }
 
+    func selectedTab() throws -> PluginTab? {
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let manager, let tab = manager.selectedTab() else { return nil }
+        return manager.shown(tab, to: grant, of: pluginID)
+    }
+
+    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, and selecting do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes and selects its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.manageTabs)
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host()?.isEmpty == false else {
+            throw PluginError.invalidAddress(url.absoluteString)
+        }
+        guard let manager else { throw PluginError.closed }
+        return try manager.openTab(url, options, by: pluginID)
+    }
+
+    func closeTab(_ id: PluginTab.ID) throws {
+        try manageTab(id, inStep: true) { try $0.closeTab(id, by: pluginID) }
+    }
+
+    func panelCloseTab(_ id: PluginTab.ID) throws {
+        try manageTab(id, inStep: false) { try $0.closeTab(id, by: pluginID) }
+    }
+
+    func selectTab(_ id: PluginTab.ID) throws {
+        try manageTab(id, inStep: true) { try $0.selectTab(id, by: pluginID) }
+    }
+
+    func panelSelectTab(_ id: PluginTab.ID) throws {
+        try manageTab(id, inStep: false) { try $0.selectTab(id, by: pluginID) }
+    }
+
+    /// A close or a selection of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
+    private func manageTab(_ id: PluginTab.ID, inStep: Bool, _ change: (PluginManager) throws -> Void) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.manageTabs)
+        guard let manager else { throw PluginError.notGranted(id) }
+        if inStep, let step = hookStep, step.tab == id, step.isStopped { throw PluginError.stopped }
+        try change(manager)
+    }
+
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
         try renameTab(id, to: name, inStep: true)
     }
@@ -1834,7 +1915,10 @@ final class ScopedPluginContext: PluginPanelContext {
         return aiRequests
     }
 
+    /// `tabs.manage` includes `tabs.rename`.
     private func require(_ permission: PluginPermission) throws {
-        guard grant.permissions.contains(permission) else { throw PluginError.permissionDenied(permission) }
+        guard grant.permissions.contains(permission) || (permission == .renameTabs && grant.permissions.contains(.manageTabs)) else {
+            throw PluginError.permissionDenied(permission)
+        }
     }
 }

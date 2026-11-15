@@ -5,7 +5,7 @@ import Foundation
 import Testing
 @testable import Plugins
 
-/// The tabs of each Persona as the session would give them, and the renames it was asked for.
+/// The tabs of each Persona as the session would give them, and the renames, opens, closes, and selections it was asked for.
 @MainActor
 private final class FakeTabsHost: PluginBrowserHost {
     struct Rename: Equatable {
@@ -15,10 +15,30 @@ private final class FakeTabsHost: PluginBrowserHost {
         var cause: BrowserEventCause
     }
 
+    /// An open, close, or selection, with the tab it opened or acted on.
+    struct Change: Equatable {
+        enum Kind: Equatable {
+            case opened(URL, PluginOpenTabOptions)
+            case closed
+            case selected
+        }
+
+        var kind: Kind
+        var tab: UUID
+        var cause: BrowserEventCause
+    }
+
     var tabs: [PersonaID: [PluginTab]] = [:]
+    /// The spaces of each Persona, in which tabs open.
+    var spaces: [PersonaID: [UUID]] = [:]
+    /// The selected tab of the window that last became main, for each Persona.
+    var selected: [PersonaID: UUID] = [:]
     private(set) var renames: [Rename] = []
+    private(set) var changes: [Change] = []
     /// Called after each rename, as the session posts the rename's title change.
     var onRename: ((Rename) -> Void)?
+    /// Called after each open, close, and selection, as the session posts its event.
+    var onChange: ((Change) -> Void)?
 
     func tabs(in persona: PersonaID) -> [PluginTab] {
         tabs[persona] ?? []
@@ -32,6 +52,51 @@ private final class FakeTabsHost: PluginBrowserHost {
     }
 
     func webContents(forTab id: UUID) -> (any EngineWebContents)? { nil }
+
+    func selectedTab(in persona: PersonaID) -> UUID? {
+        selected[persona]
+    }
+
+    /// The tab joins the Persona's tabs in the space the options name, or the Persona's first. A Persona without spaces is gone.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID {
+        guard let spaces = spaces[persona], let first = spaces.first else { throw PluginError.closed }
+        let space = options.spaceID ?? first
+        guard spaces.contains(space) else { throw PluginError.notGranted(space) }
+        let tab = PluginTab(id: UUID(), spaceID: space, title: "", url: url, engine: options.engine ?? .webKit, isPinned: false, isSelected: options.select)
+        tabs[persona, default: []].append(tab)
+        record(Change(kind: .opened(url, options), tab: tab.id, cause: cause))
+        return tab.id
+    }
+
+    func closeTab(_ id: UUID, cause: BrowserEventCause) {
+        for persona in tabs.keys { tabs[persona]?.removeAll { $0.id == id } }
+        record(Change(kind: .closed, tab: id, cause: cause))
+    }
+
+    func selectTab(_ id: UUID, cause: BrowserEventCause) {
+        record(Change(kind: .selected, tab: id, cause: cause))
+    }
+
+    private func record(_ change: Change) {
+        changes.append(change)
+        onChange?(change)
+    }
+}
+
+/// Opens, closes, and selects tabs, and so renames them, with nothing to run; the sites cover example.org.
+@MainActor
+private final class ManagingPlugin: BuiltInPlugin {
+    static var manifest: PluginManifest {
+        PluginManifest(id: PluginID(rawValue: "org.example.managing")!, name: "Managing", version: "1", summary: "", permissions: [.manageTabs],
+                       sites: [try! MatchPattern("https://example.org/*")], contributions: PluginContributions())
+    }
+
+    static var isOnByDefault: Bool { true }
+
+    init() {}
+
+    func activate(in context: any PluginContext) async throws {}
+    func run(_ command: String, _ invocation: PluginInvocation) async throws {}
 }
 
 /// Renames tabs on example.org, with nothing to run.
@@ -272,6 +337,161 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(throws: PluginError.permissionDenied(.renameTabs)) { _ = try manager.makeContext(for: withoutRename).renameTab(other.id, to: "Name") }
         context.end()
         #expect(throws: PluginError.stopped) { _ = try context.tabs() }
+    }
+
+    /// `tabs.manage` opens, closes, and selects the Persona's tabs through the host with the plugin as the cause, and includes `tabs.rename`; the selected tab needs no permission and shows only what the grant covers.
+    @Test func tabManagementGoesThroughTheBrowserHostUnderTheGrant() async throws {
+        let manager = manager(builtIns: [ManagingPlugin.self])
+        let installed = try #require(manager.plugins.first)
+        let space = UUID()
+        let covered = PluginTab(id: UUID(), spaceID: space, title: "Covered", url: URL(string: "https://example.org/a"), engine: .webKit, isPinned: false, isSelected: true)
+        let other = PluginTab(id: UUID(), spaceID: space, title: "Other", url: URL(string: "https://other.example/"), engine: .chromium, isPinned: true, isSelected: false, kind: .pinned)
+        host.tabs[persona] = [covered, other]
+        host.spaces[persona] = [space]
+        let context = manager.makeContext(for: installed)
+        let cause = BrowserEventCause(origin: .plugin(id: "org.example.managing"))
+
+        // The selected tab, as the grant shows it, and none outside the Persona's tabs, as for an agent tab or another Persona's.
+        #expect(try context.selectedTab() == nil)
+        host.selected[persona] = covered.id
+        #expect(try context.selectedTab()?.title == "Covered")
+        host.selected[persona] = other.id
+        let selected = try #require(try context.selectedTab())
+        #expect(selected.id == other.id && selected.title == nil && selected.url == nil && selected.isPinned)
+        host.selected[persona] = UUID()
+        #expect(try context.selectedTab() == nil)
+
+        let address = URL(string: "https://example.org/new")!
+        let opened = try context.openTab(address, PluginOpenTabOptions(select: false, engine: .chromium))
+        #expect(try context.tab(opened)?.engine == .chromium)
+        try context.selectTab(other.id)
+        try context.closeTab(covered.id)
+        #expect(host.changes == [
+            FakeTabsHost.Change(kind: .opened(address, PluginOpenTabOptions(select: false, engine: .chromium)), tab: opened, cause: cause),
+            FakeTabsHost.Change(kind: .selected, tab: other.id, cause: cause),
+            FakeTabsHost.Change(kind: .closed, tab: covered.id, cause: cause),
+        ])
+        #expect(try context.renameTab(other.id, to: "Name"))
+
+        // Only web pages open, in the Persona's spaces, and only the Persona's tabs close or take the selection.
+        for text in ["file:///etc/hosts", "about:blank", "javascript:alert(1)", "https:///path"] {
+            #expect(throws: PluginError.invalidAddress(text)) { _ = try context.openTab(URL(string: text)!, PluginOpenTabOptions()) }
+        }
+        let foreign = UUID()
+        #expect(throws: PluginError.notGranted(foreign)) { _ = try context.openTab(address, PluginOpenTabOptions(spaceID: foreign)) }
+        #expect(throws: PluginError.notGranted(covered.id)) { try context.closeTab(covered.id) }
+        #expect(throws: PluginError.notGranted(foreign)) { try context.selectTab(foreign) }
+        host.spaces[persona] = nil
+        #expect(throws: PluginError.closed) { _ = try context.openTab(address, PluginOpenTabOptions()) }
+        #expect(throws: PluginError.closed) { _ = try context.openTab(address, PluginOpenTabOptions(spaceID: space)) }
+        #expect(host.changes.count == 3)
+
+        // Without `tabs.manage`, nothing changes, while the selected tab still shows.
+        var withoutManage = installed
+        withoutManage.grant.permissions = []
+        let limited = manager.makeContext(for: withoutManage)
+        #expect(throws: PluginError.permissionDenied(.manageTabs)) { _ = try limited.openTab(address, PluginOpenTabOptions()) }
+        #expect(throws: PluginError.permissionDenied(.manageTabs)) { try limited.closeTab(other.id) }
+        #expect(throws: PluginError.permissionDenied(.manageTabs)) { try limited.selectTab(other.id) }
+        #expect(throws: PluginError.permissionDenied(.renameTabs)) { _ = try limited.renameTab(other.id, to: "Name") }
+        host.selected[persona] = other.id
+        #expect(try limited.selectedTab()?.id == other.id)
+        #expect(PluginGrant(requestedBy: installed.manifest).summaries.first == "Open any website in your tabs, signed in as you, and close, select, and suggest names for your tabs")
+
+        context.end()
+        #expect(throws: PluginError.stopped) { _ = try context.selectedTab() }
+        #expect(throws: PluginError.stopped) { _ = try context.openTab(address, PluginOpenTabOptions()) }
+        #expect(throws: PluginError.stopped) { try context.closeTab(other.id) }
+        #expect(throws: PluginError.stopped) { try context.selectTab(other.id) }
+        #expect(host.changes.count == 3)
+    }
+
+    /// A plugin opens at most 10 tabs within a minute, so that plugins that open a tab for each other's `tabOpened` stop, each tab being an event subject of its own; an open that the host refuses does not count, and another plugin's opens count for it alone.
+    @Test func aPluginOpensAtMostTenTabsWithinAMinute() async throws {
+        let manager = manager(builtIns: [ManagingPlugin.self])
+        let installed = try #require(manager.plugins.first)
+        let space = UUID()
+        host.spaces[persona] = [space]
+        let context = manager.makeContext(for: installed)
+        let address = URL(string: "https://example.org/new")!
+        #expect(throws: PluginError.notGranted(persona)) { _ = try context.openTab(address, PluginOpenTabOptions(spaceID: persona)) }
+        for _ in 0..<PluginManager.tabOpenLimit { _ = try context.openTab(address, PluginOpenTabOptions(select: false)) }
+        #expect(throws: PluginError.tooManyTabs) { _ = try context.openTab(address, PluginOpenTabOptions(select: false)) }
+        #expect(host.changes.count == PluginManager.tabOpenLimit)
+        // A context that the plugin's next instance gets counts the same opens.
+        #expect(throws: PluginError.tooManyTabs) { _ = try manager.makeContext(for: installed).openTab(address, PluginOpenTabOptions()) }
+        var other = installed
+        other.manifest.id = PluginID(rawValue: "org.example.other")!
+        _ = try manager.makeContext(for: other).openTab(address, PluginOpenTabOptions())
+        #expect(host.changes.count == PluginManager.tabOpenLimit + 1)
+    }
+
+    /// A script plugin reaches the tab members through `arch.tabs`, and the events of its own opens and closes never reach its listeners, while another tab's do.
+    @Test func aScriptPluginManagesTabsThroughArchTabsWithoutHearingItsOwnChanges() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        let space = UUID()
+        let shown = PluginTab(id: UUID(), spaceID: space, title: "Shown", url: URL(string: "https://example.org/a"), engine: .webKit, isPinned: false, isSelected: true)
+        host.tabs[persona] = [shown]
+        host.spaces[persona] = [space]
+        host.selected[persona] = shown.id
+        host.onChange = { [bus, persona] change in
+            let ref = BrowserTabRef(id: change.tab, personaID: persona, spaceID: space, kind: .open, engine: .webKit, url: nil)
+            switch change.kind {
+            case .opened: bus.post(.tabOpened(tab: ref, openerTabID: nil), cause: change.cause)
+            case .closed: bus.post(.tabClosed(tab: ref, reason: .plugin), cause: change.cause)
+            case .selected: bus.post(.tabSelected(tab: ref, windowID: UUID()), cause: change.cause)
+            }
+        }
+        let background = """
+        arch.events.on("tabOpened", async (event) => {
+          await arch.storage.set("heard", [...((await arch.storage.get("heard")) ?? []), event.tab.id]);
+        });
+        arch.commands.onRun("go", async () => {
+          const fail = async (call) => { try { await call(); return "resolved"; } catch (error) { return error.message; } };
+          const selected = await arch.tabs.selected();
+          const opened = await arch.tabs.open("https://example.org/new", { select: false, engine: "chromium", spaceId: null });
+          await arch.tabs.select(opened);
+          await arch.tabs.close(opened);
+          await arch.storage.set("results", {
+            selected: selected.id, title: selected.title ?? null, opened,
+            fileAddress: await fail(() => arch.tabs.open("file:///etc/hosts")),
+            relativeAddress: await fail(() => arch.tabs.open("example.org")),
+            unknownOption: await fail(() => arch.tabs.open("https://example.org/", { window: 1 })),
+            unknownEngine: await fail(() => arch.tabs.open("https://example.org/", { engine: "other" })),
+            foreignSpace: await fail(() => arch.tabs.open("https://example.org/", { spaceId: "00000000-0000-0000-0000-000000000000" })),
+            unknownTab: await fail(() => arch.tabs.close("00000000-0000-0000-0000-000000000000")),
+            notATab: await fail(() => arch.tabs.select("tab")),
+          });
+        });
+        """
+        let package = try await manager.stage(try writePackage([
+            "plugin.json": manifest + #", "permissions": ["tabs.manage"], "events": ["tabOpened"], "background": "b.js", "contributes": {"commands": [{"id": "go", "title": "Go"}]}}"#,
+            "b.js": background,
+        ]))
+        #expect(package.manifest.permissions == [.manageTabs])
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let installed = try #require(manager.plugins.first)
+        let storage = manager.makeContext(for: installed).storage
+
+        await manager.run(PluginCommandRef(plugin: installed.id, command: "go"), PluginInvocation(tab: nil))
+        guard case .object(let results)? = storage.value(forKey: "results"), case .string(let opened)? = results["opened"] else {
+            Issue.record("The command stored no results.")
+            return
+        }
+        #expect(host.changes.map(\.kind) == [.opened(URL(string: "https://example.org/new")!, PluginOpenTabOptions(select: false, engine: .chromium)), .selected, .closed])
+        #expect(host.changes.allSatisfy { $0.tab.uuidString == opened && $0.cause == BrowserEventCause(origin: .plugin(id: installed.id.rawValue)) })
+        #expect(results == [
+            "selected": .string(shown.id.uuidString), "title": .null, "opened": .string(opened),
+            "fileAddress": .string("invalidAddress"), "relativeAddress": .string("invalidCall"), "unknownOption": .string("invalidCall"),
+            "unknownEngine": .string("invalidCall"), "foreignSpace": .string("notGranted"), "unknownTab": .string("notGranted"), "notATab": .string("invalidCall"),
+        ])
+        // The plugin's own open did not reach its listener; a tab that opens otherwise does.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(storage.value(forKey: "heard") == nil)
+        let elsewhere = UUID()
+        bus.post(.tabOpened(tab: BrowserTabRef(id: elsewhere, personaID: persona, spaceID: space, kind: .open, engine: .webKit, url: nil), openerTabID: nil))
+        #expect(await eventually { storage.value(forKey: "heard") == .array([.string(elsewhere.uuidString)]) })
     }
 
     /// A setting's changes reach its plugin once, after they settle, and none that brings the value back; only a plugin that asks for them, while it is on, hears of them, and only of its own.
