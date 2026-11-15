@@ -63,7 +63,7 @@ import Testing
         try await waitUntil { !harness.socketExists }
     }
 
-    /// `agent/run` on a run's bound connection reaches the run's handler, and a run without one answers -32601 (`docs/hooks.md`, arch-cli agent run and rename).
+    /// `agent/run` on a run's bound connection reaches the run's handler, whose answer names each renamed tab by its run handle, never by Arch's identifier, and a run without one answers -32601 (`docs/hooks.md`, arch-cli agent run and rename).
     @Test func aRunsAgentRunReachesItsHandler() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -71,9 +71,10 @@ import Testing
         try await harness.settled(service)
         let asked = Shared<[[String: AgentJSON]]>([])
         let run = UUID()
-        let ticket = service.openHookRun(run, tools: ["list_tabs"], call: { _ in AgentToolResult(status: .ok, text: "") }, agentRun: { fields in
+        let tab = UUID()
+        let ticket = service.openHookRun(run, tools: ["list_tabs"], handles: [tab: "t1"], call: { _ in AgentToolResult(status: .ok, text: "") }, agentRun: { fields in
             asked.value.append(fields)
-            return AgentRunResult(status: .completed, reply: "Named it.")
+            return AgentRunResult(status: .completed, actions: [.renamedTab(tab: tab, name: "Named")], reply: "Named it.")
         })
         harness.addProcess(Self.scriptProcess, parent: 1, start: Self.scriptStart)
         harness.addProcess(getpid(), parent: Self.scriptProcess)
@@ -82,6 +83,7 @@ import Testing
         #expect(try await bound.hello(ticket: ticket, client: .cli).status == .bound)
         let result = try await bound.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": ["t1"]])
         #expect(result["status"] == "completed" && result["reply"] == "Named it.")
+        #expect(result["actions"] == [["renamedTab": ["tab": "t1", "name": "Named"]]])
         #expect(asked.value == [["prompt": "Name it", "tabs": ["t1"]]])
         service.closeHookRun(run)
 

@@ -1,4 +1,4 @@
-// Shell hook scripts (`docs/hooks.md`, Shell scripts): the fixture scripts in `Fixtures` receive the event on standard input and exactly the listed environment, run the checked bytes through `/dev/fd/3`, and fail with their exit status and last line of standard error; a copy changed outside Arch never runs; the interpreter is recorded by path and digest, and a replaced one pauses the hook with `scriptChanged`; Allow Shell Scripts pauses and resumes shell hooks and refuses new ones while it is off; the time limit ends the process group; standard error stays in the hook's last runs in memory only; the agent grant keeps tab access `title` until the user allows pages; and the run's tools reach only its tabs, by handle, under the hook's grant. `AgentTests` checks that the ticket binds only within the run's process tree.
+// Shell hook scripts (`docs/hooks.md`, Shell scripts): the fixture scripts in `Fixtures` receive the event on standard input and exactly the listed environment, run the checked bytes through `/dev/fd/3`, and fail with their exit status and last line of standard error; a copy changed outside Arch never runs; the interpreter is recorded by path and digest, and a replaced one pauses the hook with `scriptChanged`; Allow Shell Scripts pauses and resumes shell hooks and refuses new ones while it is off; the time limit ends the process group; standard error stays in the hook's last runs in memory only; the agent grant keeps tab access `title` until the user allows pages; and the run's tools reach only its tabs, by handle, under the hook's grant, with the handles also given to the channel, which names renamed tabs by them in `agent run`'s answer. `AgentTests` checks that the ticket binds only within the run's process tree.
 import Agent
 import AgentControl
 import AI
@@ -23,11 +23,19 @@ final class FakeRunChannel: AgentHookRunChannel {
     private(set) var started: [UUID: pid_t] = [:]
     private(set) var closed: [UUID] = []
     private(set) var handlers: [UUID: @MainActor (AgentToolCall) async -> AgentToolResult] = [:]
+    /// Each run's tab handles, by which the service's answer to `arch-cli agent run` names renamed tabs.
+    private(set) var handles: [UUID: [UUID: String]] = [:]
 
     func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
         self.tools[run] = tools
         handlers[run] = call
         return ticket
+    }
+
+    func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
+        self.handles[run] = handles
+        return openHookRun(run, tools: tools, call: call)
     }
 
     func hookRun(_ run: UUID, didStart processID: pid_t) {
@@ -154,7 +162,7 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         // Without `tabs`, the event has no address.
         #expect(event["tab"]?["url"] == nil)
         #expect(event["hook"]?["id"]?.stringValue == hook.id.uuidString && event["hook"]?["name"] == "Shell" && event["hook"]?["agent"] == .null)
-        #expect(channel.tools[run.run] == ["list_tabs", "rename_tab"] && channel.closed == [run.run])
+        #expect(channel.tools[run.run] == ["list_tabs", "rename_tab"] && channel.handles[run.run] == [tab.id: "t1"] && channel.closed == [run.run])
         // The run's working folder is gone, and its error output is taken once.
         #expect(try FileManager.default.contentsOfDirectory(atPath: temporary.path).isEmpty)
         #expect(shell.takeErrorOutput(of: run.run) == nil)

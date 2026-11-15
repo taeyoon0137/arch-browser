@@ -11,6 +11,8 @@ struct AgentGrantHandles {
     var sharedTabIDs: [UUID] = []
     /// The shared tabs the user let the client act in; the others it only reads.
     var actingSharedTabIDs: Set<UUID> = []
+    /// The shared tabs the user let the client rename on P19's card, while they stay shared.
+    var renamingSharedTabIDs: Set<UUID> = []
 }
 
 /// A tab's latest snapshot: the page it read, by address and by the tab's count of pages (`AgentTabActivity.pages`), its refs with their fingerprints and, for links, their full addresses, and its lines, which the next snapshot's diff compares.

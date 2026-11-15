@@ -591,7 +591,7 @@ extension AgentToolHost {
     func answerOutcome(_ answer: AgentApprovalAnswer, card: AgentApproval, handle: String, client: AgentToolClient) -> Outcome? {
         let structured: AgentJSON = ["tab": .string(handle), "approval": .string(answer.title(site: card.site))]
         switch answer {
-        case .allowOnce, .allowOnPage, .allowOnSite, .allowDownloadsFromSite: return nil
+        case .allowOnce, .allowOnPage, .allowOnSite, .allowDownloadsFromSite, .allowOnTab: return nil
         case .deny: return Outcome(result: AgentToolResult(status: .denied, text: "The user denied this step in Arch.", structured: structured), decision: .denied)
         case .denyAndStop:
             stopClient?(client.id)

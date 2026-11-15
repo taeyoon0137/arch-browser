@@ -133,7 +133,9 @@ import Testing
         }
         #expect(AgentPolicy.renameDecision(client: .outside, tab: .shared(acting: false), allowedOnce: false) == .ask(AgentAsk(rules: [.p19], isSensitive: false)))
         #expect(AgentPolicy.renameDecision(client: .run, tab: .shared(acting: true), allowedOnce: false) == .refuse(nil, AgentPolicy.wouldAskSentence))
-        #expect(!AgentPolicy.sensitiveRules.contains(.p19))
+        // P19's card is not sensitive, so its Allow asks for no Touch ID, also for an outside client.
+        #expect(AgentPolicy.entry(.p19).effect == .asks(sensitive: false) && !AgentPolicy.sensitiveRules.contains(.p19))
+        #expect(AgentPolicy.entry(.p19).sentence == "Renaming a tab the user shared asks the user once for that tab.")
         let next = Self.click(Self.button("Next"))
         #expect(AgentPolicy.decide(next, client: .run, mode: .askBeforeActing) == .refuse(nil, AgentPolicy.wouldAskSentence))
         #expect(AgentPolicy.decide(next, client: .run, mode: .actInAgentTabs) == .allow)
