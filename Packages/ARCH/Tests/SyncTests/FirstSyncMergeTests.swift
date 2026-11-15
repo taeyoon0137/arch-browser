@@ -35,6 +35,20 @@ import Testing
         #expect(result.replacements.isEmpty)
     }
 
+    /// Local keys number each list from 1, so an unmatched local item would otherwise sort among the server's items of its list.
+    @Test func unmatchedLocalItemsGoAfterTheServersItemsInTheirList() throws {
+        func ordered(_ record: SyncRecord, _ key: Double) -> SyncRecord {
+            var record = record
+            record[.order] = .number(key)
+            return record
+        }
+        let server = [space("space", "Personal")] + (1...3).map { ordered(tab("a\($0)", space: "space"), Double($0)) }
+        let local = [space("space", "Personal"), ordered(tab("b2", space: "space"), 2), ordered(tab("b3", space: "space"), 3)]
+        let result = try plan(local, server)
+        #expect(result.recordsToUpload.map(\.recordName) == ["b2", "b3"])
+        #expect(result.recordsToUpload.map { $0[.order] } == [.number(4), .number(5)])
+    }
+
     @Test func firstLaunchSpacesJoinAndIdenticalRecordNamesTakeServerValues() throws {
         let local = [record(.persona, "default", ["name": .text("Old name")]), space("local", "Personal"),
                      record(.setting, "ARCHAppearance", ["value": .text("dark")])]

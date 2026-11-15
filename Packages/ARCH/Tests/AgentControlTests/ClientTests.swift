@@ -182,6 +182,18 @@ private let passes: (Int32) throws -> AgentPeer = { try AgentPeer.read(socket: $
         #expect(wait())
     }
 
+    /// The peer can no longer be read once the listener has closed, which a refusal can do before the client's check runs.
+    @Test func aConnectionClosedBeforeTheCheckExits6() throws {
+        let listener = try TestListener()
+        let closed = listener.serveOnce { _ in }
+        #expect(throws: AgentClientError.closedBeforeAnswer) {
+            try AgentControlConnection(location: listener.location) { socket in
+                #expect(closed())
+                return try passes(socket)
+            }
+        }
+    }
+
     @Test func aListenerThatDoesNotAnswerTimesOut() throws {
         let listener = try TestListener()
         let release = DispatchSemaphore(value: 0)

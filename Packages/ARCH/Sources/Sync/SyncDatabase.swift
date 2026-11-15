@@ -4,7 +4,7 @@ import Foundation
 
 /// The CloudKit database that sync uses, as the app's own entitlements name it (`SyncAvailability`).
 public struct SyncDatabase: Hashable, Sendable {
-    /// The container, the first that the app's entitlement lists. The identifier belongs to the user's team, so it goes only to `CKContainer(identifier:)` and is never logged, shown, or written to a file (Working Rule 8 of `docs/plan.md`).
+    /// The container, the first that the app's entitlement lists. It goes only to `CKContainer(identifier:)`; `sync.json` keeps only `digest`.
     public var containerIdentifier: String
     /// The CloudKit environment, `Development` or `Production`, as the app's `com.apple.developer.icloud-container-environment` entitlement gives it. Nil without that entitlement, where CloudKit picks the environment by the build's signing.
     public var environment: String?

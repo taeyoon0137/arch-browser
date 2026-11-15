@@ -29,7 +29,7 @@ struct WebsitesSection: View {
     }
 
     let session: BrowserSession
-    /// Whether remembered answers reach more than one Persona, which leaves out the Agents Persona. The section follows only that, not every change of the session.
+    /// Whether a remembered answer holds in several Personas. The section follows only the session's Personas, not every change of the session.
     @State private var hasSeveralPersonas = false
 
     var body: some View {
@@ -64,7 +64,8 @@ struct WebsitesSection: View {
         .formStyle(.grouped)
         // A fixed height keeps the window still while answers come and go; the list scrolls instead.
         .frame(width: sectionWidth, height: 360)
-        .onReceive(session.$personas) { hasSeveralPersonas = session.remembersAnswersInSeveralPersonas($0) }
+        // The Agents Persona is named agent-only after it joins the Personas, so the flag is read on the next turn.
+        .onReceive(session.$personas) { _ in DispatchQueue.main.async { hasSeveralPersonas = session.remembersAnswersInSeveralPersonas } }
     }
 
     private func row(for type: EnginePermissionType, origin: String) -> some View {

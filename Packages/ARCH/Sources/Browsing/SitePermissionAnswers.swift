@@ -30,7 +30,12 @@ final class SitePermissionAnswers {
         self.agentOnlyPersonaID = agentOnlyPersonaID
     }
 
-    /// Answers a request of the tab `tabID` in the Persona `personaID` from the remembered answers, or asks with the card whose maker it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page. A request in the agent-only Persona is denied at once and not remembered.
+    /// Whether a remembered answer holds in more than one of `personas` (Persona rule 6). The Agents Persona takes no remembered answer, so it does not count.
+    func holdsInSeveralPersonas(_ personas: [Persona]) -> Bool {
+        personas.filter { $0.id != agentOnlyPersonaID }.count > 1
+    }
+
+    /// Answers a request of the tab `tabID` in the Persona `personaID` from the remembered answers, or asks with the card whose maker it passes to `ask`, under `identity`, the site that asks, and remembers the user's answer. One remembered Don't Allow denies the whole request, and only a remembered Allow for every type in it grants it without asking. A request that is never remembered, such as one to record the screen or one from a page without a web address, always asks. `context` is the profile of the tab's page. A request in the agent-only Persona is denied at once and not remembered. `inEveryPersona` makes the card's note say that the answer holds in every Persona (`holdsInSeveralPersonas(_:)`).
     ///
     /// The card can wait in its tab's queue while Arch's notification permission changes, as when macOS's question for another tab's card is answered, so `ask` makes the card with the maker each time a card shows it, which reads the permission then, and again when the permission changes while a card shows it, and the answer acts on the permission the card showed last.
     func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, personaID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity, inEveryPersona: Bool = false,

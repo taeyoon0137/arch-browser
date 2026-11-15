@@ -13,11 +13,14 @@ public struct SyncMirror: Sendable {
     public var records: [String: CKRecord]
     /// Every save not sent yet, as the last comparison of its scope returned it (`SyncDiff`), with its field values and edit times. The engine's state keeps only the record names, and the next comparison needs the values to tell whether a field still holds the value it found.
     public var pendingSaves: [SyncRecord]
+    /// The mirror's records that the session does not hold because this build could not apply them: those it held out (`IncomingSidebarRecords.heldOut(server:local:)`) and those of types it does not know. The next launch applies them as if fetched, so a later build that can shows them rather than taking them for items deleted here.
+    public var unapplied: Set<String>
 
-    public init(engineState: Data? = nil, records: [String: CKRecord] = [:], pendingSaves: [SyncRecord] = []) {
+    public init(engineState: Data? = nil, records: [String: CKRecord] = [:], pendingSaves: [SyncRecord] = [], unapplied: Set<String> = []) {
         self.engineState = engineState
         self.records = records
         self.pendingSaves = pendingSaves
+        self.unapplied = unapplied
     }
 
     /// Whether nothing is kept, as before the first sync.
@@ -44,7 +47,8 @@ public struct SyncMirror: Sendable {
         return SyncMirror(
             engineState: file.engineState,
             records: Dictionary(records.filter { SyncCloudKitRecords.isInZone($0.recordID) }.map { ($0.recordID.recordName, $0) }) { first, _ in first },
-            pendingSaves: file.pendingSaves.compactMap { try? $0.record() }
+            pendingSaves: file.pendingSaves.compactMap { try? $0.record() },
+            unapplied: Set(file.unapplied ?? [])
         )
     }
 
@@ -62,7 +66,8 @@ public struct SyncMirror: Sendable {
             database: database.digest,
             engineState: engineState,
             records: try NSKeyedArchiver.archivedData(withRootObject: sortedRecords as NSArray, requiringSecureCoding: true),
-            pendingSaves: pendingSaves.map(File.PendingSave.init)
+            pendingSaves: pendingSaves.map(File.PendingSave.init),
+            unapplied: unapplied.isEmpty ? nil : unapplied.sorted()
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
@@ -98,13 +103,16 @@ public struct SyncMirror: Sendable {
         var records: Data
         /// The pending saves. Reading skips one that does not decode, such as one with a kind of value that only a newer build writes, so the rest of the file still reads.
         var pendingSaves: [PendingSave]
+        /// The unapplied record names, sorted, or nil for none. Files before it have none.
+        var unapplied: [String]?
 
-        init(version: Int, database: String, engineState: Data?, records: Data, pendingSaves: [PendingSave]) {
+        init(version: Int, database: String, engineState: Data?, records: Data, pendingSaves: [PendingSave], unapplied: [String]?) {
             self.version = version
             self.database = database
             self.engineState = engineState
             self.records = records
             self.pendingSaves = pendingSaves
+            self.unapplied = unapplied
         }
 
         init(from decoder: Decoder) throws {
@@ -114,10 +122,11 @@ public struct SyncMirror: Sendable {
             engineState = try container.decodeIfPresent(Data.self, forKey: .engineState)
             records = try container.decode(Data.self, forKey: .records)
             pendingSaves = try container.decode([Readable].self, forKey: .pendingSaves).compactMap(\.save)
+            unapplied = try container.decodeIfPresent([String].self, forKey: .unapplied)
         }
 
         private enum CodingKeys: String, CodingKey {
-            case version, database, engineState, records, pendingSaves
+            case version, database, engineState, records, pendingSaves, unapplied
         }
 
         /// One pending save as read, or nil when it does not decode. Decoding never fails, so the list goes on to the next save.

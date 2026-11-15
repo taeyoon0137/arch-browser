@@ -31,9 +31,10 @@ import LiveFolders
             savedPage = isPinned ? currentPage : nil
             // Pinning or unpinning is the user's own act on the tab, so the archive and unload timers count from it; otherwise a pin left alone for days, once unpinned, would be archived at the next check.
             lastActivatedAt = Date()
+            if !isPinned { pendingSyncEngine = nil }
         }
     }
-    /// A synced engine choice waits while a window shows this page.
+    /// A synced engine choice waits while a window shows this page. Only a pinned tab syncs, so unpinning drops it.
     var pendingSyncEngine: EngineKind?
     /// A newer site-settings choice cancels an engine switch still copying cookies.
     var requestedEngineSwitch: EngineKind?
@@ -220,6 +221,12 @@ import LiveFolders
         folderID = pinned.folderID
         customTitle = pinned.customTitle
         savedPage = SavedPage(url: pinned.url, title: pinned.title)
+    }
+
+    /// Makes a pinned tab that sidebar sync adds at its saved page open as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
+    func opensAsRestored() {
+        isRestored = true
+        recordedURL = savedPage?.url
     }
 
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.

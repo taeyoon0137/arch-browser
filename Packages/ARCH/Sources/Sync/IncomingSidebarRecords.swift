@@ -20,8 +20,9 @@ public enum IncomingSidebarRecords {
 
     /// Merges a completed fetch against base records from the mirror. Absent fetched records
     /// carry no implication of deletion. An explicit tombstone takes precedence over a local save.
+    /// A tab without an engine takes `defaultEngine`.
     public static func plan(local: [SyncRecord], fetched: [SyncRecord], mirror: [SyncRecord],
-                            deleted: [String: SyncRecordType], foundAt: Date) throws -> Plan {
+                            deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind) throws -> Plan {
         func byName(_ records: [SyncRecord]) throws -> [String: SyncRecord] {
             var result: [String: SyncRecord] = [:]
             for item in records where item.recordType != .setting {
@@ -31,18 +32,18 @@ public enum IncomingSidebarRecords {
         }
         var combined = try byName(local)
         let bases = try byName(mirror)
+        let fetchedByName = try byName(fetched)
+        let held = heldRecords(server: Array(bases.merging(fetchedByName) { _, fetched in fetched }.values), local: local)
         var sends: [String: SyncRecord] = [:]
-        for (name, server) in try byName(fetched) {
+        for (name, server) in fetchedByName where held[name] == nil {
             if let localRecord = combined[name] {
-                // Local IDs never move a tab, folder, favorite, or space into another Persona.
-                guard localRecord[.persona] == server[.persona], localRecord.recordType == server.recordType,
-                      bases[name].map({ $0.recordType == server.recordType }) ?? true else { throw InvalidGraph.inconsistentIdentity(name) }
-                let merge = SyncMerge.merge(local: localRecord, server: server, base: bases[name].map(SyncMerge.Base.mirror) ?? .firstWrite)
+                let base = bases[name].flatMap { $0.recordType == server.recordType ? SyncMerge.Base.mirror($0) : nil } ?? .firstWrite
+                let merge = SyncMerge.merge(local: localRecord, server: server, base: base)
                 combined[name] = merge.record
                 if merge.needsSend { sends[name] = merge.record }
             } else { combined[name] = server }
         }
-        let plan = try plan(records: Array(combined.values), deleted: deleted, foundAt: foundAt)
+        let plan = try plan(records: Array(combined.values), deleted: deleted, foundAt: foundAt, defaultEngine: defaultEngine, held: held)
         for name in deleted.keys { sends[name] = nil }
         for name in plan.recordsToDelete { sends[name] = nil }
         for row in plan.repairs { sends[row.recordName] = row }
@@ -52,15 +53,84 @@ public enum IncomingSidebarRecords {
 
     /// Inputs contain all sidebar records after field merging, including unsent local records. An
     /// explicit deletion always wins. Settings use SyncedSettings independently of this graph.
-    public static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date) throws -> Plan {
+    /// A tab without an engine takes `defaultEngine`.
+    public static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind) throws -> Plan {
+        try plan(records: records, deleted: deleted, foundAt: foundAt, defaultEngine: defaultEngine, held: heldRecords(server: records, local: []))
+    }
+
+    /// The sidebar records that this build leaves alone, by name: a server record whose name or a field it needs this build cannot read, such as a tint, engine, or live folder source of a newer build, a live folder this Mac would not share, or a space's home address that is not http or https; a server record that would move `local`'s row of the same name to another Persona or type; and every record under one of them, since the repairs would otherwise move it. The plans skip them, and the comparisons neither save nor delete them, so sync goes on without them and keeps what another build wrote.
+    public static func heldOut(server: [SyncRecord], local: [SyncRecord]) -> Set<String> {
+        Set(heldRecords(server: server, local: local).keys)
+    }
+
+    private static func heldRecords(server: [SyncRecord], local: [SyncRecord]) -> [String: SyncRecord] {
+        let localByName = Dictionary(local.map { ($0.recordName, $0) }) { first, _ in first }
+        var held: [String: SyncRecord] = [:]
+        for item in server where item.recordType != .setting {
+            let moved = localByName[item.recordName].map { $0.recordType != item.recordType || $0[.persona] != item[.persona] } ?? false
+            if moved || !canApply(item) { held[item.recordName] = item }
+        }
+        var grew = !held.isEmpty
+        while grew {
+            grew = false
+            for item in server + local where item.recordType != .setting && held[item.recordName] == nil {
+                let parents = [SyncField.persona, .space, .parent, .folder].compactMap { field -> String? in
+                    if case .reference(let name) = item[field] { name } else { nil }
+                }
+                if parents.contains(where: { held[$0] != nil }) {
+                    held[item.recordName] = item
+                    grew = true
+                }
+            }
+        }
+        return held
+    }
+
+    /// Whether `sidebar(personas:spaces:folders:all:defaultEngine:)` can turn the record into a sidebar item once the repairs have given it a space and parent.
+    private static func canApply(_ item: SyncRecord) -> Bool {
+        func text(_ field: SyncField) -> String? {
+            if case .text(let text) = item[field] { text } else { nil }
+        }
+        func address(_ field: SyncField) -> URL? {
+            text(field).flatMap { URL(string: $0, encodingInvalidCharacters: false) }.flatMap { $0.scheme == nil ? nil : $0 }
+        }
+        guard (try? identifier(item.recordName, type: item.recordType)) != nil else { return false }
+        if item.recordType != .persona {
+            guard case .reference(let owner) = item[.persona], (try? identifier(owner, type: .persona)) != nil else { return false }
+        }
+        switch item.recordType {
+        case .persona:
+            return text(.name) != nil
+        case .space:
+            guard text(.name) != nil, text(.symbol) != nil, text(.tint).flatMap(SpaceTint.init(rawValue:)) != nil else { return false }
+            // A home page set here comes only from an http or https page.
+            return item[.homeURL] == nil || address(.homeURL).flatMap { $0.scheme?.lowercased() }.map { $0 == "http" || $0 == "https" } == true
+        case .folder:
+            guard text(.name) != nil else { return false }
+            guard item[.live] != nil else { return true }
+            let live = text(.live).flatMap { try? JSONDecoder().decode(LiveFolderConfiguration.self, from: Data($0.utf8)) }
+            return live.map { SidebarSyncState.canShare($0) } ?? false
+        case .favorite:
+            return address(.url) != nil && text(.title) != nil
+        case .tab:
+            guard item[.engine] == nil || text(.engine).flatMap(EngineKind.init(rawValue:)) != nil else { return false }
+            guard item[.url] == nil || (address(.url) != nil && text(.title) != nil) else { return false }
+            return item[.customTitle] == nil || text(.customTitle) != nil
+        case .setting:
+            return true
+        }
+    }
+
+    private static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind, held: [String: SyncRecord]) throws -> Plan {
         var all: [String: SyncRecord] = [:]
         var removed = deleted.filter { $0.value != .setting }
         // The fixed default profile owns the platform's default storage and cannot be removed.
         removed.removeValue(forKey: "default")
-        for item in records where item.recordType != .setting {
+        for item in records where item.recordType != .setting && held[item.recordName] == nil {
             if let removal = removed[item.recordName] {
-                guard removal == item.recordType else { throw InvalidGraph.inconsistentIdentity(item.recordName) }
-                continue
+                if removal == item.recordType { continue }
+                // A deletion of another type names some other record; it removes nothing here.
+                removed.removeValue(forKey: item.recordName)
             }
             guard all.updateValue(item, forKey: item.recordName) == nil else { throw InvalidGraph.inconsistentIdentity(item.recordName) }
         }
@@ -75,7 +145,9 @@ public enum IncomingSidebarRecords {
             }
         }
         var spaces = Dictionary(grouping: SyncOrderKeys.sorted(all.values.filter { $0.recordType == .space }), by: { $0[.persona] })
-        for persona in personas where spaces[.reference(persona.recordName)] == nil {
+        // A Persona whose spaces are held out still has them on the server.
+        let heldSpaceOwners = Set(held.values.filter { $0.recordType == .space }.map { $0[.persona] })
+        for persona in personas where spaces[.reference(persona.recordName)] == nil && !heldSpaceOwners.contains(.reference(persona.recordName)) {
             let name = try personalSpaceID(for: persona).uuidString
             guard all[name] == nil else { throw InvalidGraph.inconsistentIdentity(name) }
             // The same deterministic repair can be deleted remotely while its Persona survives.
@@ -95,7 +167,11 @@ public enum IncomingSidebarRecords {
                 return all[id]
             }
             if space?.recordType != .space || space?[.persona] != owner {
-                guard let first = spaces[owner]?.first else { throw InvalidGraph.malformedRecord(item.recordName) }
+                guard let first = spaces[owner]?.first else {
+                    // Its Persona's only spaces are held out, so it waits with them.
+                    all.removeValue(forKey: item.recordName)
+                    continue
+                }
                 item[.space] = .reference(first.recordName)
             }
             let key: SyncField = item.recordType == .folder ? .parent : .folder
@@ -162,10 +238,10 @@ public enum IncomingSidebarRecords {
             row.modifiedAt = max(foundAt, row.modifiedAt)
             repairs.append(row)
         }
-        let state = try sidebar(personas: personas, spaces: spaces, folders: parentFirst, all: all)
+        let state = try sidebar(personas: personas, spaces: spaces, folders: parentFirst, all: all, defaultEngine: defaultEngine)
         var tombstones = SidebarSyncDeletions()
         for (name, type) in removed {
-            let id = try identifier(name, type: type)
+            guard let id = try? identifier(name, type: type) else { continue }
             switch type {
             case .persona: tombstones.personas.insert(id)
             case .space: tombstones.spaces.insert(id)
@@ -204,7 +280,7 @@ public enum IncomingSidebarRecords {
     }
 
     private static func sidebar(personas: [SyncRecord], spaces: [SyncValue?: [SyncRecord]], folders: [SyncRecord],
-                                all: [String: SyncRecord]) throws -> SidebarSyncState {
+                                all: [String: SyncRecord], defaultEngine: EngineKind) throws -> SidebarSyncState {
         func text(_ item: SyncRecord, _ field: SyncField) throws -> String {
             guard case .text(let text) = item[field] else { throw InvalidGraph.malformedRecord(item.recordName) }
             return text
@@ -243,7 +319,11 @@ public enum IncomingSidebarRecords {
             try Favorite(id: identifier(item.recordName, type: .favorite), url: url(item, .url), title: text(item, .title), personaID: owner(item))
         }
         let tabs = try SyncOrderKeys.sorted(all.values.filter { $0.recordType == .tab }).map { item in
-            guard let engine = try EngineKind(rawValue: text(item, .engine)) else { throw InvalidGraph.malformedRecord(item.recordName) }
+            var engine = defaultEngine
+            if item[.engine] != nil {
+                guard let kind = try EngineKind(rawValue: text(item, .engine)) else { throw InvalidGraph.malformedRecord(item.recordName) }
+                engine = kind
+            }
             let saved = try item[.url].map { _ in try SavedPage(url: url(item, .url), title: text(item, .title)) }
             let custom = try item[.customTitle].map { _ in try text(item, .customTitle) }
             return try SidebarSyncState.PinnedTab(id: identifier(item.recordName, type: .tab), personaID: owner(item),

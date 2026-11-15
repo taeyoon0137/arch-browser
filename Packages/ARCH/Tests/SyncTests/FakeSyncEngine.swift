@@ -37,7 +37,7 @@ final class FakeSyncEngine: SyncEngineClient {
     /// The most changes one batch holds, as one request holds at most 250 records.
     var batchLimit = 250
     /// The most batches one send builds before it throws, since a delegate that adds a change back after each refusal would keep the engine sending without end.
-    var batchesPerSendLimit = 100
+    private let batchesPerSendLimit = 100
     private(set) var fetchCount = 0
     private(set) var batches: [Batch] = []
     /// The zone's changes that the server took, in order.

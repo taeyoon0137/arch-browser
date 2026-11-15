@@ -25,7 +25,7 @@ struct SessionSnapshot: Codable {
         var engine: EngineKind?
         /// The engine's restorable page state, such as WebKit's back-forward list, which the file keeps sealed from version 13. `nil` for engines that keep none, in closed-tab records, in files before version 3, and when the state cannot be sealed or opened.
         var state: Data?
-        /// A synced engine change that waits until this tab is no longer visible.
+        /// A pinned tab's synced engine change that waits until no window shows the tab, which the next launch opens it in. Optional, so it needs no new version; `nil` in files written before sync.
         var pendingSyncEngine: EngineKind? = nil
         /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
         var personaID: UUID?
@@ -225,18 +225,8 @@ extension SessionSnapshot {
 
     /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch. A folder whose tabs the user kept is an ordinary folder.
     @MainActor static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
-        var agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
-        guard !agentFolderIDs.isEmpty else { return (tabs, folders) }
-        // An older hierarchy can contain descendants of an agent folder. Its owner marker is
-        // intentionally never encoded, so exclude the whole subtree before writing the file.
-        let children = Dictionary(grouping: folders, by: \.parentID)
-        var pending = Array(agentFolderIDs)
-        while let parent = pending.popLast() {
-            for folder in children[parent] ?? [] where agentFolderIDs.insert(folder.id).inserted {
-                pending.append(folder.id)
-            }
-        }
-        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !agentFolderIDs.contains($0.id) })
+        let agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
+        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !$0.isAgentFolder })
     }
 }
 

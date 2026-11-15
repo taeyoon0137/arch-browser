@@ -13,7 +13,7 @@ final class PageReadCheck: NSObject, NSApplicationDelegate, EngineWebContentsUID
     private var finished = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // A direct launch has no test profile or mock keyring. Only start CEF under the prepared fixture bundle.
+        // A direct launch has no test profile or mock keychain. Only start CEF under the prepared fixture bundle.
         guard Bundle.main.bundleIdentifier == "xyz.taeyoon.arch.engine-read-check",
               CommandLine.arguments.contains("--use-mock-keychain"),
               FileManager.default.fileExists(atPath: fixture.path) else {
