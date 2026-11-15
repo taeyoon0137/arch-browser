@@ -122,22 +122,23 @@ import Testing
         #expect(try !MatchPattern("https://example.com/*").coversEverySite && !MatchPattern("https://*.example.com/*").coversEverySite)
     }
 
-    /// Settings states a long grant in a few words by its broadest site and the number of the other permissions, before the whole list.
+    /// Settings states more than three sites in one sentence by the broadest, counting a site that another pattern's subdomains take in once, while each permission keeps its sentence.
     @Test func briefsAGrantByItsBroadestSite() throws {
-        func brief(_ sites: [String], permissions: Set<PluginPermission> = [], apis: [String] = []) throws -> String {
+        func brief(_ sites: [String], permissions: Set<PluginPermission> = [], apis: [String] = []) throws -> [String]? {
             let patterns = try sites.map(MatchPattern.init)
             let manifest = PluginManifest(id: PluginID(rawValue: "org.example.brief")!, name: "Brief", version: "1", summary: "", permissions: permissions, sites: patterns,
                                           extensionPermissions: apis, contributions: PluginContributions())
             return InstalledPlugin(manifest: manifest, grant: PluginGrant(permissions: permissions, sites: patterns), isEnabled: true).accessBrief
         }
-        #expect(try brief([]) == "None")
-        #expect(try brief(["https://example.com/*", "http://example.com/docs/*"]) == "example.com")
-        #expect(try brief(["https://*.example.com/*"], apis: ["storage"]) == "example.com and its subdomains, 1 permission")
-        #expect(try brief(["https://a.example/*", "https://b.example/*", "https://c.example/*"]) == "3 websites")
-        #expect(try brief(["https://a.example/*", "<all_urls>"], permissions: [.tabs], apis: ["storage", "scripting"]) == "All websites, 3 permissions")
-        #expect(try brief(["*://*.com/*"]) == "Every .com website")
-        #expect(try brief(["https://a.example/*", "*://*.com/*", "https://b.example/*"]) == "Every .com website and 2 more")
-        #expect(try brief([], permissions: [.clipboard, .tabs]) == "2 permissions")
+        // Up to three sites, every sentence shows.
+        #expect(try brief([]) == nil)
+        #expect(try brief(["https://a.example/*", "https://b.example/*", "https://c.example/*"], permissions: [.clipboard, .nativeMessaging, .tabs]) == nil)
+        #expect(try brief(["https://a.example/*", "https://b.example/*", "https://c.example/*", "https://d.example/*"]) == ["Run scripts on pages from 4 websites"])
+        #expect(try brief(["https://example.com/*", "http://example.com/docs/*", "https://*.example.com/*", "https://www.example.com/*"]) == ["Run scripts on pages from example.com and its subdomains"])
+        #expect(try brief(["https://example.com/*", "https://*.example.com/*", "https://a.example/*", "https://b.example/*"]) == ["Run scripts on pages from 3 websites"])
+        #expect(try brief(["https://a.example/*", "<all_urls>", "https://b.example/*", "https://c.example/*"], permissions: [.nativeMessaging, .tabs], apis: ["storage"])
+            == ["Read the titles and addresses of your tabs", "Exchange messages with apps on this Mac", "Run scripts on pages from every website", "Use the extension APIs storage"])
+        #expect(try brief(["https://a.example/*", "*://*.com/*", "https://b.example/*", "https://shop.com/*"]) == ["Run scripts on pages from every .com website and 2 more"])
     }
 }
 

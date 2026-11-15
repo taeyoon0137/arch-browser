@@ -75,11 +75,13 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         grant.summaries + [manifest.extensionPermissionsSummary].compactMap { $0 }
     }
 
-    /// What the plugin may do in a few words, as Settings states it before the sentences of `accessSummaries`: its sites by the broadest (`MatchPattern.briefSiteName(of:)`), then the number of its other permissions, those of its grant and the API permissions of a web extension, such as "All websites, 5 permissions", or "None".
-    public var accessBrief: String {
-        let permissions = grant.permissions.count + manifest.extensionPermissions.count
-        let parts = [MatchPattern.briefSiteName(of: grant.sites), permissions == 0 ? nil : permissions == 1 ? "1 permission" : "\(permissions) permissions"].compactMap { $0 }
-        return parts.isEmpty ? "None" : parts.joined(separator: ", ")
+    /// The most sites whose sentences Settings lists among `accessSummaries`; with more, it states them in one (`accessBrief`).
+    public static let listedSiteLimit = 3
+
+    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
+    public var accessBrief: [String]? {
+        guard grant.sites.count > Self.listedSiteLimit, let sites = MatchPattern.briefAccessSummary(of: grant.sites) else { return nil }
+        return PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary) + [sites, manifest.extensionPermissionsSummary].compactMap { $0 }
     }
 }
 

@@ -846,8 +846,10 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
     public func missingEngine(among running: Set<EngineKind>) -> EngineKind?
     /// The grant's sentences, then a web extension's other API permissions.
     public var accessSummaries: [String] { get }
-    /// The same in a few words, which Settings shows before those sentences once there are two or more: the broadest site, such as "All websites", the one site's name, or the number of sites, then the number of the other permissions, such as "All websites, 5 permissions"; "None" without access.
-    public var accessBrief: String { get }
+    /// The most sites whose sentences Settings lists among those; with more, it states them in one.
+    public static let listedSiteLimit: Int
+    /// Those sentences as Settings states them while the grant has more than `listedSiteLimit` sites, with each site's behind a disclosure, or nil with fewer: each permission's, and in place of the sites' one that names them by the broadest, every website, the one site's name, a top-level domain's sites with the number of the others, or the number of sites, such as "Run scripts on pages from every .com website and 3 more" or "Run scripts on pages from 14 websites", counting a site that another pattern's subdomains take in once.
+    public var accessBrief: [String]? { get }
 }
 
 /// What one engine's runtime found when it checked a package.

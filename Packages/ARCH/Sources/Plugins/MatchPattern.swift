@@ -61,19 +61,29 @@ public struct MatchPattern: Hashable, Sendable, CustomStringConvertible {
 
     /// What a grant of the pattern lets a plugin do, as the sentence that Settings and the install sheet show.
     public var accessSummary: String {
-        "Run scripts on pages from \(siteName)"
+        Self.accessSummary(ofSites: siteName)
     }
 
-    /// The sites of `patterns` in a few words, as Settings names them before the whole list, by the broadest: "All websites" when one covers every host; the site's name when all name one site, such as `example.com and its subdomains`; for several with one that covers a top-level domain, that domain with the number of the others, such as "Every .com website and 3 more"; else the number of sites, such as "14 websites". Nil without patterns.
-    static func briefSiteName(of patterns: [MatchPattern]) -> String? {
+    private static func accessSummary(ofSites name: String) -> String {
+        "Run scripts on pages from \(name)"
+    }
+
+    /// One sentence for all of `patterns` in place of each one's `accessSummary`, as Settings states a long list of sites (`InstalledPlugin.accessBrief`), which names the sites by the broadest: every website when one covers every host; the site's name when all name one site, such as `example.com and its subdomains`; with one that covers a top-level domain, that domain and the number of the other sites, such as "Run scripts on pages from every .com website and 3 more"; else the number of sites, such as "Run scripts on pages from 14 websites". A site that another pattern covers with its subdomains, as `*.example.com` covers `example.com` and `www.example.com`, counts as that pattern's. Nil without patterns.
+    static func briefAccessSummary(of patterns: [MatchPattern]) -> String? {
         var names: [String] = []
-        for name in patterns.map(\.siteName) where !names.contains(name) { names.append(name) }
-        guard !names.isEmpty else { return nil }
-        if patterns.contains(where: { $0.host == nil }) { return "All websites" }
-        let domain = patterns.first(where: \.coversTopLevelDomain).flatMap(\.host).map { "Every .\($0) website" }
-        if names.count == 1 { return domain ?? names[0] }
-        if let domain { return "\(domain) and \(names.count - 1) more" }
-        return "\(names.count) websites"
+        for pattern in patterns where !patterns.contains(where: { $0.takesIn(pattern) }) && !names.contains(pattern.siteName) {
+            names.append(pattern.siteName)
+        }
+        guard names.count > 1 else { return names.first.map(Self.accessSummary(ofSites:)) }
+        return Self.accessSummary(ofSites: patterns.first(where: \.coversTopLevelDomain).map { "\($0.siteName) and \(names.count - 1) more" } ?? "\(names.count) websites")
+    }
+
+    /// Whether the pattern's sites take in those of `other` under another name: every host takes in each name, and a host with its subdomains takes in the host alone and each name under it, as `*.example.com` takes in `example.com`, `www.example.com`, and `*.www.example.com`. Schemes and paths do not count, as `siteName` leaves them out.
+    private func takesIn(_ other: MatchPattern) -> Bool {
+        guard let otherHost = other.host else { return false }
+        guard let host else { return true }
+        guard includesSubdomains else { return false }
+        return otherHost == host ? !other.includesSubdomains : otherHost.hasSuffix("." + host)
     }
 
     /// Whether the pattern covers every host, or every host under a top-level domain, as `*://*.com/*` does, which granting asks the user to confirm with Touch ID or the login password. A few such patterns would otherwise reach most of the web without the confirmation.

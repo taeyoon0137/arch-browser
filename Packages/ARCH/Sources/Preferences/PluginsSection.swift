@@ -497,20 +497,14 @@ private struct UpdateRow: View {
     }
 }
 
-/// What the plugin's grant lets it do: its one sentence, or, with more, a few words that name the broadest of its sites and count its permissions (`InstalledPlugin.accessBrief`), with every sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down.
+/// What the plugin's grant lets it do: a sentence for each permission and each site, or, with more than `InstalledPlugin.listedSiteLimit` sites, one sentence for the sites that names the broadest (`InstalledPlugin.accessBrief`), with every site's sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down while each permission stays in view.
 private struct AccessRow: View {
     let plugin: InstalledPlugin
 
     var body: some View {
-        let summaries = plugin.accessSummaries
-        if summaries.count < 2 {
-            LabeledContent("Access") {
-                Text(summaries.first ?? "None")
-                    .multilineTextAlignment(.trailing)
-            }
-        } else {
+        if let brief = plugin.accessBrief {
             DisclosureGroup {
-                Text(summaries.joined(separator: "\n"))
+                Text(plugin.grant.sites.map(\.accessSummary).joined(separator: "\n"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
@@ -518,9 +512,15 @@ private struct AccessRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } label: {
                 LabeledContent("Access") {
-                    Text(plugin.accessBrief)
+                    Text(brief.joined(separator: "\n"))
                         .multilineTextAlignment(.trailing)
                 }
+            }
+        } else {
+            LabeledContent("Access") {
+                let summaries = plugin.accessSummaries
+                Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
+                    .multilineTextAlignment(.trailing)
             }
         }
     }
