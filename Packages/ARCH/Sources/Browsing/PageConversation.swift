@@ -17,6 +17,9 @@ final class PageConversation: ObservableObject {
     /// The page text one question reads at most. The service cuts it further to the model's input limit.
     static let pageTextLimit = 100_000
 
+    /// The page committed a new document while the question was being read, so the question did not go out.
+    struct PageReloaded: Error {}
+
     struct Exchange: Identifiable {
         enum State {
             case readingPage
@@ -158,7 +161,7 @@ final class PageConversation: ObservableObject {
             // An engine finishes a read it has started, so a question stopped during the read takes nothing from it.
             try Task.checkCancellation()
             guard document == documentID() else {
-                update(id) { $0.state = .stopped }
+                update(id) { $0.state = .failed(PageReloaded()) }
                 return
             }
             if let selected {

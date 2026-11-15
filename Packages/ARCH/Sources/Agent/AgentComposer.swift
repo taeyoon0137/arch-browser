@@ -77,7 +77,10 @@ public struct AgentReaderExcerpt: Equatable {
     public var place: String
     /// The document reviewed when this draft opened.
     public var tab: AgentTabInfo?
-    public var readerExcerpt: AgentReaderExcerpt?
+    /// The reader's selection and answer, which Share reader excerpt shares from the start; the user can preview it or turn it off.
+    public var readerExcerpt: AgentReaderExcerpt? {
+        didSet { sharesExcerpt = readerExcerpt != nil }
+    }
     @Published public var text: String
     @Published var attachesTab = true
     @Published var sharesExcerpt = false

@@ -118,7 +118,7 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         for status in AgentResultStatus.allCases where status != .ok {
             #expect(text.contains("- \(status.rawValue):"), "\(status)")
         }
-        for code in ["notInteractable", "notVisible", "tabNotFound", "navigationFailed"] {
+        for code in ["notInteractable", "notVisible", "tabNotFound", "navigationFailed", "pageChanged"] {
             #expect(text.contains(code), "\(code)")
         }
     }
