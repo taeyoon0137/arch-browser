@@ -137,7 +137,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case tabs
     /// Suggested names for tabs, which the user's own names always outrank (`docs/hooks.md`, hook decision 13).
     case renameTabs = "tabs.rename"
-    /// Opening, closing, and selecting the Persona's tabs, and what `renameTabs` grants. The tabs it opens load pages from any host, the local network's among them, with the Persona's cookies, as the user's own tabs do, so an address can carry what the plugin knows to any host and act as the user on a site, as a sign-out link does; the summary says so.
+    /// Opening, closing, selecting, and moving the Persona's tabs, and what `renameTabs` grants. The tabs it opens load pages from any host, the local network's among them, with the Persona's cookies, as the user's own tabs do, so an address can carry what the plugin knows to any host and act as the user on a site, as a sign-out link does; the summary says so.
     case manageTabs = "tabs.manage"
     /// Writing text to the clipboard.
     case clipboard
@@ -151,7 +151,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         switch self {
         case .tabs: return "Read the titles and addresses of your tabs"
         case .renameTabs: return "Suggest names for your tabs"
-        case .manageTabs: return "Open any website in your tabs, signed in as you, and close, select, and suggest names for your tabs"
+        case .manageTabs: return "Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs"
         case .clipboard: return "Write text to the clipboard"
         case .nativeMessaging: return "Exchange messages with apps on this Mac"
         case .ai: return "Send text to the AI models you connected"

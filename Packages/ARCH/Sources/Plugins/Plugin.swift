@@ -74,6 +74,8 @@ public protocol PluginContext: AnyObject {
     func closeTab(_ id: PluginTab.ID) throws
     /// Needs `tabs.manage`. Selects one of the tabs the plugin reaches in a browser window of its Persona: the window that shows the tab, else the front main window on its space, else the front main window of its Persona, which then shows its space. A window of another Persona keeps its Persona / Space, so without a main window of the Persona nothing changes, and no window or the app comes forward. A window that has the tab selected already stays as it is, with the internal page over it, if any, while selecting another tab ends the window's internal page, palette, and find bar, as any selection of another tab does. The selection, and the space switch that it brings, come with the plugin as their cause, so the plugin does not hear of them. Throws `PluginError.notGranted` for any other tab, and `stopped` as `closeTab(_:)` does for a stopped hook step's tab.
     func selectTab(_ id: PluginTab.ID) throws
+    /// Needs `tabs.manage`. Moves one of the tabs the plugin reaches to the place, as a drag in the sidebar or a drop on a space's symbol moves it, within the spaces of its Persona. The tab stays pinned or open, so a plugin, whose close only unloads a pinned tab, can neither drop a pinned tab's saved page by moving it among the open tabs nor pin one. A move to another space takes the tab out of its split view, and each window that has it selected follows it to that space. Returns whether the tab is at the place afterwards, also when it was there already; false where it cannot go there: a favorite's tab and a small window's tab, which have no place in a space's list, a live folder item's tab, which stays in its folder, a place next to such a tab or to the tab itself, and a place next to a tab of the other list. The space switch that a move brings comes with the plugin as its cause, so the plugin does not hear of it. Throws `PluginError.notGranted` for a tab the plugin does not reach, the tab moved or the one it goes next to, and for a space that is not the Persona's, and `stopped` as `closeTab(_:)` does for a stopped hook step's tab.
+    func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool
     /// Needs `tabs.rename`, which `tabs.manage` includes. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives; while a hook step of the plugin runs, a rename of its event's tab is for its event's document, and once the scheduler has stopped the step, the tab does not take it; a script plugin's panel renames outside any step. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
     /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any, and a script plugin's panel's to none: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. Every request stops when the instance stops.
@@ -88,7 +90,7 @@ extension PluginContext {
     /// A context that offers no selected tab, such as a hook script's, which acts on its run's tabs, gives none.
     public func selectedTab() throws -> PluginTab? { nil }
 
-    /// A context that changes no tabs, such as a hook script's, refuses to open, close, and select them.
+    /// A context that changes no tabs, such as a hook script's, refuses to open, close, select, and move them.
     public func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
         throw PluginError.permissionDenied(.manageTabs)
     }
@@ -98,6 +100,10 @@ extension PluginContext {
     }
 
     public func selectTab(_ id: PluginTab.ID) throws {
+        throw PluginError.permissionDenied(.manageTabs)
+    }
+
+    public func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool {
         throw PluginError.permissionDenied(.manageTabs)
     }
 
@@ -148,6 +154,25 @@ public protocol PluginBrowserHost: AnyObject {
     func closeTab(_ id: UUID, cause: BrowserEventCause)
     /// Selects a tab that `tabs(in:)` lists as `PluginContext.selectTab(_:)` describes, with its event carrying `cause`. Nothing happens for an agent tab or a tab that is gone.
     func selectTab(_ id: UUID, cause: BrowserEventCause)
+    /// Moves a tab that `tabs(in:)` lists as `PluginContext.moveTab(_:to:)` describes, next to another such tab of its Persona or to a space, with the space switch it brings carrying `cause`, and returns whether the tab is at the place afterwards. Throws `PluginError.notGranted` for a space that is not the tab's Persona's; false for an agent tab and a tab that is gone, also as the one to go next to.
+    func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool
+}
+
+/// Where `PluginContext.moveTab(_:to:)` moves a tab, which stays pinned or open.
+public enum PluginTabPlace: Hashable, Sendable {
+    /// Right before or after another tab, in that tab's space, list, and folder, as a drag to that tab's row puts it.
+    case before(PluginTab.ID)
+    case after(PluginTab.ID)
+    /// Last among the pinned tabs, or the open tabs, outside folders of a space of the plugin's Persona, as a drop on the space's symbol puts it; nil for the tab's own space, where it leaves its folder.
+    case end(ofSpace: UUID?)
+
+    /// The tab that the place is next to, if any.
+    var neighbor: PluginTab.ID? {
+        switch self {
+        case let .before(id), let .after(id): return id
+        case .end: return nil
+        }
+    }
 }
 
 /// Where `PluginContext.openTab(_:_:)` opens a tab.
@@ -332,7 +357,7 @@ public protocol PluginSecrets: AnyObject {
 public enum PluginError: Error, Hashable, Sendable {
     /// The plugin's grant lacks the permission a call needs.
     case permissionDenied(PluginPermission)
-    /// The plugin instance whose context the call went through has stopped, or the scheduler has stopped the hook step whose listener closes or selects the step's event's tab.
+    /// The plugin instance whose context the call went through has stopped, or the scheduler has stopped the hook step whose listener closes, selects, or moves the step's event's tab.
     case stopped
     /// The command acts on a page, and the invocation has none, or a page call's tab has no page to run in, or its page changed while the call ran.
     case noPage

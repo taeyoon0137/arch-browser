@@ -107,6 +107,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             open: (url, options) => call("tabs.open", [url, ...given(options)]),
             close: (id) => call("tabs.close", [id]),
             select: (id) => call("tabs.select", [id]),
+            move: (id, place) => call("tabs.move", [id, ...given(place)]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
           storage: Object.freeze({
@@ -272,6 +273,12 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
+    /// Moves the tab for a call of the document: a panel's move belongs to no hook step of the plugin.
+    private func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool {
+        if role == .panel, let context = context as? any PluginPanelContext { return try context.panelMoveTab(id, to: place) }
+        return try context.moveTab(id, to: place)
+    }
+
     /// Starts reading the reply of an `arch.ai.stream` call and returns the stream's number, with which the script asks for its text.
     private func startStream(_ request: AIRequest, with client: any AIClient) -> PluginValue {
         let number = nextRequestNumber
@@ -432,6 +439,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "tabs.close", "tabs.select":
             guard call.args.count == 1, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             try manageTab(id, closing: call.call == "tabs.close")
+        case "tabs.move":
+            guard call.args.count <= 2, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
+            return .bool(try moveTab(id, to: try Self.tabPlace(call.value(1))))
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try renameTab(id, to: try call.optionalText(1)))
@@ -464,6 +474,23 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         // A key the bridge does not read would go without effect.
         guard fields.isEmpty else { throw BridgeFailure.invalidCall }
         return options
+    }
+
+    /// The place of `arch.tabs.move(id, place)`: `{before}` or `{after}` with a tab's identifier, or `{spaceId}` with a space's, at most one of them, where a missing or null value counts as none. Without one, the tab goes last in its own space's list.
+    private static func tabPlace(_ value: PluginValue?) throws -> PluginTabPlace {
+        guard let value, value != .null else { return .end(ofSpace: nil) }
+        guard case let .object(fields) = value else { throw BridgeFailure.invalidCall }
+        let known: Set = ["before", "after", "spaceId"]
+        let given = fields.filter { $0.value != .null }
+        // A key the bridge does not read would go without effect, and two places name none.
+        guard fields.keys.allSatisfy(known.contains), given.count <= 1 else { throw BridgeFailure.invalidCall }
+        guard let (key, field) = given.first else { return .end(ofSpace: nil) }
+        guard case let .string(text) = field, let id = UUID(uuidString: text) else { throw BridgeFailure.invalidCall }
+        switch key {
+        case "before": return .before(id)
+        case "after": return .after(id)
+        default: return .end(ofSpace: id)
+        }
     }
 
     /// A secret call's result, or nil for none.

@@ -203,6 +203,11 @@ private final class RecordingHost: PluginBrowserHost {
     func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID { throw PluginError.closed }
     func closeTab(_ id: UUID, cause: BrowserEventCause) { changes.append("close \(id)") }
     func selectTab(_ id: UUID, cause: BrowserEventCause) { changes.append("select \(id)") }
+
+    func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool {
+        changes.append("move \(id)")
+        return true
+    }
 }
 
 @MainActor
@@ -742,8 +747,8 @@ extension PluginAITests {
         #expect(host.renames.map(\.name) == ["During", "After"] && host.renames.last?.document == nil)
     }
 
-    /// Once the scheduler stops a step, whose listener still runs, the listener closes and selects the step's tab no more, since the tab can show the user's next document by then, while it still reaches another tab and a panel reaches the step's tab.
-    @Test func aStoppedStepClosesAndSelectsItsTabNoMore() async throws {
+    /// Once the scheduler stops a step, whose listener still runs, the listener closes, selects, and moves the step's tab no more, since the tab can show the user's next document by then, while it still reaches another tab and a panel reaches the step's tab.
+    @Test func aStoppedStepClosesSelectsAndMovesItsTabNoMore() async throws {
         let manifest = #"{"id": "org.example.close-panel", "name": "Close Panel", "version": "1", "apiVersion": 1, "summary": "Closes.", "permissions": ["ai", "tabs.manage"], "events": ["pageLoaded"], "background": "b.js", "contributes": {"sidebarItems": [{"id": "panel", "title": "Close", "symbol": "xmark", "panel": "panel.html"}]}}"#
         let background = """
         arch.events.on("pageLoaded", async (event) => {
@@ -752,7 +757,8 @@ extension PluginAITests {
           const fail = async (call) => { try { await call(); return "resolved"; } catch (error) { return error.message; } };
           const other = (await arch.tabs.list()).find((tab) => tab.id !== event.tab.id).id;
           await arch.storage.set("step", {
-            select: await fail(() => arch.tabs.select(event.tab.id)), close: await fail(() => arch.tabs.close(event.tab.id)), other: await fail(() => arch.tabs.select(other)),
+            select: await fail(() => arch.tabs.select(event.tab.id)), move: await fail(() => arch.tabs.move(event.tab.id)), close: await fail(() => arch.tabs.close(event.tab.id)),
+            other: await fail(() => arch.tabs.select(other)),
           });
           await new Promise((resolve) => setTimeout(resolve, 3000));
         });
@@ -780,11 +786,13 @@ extension PluginAITests {
         #expect(await eventually { storage.value(forKey: "ready") == .bool(true) })
         service.hooks.scheduler.cancel(subject: page.id)
         #expect(await eventually { storage.value(forKey: "step") != nil })
-        #expect(storage.value(forKey: "step") == .object(["select": .string("stopped"), "close": .string("stopped"), "other": .string("resolved")]))
+        #expect(storage.value(forKey: "step") == .object(["select": .string("stopped"), "move": .string("stopped"), "close": .string("stopped"), "other": .string("resolved")]))
         #expect(host.changes == ["select \(other.id)"])
         // The listener still runs, and the panel's calls belong to no step.
-        _ = try await webView.callAsyncJavaScript("await arch.tabs.select(id); await arch.tabs.close(id);", arguments: ["id": page.id.uuidString], contentWorld: .page)
-        #expect(host.changes == ["select \(other.id)", "select \(page.id)", "close \(page.id)"])
+        let moved = try await webView.callAsyncJavaScript("await arch.tabs.select(id); const moved = await arch.tabs.move(id); await arch.tabs.close(id); return moved;",
+                                                          arguments: ["id": page.id.uuidString], contentWorld: .page)
+        #expect(moved as? Bool == true)
+        #expect(host.changes == ["select \(other.id)", "select \(page.id)", "move \(page.id)", "close \(page.id)"])
     }
 
     /// Closing a panel stops the requests of its document.

@@ -62,6 +62,7 @@ final class FakePluginHost: PluginBrowserHost {
     func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID { throw PluginError.closed }
     func closeTab(_ id: UUID, cause: BrowserEventCause) {}
     func selectTab(_ id: UUID, cause: BrowserEventCause) {}
+    func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool { false }
 }
 
 /// The real runner, recording each invocation and outcome, since the registry keeps only a failed run's first 200 characters.
@@ -593,9 +594,9 @@ extension PluginValue {
         let other = await runner.run(invocation(of: hook, script: #"arch.events.on("tabOpened", () => {});"#, loading: tab))
         #expect(other.code == "noListener")
         #expect(other.failure == "The script set no listener for pageLoaded with arch.events.on.")
-        // A script has no storage, secrets, clipboard, or page, not even its event's tab's, and no selected tab; it opens, closes, and selects no tab.
-        let probe = #"arch.events.on("pageLoaded", async (event) => { const results = []; for (const attempt of [() => arch.storage.set("a", 1), () => arch.ui.copy("a"), () => arch.pages.run(event.tab.id, "script.js"), () => arch.pages.post(event.tab.id, 1), () => arch.tabs.open("https://example.org/"), () => arch.tabs.close(event.tab.id), () => arch.tabs.select(event.tab.id), async () => { if ((await arch.tabs.selected()) !== null) throw new Error("selected"); }]) { try { await attempt(); results.push("allowed"); } catch (error) { results.push(error.message); } } throw new Error(results.join()); });"#
-        #expect(await runner.run(invocation(of: hook, script: probe, loading: tab)).failure == "quotaExceeded,permissionDenied,notGranted,notGranted,permissionDenied,permissionDenied,permissionDenied,allowed")
+        // A script has no storage, secrets, clipboard, or page, not even its event's tab's, and no selected tab; it opens, closes, selects, and moves no tab.
+        let probe = #"arch.events.on("pageLoaded", async (event) => { const results = []; for (const attempt of [() => arch.storage.set("a", 1), () => arch.ui.copy("a"), () => arch.pages.run(event.tab.id, "script.js"), () => arch.pages.post(event.tab.id, 1), () => arch.tabs.open("https://example.org/"), () => arch.tabs.close(event.tab.id), () => arch.tabs.select(event.tab.id), () => arch.tabs.move(event.tab.id), async () => { if ((await arch.tabs.selected()) !== null) throw new Error("selected"); }]) { try { await attempt(); results.push("allowed"); } catch (error) { results.push(error.message); } } throw new Error(results.join()); });"#
+        #expect(await runner.run(invocation(of: hook, script: probe, loading: tab)).failure == "quotaExceeded,permissionDenied,notGranted,notGranted,permissionDenied,permissionDenied,permissionDenied,permissionDenied,allowed")
     }
 }
 
