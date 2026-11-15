@@ -70,6 +70,27 @@ struct SidebarReorderHover {
         return nil
     }
 
+    /// The list whose end a dragged tab's pointer is at in the visible `list`, outside which rows are scrolled out of sight: `true` over the divider, which ends the pinned list, and `false` over the New Tab row, which ends the open list, or below it, where no row is, so an open list without tabs takes the tab anywhere under the divider.
+    static func listEnd(at point: CGPoint, divider: CGRect?, newTabRow: CGRect?, list: CGRect) -> Bool? {
+        guard list.contains(point) else { return nil }
+        if divider?.contains(point) == true { return true }
+        guard let newTabRow else { return nil }
+        let belowRows = CGRect(x: newTabRow.minX, y: newTabRow.minY, width: newTabRow.width, height: max(newTabRow.height, list.maxY - newTabRow.minY))
+        return belowRows.contains(point) ? false : nil
+    }
+
+    /// The slot a dragged tab takes beside `target`, the tab row under the pointer, or nil while the tab keeps its slot. `current` is the slot shown so far, nil while the tab shows in its own place, and `slotFrame` the frame of that slot. Within the slot's list, pinned or open, the row makes room once the pointer crosses its middle in the direction of travel, and coming from above the tab goes after it only in the row's own folder. The divider always lies between the slot and a row of the other list, so that row takes the tab as soon as the pointer is over it: before the row in its upper half, after it in its lower half. A pinned tab thus unpins wherever it enters the open tabs' rows, and an open tab pins wherever it enters the pinned tabs' rows. `takesRowsPlace` tells whether the slot lands where the row was, under the pointer, so that the row's frame holds the hysteresis (`SidebarReorderHover.moved(into:)`); a slot placed on the near side of a row of the other list does not, and the row's middle then decides the next move.
+    static func placement(beside target: Tab, rowFrame: CGRect, dragging tab: Tab, slotFrame: CGRect, current: SidebarTabSlot?, at point: CGPoint) -> (slot: SidebarTabSlot, takesRowsPlace: Bool)? {
+        let fromAbove = slotFrame.midY < rowFrame.midY
+        guard (current?.pinned ?? tab.isPinned) == target.isPinned else {
+            let after = point.y >= rowFrame.midY
+            return (.beside(target.id, folder: target.folderID, pinned: target.isPinned, after: after), after == fromAbove)
+        }
+        guard SidebarReorderHover.crossedMidpoint(from: slotFrame, into: rowFrame, at: point) else { return nil }
+        let folderID = current.map(\.folderID) ?? tab.folderID
+        return (.beside(target.id, folder: target.folderID, pinned: target.isPinned, after: folderID == target.folderID && fromAbove), true)
+    }
+
     /// Move only the dragged row in this render's lists. Its identity stays with the gesture.
     func project(_ tab: Tab, pinnedRows: inout [FolderTree.Row], openRows: inout [FolderTree.Row]) {
         var destination = (pinned ? pinnedRows : openRows).filter { $0.id != tab.id }

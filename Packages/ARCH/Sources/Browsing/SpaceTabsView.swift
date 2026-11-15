@@ -309,7 +309,7 @@ struct SpaceTabsView: View {
         setDropTarget(\.targetFolderID, to: isOverList ? session.folders(in: space.id).first { rowFrames[$0.id]?.contains(point) == true }.flatMap { tree.canMoveTab(tab, into: $0.id) ? $0.id : nil } : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && point.x > listFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: point, in: windowModel) : nil)
-        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. Nor does a live folder's tab, since nothing else enters a live folder and its tabs keep their source's order (live folder rule 4).
+        // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. Nor does a live folder's tab, since nothing else enters a live folder and its tabs keep their source's order (live folder rule 4). A row of the tab's own list makes room once the pointer crosses its middle, and a row of the other list, past the divider, as soon as the pointer reaches it, so the tab pins or unpins wherever it enters the other list's rows (`SidebarTabSlot.placement`). The divider ends the pinned list; the New Tab row and the empty space below it end the open list.
         guard tabReorder.acceptsRow(at: point, in: listFrame, excluding: sidebarDrag.favoriteBarFrames[space.id]) else {
             if tabSlot != nil { tabSlot = nil }
             return
@@ -317,26 +317,25 @@ struct SpaceTabsView: View {
         guard sidebarDrag.targetSpaceID == nil, sidebarDrag.targetFolderID == nil,
               tabReorder.canMove(at: point) else { return }
         let tabs = tree.tabs(in: space.id, pinned: true) + tree.tabs(in: space.id, pinned: false)
-        let frame: CGRect
+        let frame: CGRect?
         let next: SidebarTabSlot
-        if let pinned = listEnd(at: point), let endFrame = rowFrames[pinned ? Self.pinnedListEndID : Self.openListEndID] {
+        if let pinned = SidebarTabSlot.listEnd(at: point, divider: rowFrames[Self.pinnedListEndID], newTabRow: rowFrames[Self.openListEndID], list: listFrame),
+           let endFrame = rowFrames[pinned ? Self.pinnedListEndID : Self.openListEndID] {
             if tabSlot == nil && tree.tabsOutsideFolders(in: space.id, pinned: pinned).last?.id == tab.id { return }
             next = .end(pinned: pinned)
             frame = endFrame
         } else if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(point) == true }),
                   let rowFrame = rowFrames[target.id], let slot = rowFrames[tab.id],
-                  SidebarReorderHover.crossedMidpoint(from: slot, into: rowFrame, at: point) {
+                  let placement = SidebarTabSlot.placement(beside: target, rowFrame: rowFrame, dragging: tab, slotFrame: slot, current: tabSlot, at: point) {
             guard target.agentOwnerID == nil || target.folderID == tab.folderID else { return }
-            let sameList = tabSlot.map { $0.pinned == target.isPinned && $0.folderID == target.folderID }
-                ?? (tab.isPinned == target.isPinned && tab.folderID == target.folderID)
-            next = .beside(target.id, folder: target.folderID, pinned: target.isPinned, after: sameList && slot.midY < rowFrame.midY)
-            frame = rowFrame
+            next = placement.slot
+            frame = placement.takesRowsPlace ? rowFrame : nil
         } else {
             return
         }
         guard next != tabSlot else { return }
         withAnimation(.easeOut(duration: 0.15)) { tabSlot = next }
-        tabReorder.moved(into: frame)
+        if let frame { tabReorder.moved(into: frame) }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
