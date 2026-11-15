@@ -61,7 +61,14 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     /// The Persona's profiles in the engines that run extensions, from the first extension that is checked, loads, or goes.
     private var attached: [EngineKind: any EngineExtensions]?
     /// The installed extensions, on or off, in the order the user installed them, as the manager last listed them.
-    private var plugins: [InstalledPlugin] = []
+    private var plugins: [InstalledPlugin] = [] {
+        didSet {
+            let names = Self.pageNames(of: plugins)
+            if names != pageNames { pageNames = names }
+        }
+    }
+    /// The name of each installed extension, on or off, by the identifier that the engines know it by and that its pages' addresses have as their host (`name(ofPageAt:)`): under the identifier that the versions of a pair share, the name of its version installed first. It changes with an install, an update that renames the extension, and a removal, not with a switch on or off. The session follows it, so that the views that name an extension's page by the extension draw the new name at once without following the whole runtime.
+    @Published public private(set) var pageNames: [String: String] = [:]
     /// The extensions each engine runs, with what it loaded.
     private var loaded: [EngineKind: [PluginID: LoadedExtension]] = [:]
     /// The last change to the engines; each waits for the one before, so that loads and unloads reach the engines in order.
@@ -239,9 +246,17 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
 
     /// The name of the installed extension, on or off, whose page is at `url`, as its options page in a tab, or, for a version of a pair, the pair's name, its version installed first's; nil for any other address. The manifest's name has no spaces at either end, and one of nothing but spaces, as a localized name whose message is empty, names the extension by its identifier (`WebExtensionManifest`), which this then gives. Both engines address an extension's pages under a scheme of their own outside the web schemes, with the identifier they know the extension by as the host, which the address pill shows the name in place of.
     public func name(ofPageAt url: URL) -> String? {
-        guard let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme), let host = url.host?.lowercased(), !host.isEmpty,
-              let installed = plugins.first(where: { Self.extensionID(of: $0) == host }) else { return nil }
-        return (plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed).manifest.name
+        guard let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme), let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+        return pageNames[host]
+    }
+
+    /// `pageNames` for the installed extensions in the order the user installed them: the first plugin with an engine identifier names it, by its own name or its pair's version installed first's.
+    private static func pageNames(of plugins: [InstalledPlugin]) -> [String: String] {
+        var names: [String: String] = [:]
+        for installed in plugins where names[extensionID(of: installed)] == nil {
+            names[extensionID(of: installed)] = (plugins.first { $0.id == installed.id || $0.id == installed.counterpart } ?? installed).manifest.name
+        }
+        return names
     }
 
     /// Waits until the changes to the engines asked for so far, and those they lead to, are done.

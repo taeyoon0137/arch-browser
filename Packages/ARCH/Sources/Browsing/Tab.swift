@@ -100,7 +100,7 @@ import LiveFolders
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
-    /// The session sets this callback to name the web extension of the tab's Persona whose page is at an address (`BrowserSession.extensionName(ofPageAt:in:)`), which the tab's prompts name in place of the identifier that the address has as its host (`PromptSiteIdentity`), `shownTitle` and `shownPageTitle` put in place of a title that only repeats such a page's address, and Now Playing names as the page's site. Without it they show the identifier, or the address that Chromium reports as the title.
+    /// The session sets this callback to name the web extension of the tab's Persona whose page is at an address (`BrowserSession.extensionName(ofPageAt:in:)`), which the tab's prompts name in place of the identifier that the address has as its host (`PromptSiteIdentity`), `shownTitle` and `shownPageTitle` put in place of a title that only repeats such a page's address, and Now Playing names as the page's site. Without it they show the identifier, or the address that Chromium reports as the title. The session has a tab on such a page announce a change when its extension's name changes (`BrowserSession.extensionNamesDidChange(from:to:in:)`).
     var extensionName: ((URL) -> String?)?
     /// Opens a link in a new tab, optionally selecting it in the source window.
     var openURLInNewTab: ((URL, Bool) -> Void)?

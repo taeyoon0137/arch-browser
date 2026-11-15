@@ -671,4 +671,32 @@ struct EngineVersionsTests {
         let blankID = WebExtensionManifest.extensionID(of: blank.id)
         #expect(blank.manifest.name == blankID && runtime.name(ofPageAt: URL(string: "webkit-extension://\(blankID)/options.html")!) == blankID)
     }
+
+    @Test func thePageNamesFollowAnInstallARenameAndARemoval() async throws {
+        let (manager, runtime) = launch()
+        var published: [[String: String]] = []
+        let subscription = runtime.$pageNames.dropFirst().sink { published.append($0) }
+        defer { subscription.cancel() }
+        let tool = try await manager.installEverything(from: package("tool", name: "Tool"), isEnabled: false)
+        let toolID = WebExtensionManifest.extensionID(of: tool.id)
+        let options = URL(string: "chrome-extension://\(toolID)/options.html")!
+        #expect(runtime.name(ofPageAt: options) == "Tool" && published.last == [toolID: "Tool"])
+        // A switch on or off names the page as before and publishes nothing.
+        let count = published.count
+        manager.setEnabled(true, for: tool.id)
+        manager.setEnabled(false, for: tool.id)
+        #expect(runtime.name(ofPageAt: options) == "Tool" && published.count == count)
+        // An update that renames the extension publishes the new name.
+        let update = try await manager.stage(package("tool", name: "Tool Two", version: "2"))
+        try manager.install(update, grant: PluginGrant(requestedBy: update.manifest), isEnabled: false)
+        #expect(runtime.name(ofPageAt: options) == "Tool Two" && published.last == [toolID: "Tool Two"])
+        // A pair's version installed first names the pages of both versions.
+        let (reader, _) = try await installComplementaryPair(in: manager)
+        #expect(runtime.name(ofPageAt: URL(string: "chrome-extension://\(keyID)/options.html")!) == "Reader" && published.last?[keyID] == "Reader")
+        // A removal takes the name away, so the page goes by its identifier again; removing the pair's version installed first leaves the name to the other version.
+        try manager.remove(tool.id)
+        #expect(runtime.name(ofPageAt: options) == nil && published.last == [keyID: "Reader"])
+        try manager.remove(reader)
+        #expect(published.last == [keyID: "Reader for Chromium"])
+    }
 }

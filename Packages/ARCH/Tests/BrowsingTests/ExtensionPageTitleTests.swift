@@ -1,6 +1,9 @@
-// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, a hook's name, and a live folder item's title stay, with a rename to that name and a favorite of the page. Tabs run on stand-ins, in a session on a test engine for the rename and the favorite, with the extension's name from a callback as the session gives it.
+// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, a hook's name, and a live folder item's title stay, with a rename to that name and a favorite of the page, and how the name follows an install, a rename, and a removal of the extension at once. Tabs run on stand-ins, in a session on a test engine for the rename, the favorite, and the changes, with the extension's name from a callback as the session gives it, or for the changes from the Persona's runtime, to which the test lists the extension as the manager does.
 import ARCHEngine
+import Combine
+import Extensions
 import Foundation
+@testable import Plugins
 import Testing
 @testable import Browsing
 
@@ -96,5 +99,67 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
             // Use Current Page as Saved Page takes the page's title as the row names the page.
             #expect(renamed.usingCurrentPage(of: page, among: session.favorites)?.title == "Reader")
         }
+    }
+
+    /// The extension named Reader as the manager lists it to the runtime, under `name`.
+    private func reader(named name: String, isEnabled: Bool = true) -> InstalledPlugin {
+        let manifest = PluginManifest(id: PluginID(rawValue: "extension.\(identifier)")!, name: name, version: "1", summary: "", contributions: PluginContributions())
+        return InstalledPlugin(kind: .webExtension, manifest: manifest, grant: PluginGrant(requestedBy: manifest), isEnabled: isEnabled)
+    }
+
+    /// Lets the main queue run what was sent to it before.
+    private func nextTurn() async {
+        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
+    }
+
+    @Test func theNamesFollowAnInstallARenameAndARemovalAtOnce() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let personaID = space.resolvedPersonaID
+        let otherSpace = try #require(session.spaces(in: session.addPersona(named: "Work").id).first)
+        let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let quietWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let otherWindow = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: otherSpace.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        defer { [window, quietWindow, otherWindow].forEach(session.windowWillClose) }
+        window.commandPaletteMode = .newTab
+        otherWindow.commandPaletteMode = .newTab
+        let page = session.adopt(UnloadedWebContents(url: options, title: "", engine: .webKit, state: nil), spaceID: space.id, personaID: personaID, pinned: false, select: false)
+        let otherPage = session.adopt(UnloadedWebContents(url: URL(string: "webkit-extension://ponmlkjihgfedcbaponmlkjihgfedcba/options.html")!, title: "", engine: .webKit, state: nil),
+                                      spaceID: space.id, personaID: personaID, pinned: false, select: false)
+        let site = session.adopt(UnloadedWebContents(url: URL(string: "https://example.org/")!, title: "", engine: .webKit, state: nil), spaceID: space.id, personaID: personaID, pinned: false, select: false)
+        var changes: [String: Int] = [:]
+        let observers = [("page", page.objectWillChange), ("otherPage", otherPage.objectWillChange), ("site", site.objectWillChange),
+                         ("window", window.objectWillChange), ("quietWindow", quietWindow.objectWillChange), ("otherWindow", otherWindow.objectWillChange)]
+            .map { name, publisher in publisher.sink { changes[name, default: 0] += 1 } }
+        defer { observers.forEach { $0.cancel() } }
+
+        // A runtime whose first list names nothing announces nothing.
+        let runtime = try #require(session.webExtensions(in: personaID))
+        await nextTurn()
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == nil && page.shownTitle == identifier && changes.isEmpty)
+
+        // An install names the page at once, and on the next turn the page's tab and the Persona's window whose palette is open announce it, so the views that follow them draw the name; another extension's page, a web page's tab, the Persona's window without the palette, and another Persona's window do not.
+        runtime.run([reader(named: "Reader")])
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == "Reader" && page.shownTitle == "Reader")
+        await nextTurn()
+        #expect(changes == ["page": 1, "window": 1])
+
+        // A rename, as an update brings, announces the new name; a switch off keeps the name and announces nothing.
+        runtime.run([reader(named: "Reader Two")])
+        await nextTurn()
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == "Reader Two" && page.shownTitle == "Reader Two" && changes == ["page": 2, "window": 2])
+        runtime.run([reader(named: "Reader Two", isEnabled: false)])
+        await nextTurn()
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == "Reader Two" && page.shownTitle == "Reader Two" && changes == ["page": 2, "window": 2])
+
+        // A removal takes the name away, so the page's tab shows the identifier again.
+        runtime.remove(reader(named: "Reader Two", isEnabled: false))
+        await nextTurn()
+        #expect(session.extensionName(ofPageAt: options, in: personaID) == nil && page.shownTitle == identifier && changes == ["page": 3, "window": 3])
     }
 }
