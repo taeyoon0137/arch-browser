@@ -237,7 +237,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         WebExtensionManifest.extensionID(of: installed.manifest.id)
     }
 
-    /// The name of the installed extension, on or off, whose page is at `url`, as its options page in a tab, or, for a version of a pair, the pair's name, its version installed first's, without spaces at either end; nil for any other address, and for a name with nothing else, as a localized name whose message is empty, so that the identifier shows instead. Both engines address an extension's pages under a scheme of their own outside the web schemes, with the identifier they know the extension by as the host, which the address pill shows the name in place of.
+    /// The name of the installed extension, on or off, whose page is at `url`, as its options page in a tab, or, for a version of a pair, the pair's name, its version installed first's, without spaces at either end; nil for any other address. A manifest whose name has nothing else, as a localized name whose message is empty, names the extension by its identifier (`WebExtensionManifest`), which this then gives. Both engines address an extension's pages under a scheme of their own outside the web schemes, with the identifier they know the extension by as the host, which the address pill shows the name in place of.
     public func name(ofPageAt url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(), !EngineURLSchemes.web.contains(scheme), let host = url.host?.lowercased(), !host.isEmpty,
               let installed = plugins.first(where: { Self.extensionID(of: $0) == host }) else { return nil }
