@@ -1000,7 +1000,7 @@ public final class PluginManager: ObservableObject {
 
     /// The panel of a sidebar item whose action is `.panel`, from its plugin, which starts first if it has not started. Nil, with a beep, when the plugin offers no panel for the item or fails to start.
     public func panel(for item: Attributed<PluginSidebarItem>) async -> NSViewController? {
-        guard item.item.action == .panel, let installed = enabledPlugin(item.plugin), installed.manifest.contributions.sidebarItems.contains(item.item) else { return nil }
+        guard case .panel = item.item.action, let installed = enabledPlugin(item.plugin), installed.manifest.contributions.sidebarItems.contains(item.item) else { return nil }
         if let panel = try? await start(installed)?.panel(for: item.item.id) { return panel }
         NSSound.beep()
         return nil
@@ -1445,7 +1445,7 @@ struct PluginListFile: Codable {
 
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.
 @MainActor
-final class ScopedPluginContext: PluginContext {
+final class ScopedPluginContext: PluginPanelAIContext {
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
@@ -1525,10 +1525,18 @@ final class ScopedPluginContext: PluginContext {
 
     /// A manager without an AI interface, as in tests, gives no AI. The client belongs to the hook step that runs now, if any.
     func ai() throws -> any AIClient {
+        try aiRequestsInReach().client()
+    }
+
+    func panelAI() throws -> any AIClient {
+        try aiRequestsInReach().client(inStep: false)
+    }
+
+    private func aiRequestsInReach() throws -> PluginAIRequests {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.ai)
         guard let aiRequests else { throw PluginError.permissionDenied(.ai) }
-        return aiRequests.client()
+        return aiRequests
     }
 
     private func require(_ permission: PluginPermission) throws {

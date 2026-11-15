@@ -1,4 +1,4 @@
-// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document.
+// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws; a panel's requests outside the plugin's hook steps; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document.
 import AI
 import ARCHEngine
 import Events
@@ -576,6 +576,103 @@ private final class RecordingHost: PluginBrowserHost {
         let started = ContinuousClock.now
         await manager.run(PluginCommandRef(plugin: package.manifest.id, command: "hang"), PluginInvocation(tab: nil))
         #expect(ContinuousClock.now - started < .seconds(8))
+    }
+}
+
+extension PluginAITests {
+    /// A command-line tool that reads the request and prints its reply in two lines, `seconds` apart.
+    private static func streamingTool(pause seconds: Double) -> AIProviderConfiguration {
+        AIProviderConfiguration(name: "Streaming", kind: .commandLine(AICommandLineConfiguration(executable: URL(fileURLWithPath: "/bin/sh"),
+                                                                                                 arguments: ["-c", "cat > /dev/null; printf 'Short\\n'; sleep \(seconds); printf 'answer\\n'"],
+                                                                                                 environment: ["PATH": "/usr/bin:/bin"])),
+                                models: [AIModelConfiguration(name: "")], limits: .commandLine)
+    }
+
+    /// The stream's listener gets each piece of the reply as it arrives, and waiting for the next piece does not count toward the hang limit. A listener that throws stops the request.
+    @Test func aScriptPluginStreamsAReplyAsItArrives() async throws {
+        let manifest = #"{"id": "org.example.ai-stream", "name": "AI Stream", "version": "1", "apiVersion": 1, "summary": "Streams.", "permissions": ["ai"], "background": "b.js", "contributes": {"commands": [{"id": "stream", "title": "Stream"}, {"id": "stop", "title": "Stop"}]}}"#
+        let background = """
+        const request = { messages: [{ role: "user", text: "Hi" }] };
+        arch.commands.onRun("stream", async () => {
+          const pieces = [];
+          const reply = await arch.ai.stream(request, (text) => { pieces.push(text); });
+          await arch.storage.set("streamed", { pieces, reply });
+          await arch.storage.set("withoutListener", await arch.ai.stream(request).catch((error) => error.message));
+        });
+        arch.commands.onRun("stop", async () => {
+          try {
+            await arch.ai.stream(request, () => { throw new Error("Enough"); });
+          } catch (error) {
+            await arch.storage.set("stopped", error.message);
+          }
+        });
+        """
+        let feature = AIFeatureID.plugin("org.example.ai-stream")
+        let service = service()
+        let tool = Self.streamingTool(pause: 3)
+        service.settings.providers = [tool]
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool)]), for: feature)
+        let manager = manager(ai: service, hang: 1.5)
+        defer { manager.close() }
+        let package = try await manager.stage(try writePackage(["plugin.json": manifest, "b.js": background]))
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+
+        await manager.run(PluginCommandRef(plugin: package.manifest.id, command: "stream"), PluginInvocation(tab: nil))
+        guard case let .object(streamed)? = storage.value(forKey: "streamed"), case let .array(pieces)? = streamed["pieces"],
+              case let .object(reply)? = streamed["reply"], case let .string(text)? = reply["text"] else {
+            Issue.record("The stream did not finish: \(String(describing: storage.value(forKey: "streamed")))")
+            return
+        }
+        #expect(pieces.count == 2 && pieces.map { if case let .string(piece) = $0 { piece } else { "" } }.joined() == text)
+        #expect(text.hasPrefix("Short") && text.hasSuffix("answer") && reply["finishReason"] == .string("completed"))
+        #expect(storage.value(forKey: "withoutListener") == .string("invalidCall") && manager.plugins.first?.failure == nil)
+
+        let started = ContinuousClock.now
+        await manager.run(PluginCommandRef(plugin: package.manifest.id, command: "stop"), PluginInvocation(tab: nil))
+        #expect(storage.value(forKey: "stopped") == .string("Enough"))
+        #expect(await eventually {
+            if case .cancelled? = service.activity.last?.result { return true }
+            return false
+        })
+        #expect(ContinuousClock.now - started < .seconds(3))
+    }
+
+    /// A panel's request belongs to no hook step, so stopping the step that runs meanwhile leaves it running.
+    @Test func aPanelsRequestsStayOutOfThePluginsHookSteps() async throws {
+        let manifest = #"{"id": "org.example.ai-panel", "name": "AI Panel", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": ["ai"], "events": ["pageLoaded"], "background": "b.js", "contributes": {"sidebarItems": [{"id": "panel", "title": "Ask", "symbol": "sparkles", "panel": "panel.html"}]}}"#
+        let background = """
+        arch.events.on("pageLoaded", async () => {
+          try {
+            await arch.storage.set("step", (await arch.ai.reply({ messages: [{ role: "user", text: "Name it" }] })).text);
+          } catch (error) {
+            await arch.storage.set("step", error.message);
+          }
+        });
+        """
+        let panelScript = #"arch.ai.reply({ messages: [{ role: "user", text: "Hi" }] }).then((reply) => arch.storage.set("panel", reply.text), (error) => arch.storage.set("panel", error.message));"#
+        let feature = AIFeatureID.plugin("org.example.ai-panel")
+        let service = service(answeringAfter: 3, for: [feature])
+        let manager = manager(ai: service)
+        defer { manager.close() }
+        let package = try await manager.stage(try writePackage([
+            "plugin.json": manifest, "b.js": background, "panel.html": #"<!doctype html><script src="panel.js"></script>"#, "panel.js": panelScript,
+        ]))
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+
+        let page = tab()
+        bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: true))
+        try await Task.sleep(for: .seconds(1))
+        let item = try #require(manager.contributions.sidebarItems.first)
+        let panel = try #require(await manager.panel(for: item))
+        _ = panel.view
+        panel.viewWillAppear()
+        defer { panel.viewDidDisappear() }
+        try await Task.sleep(for: .milliseconds(500))
+        service.hooks.scheduler.cancel(subject: page.id)
+        #expect(await eventually { storage.value(forKey: "step") == .string("cancelled") })
+        #expect(await eventually { storage.value(forKey: "panel") == .string("Short answer") })
     }
 }
 

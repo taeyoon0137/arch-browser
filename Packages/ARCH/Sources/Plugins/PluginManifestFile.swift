@@ -2,13 +2,14 @@
 import ARCHEngine
 import Events
 import Foundation
+import UniformTypeIdentifiers
 
 /// What a package's `plugin.json` declares.
 struct ScriptManifest {
     static let fileName = "plugin.json"
 
     let manifest: PluginManifest
-    /// The package path of the background script, which commands and page script values reach. A plugin without one adds only page scripts and settings.
+    /// The package path of the background script, which commands and page script values reach. A plugin without one adds only page scripts, settings, and panels.
     let background: String?
 
     /// Reads `plugin.json` in the package folder at `root`. Throws `PluginError.unsupportedAPIVersion` for a newer plugin API, and `.invalidPackage`, `.invalidMatchPattern`, or `.invalidShortcut` for a manifest that breaks the rules of `docs/plugins.md`.
@@ -55,7 +56,7 @@ struct ScriptManifest {
         let commands = try object.objects("commands").map(command)
         let commandIDs = try unique(commands.map(\.id), in: "contributes.commands")
         let menuItems = try object.objects("menus").map { try menuItem($0, commands: commandIDs) }
-        let sidebarItems = try object.objects("sidebarItems").map { try sidebarItem($0, commands: commandIDs) }
+        let sidebarItems = try object.objects("sidebarItems").map { try sidebarItem($0, commands: commandIDs, packageAt: root) }
         _ = try unique(sidebarItems.map(\.id), in: "contributes.sidebarItems")
         let settings = try object.objects("settings").map(setting)
         _ = try unique(settings.map(\.key), in: "contributes.settings")
@@ -99,13 +100,25 @@ struct ScriptManifest {
         return item
     }
 
-    /// A script plugin's sidebar item runs a command.
-    private static func sidebarItem(_ object: ManifestObject, commands: Set<String>) throws -> PluginSidebarItem {
+    /// A script plugin's sidebar item runs the command that `command` names or shows the HTML file of the package that `panel` names in a panel, and takes one of the two.
+    private static func sidebarItem(_ object: ManifestObject, commands: Set<String>, packageAt root: URL) throws -> PluginSidebarItem {
         var object = object
-        let item = PluginSidebarItem(id: try object.string("id"), title: try object.string("title"), symbol: try object.string("symbol"),
-                                     action: .command(try object.listedCommand(commands)))
+        let id = try object.string("id")
+        let title = try object.string("title")
+        let symbol = try object.string("symbol")
+        let action: PluginSidebarItem.Action
+        if let page = try object.optionalString("panel") {
+            guard object.value("command") == nil else { throw invalidManifest("\(object.path) takes a command or a panel, not both") }
+            _ = try packageFile(page, in: root, named: "\(object.path).panel")
+            guard UTType(filenameExtension: (page as NSString).pathExtension)?.conforms(to: .html) == true else {
+                throw invalidManifest("\(object.path).panel names “\(page)”, which is not an HTML file")
+            }
+            action = .panel(page: page)
+        } else {
+            action = .command(try object.listedCommand(commands))
+        }
         try object.finish()
-        return item
+        return PluginSidebarItem(id: id, title: title, symbol: symbol, action: action)
     }
 
     /// `type` is `toggle`, `text`, `number` with an optional `min` and `max`, `choice` with its `options`, or `secret`. Each but a secret takes an optional `default`: false, empty text, the minimum or 0, and the first option without one.

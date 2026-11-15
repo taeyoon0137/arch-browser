@@ -115,8 +115,8 @@ public struct PluginSidebarItem: Identifiable, Hashable, Sendable {
     public enum Action: Hashable, Sendable {
         /// Runs one of the plugin's commands on the window's selected tab.
         case command(String)
-        /// Shows the plugin's panel for the item, from `Plugin.panel(for:)`, in a popover beside the row.
-        case panel
+        /// Shows the plugin's panel for the item, from `Plugin.panel(for:)`, in a popover beside the row. A script plugin's item names the package path of the HTML file that its panel shows; a built-in plugin's names none.
+        case panel(page: String? = nil)
     }
 
     /// Belongs to the plugin, so two plugins can use the same identifier.

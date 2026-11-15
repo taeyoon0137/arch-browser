@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, sidebar items that show a panel, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, a panel's page with its own `arch`, which keeps the instance while it shows, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -111,6 +111,32 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             folder.url.appendingPathComponent("Plugins/\($0)/Staging").path
         }
         #expect(try staging.allSatisfy { try FileManager.default.contentsOfDirectory(atPath: $0).isEmpty })
+    }
+
+    /// A sidebar item shows one of the package's HTML files in a panel, which needs no background script, or runs a command, but not both.
+    @Test func readsSidebarItemsThatShowAPanel() async throws {
+        let manifest = #"{"id": "org.example.panel", "name": "Panel", "version": "1", "apiVersion": 1, "summary": "Shows.", "contributes": {"sidebarItems": [ITEM]}}"#
+        let item = #"{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}"#
+        let package = try await manager().stage(try writePackage("panel", ["plugin.json": manifest.replacingOccurrences(of: "ITEM", with: item), "panel.html": "<!doctype html>"]))
+        #expect(package.manifest.contributions.sidebarItems.map(\.action) == [.panel(page: "panel.html")] && package.background == nil)
+        let cases: [(String, String, [String: String], String)] = [
+            ("both", #"{"id": "a", "title": "A", "symbol": "a", "command": "a", "panel": "panel.html"}"#, ["panel.html": ""],
+             "plugin.json: contributes.sidebarItems[0] takes a command or a panel, not both."),
+            ("missing page", #"{"id": "a", "title": "A", "symbol": "a", "panel": "missing.html"}"#, [:],
+             "plugin.json: contributes.sidebarItems[0].panel names “missing.html”, which is not a file of the package."),
+            ("not HTML", #"{"id": "a", "title": "A", "symbol": "a", "panel": "panel.js"}"#, ["panel.js": ""],
+             "plugin.json: contributes.sidebarItems[0].panel names “panel.js”, which is not an HTML file."),
+            ("neither", #"{"id": "a", "title": "A", "symbol": "a"}"#, [:], "plugin.json: contributes.sidebarItems[0].command is missing."),
+        ]
+        let manager = manager()
+        for (name, item, files, reason) in cases {
+            let package = try writePackage("panel \(name)", files.merging(["plugin.json": manifest.replacingOccurrences(of: "ITEM", with: item)]) { $1 })
+            await #expect(throws: PluginError.invalidPackage(reason), "\(name)") { try await manager.stage(package) }
+        }
+    }
+
+    @Test func addressesAPanelsPageInThePackage() throws {
+        #expect(PluginSandbox.url(of: "ui/panel page.html", in: sampleID).absoluteString == "arch-plugin://org.example.sample/ui/panel%20page.html")
     }
 
     /// A name of nothing but spaces would show as no name, so the plugin goes by its identifier. Any other name loses the spaces at either end.
@@ -251,6 +277,47 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             "eval": .string("EvalError"), "fetch": .string("TypeError"), "webRTC": .string("undefined,undefined"), "copy": .string("permissionDenied"),
             "reservedKey": .string("reservedKey"), "removed": .string("allowed"),
         ]))
+    }
+
+    /// A panel shows its page with the bridge's calls but not the background script's listeners, and keeps the instance from its idle stop while it shows.
+    @Test func showsAPanelAndKeepsTheInstanceWhileItShows() async throws {
+        let id = PluginID(rawValue: "org.example.panel")!
+        let root = folder.url.appendingPathComponent("Packages/Panel", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let files = [
+            "plugin.json": #"{"id": "org.example.panel", "name": "Panel", "version": "1", "apiVersion": 1, "summary": "Shows.", "background": "b.js", "contributes": {"commands": [{"id": "count", "title": "Count"}], "sidebarItems": [{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}]}}"#,
+            "b.js": #"let runs = 0; arch.commands.onRun("count", () => arch.storage.set("runs", ++runs));"#,
+            "panel.html": #"<!doctype html><meta charset="utf-8"><script src="panel.js"></script>"#,
+            "panel.js": #"arch.storage.set("panel", { members: Object.keys(arch).sort(), stream: typeof arch.ai.stream, deliver: typeof window.__archDeliver });"#,
+        ]
+        for (path, text) in files {
+            try Data(text.utf8).write(to: root.appendingPathComponent(path))
+        }
+        let manager = manager(ScriptPluginLimits(hang: 10, idle: 0.2))
+        defer { manager.close() }
+        let package = try await manager.stage(root)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+        let item = try #require(manager.contributions.sidebarItems.first)
+        let panel = try #require(await manager.panel(for: item) as? ScriptPluginPanel)
+        #expect(panel.title == "Panel" && panel.preferredContentSize == ScriptPluginPanel.size)
+        // The popover loads the panel's view as it starts to show it.
+        _ = panel.view
+        panel.viewWillAppear()
+        #expect(await eventually { storage.value(forKey: "panel") != nil })
+        #expect(storage.value(forKey: "panel") == .object([
+            "members": .array(["ai", "secrets", "settings", "storage", "tabs", "ui"].map(PluginValue.string)), "stream": .string("function"), "deliver": .string("undefined"),
+        ]))
+        let count = PluginCommandRef(plugin: id, command: "count")
+        await manager.run(count, PluginInvocation(tab: nil))
+        try await Task.sleep(for: .milliseconds(600))
+        await manager.run(count, PluginInvocation(tab: nil))
+        // The start that ran the first command ran the second one too.
+        #expect(storage.value(forKey: "runs") == .number(2))
+        panel.viewDidDisappear()
+        try await Task.sleep(for: .milliseconds(600))
+        await manager.run(count, PluginInvocation(tab: nil))
+        #expect(storage.value(forKey: "runs") == .number(1))
     }
 
     @Test func stopsWhenIdleAndStartsAgainAtTheNextUse() async throws {
@@ -433,6 +500,17 @@ private extension PluginValue {
         if case let .object(fields) = self { return fields }
         return nil
     }
+}
+
+/// Polls the main actor until the condition holds or ten seconds pass.
+@MainActor
+private func eventually(_ condition: @MainActor () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(10)
+    while ContinuousClock.now < deadline {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
 }
 
 /// Keeps the main actor from running anything else for the interval.

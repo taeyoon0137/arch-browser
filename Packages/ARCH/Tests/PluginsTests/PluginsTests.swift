@@ -206,7 +206,7 @@ import Testing
                     PluginMenuItem(command: "unlisted", location: .spaceMenu),
                 ],
                 sidebarItems: [
-                    PluginSidebarItem(id: "panel", title: "Panel", symbol: "sidebar.right", action: .panel),
+                    PluginSidebarItem(id: "panel", title: "Panel", symbol: "sidebar.right", action: .panel()),
                     PluginSidebarItem(id: "save", title: "Save", symbol: "square.and.arrow.down", action: .command("save")),
                     PluginSidebarItem(id: "unlisted", title: "Unlisted", symbol: "questionmark", action: .command("unlisted")),
                 ])),
@@ -217,7 +217,7 @@ import Testing
             installed("org.example.off", name: "Off", contributions: PluginContributions(
                 commands: [PluginCommand(id: "read", title: "Read")],
                 menuItems: [PluginMenuItem(command: "read", location: .pluginsMenu)],
-                sidebarItems: [PluginSidebarItem(id: "panel", title: "Panel", symbol: "sidebar.right", action: .panel)]), isEnabled: false),
+                sidebarItems: [PluginSidebarItem(id: "panel", title: "Panel", symbol: "sidebar.right", action: .panel())]), isEnabled: false),
         ])
     }
 
@@ -1102,7 +1102,7 @@ private final class PanelPlugin: RecordingPlugin {
         PluginManifest(id: PluginID(rawValue: "org.example.panel")!, name: "Panel", version: "1", summary: "", contributions: PluginContributions(
             commands: [PluginCommand(id: "record", title: "Record")],
             sidebarItems: [
-                PluginSidebarItem(id: "panel", title: "Panel", symbol: "sidebar.right", action: .panel),
+                PluginSidebarItem(id: "panel", title: "Panel", symbol: "sidebar.right", action: .panel()),
                 PluginSidebarItem(id: "command", title: "Command", symbol: "play", action: .command("record")),
             ]))
     }
