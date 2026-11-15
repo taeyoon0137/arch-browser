@@ -156,7 +156,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | Permission | Grants | Without it |
 |---|---|---|
 | `tabs` | Titles and addresses of the Persona's tabs, in calls and events | Tabs and events carry identifiers, engines, and pinned state only, except for pages the site grant covers |
-| `tabs.manage` | Open, close, select, and rename the Persona's tabs (`openTab(_:_:)`, `closeTab(_:)`, `selectTab(_:)`, and what `tabs.rename` grants). Moving tabs follows once `PluginContext` has a member for it | Calls throw `permissionDenied` |
+| `tabs.manage` | Open, close, select, and rename the Persona's tabs (`openTab(_:_:)`, `closeTab(_:)`, `selectTab(_:)`, and what `tabs.rename` grants). A tab that it opens downloads no file at its address, closing at once, and its pages' downloads, the first included, ask with a card over the tab until the user clicks in its page or loads an address in it (`PageDownloadGate.pluginDidOpen()`), so the plugin cannot fill the downloads folder. Moving tabs follows once `PluginContext` has a member for it | Calls throw `permissionDenied` |
 | `tabs.rename` | Rename tabs; included in `tabs.manage`. A name set by code is the tab's suggested name, so the user's own name wins (`docs/hooks.md`, hook decision 13) | Calls throw `permissionDenied` |
 | Sites (`sites` with `siteAccess`) | Page scripts, page messages, and running package scripts in matching pages | No page access |
 | `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) and the pages of the tabs that a plugin with `tabs.manage` opens, whose addresses can carry what it knows to any host |
@@ -660,7 +660,7 @@ public protocol PluginContext: AnyObject {
     func tab(_ id: PluginTab.ID) throws -> PluginTab?
     /// The selected tab of the browser window that last became main, as `tab(_:)` gives it, while it is one the plugin reaches and no internal page or the preview panel covers its page, as a command gets it; nil otherwise.
     func selectedTab() throws -> PluginTab?
-    /// Needs `tabs.manage`, as do the next two. Opens a tab at an `http` or `https` address, else throws `invalidAddress`, in the options' space, which must be the Persona's (else `notGranted`), or where a new tab that the user opens goes, and selects it as `selectTab(_:)` does unless the options say not to. Its opening, selection, and first load carry the plugin as their cause, so the plugin does not hear of them.
+    /// Needs `tabs.manage`, as do the next two. Opens a tab at an `http` or `https` address, else throws `invalidAddress`, in the options' space, which must be the Persona's (else `notGranted`), or where a new tab that the user opens goes, and selects it as `selectTab(_:)` does unless the options say not to. Its opening, selection, and first load carry the plugin as their cause, so the plugin does not hear of them. The tab downloads nothing without asking until the user clicks in it or loads an address in it, and closes without downloading when its address is a file's.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
     /// Closes the tab without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads, a favorite's tab ends, a live folder item's tab is dismissed, and any other joins the closed list. The close's reason is `plugin`.
     func closeTab(_ id: PluginTab.ID) throws

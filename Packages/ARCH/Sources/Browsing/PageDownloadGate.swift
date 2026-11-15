@@ -1,4 +1,4 @@
-// When a page may start a download without asking: its first download goes through, and so does one after a click in the page, as when the user clicks a file's link, or one that an address Arch loads for the user starts. Any other download waits until the user answers whether the page may download more files, so that a page cannot fill the downloads folder on its own. An Allow lasts until the tab commits another document. A refusal and the first download last until the gate starts over: at a document the user asked for, by a click in the page or through Arch, or one on another site. A document that the page loads on its own on its site, as by reloading or changing its address, keeps them, so that a page cannot reload itself for another first download.
+// When a page may start a download without asking: its first download goes through, and so does one after a click in the page, as when the user clicks a file's link, or one that an address Arch loads for the user starts. Any other download waits until the user answers whether the page may download more files, so that a page cannot fill the downloads folder on its own. An Allow lasts until the tab commits another document. A refusal and the first download last until the gate starts over: at a document the user asked for, by a click in the page or through Arch, or one on another site. A document that the page loads on its own on its site, as by reloading or changing its address, keeps them, so that a page cannot reload itself for another first download. A tab that a plugin opened has no first download until the user clicks in its page or Arch loads an address in it for the user, so that a plugin cannot fill the downloads folder through the tabs it opens.
 
 /// One tab's downloads from its current documents. `BrowserSession` admits each download through it and asks with a card over the tab when it says so. The gate returns the decisions for the caller to run, so that none runs while the gate changes.
 struct PageDownloadGate {
@@ -25,6 +25,8 @@ struct PageDownloadGate {
     private var answer: Bool?
     /// The decisions of the downloads that wait for the answer.
     private var waiting: [(Bool) -> Void] = []
+    /// Set when a plugin opened the tab, until the user clicks in its page or Arch loads an address in it for the user: each document starts over with its first download used, and an address that only points at a file downloads nothing (`Tab.webContents(_:shouldDownload:hasPage:)`).
+    private(set) var isOpenedByPlugin = false
     /// Counts the times the gate started over, so that an answer to a question asked before decides only the downloads that wait for it.
     private var start = 0
     private var askedStart: Int?
@@ -56,22 +58,30 @@ struct PageDownloadGate {
         return waiting
     }
 
-    /// A click in the page lets it start one more download without asking, and the next document starts over.
+    /// A click in the page lets it start one more download without asking, and the next document starts over, also in a tab that a plugin opened.
     mutating func userDidClick() {
         hasUserInput = true
+        isOpenedByPlugin = false
     }
 
-    /// Arch loads an address in the tab for the user, as one typed in the palette, Back, or Reload: a download that the load starts goes on without asking, even after a refusal, and the document it loads starts over.
+    /// Arch loads an address in the tab for the user, as one typed in the palette, Back, or Reload: a download that the load starts goes on without asking, even after a refusal, and the document it loads starts over, also in a tab that a plugin opened.
     mutating func userDidNavigate() {
         isUserLoad = true
+        isOpenedByPlugin = false
     }
 
-    /// The tab committed a document of `site`, which ends an Allow. The gate starts over when the user asked for the document or it is on another site. Downloads that wait keep waiting for the question already asked.
+    /// A plugin opened the tab, so every download of its pages asks until the user clicks in a page of the tab or loads an address in it.
+    mutating func pluginDidOpen() {
+        isOpenedByPlugin = true
+        hasDownloaded = true
+    }
+
+    /// The tab committed a document of `site`, which ends an Allow. The gate starts over when the user asked for the document or it is on another site, without a first download in a tab that a plugin opened. Downloads that wait keep waiting for the question already asked.
     mutating func documentDidCommit(site: String?) {
         if answer == true { answer = nil }
         if isUserLoad || hasUserInput || site != self.site {
             start += 1
-            hasDownloaded = false
+            hasDownloaded = isOpenedByPlugin
             hasUserInput = false
             answer = nil
         }
