@@ -75,8 +75,8 @@ struct SpaceTheme: Equatable {
     let strength: TintStrength
     /// The appearance the sidebar draws its text and icons in.
     let sidebarColorScheme: ColorScheme
-    /// The window's own appearance.
-    private let colorScheme: ColorScheme
+    /// The window's own appearance. What the sidebar opens with a background of its own, such as the site settings popover, draws in it rather than in `sidebarColorScheme`.
+    let colorScheme: ColorScheme
     /// The wash as the sidebar shows it, at the gradient's average opacity.
     private let wash: SRGBColor
 

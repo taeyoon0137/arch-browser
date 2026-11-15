@@ -5,11 +5,19 @@ import SwiftUI
 struct PromptIdentityRow: View {
     let identity: PromptIdentity
     let isHeader: Bool
+    /// The column that the 16-point icon centers in, and the space between it and the name. A prompt card keeps the icon's own width and the row's spacing; the site settings popover's header takes its rows' column and spacing, so that the name starts where their labels do.
+    var iconColumnWidth: CGFloat = 16
+    var iconSpacing: CGFloat = Self.spacing
+
+    /// The space between the row's parts.
+    private static let spacing: CGFloat = 6
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Self.spacing) {
             icon
                 .frame(width: 16, height: 16)
+                .frame(width: iconColumnWidth)
+                .padding(.trailing, iconSpacing - Self.spacing)
                 .accessibilityHidden(true)
             Text(identity.name)
                 .font(.system(size: isHeader ? 13 : 12, weight: isHeader ? .semibold : .medium))

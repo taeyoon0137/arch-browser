@@ -1,4 +1,4 @@
-// The site settings popover's Extensions group for the web extensions of the tab's Persona: on a Web Store page, first the store's row, Install This Extension… or, while the Persona has the page's extension installed, its name; then a row for each enabled extension with an action, and for one without while the engine keeps it from the tab's site, a pair once, with the action's icon, label, and badge for the tab. A click closes the popover and runs the action, which shows the extension's popup from the site settings button or tells the extension of the click. An extension that the engine kept from running on the tab's site, as Chromium keeps one whose sites wait for a click, offers Allow on This Site. On a tab whose engine runs extensions but none of a plugin's versions, the row says where the plugin runs and, while the plugin asks for that engine's version, offers Install <Engine> Version… and Dismiss.
+// The site settings popover's Extensions group for the web extensions of the tab's Persona: on a Web Store page, first the store's row, Install This Extension… or, while the Persona has the page's extension installed, its name with Installed; then a row for each enabled extension with an action, and for one without while the engine keeps it from the tab's site, a pair once, with the action's icon, label, and badge for the tab. A click closes the popover and runs the action, which shows the extension's popup from the site settings button or tells the extension of the click. An extension that the engine kept from running on the tab's site, as Chromium keeps one whose sites wait for a click, offers Allow on This Site. On a tab whose engine runs extensions but none of a plugin's versions, the row says where the plugin runs and, while the plugin asks for that engine's version, offers Install <Engine> Version… and Dismiss, side by side or, where they do not fit, one above the other.
 import ARCHEngine
 import Extensions
 import Plugins
@@ -34,7 +34,9 @@ struct WebExtensionActionsSection: View {
                 // As tall as the rows up to 260 points, about eight actions; more scroll inside the box, so that the popover stays on the screen.
                 ViewThatFits(in: .vertical) {
                     rows
+                    // Rows scrolled past the box's edge and the scroll bar end at its corners.
                     ScrollView { rows }
+                        .clipShape(RoundedRectangle(cornerRadius: SiteSettingsMetrics.boxCornerRadius, style: .continuous))
                 }
                 .frame(maxHeight: 260)
             }
@@ -53,7 +55,7 @@ struct WebExtensionActionsSection: View {
         return plugins.leadVersion(of: installed.id)?.manifest.name ?? installed.manifest.name
     }
 
-    /// Install This Extension… closes the popover and opens the store sheet in Settings ▸ Plugins for the tab's Persona and space; an installed extension's row only names it.
+    /// Install This Extension… closes the popover and opens the store sheet in Settings ▸ Plugins for the tab's Persona and space; an installed extension's row only names it, with Installed at its end.
     @ViewBuilder private func row(for storeRow: WebStorePageRow) -> some View {
         switch storeRow {
         case let .install(id):
@@ -63,7 +65,7 @@ struct WebExtensionActionsSection: View {
             })
             .disabled(session.installFromWebStore == nil)
         case .installed:
-            SiteSettingsRow(symbol: "checkmark.circle", title: storeRow.title)
+            SiteSettingsRow(symbol: "checkmark.circle", title: storeRow.title, detail: "Installed")
         }
     }
 
@@ -96,12 +98,15 @@ struct WebExtensionActionsSection: View {
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
-                                HStack {
-                                    Button("Install \(engine.displayName) Version\u{2026}") {
-                                        close()
-                                        session.installEngineVersion?(tab.personaID, tabSpace, item.id, engine)
-                                    }
-                                    Button("Dismiss") { session.plugins(in: tab.personaID).dismissVersionNote(of: item.id, for: engine) }
+                                let install = Button("Install \(engine.displayName) Version\u{2026}") {
+                                    close()
+                                    session.installEngineVersion?(tab.personaID, tabSpace, item.id, engine)
+                                }
+                                let dismiss = Button("Dismiss") { session.plugins(in: tab.personaID).dismissVersionNote(of: item.id, for: engine) }
+                                // Side by side the two take about all of the row, so a scroll bar that stays visible would cut them short.
+                                ViewThatFits(in: .horizontal) {
+                                    HStack { install; dismiss }
+                                    VStack(alignment: .leading, spacing: 6) { install; dismiss }
                                 }
                                 .controlSize(.small)
                             }
@@ -164,7 +169,7 @@ struct WebStoreReader {
 enum WebStorePageRow: Equatable {
     /// Install This Extension…, for the extension's identifier.
     case install(String)
-    /// The name of the Persona's plugin of the page's extension.
+    /// The name of the Persona's plugin of the page's extension, which the row shows with Installed.
     case installed(String)
 
     /// The row for a tab at `pageURL`, or nil when it is not a store page. `installedName` names the tab's Persona's plugin of an extension identifier, or gives nil while it has none.
@@ -176,7 +181,7 @@ enum WebStorePageRow: Equatable {
     var title: String {
         switch self {
         case .install: return "Install This Extension\u{2026}"
-        case let .installed(name): return "\u{201C}\(name)\u{201D} is installed."
+        case let .installed(name): return name
         }
     }
 

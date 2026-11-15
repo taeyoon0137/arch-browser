@@ -10,6 +10,7 @@ struct AddressPillView: View {
     /// `nil` when no tab is open.
     let tab: Tab?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.spaceTheme) private var theme
     @Environment(\.addressPillPull) private var pull
     @State private var isShowingSiteSettings = false
 
@@ -88,9 +89,12 @@ struct AddressPillView: View {
             SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.siteSettingsButtonView))
                 .padding(.trailing, 4)
-                .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
-                    SiteSettingsView(session: session, tab: tab) { isShowingSiteSettings = false }
-                }
+                // The popover has its own background, so it draws in the window's appearance, not the one the sidebar may take for a strong tint, which a popover on the button itself would inherit.
+                .background(Color.clear
+                    .popover(isPresented: $isShowingSiteSettings, arrowEdge: .bottom) {
+                        SiteSettingsView(session: session, tab: tab) { isShowingSiteSettings = false }
+                    }
+                    .environment(\.colorScheme, theme.colorScheme))
         }
         .font(.system(size: 14))
         .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
@@ -257,7 +261,7 @@ struct TabEngineSection: View {
             }
             if tab.preferredEngine != tab.engineKind {
                 SiteSettingsDivider()
-                SiteSettingsRow(symbol: "pin", title: "Keep Using \(tab.engineKind.displayName)", action: {
+                SiteSettingsRow(symbol: "checkmark.circle", title: "Keep Using \(tab.engineKind.displayName)", action: {
                     session.switchEngine(of: tab, to: tab.engineKind)
                 })
             }
