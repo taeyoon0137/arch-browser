@@ -19,6 +19,7 @@ public enum TabCloseReason: String {
     case webExtension
     /// Delete Persona closed it with the rest of its Persona.
     case persona
+    /// A sidebar sync deletion or a first-sync match from another Mac removed it.
     case sync
 
     var title: String {

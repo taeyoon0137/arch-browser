@@ -1,3 +1,4 @@
+import ARCHEngine
 import Browsing
 import CloudKit
 import Foundation
@@ -7,6 +8,7 @@ import Testing
 @MainActor @Suite struct SyncControllerTests {
     private final class Sidebar: SyncedSidebar {
         let needsFullSidebarSync = false
+        let defaultEngine = EngineKind.webKit
         func finishSidebarSyncRecovery() {}
         var sidebarSyncState: SidebarSyncState
         var onSidebarSyncSave: ((SidebarSyncState) -> Void)?
@@ -170,6 +172,43 @@ import Testing
         await f.controller.refresh()
         #expect(f.engines.last?.startedFrom == token && f.sidebar.saved?.spaces.first?.id == fresh.id)
         #expect(f.engines.last?.pendingChanges.isEmpty == true)
+    }
+
+    /// A record this build cannot apply, such as a space with a newer build's tint, waits on the server with the tab in it: the rest of the fetch applies, and a later save neither deletes nor overwrites them. A later launch that can apply them, as a newer build can, shows them instead of deleting them.
+    @Test func aRecordThisBuildCannotApplyWaitsWhileTheRestSyncs() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        let lab = UUID().uuidString, labTab = UUID().uuidString, work = UUID().uuidString
+        func row(_ type: SyncRecordType, _ name: String, _ fields: [String: SyncValue]) -> CKRecord {
+            SyncCloudKitRecords.ckRecord(from: SyncRecord(recordType: type, recordName: name, fields: fields, modifiedAt: f.clock))
+        }
+        func space(_ name: String, tint: String) -> CKRecord {
+            row(.space, name, ["persona": .reference("default"), "name": .text("Room"), "symbol": .text("star"), "tint": .text(tint), "order": .number(5)])
+        }
+        engine.fetchScript = [.fetchedChanges(.init(records: [space(work, tint: "green"), space(lab, tint: "ultraviolet"),
+            row(.tab, labTab, ["persona": .reference("default"), "space": .reference(lab), "engine": .text("webKit"), "order": .number(1)])]))]
+        await f.controller.refresh()
+        #expect(f.controller.lastError == nil && f.controller.lastSync != nil)
+        #expect(f.sidebar.sidebarSyncState.spaces.map(\.id.uuidString).contains(work))
+        #expect(!f.sidebar.sidebarSyncState.spaces.map(\.id.uuidString).contains(lab) && f.sidebar.sidebarSyncState.pinnedTabs.isEmpty)
+        #expect(f.copy.records[lab] != nil && f.copy.records[labTab] != nil)
+        f.sidebar.renameSpace("Edited")
+        try f.sidebar.saveNow().get()
+        #expect(engine.pendingChanges == [.saveRecord(f.space.id.uuidString)])
+        #expect(f.copy.unapplied == [lab, labTab])
+        // A launch of a build that reads the tint, as this file then holds it.
+        try await engine.sendChanges()
+        var file = f.copy
+        file.records[lab] = space(lab, tint: "green")
+        try file.write(to: f.file, database: f.database)
+        f.newController()
+        await f.controller.refresh()
+        let later = try #require(f.engines.last)
+        #expect(f.sidebar.sidebarSyncState.spaces.map(\.id.uuidString).contains(lab))
+        #expect(f.sidebar.sidebarSyncState.pinnedTabs.map(\.id.uuidString) == [labTab])
+        #expect(!later.pendingChanges.contains(.deleteRecord(lab)) && !later.pendingChanges.contains(.deleteRecord(labTab)))
+        #expect(f.copy.unapplied.isEmpty)
     }
 
     @Test func settingsAndSidebarPreserveTheirOwnQueueAndNeverUploadAnUnsavedSidebarEdit() async throws {

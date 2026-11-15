@@ -182,7 +182,7 @@ public struct BrowserEvent: Identifiable, Codable, Hashable, Sendable {
 
 | Kind | Posted when | Subject | Posts nothing for |
 |---|---|---|---|
-| `tabOpened` | A tab joins the session after launch, from any source: the palette, a link, a page, another app, a favorite's first opening, a plugin, an agent, or a hook | Tab | Tabs restored from the saved session, pinned tabs that a browser import opened, tabs that move between spaces or windows |
+| `tabOpened` | A tab joins the session after launch, from any source: the palette, a link, a page, another app, a favorite's first opening, a plugin, an agent, or a hook | Tab | Tabs restored from the saved session, pinned tabs that a browser import opened or sidebar sync added, tabs that move between spaces or windows |
 | `tabClosed` | A tab leaves the session; posted while the session still lists it, so a consumer can read its last name and address during delivery (Closed tabs) | Tab | Tabs at quit |
 | `pageLoaded` | The tab's main frame finishes loading a document while the tab has an address (`webContentsDidFinishLoadingDocument`) | Tab | Frames inside the page, navigations within the document |
 | `addressChanged` | The tab's committed address changes, including within the document (`webContentsDidChangeURL`); an address reported while the page loads posts once the load or its document's load ends, with the address the tab then shows | Tab | A report that repeats the tab's address, an address the tab leaves before it commits, as WebKit reports for a navigation that fails or becomes a download |

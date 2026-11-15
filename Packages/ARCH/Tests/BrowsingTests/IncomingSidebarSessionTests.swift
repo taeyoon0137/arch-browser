@@ -1,5 +1,6 @@
 import ARCHEngine
 @testable import Browsing
+import Events
 import Foundation
 import LiveFolders
 import Testing
@@ -128,6 +129,64 @@ import Testing
             let result = try #require(SessionStore(directory: directory, seal: SessionStateSeal { nil }).load())
             #expect(result.closedTabs?.compactMap(\.id) == [id])
             #expect(session.windows.isEmpty)
+        }
+    }
+
+    /// A pin from another Mac joins as a restored tab, so no `tabOpened` posts for it; a pinned tab whose folder alone changes, which reorders nothing, still shows there at once; and unpinning drops a synced engine that waits.
+    @Test func incomingPinsOpenAsRestoredAndAFolderChangePublishes() async throws {
+        try await temporarySession { session, _ in
+            let current = session.sidebarSyncState, space = try #require(current.spaces.first)
+            var opened: [UUID] = []
+            let subscription = session.events.subscribe(BrowserEventFilter()) { event in
+                if case .tabOpened(let tab, _) = event.payload { opened.append(tab.id) }
+            }
+            defer { _ = subscription }
+            let local = session.adopt(PageStub(engine: .webKit, url: URL(string: "about:blank#local")), spaceID: space.id, personaID: space.resolvedPersonaID, pinned: true, select: false)
+            local.savedPage = SavedPage(url: URL(string: "about:blank#local")!, title: "Local")
+            #expect(opened == [local.id])
+            let folder = SidebarSyncState.Folder(id: UUID(), personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Read", live: nil)
+            func pin(_ id: UUID, in folderID: UUID?, _ address: String) -> SidebarSyncState.PinnedTab {
+                .init(id: id, personaID: space.resolvedPersonaID, spaceID: space.id, folderID: folderID,
+                      savedPage: SavedPage(url: URL(string: address)!, title: "Page"), customTitle: nil, engine: .webKit)
+            }
+            func state(_ pins: [SidebarSyncState.PinnedTab]) -> SidebarSyncState {
+                .init(personas: current.personas, spaces: current.spaces, folders: [folder], favorites: [], pinnedTabs: pins)
+            }
+            let remote = UUID()
+            session.applySidebarSync(state([pin(local.id, in: nil, "about:blank#local"), pin(remote, in: nil, "about:blank#remote")]), deletions: .init())
+            #expect(opened == [local.id] && session.tabs.contains { $0.id == remote })
+            var published = 0
+            let watch = session.objectWillChange.sink { published += 1 }
+            defer { watch.cancel() }
+            session.applySidebarSync(state([pin(local.id, in: folder.id, "about:blank#local"), pin(remote, in: nil, "about:blank#remote")]), deletions: .init())
+            #expect(local.folderID == folder.id && published > 0)
+            local.pendingSyncEngine = .chromium
+            local.isPinned = false
+            #expect(local.pendingSyncEngine == nil)
+        }
+    }
+
+    /// A live folder that another Mac moved to another space takes its item tabs, which do not sync, and they stay its items across a save and a load.
+    @Test func aLiveFolderMovedToAnotherSpaceKeepsItsItemTabs() async throws {
+        try await temporarySession { session, directory in
+            let home = try #require(session.spaces.first)
+            let work = session.makeSpace(in: home.resolvedPersonaID, named: "Work")
+            let news = TabFolder(spaceID: home.id, name: "News", isPinned: true,
+                                 live: LiveFolderConfiguration(source: .feed(address: URL(string: "https://fixture.invalid/feed")!, isPrivate: false)))
+            session.appendFolder(news)
+            let item = session.adopt(PageStub(engine: .webKit, url: URL(string: "about:blank#item")), spaceID: home.id, personaID: home.resolvedPersonaID,
+                                     pinned: true, select: false, folderID: news.id)
+            item.liveItemID = "item-1"
+            let state = session.sidebarSyncState
+            let moved = state.folders.map { folder in
+                folder.id == news.id ? SidebarSyncState.Folder(id: folder.id, personaID: folder.personaID, spaceID: work.id, parentID: nil, name: folder.name, live: folder.live) : folder
+            }
+            session.applySidebarSync(SidebarSyncState(personas: state.personas, spaces: state.spaces, folders: moved, favorites: state.favorites, pinnedTabs: state.pinnedTabs), deletions: .init())
+            #expect(item.spaceID == work.id && item.folderID == news.id && item.liveItemID == "item-1")
+            try session.saveNow().get()
+            let file = try #require(SessionStore(directory: directory, seal: SessionStateSeal { nil }).load())
+            let record = try #require(file.tabs.first { $0.id == item.id })
+            #expect(record.spaceID == work.id && record.folderID == news.id && record.liveItemID == "item-1")
         }
     }
 

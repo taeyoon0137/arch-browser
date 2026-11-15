@@ -63,6 +63,8 @@ import Foundation
     private var fetchTask: Task<Void, Never>?
     private var needsRecoveryFetch = false
     private var deletionSendInFlight = false
+    /// The unapplied mirror records that this launch's first fetch applies as if fetched (`SyncMirror.unapplied`).
+    private var reapplying = Set<String>()
 
     public convenience init(sidebar: any SyncedSidebar, directory: URL, defaults: UserDefaults = .standard) {
         let availability = SyncAvailability()
@@ -201,6 +203,8 @@ import Foundation
             // mirror could turn every missing row into an outgoing delete. A nil token and
             // first-sync merge restore the complete zone while preserving local-only additions.
             mirror = sidebar.needsFullSidebarSync ? SyncMirror() : SyncMirror.read(from: url, database: target)
+            reapplying = mirror.unapplied.filter { mirror.records[$0] != nil }
+            for name in reapplying { fetched[name] = mirror.records[name] }
             first = mirror.isEmpty
             fetching = true
             lastError = nil
@@ -229,6 +233,7 @@ import Foundation
         deletionSendInFlight = false
         database = nil
         needsRecoveryFetch = false
+        reapplying.removeAll()
         fetchTask?.cancel()
         fetchTask = nil
         first = false
@@ -294,7 +299,11 @@ import Foundation
     private func compareSidebar(_ state: SidebarSyncState, publish: Bool? = nil) throws {
         let date = now()
         let records = try SidebarRecords.records(from: state, foundAt: date)
-        let changes = SyncDiff.changes(local: records, scope: { $0.recordType != .setting }, mirror: bases, pending: mirror.pendingSaves, foundAt: date)
+        let base = bases
+        // What this build cannot apply stays on the server as another build wrote it.
+        let held = IncomingSidebarRecords.heldOut(server: base, local: records)
+        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) }
+        let changes = SyncDiff.changes(local: records.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
         reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType != .setting })
     }
 
@@ -477,6 +486,9 @@ import Foundation
                 engine.remove([.saveRecord(key), .deleteRecord(key)])
             }
             for (key, row) in fetched { mirror.records[key] = row }
+            mirror.unapplied = IncomingSidebarRecords.heldOut(server: bases, local: [])
+                .union(mirror.records.compactMap { SyncCloudKitRecords.syncRecord(from: $0.value) == nil ? $0.key : nil })
+            reapplying.removeAll()
             if mirror.records.isEmpty {
                 awaitingZoneSave = true
                 engine.add([.saveZone])
@@ -505,7 +517,9 @@ import Foundation
     }
 
     private func applyFirst(local: [SyncRecord], server: [SyncRecord], date: Date) throws {
-        let plan = try FirstSyncMerge.plan(local: local, server: server, samePage: { $0.isSamePage(as: $1) })
+        let held = IncomingSidebarRecords.heldOut(server: server, local: local)
+        let plan = try FirstSyncMerge.plan(local: local.filter { !held.contains($0.recordName) }, server: server.filter { !held.contains($0.recordName) },
+                                           samePage: { $0.isSamePage(as: $1) })
         var replacements = SidebarSyncReplacements()
         for match in plan.replacements {
             guard let old = UUID(uuidString: match.localName), let new = UUID(uuidString: match.serverName) else { continue }
@@ -519,7 +533,7 @@ import Foundation
         }
         var rows = plan.recordsToApply
         for upload in plan.recordsToUpload { rows[upload.recordName] = upload }
-        let incoming = try IncomingSidebarRecords.plan(records: Array(rows.values), deleted: deleted, foundAt: date)
+        let incoming = try IncomingSidebarRecords.plan(records: Array(rows.values), deleted: deleted, foundAt: date, defaultEngine: sidebar.defaultEngine)
         sidebar.applyFirstSidebarSync(incoming.sidebar, replacements: replacements)
         for item in plan.recordsToApply.values where item.recordType == .setting { settings.apply(item) }
         if !deleted.isEmpty || !incoming.recordsToDelete.isEmpty { sidebar.applySidebarSync(incoming.sidebar, deletions: incoming.deletions) }
@@ -528,15 +542,17 @@ import Foundation
     private func applyFetched(local: [SyncRecord], server: [SyncRecord], base: [SyncRecord], date: Date) throws {
         // Only a changed local field takes an edit time from this Mac. Preserve the server's
         // times and order keys for unedited values before a three-way merge.
-        let differences = SyncDiff.changes(local: local, scope: { $0.recordType != .setting }, mirror: base, pending: mirror.pendingSaves, foundAt: date)
+        let held = IncomingSidebarRecords.heldOut(server: base, local: local)
+        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) }
+        let differences = SyncDiff.changes(local: local.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
         let changed = Dictionary(uniqueKeysWithValues: differences.saves.map { ($0.recordName, $0) })
         let baseByName = Dictionary(uniqueKeysWithValues: base.map { ($0.recordName, $0) })
-        let current = local.map { changed[$0.recordName] ?? baseByName[$0.recordName] ?? $0 }
+        let current = local.map { held.contains($0.recordName) ? $0 : changed[$0.recordName] ?? baseByName[$0.recordName] ?? $0 }
         // A record already deleted on this Mac must stay absent while its pending delete
         // is being sent. An edit of that same surviving server ID cannot restore it.
-        let localDeletions = Set(differences.deletions)
+        let localDeletions = Set(differences.deletions).subtracting(reapplying)
         let incoming = try IncomingSidebarRecords.plan(local: current, fetched: server.filter { !localDeletions.contains($0.recordName) },
-                                                     mirror: base, deleted: deleted, foundAt: date)
+                                                     mirror: base, deleted: deleted, foundAt: date, defaultEngine: sidebar.defaultEngine)
         sidebar.applySidebarSync(incoming.sidebar, deletions: incoming.deletions)
         for item in server where item.recordType == .setting {
             let pending = mirror.pendingSaves.first { $0.recordName == item.recordName }

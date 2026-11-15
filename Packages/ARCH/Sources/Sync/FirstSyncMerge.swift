@@ -16,7 +16,7 @@ public enum FirstSyncMerge {
         public let recordsToApply: [String: SyncRecord]
         /// Spaces before their folders, parents before children, and tabs after folders.
         public let replacements: [Replacement]
-        /// Unmatched local items and same-ID merges with new values, in local sidebar order.
+        /// Unmatched local items and same-ID merges with new values, in local sidebar order. An unmatched item in a list the server also fills goes after the server's items.
         public let recordsToUpload: [SyncRecord]
     }
 
@@ -79,13 +79,23 @@ public enum FirstSyncMerge {
 
         var apply = serverByName
         var upload: [SyncRecord] = []
+        // Local keys number each list from 1, so a new item would sort among the server's; it takes the next keys after them instead, in local order.
+        var nextKeys: [SyncOrderKeys.SiblingList: Double] = [:]
+        for record in server {
+            guard let list = SyncOrderKeys.SiblingList(of: record), let key = SyncOrderKeys.key(of: record) else { continue }
+            nextKeys[list] = max(nextKeys[list] ?? key, key)
+        }
         for original in local where aliases[original.recordName] == nil {
-            let record = remap(original, using: aliases)
+            var record = remap(original, using: aliases)
             if let existing = serverByName[record.recordName] {
                 let merge = SyncMerge.merge(local: record, server: existing, base: .firstSync)
                 apply[record.recordName] = merge.record
                 if merge.needsSend { upload.append(merge.record) }
             } else {
+                if let list = SyncOrderKeys.SiblingList(of: record), let last = nextKeys[list] {
+                    nextKeys[list] = last + 1
+                    record[.order] = .number(last + 1)
+                }
                 upload.append(record)
             }
         }

@@ -29,9 +29,10 @@ import LiveFolders
         didSet {
             guard isPinned != oldValue else { return }
             savedPage = isPinned ? currentPage : nil
+            if !isPinned { pendingSyncEngine = nil }
         }
     }
-    /// A synced engine choice waits while a window shows this page.
+    /// A synced engine choice waits while a window shows this page. Only a pinned tab syncs, so unpinning drops it.
     var pendingSyncEngine: EngineKind?
     /// A newer site-settings choice cancels an engine switch still copying cookies.
     var requestedEngineSwitch: EngineKind?
@@ -215,13 +216,18 @@ import LiveFolders
         self.folderID = folderID
     }
 
-    /// Takes what a pinned tab that browser import opens keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2). It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
+    /// Takes what a pinned tab that browser import opens keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2). It opens as a restored tab does (`opensAsRestored()`).
     func takeImport(_ pinned: SidebarImport.Plan.PinnedTab) {
         folderID = pinned.folderID
         customTitle = pinned.customTitle
         savedPage = SavedPage(url: pinned.url, title: pinned.title)
+        opensAsRestored()
+    }
+
+    /// Makes a pinned tab that joins at its saved page, from browser import or sidebar sync, open as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
+    func opensAsRestored() {
         isRestored = true
-        recordedURL = pinned.url
+        recordedURL = savedPage?.url
     }
 
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.

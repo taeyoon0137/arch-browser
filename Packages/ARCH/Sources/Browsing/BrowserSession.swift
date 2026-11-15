@@ -1733,6 +1733,11 @@ final class EngineRuntime {
     /// Moves a folder dropped on another space's symbol, with the folders and tabs inside it, last among the folders at the top of that space's list of its kind (`FolderTree.moveFolder(_:toSpace:)`). As for a dropped tab, its tabs leave the split view of the space they leave, and a window that selects one of them follows it to the space.
     public func moveFolder(_ id: UUID, toSpace spaceID: UUID) {
         guard canMoveFolder(id, toSpace: spaceID) else { return }
+        carryFolder(id, toSpace: spaceID)
+    }
+
+    /// The move of `moveFolder(_:toSpace:)` without its checks, which a folder that sync moves passed on the Mac that moved it.
+    private func carryFolder(_ id: UUID, toSpace spaceID: UUID) {
         let carried = folderTree.tabs(inside: id)
         carried.forEach { leaveSplitView($0) }
         changeFolderTree { $0.moveFolder(id, toSpace: spaceID) }
@@ -1941,7 +1946,7 @@ final class EngineRuntime {
             }
             let personaID = personaID(ofSpace: record.spaceID)
             let page: UnloadedWebContents
-            if let target = record.pendingSyncEngine, target != record.engine {
+            if record.isPinned, let target = record.pendingSyncEngine, target != record.engine {
                 page = UnloadedWebContents(url: record.url, title: record.title, engine: target, state: nil)
             } else {
                 page = UnloadedWebContents(record: record, defaultEngine: defaultEngine)
@@ -2155,12 +2160,14 @@ extension BrowserSession {
                   incoming.parentID.map(appliedFolders.contains) ?? true, SidebarSyncState.canShare(incoming.live) else { continue }
             if let old = folders.first(where: { $0.id == incoming.id }) {
                 guard eligibleFolders.contains(old.id), spaces.first(where: { $0.id == old.spaceID })?.resolvedPersonaID == incoming.personaID else { continue }
-                var updated = old
+                // A folder that moves to another space takes along what it holds that does not sync, such as a live folder's item tabs and a private feed folder, as a drop on the space's symbol does. A synced folder inside it that stays behind moves back when its own record comes.
+                if old.spaceID != incoming.spaceID { carryFolder(old.id, toSpace: incoming.spaceID) }
+                guard let moved = folders.first(where: { $0.id == incoming.id }) else { continue }
+                var updated = moved
                 updated.name = incoming.name
-                updated.spaceID = incoming.spaceID
                 updated.parentID = incoming.parentID
                 updated.live = incoming.live
-                if old != updated { updateFolder(old.id) { $0 = updated } }
+                if moved != updated { updateFolder(moved.id) { $0 = updated } }
             } else {
                 appendFolder(TabFolder(id: incoming.id, spaceID: incoming.spaceID, name: incoming.name, isPinned: true,
                                        parentID: incoming.parentID, live: incoming.live))
@@ -2176,6 +2183,9 @@ extension BrowserSession {
             appliedFavorites.insert(favorite.id)
         }
         var appliedTabs = Set<UUID>()
+        var addedTabs: [Tab] = []
+        // The sidebar's rows follow the session, which a tab's own placement does not publish.
+        var publishedPlacement = false
         for incoming in state.pinnedTabs {
             guard spaces.contains(where: { $0.id == incoming.spaceID && $0.resolvedPersonaID == incoming.personaID }),
                   incoming.folderID.map(appliedFolders.contains) ?? true else { continue }
@@ -2183,9 +2193,17 @@ extension BrowserSession {
             if let old = allTabs.first(where: { $0.id == incoming.id }) {
                 guard eligibleTabs.contains(old.id), old.personaID == incoming.personaID else { continue }
                 tab = old
+                if !publishedPlacement, tab.spaceID != incoming.spaceID || tab.folderID != incoming.folderID {
+                    objectWillChange.send()
+                    publishedPlacement = true
+                }
             } else {
+                // A pin from another Mac joins as a restored tab, as browser import's do: before the list takes it, so that its tabOpened never posts.
                 let page = UnloadedWebContents(url: incoming.savedPage?.url, title: incoming.savedPage?.title ?? "", engine: incoming.engine, state: nil)
-                tab = adopt(page, id: incoming.id, spaceID: incoming.spaceID, personaID: incoming.personaID, pinned: true, select: false)
+                tab = makeTab(page, id: incoming.id, spaceID: incoming.spaceID, personaID: incoming.personaID, pinned: true)
+                tab.savedPage = incoming.savedPage
+                tab.opensAsRestored()
+                addedTabs.append(tab)
             }
             if tab.spaceID != incoming.spaceID {
                 _ = leaveSplitView(tab)
@@ -2204,6 +2222,7 @@ extension BrowserSession {
             tab.pendingSyncEngine = tab.preferredEngine == incoming.engine ? nil : incoming.engine
             appliedTabs.insert(tab.id)
         }
+        if !addedTabs.isEmpty { tabs.append(contentsOf: addedTabs) }
         if let reordered = Self.orderedSynced(personas, by: state.personas.map(\.id)) { personas = reordered }
         if let reordered = Self.orderedSynced(spaces, by: state.spaces.map(\.id)) { spaces = reordered }
         if let reordered = Self.orderedSynced(folders, by: state.folders.map(\.id).filter(appliedFolders.contains)) { folders = reordered }
@@ -2227,7 +2246,7 @@ extension BrowserSession {
 
     func applyPendingSyncEngines() {
         for tab in tabs {
-            guard let target = tab.pendingSyncEngine, target != tab.engineKind, window(showing: tab) == nil,
+            guard tab.isPinned, let target = tab.pendingSyncEngine, target != tab.engineKind, window(showing: tab) == nil,
                   let source = runtime(of: tab) else { continue }
             switchLoadedEngine(of: tab, to: target, source: source) { [weak self, weak tab] in
                 guard let self, let tab else { return false }

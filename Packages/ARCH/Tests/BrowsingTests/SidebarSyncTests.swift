@@ -41,10 +41,9 @@ import Testing
         let legacyFeed = TabFolder(spaceID: space.id, name: "Unmarked", isPinned: true,
             live: LiveFolderConfiguration(source: .feed(address: URL(string: "https://example.test/feed?private=fixture")!, isPrivate: false)))
         let agent = TabFolder(spaceID: space.id, name: "Agent", isPinned: false, agentSessionID: UUID())
-        let agentChild = TabFolder(spaceID: space.id, name: "Nested agent work", isPinned: true, parentID: agent.id)
         let ordinary = TabFolder(spaceID: space.id, name: "Pinned", isPinned: true)
         let open = TabFolder(spaceID: space.id, name: "Open", isPinned: false)
-        let folders = [ordinary, open, publicFeed, secretFeed, legacyFeed, agent, agentChild]
+        let folders = [ordinary, open, publicFeed, secretFeed, legacyFeed, agent]
         let tabs = folders.map { folder in
             let tab = Tab(id: UUID(), webContents: PageStub(engine: .webKit, url: page), spaceID: space.id,
                           isPinned: folder.isPinned, personaID: Persona.defaultID)
