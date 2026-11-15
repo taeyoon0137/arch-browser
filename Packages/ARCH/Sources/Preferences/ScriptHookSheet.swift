@@ -469,10 +469,8 @@ struct ScriptHookSheet: View {
 
     @ViewBuilder private var agentSettings: some View {
         Section("Agent") {
-            if draft.isShell && !draft.enablesAgent {
-                // A shell script has no command that starts an agent run until `arch-cli agent run` exists, so its hook offers none; one stored with agent runs can still turn them off.
-                Text("Shell scripts cannot start agent runs yet.").font(.caption)
-            } else if !draft.guided || !draft.generated {
+            // A shell script starts its agent runs with `arch-cli agent run`, under the hook's grant and run tabs.
+            if !draft.guided || !draft.generated {
                 Toggle("Allow Agent Runs", isOn: $draft.enablesAgent)
             }
             if draft.enablesAgent {

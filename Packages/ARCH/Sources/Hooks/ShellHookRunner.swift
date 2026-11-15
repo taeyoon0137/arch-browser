@@ -271,12 +271,16 @@ public final class ShellHookRunner: HookScriptRunning {
     private let helpers: URL?
     private let temporaryFolder: URL
     private let loginPath: @Sendable () async -> String?
+    /// Runs the agent runs a script starts with `arch-cli agent run`, as the JavaScript runner's `arch.agent.run` does.
+    private let runAgent: HookScriptRunner.AgentCall?
     private var running: [UUID: Running] = [:]
     private var errorOutputs: [UUID: String] = [:]
 
     /// `host` reaches the tabs, `allowsAI` is the AI interface's site check for a hook with `agent`, and `channel` binds `arch-cli`'s tickets; `helpers` is the bundle's `Contents/Helpers`, which leads the script's PATH. Tests give their own folder and PATH.
     public init(host: any PluginBrowserHost, allowsAI: @escaping (URL) -> Bool, channel: (any AgentHookRunChannel)?, helpers: URL?,
-                temporaryFolder: URL = FileManager.default.temporaryDirectory, loginPath: @escaping @Sendable () async -> String? = { await AILoginShell.path() }) {
+                temporaryFolder: URL = FileManager.default.temporaryDirectory, loginPath: @escaping @Sendable () async -> String? = { await AILoginShell.path() },
+                runAgent: HookScriptRunner.AgentCall? = nil) {
+        self.runAgent = runAgent
         self.host = host
         self.allowsAI = allowsAI
         self.channel = channel
@@ -312,8 +316,12 @@ public final class ShellHookRunner: HookScriptRunning {
         guard mkdir(folder.path, 0o700) == 0 else { return .failed(code: "notStarted", message: "Arch could not make the run's folder: \(String(cString: strerror(errno))).") }
         defer { try? FileManager.default.removeItem(at: folder) }
         state.folder = folder
-        let tools = ShellHookRunTools(invocation: invocation, host: host, allowsAI: allowsAI)
-        let ticket = channel?.openHookRun(invocation.run, tools: tools.names) { call in tools.call(call) } ?? ""
+        let tools = ShellHookRunTools(invocation: invocation, host: host, allowsAI: allowsAI, runAgent: runAgent)
+        var agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?
+        if tools.permitsAgentRuns {
+            agentRun = { @MainActor fields in await tools.runAgent(fields) }
+        }
+        let ticket = channel?.openHookRun(invocation.run, tools: tools.names, call: { call in tools.call(call) }, agentRun: agentRun) ?? ""
         state.accessEnd = { [channel] in
             tools.end()
             channel?.closeHookRun(invocation.run)
@@ -347,7 +355,7 @@ public final class ShellHookRunner: HookScriptRunning {
         if state.isCancelled { return .cancelled }
         switch termination {
         case .exited(0):
-            return .completed(actions: tools.actions, agent: nil)
+            return .completed(actions: tools.actions, agent: tools.agentUse)
         case .exited(let status):
             let line = errorText.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.last { !$0.isEmpty }
             return .failed(code: "exitStatus", message: "Exited with status \(status)" + (line.map { ": \($0)" } ?? "."))
@@ -449,14 +457,19 @@ final class ShellHookRunTools {
     /// Each run tab's handle.
     let handles: [UUID: String]
     private(set) var actions: [AgentRunAction] = []
+    /// The model and usage of the agent runs the script started.
+    private(set) var agentUse: HookAgentUse?
     private let host: any PluginBrowserHost
     private let allowsAI: (URL) -> Bool
+    private let callAgent: HookScriptRunner.AgentCall?
     private var hasEnded = false
+    private var pendingRuns: [UUID: Task<AgentRunResult, Never>] = [:]
 
-    init(invocation: HookInvocation, host: any PluginBrowserHost, allowsAI: @escaping (URL) -> Bool) {
+    init(invocation: HookInvocation, host: any PluginBrowserHost, allowsAI: @escaping (URL) -> Bool, runAgent: HookScriptRunner.AgentCall? = nil) {
         self.invocation = invocation
         self.host = host
         self.allowsAI = allowsAI
+        callAgent = runAgent
         var handles: [UUID: String] = [:]
         if let tab = invocation.eventTab, invocation.tabs.contains(tab) { handles[tab] = "t1" }
         var next = 2
@@ -474,6 +487,56 @@ final class ShellHookRunTools {
 
     func end() {
         hasEnded = true
+        for task in pendingRuns.values { task.cancel() }
+        pendingRuns.removeAll()
+    }
+
+    /// Whether the script may start agent runs: a hook with `agent` and its agent grant, which a program's hook, never a shell hook, could lack.
+    var permitsAgentRuns: Bool {
+        callAgent != nil && invocation.hook.usesAgent && invocation.hook.grant.agent != nil
+    }
+
+    /// `arch-cli agent run` inside the run (`docs/hooks.md`, arch-cli agent run and rename): the hook's grant and feature, the run's tabs by their handles with `t1` the event's tab and the event's tab when none is named, the model the hook saved when the options name none, the grant's tools and tab access when they name none, Keep Activity Only, and only reports in a test. The run's end cancels it.
+    func runAgent(_ given: [String: AgentJSON]) async -> AgentRunResult {
+        func refused(_ code: String, _ message: String) -> AgentRunResult { AgentRunResult(status: .refused, code: code, message: message) }
+        guard !hasEnded else { return refused("runEnded", "This hook's run has ended.") }
+        guard permitsAgentRuns, let callAgent, let grant = invocation.hook.grant.agent else { return refused("notGranted", "This hook may not start agent runs.") }
+        var fields = given
+        var tabs: [UUID] = invocation.eventTab.flatMap { handles[$0] == nil ? nil : [$0] } ?? []
+        if let value = fields.removeValue(forKey: "tabs") {
+            guard case .array(let items) = value else { return refused("invalidArguments", "tabs takes a list of the run's tab handles, such as [\"t1\"].") }
+            tabs = []
+            for item in items {
+                guard let handle = item.stringValue, let id = handles.first(where: { $0.value == handle })?.key else {
+                    return refused("notGranted", "\(item.stringValue ?? "") is not one of this hook's run tabs.")
+                }
+                if !tabs.contains(id) { tabs.append(id) }
+            }
+        }
+        guard !tabs.isEmpty else { return refused("notGranted", "This run has no tab for an agent run.") }
+        fields["tools"] = fields["tools"] ?? .array(grant.tools.sorted().map(AgentJSON.string))
+        fields["tabAccess"] = fields["tabAccess"] ?? .string(grant.tabAccess.rawValue)
+        fields["record"] = fields["record"] ?? .string(max(grant.minimumRecord, min(invocation.hook.record, grant.maximumRecord)).rawValue)
+        if fields["model"] == nil, let model = invocation.hook.agent?.model, let encoded = try? AgentJSON(encoding: model) { fields["model"] = encoded }
+        guard var options = try? AgentJSON.object(fields).decode(as: AgentRunOptions.self) else {
+            return refused("invalidArguments", "agent run takes a prompt and, unless the hook saved one, a model.")
+        }
+        options.closedTab = nil
+        options.dryRun = options.dryRun || !invocation.appliesActions
+        let request = AgentRunRequest(options: options, tabs: tabs, allowedTabs: invocation.tabs, documents: invocation.documents, documentIDs: invocation.documentIDs,
+                                      knownProviders: invocation.knownProviders,
+                                      origin: invocation.isTest ? .test(hook: invocation.hook.id, run: invocation.run) : .hook(invocation.hook.id, run: invocation.run),
+                                      promptSource: .user, feature: .agentHook(invocation.hook.id), grant: grant)
+        let id = UUID()
+        let task = Task { await callAgent(request, invocation) }
+        pendingRuns[id] = task
+        defer { pendingRuns[id] = nil }
+        var result = await task.value
+        if hasEnded || task.isCancelled { return AgentRunResult(status: .cancelled, message: "This hook's run has ended.") }
+        if !grant.returnsReply { result.reply = nil }
+        actions.append(contentsOf: result.actions)
+        agentUse = HookAgentUse(model: result.model ?? agentUse?.model, usage: (agentUse?.usage ?? AIUsage(inputTokens: 0, outputTokens: 0)) + result.usage)
+        return result
     }
 
     func call(_ call: AgentToolCall) -> AgentToolResult {
