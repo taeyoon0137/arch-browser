@@ -64,9 +64,10 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
             default: return []
             }
         }
-        // Words with an underscore, such as hand_to_user or max_chars, must be the catalog's.
-        var known = Set(AgentToolCatalog.tools.map(\.name))
-        for tool in AgentToolCatalog.tools {
+        // Words with an underscore, such as hand_to_user or max_chars, must be the catalog's, or the tools of outside programs beside it.
+        let catalog = AgentToolCatalog.tools + [AgentToolCatalog.renameTab, AgentToolCatalog.watchEvents]
+        var known = Set(catalog.map(\.name))
+        for tool in catalog {
             for parameter in tool.parameters {
                 known.insert(parameter.name)
                 known.formUnion(values(parameter))

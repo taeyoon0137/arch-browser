@@ -162,6 +162,7 @@ import Foundation
             subscriptionToolName: { id in AIService.shared.settings.providers.first { $0.id == id }.flatMap { $0.commandLineAgent?.title } },
             providerMessage: { AIService.shared.settings.message(for: $0) }))
         AIService.shared.register(.agent)
+        AIService.shared.register(.agentRun)
     }
 
     init(directory: URL, host: any AgentBrowserHost, version: String, dependencies: Dependencies) {
@@ -1049,7 +1050,8 @@ import Foundation
                                       environment: [AgentMCPServer.ticketVariable: binding.ticket.text], tools: binding.tools.map(\.name))
         var request = AIAgentSessionRequest(feature: feature, route: .models(models), instructions: instructions, toolServer: server, id: binding.id,
                                             folder: dependencies.sessionFolder(binding.id), maxTurns: turns, ephemeral: true)
-        request.knownProviders = binding.knownProviders
+        // A hook's run checks its known providers; an outside client's, which has none, checks none (`docs/hooks.md`, Known providers).
+        request.knownProviders = binding.knownProviders.isEmpty ? nil : binding.knownProviders
         hookCLIs[binding.id] = binding
         if endpoint == nil { updateListening() }
         do {
@@ -1495,6 +1497,8 @@ import Foundation
         case (.ready, AgentControlMethod.hooksList) where connection.sessionID == nil, (.ready, AgentControlMethod.hooksAdd) where connection.sessionID == nil,
              (.ready, AgentControlMethod.hooksRemove) where connection.sessionID == nil:
             hookCall(method, params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.agentRun) where connection.sessionID == nil:
+            runAgent(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.grantShow):
             // A session's connection is bound; it has no grant to show.
             let answer = connection.identity.map(answer(for:)) ?? AgentHelloAnswer(version: version, status: .bound)
@@ -1860,7 +1864,7 @@ extension AgentService {
 
     /// The tools of outside programs beside the tool host's: `watch_events` with Watch Browser Events, and before a grant, since the grant sheet may allow it.
     static func programTools(for grant: AgentGrant?) -> [String] {
-        grant.map { $0.scopes.watchEvents } ?? true ? [AgentToolCatalog.watchEvents.name] : []
+        [AgentToolCatalog.renameTab.name] + (grant.map { $0.scopes.watchEvents } ?? true ? [AgentToolCatalog.watchEvents.name] : [])
     }
 
     /// Records the event in each watching grant's buffer and queues it for that grant's subscriptions that take it. While outside access is off, no grant records anything.
@@ -2003,6 +2007,7 @@ extension AgentService {
 
     /// An outside client's call: `watch_events` reads the grant's event buffer here, with the tool host's argument check and daily count, and every other tool runs in the tool host.
     private func runOutsideCall(_ call: AgentToolCall, for grant: AgentGrant, connectionID: UUID, callID: Int?) async -> AgentToolHost.Outcome {
+        if call.name == AgentToolCatalog.renameTab.name { return renameTab(call, for: grant) }
         guard call.name == AgentToolCatalog.watchEvents.name else {
             return await toolHost(connectionID: connectionID, callID: callID).run(call, for: grant, state: state(for: grant))
         }
@@ -2014,5 +2019,115 @@ extension AgentService {
             return AgentToolHost.error("limitReached", "This client made \(AgentToolHost.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.")
         }
         return await AgentToolHost.watchEvents(call.arguments, buffer: outsidePrograms.buffer(for: grant.id))
+    }
+}
+
+// MARK: - Outside programs' runs and renames
+
+extension AgentService {
+    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely for the document it shows now, with the first line of the name trimmed and cut to 60 characters and an empty name clearing a suggested name, through `BrowserAgentHost`'s suggested names. A tab the user shared would ask once per tab, which this build does not ask yet, so it is refused; any other tab is refused with P17, and a tab on a site excluded from AI with P16.
+    private func renameTab(_ call: AgentToolCall, for grant: AgentGrant) -> AgentToolHost.Outcome {
+        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.renameTab) { return AgentToolHost.error("invalidArguments", problem) }
+        let state = state(for: grant)
+        guard state.countCall(at: dependencies.now()) else {
+            return AgentToolHost.error("limitReached", "This client made \(AgentToolHost.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.")
+        }
+        let handle = call.arguments["tab"]?.stringValue ?? ""
+        guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return AgentToolHost.error("tabNotFound", "This client has no tab \(handle).") }
+        let access: AgentTabAccess
+        if tab.agentOwnerID == grant.id {
+            access = .agentTab
+        } else if tab.agentOwnerID == nil, state.handles.sharedTabIDs.contains(id) {
+            access = .shared(acting: state.handles.actingSharedTabIDs.contains(id))
+        } else {
+            access = .notTheClients
+        }
+        func refused(_ code: String, _ text: String) -> AgentToolHost.Outcome {
+            AgentToolHost.Outcome(result: AgentToolResult(status: .refused, code: code, text: text, structured: ["rule": .string(code)]))
+        }
+        switch AgentPolicy.renameDecision(client: .outside, tab: access, allowedOnce: false) {
+        case .refuse(let rule, let sentence): return refused(rule?.rawValue ?? AgentPolicy.wouldAskCode, sentence)
+        case .ask: return refused(AgentRule.p19.rawValue, "Renaming a tab the user shared asks the user first, which this build of Arch does not ask yet. Rename your own agent tabs.")
+        default: break
+        }
+        guard let url = tab.url, AgentPolicy.showsTitle(of: url, allowsAI: dependencies.allowsAI) else { return refused(AgentRule.p16.rawValue, AgentPolicy.entry(.p16).sentence) }
+        guard let naming = host as? AgentTabNaming else { return AgentToolHost.notAvailable("This build of Arch cannot name tabs.") }
+        let given = call.arguments["name"]?.stringValue ?? ""
+        let name = String(given.prefix { !$0.isNewline }.trimmingCharacters(in: .whitespaces).prefix(60)).trimmingCharacters(in: .whitespaces)
+        guard naming.suggestName(name.isEmpty ? nil : name, forTab: id, showing: url, byGrant: grant.id, applying: true) else {
+            return refused("userNamed", "The user's own name for this tab, or a name the user turned down, keeps the tab's name.")
+        }
+        let text = name.isEmpty ? "Cleared the suggested name of \(handle)." : "Suggested the name \u{201C}\(name)\u{201D} for \(handle)."
+        return AgentToolHost.Outcome(result: AgentToolResult(status: .ok, text: text, structured: ["tab": .string(handle), "name": .string(name), "applied": true]),
+                                     site: AgentActivityEntry.site(of: url), step: name.isEmpty ? "Cleared the name of \(handle)" : "Named \(handle) \u{201C}\(name)\u{201D}")
+    }
+
+    /// `agent/run` from an outside client with Start Agent Tasks, asked for a grant first as a tool call is: one run under `agentRun` with `AgentRunGrant.forClient(_:)`, recorded with its model and outcome in the activity log, whose tool calls the runner records too. The client's connection closing cancels it.
+    private func runAgent(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let identity = connection.identity else { return }
+        guard connection.runningCalls < AgentLimits.callsPerConnection else {
+            return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "This connection already runs \(AgentLimits.callsPerConnection) calls."))
+        }
+        guard case .object(let fields)? = params else { return replyError(connection, requestID, .invalidParams("agent/run takes the run's options as one object.")) }
+        let running = connection.startCall(requestID)
+        running.task = Task {
+            defer { connection.endCall(running) }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID, call: running), connections[connection.id] != nil, !running.isCancelled else { return }
+            guard grant.scopes.startTasks else {
+                return replyError(connection, requestID, Self.noGrantError("This client's grant does not include Start Agent Tasks. Revoke it in Settings \u{25B8} AI \u{25B8} Agents and allow it again with that scope."))
+            }
+            if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
+            touch(grant)
+            endpoint?.send(.notification(method: AgentControlMethod.progressNotification, params: ["call": requestID.json, "message": "The agent runs in Arch\u{2026}"]), to: connection.id)
+            let result = await outsideRun(fields, for: grant, identity: identity)
+            activity.record(AgentActivityEntry(date: dependencies.now(), event: .agentRun, grantID: grant.id, clientName: identity.displayName, personaID: grant.personaID,
+                                               decision: result.status == .refused ? .refused : .auto, rule: result.status == .refused ? result.code : nil, outcome: result.status.rawValue,
+                                               model: result.model.map { "\($0.provider.rawValue)/\($0.model)" }))
+            guard !running.isCancelled, connections[connection.id] != nil else { return }
+            reply(connection, requestID, Self.json(result))
+        }
+    }
+
+    /// The run of an outside client's options: its tabs by the client's handles, or else every agent tab of the client and tab shared with it, the Standard tier, Keep Activity Only, tab access `title` with `rename_tab` or `page` with the read tools too, and the program's label.
+    private func outsideRun(_ given: [String: AgentJSON], for grant: AgentGrant, identity: AgentClientIdentity) async -> AgentRunResult {
+        func refused(_ code: String, _ message: String) -> AgentRunResult { AgentRunResult(status: .refused, code: code, message: message) }
+        var fields = given
+        let state = state(for: grant)
+        let own = host.agentTabs(of: grant.id)
+        let shared = host.tabs(withIDs: Set(state.handles.sharedTabIDs)).filter { $0.agentOwnerID == nil }
+        let reachable = own + shared
+        var ids = reachable.map(\.id)
+        if let value = fields.removeValue(forKey: "tabs") {
+            guard case .array(let items) = value else { return refused("invalidArguments", "tabs takes a list of this client's tab handles, such as [\"t1\"].") }
+            ids = []
+            for item in items {
+                guard let handle = item.stringValue, let id = state.handles.tabs.id(for: handle) else { return refused("tabNotFound", "This client has no tab \(item.stringValue ?? "").") }
+                guard reachable.contains(where: { $0.id == id }) else { return refused(AgentRule.p17.rawValue, AgentPolicy.entry(.p17).sentence) }
+                if !ids.contains(id) { ids.append(id) }
+            }
+        }
+        guard !ids.isEmpty else { return refused("noTab", "This client has no agent tab or shared tab to run on. Open one with open_tab first.") }
+        let page = fields["tabAccess"] == .string(AgentRunTabAccess.page.rawValue)
+        fields["tabAccess"] = fields["tabAccess"] ?? .string(AgentRunTabAccess.title.rawValue)
+        fields["tools"] = fields["tools"] ?? .array((page ? [AgentToolCatalog.renameTab.name, "read_text", "snapshot"] : [AgentToolCatalog.renameTab.name]).map(AgentJSON.string))
+        fields["record"] = fields["record"] ?? .string(AgentRunRecord.activity.rawValue)
+        fields["model"] = fields["model"] ?? ["tier": .string(AIModelTier.standard.rawValue)]
+        guard let options = try? AgentJSON.object(fields).decode(as: AgentRunOptions.self) else {
+            return refused("invalidArguments", "agent/run takes prompt, and optionally model, tabAccess, tools, record, limits, tabs, and dryRun, as arch.agent.run does.")
+        }
+        var documents: [UUID: URL] = [:]
+        var documentIDs: [UUID: UUID] = [:]
+        for tab in reachable where ids.contains(tab.id) {
+            guard let url = tab.url else { continue }
+            documents[tab.id] = url
+            documentIDs[tab.id] = tab.documentID
+        }
+        var request = AgentRunRequest(options: options, tabs: ids, allowedTabs: Set(reachable.map(\.id)), documents: documents, documentIDs: documentIDs, knownProviders: nil,
+                                      origin: .outsideClient(grant: grant.id), promptSource: .program(name: identity.displayName), feature: .agentRun, grant: .forClient(grant))
+        request.sharedTabs = Set(shared.map(\.id)).intersection(ids)
+        let naming = host as? AgentTabNaming
+        return await runs.run(request, personaID: grant.personaID) { id, name, document, applying in
+            naming?.suggestName(name, forTab: id, showing: document, byGrant: grant.id, applying: applying) ?? false
+        }
     }
 }

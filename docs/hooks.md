@@ -922,6 +922,14 @@ arch-cli rename <tab> <name>
 - It prints the result's sentence and reply, or the result as JSON with `--json`, and exits 0 when completed, 1 when failed, 4 when refused, and 5 when timed out.
 - `rename` calls `rename_tab`.
 
+What VII.30 decided while building outside clients' runs and renames (`Agent/AgentRun.swift`, `Agent/AgentRunner.swift`, `Agent/AgentService.swift`, `Browsing/BrowserAgentHost.swift`):
+
+- Without `--tab`, a run works on every agent tab of the client and tab shared with it. Without `--tools`, it calls `rename_tab`, and with `--page` the read tools too. Its first message names the run tabs `t1`, `t2`, … in the run's order, which need not be the grant's handles.
+- The day's runs count under `agentRun.<grant id>` in `ai-usage.json`, beside the feature's totals under `agentRun`. Kept runs at Keep the Session count 20 for the feature as a whole, not per grant.
+- The run's own activity entry is the event `agentRun`, with its model as `provider/model`, its outcome, and its refusing rule; its tool calls are `toolCall` entries under the grant, as the client's own calls are.
+- `BrowserAgentHost` gives agent tabs suggested names through `AgentTabNaming`, a protocol beside `AgentBrowserHost`, under the same rules as hooks' names, with the grant as the cause. P19's card, which asks once before a client renames a tab the user shared, is not built yet, so such a rename is refused with P19, and in a run with `wouldAsk`.
+- `arch-cli agent run` exits 1 for a cancelled run, as for a failed one.
+
 ### arch-mcp
 
 - `rename_tab` and `watch_events` join the tools `arch-mcp` lists when the connection's grant allows them.

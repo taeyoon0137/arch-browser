@@ -5,7 +5,7 @@ import Foundation
 /// A rule of the table, by its number.
 public enum AgentRule: String, CaseIterable, Sendable {
     case p1 = "P1", p2 = "P2", p3 = "P3", p4 = "P4", p5 = "P5", p6 = "P6", p7 = "P7", p8 = "P8", p9 = "P9"
-    case p10 = "P10", p11 = "P11", p12 = "P12", p13 = "P13", p14 = "P14", p15 = "P15", p16 = "P16", p17 = "P17", p18 = "P18"
+    case p10 = "P10", p11 = "P11", p12 = "P12", p13 = "P13", p14 = "P14", p15 = "P15", p16 = "P16", p17 = "P17", p18 = "P18", p19 = "P19"
 }
 
 /// What a rule does when its trigger holds.
@@ -31,10 +31,11 @@ public struct AgentRuleEntry: Sendable {
     public var sentence: String
 }
 
-/// Who calls: an in-app session, which has a site scope, or an outside client, which navigates freely in its own agent tabs because it can send data anywhere itself (agent decision 8).
+/// Who calls: an in-app session, which has a site scope, an outside client, which navigates freely in its own agent tabs because it can send data anywhere itself (agent decision 8), or an agent run, which never asks: what would ask is refused with `wouldAsk` (`docs/hooks.md`, Tools).
 public enum AgentClientKind: String, CaseIterable, Sendable {
     case inApp
     case outside
+    case run
 }
 
 /// How the client may use the tab a step acts in.
@@ -206,6 +207,8 @@ public enum AgentPolicy {
         AgentRuleEntry(rule: .p17, trigger: "Closing a tab the session did not open; acting on a tab of another session or Persona", effect: .refuses,
                        sentence: "Agents close and act only in their own agent tabs and the tabs the user shared with them."),
         AgentRuleEntry(rule: .p18, trigger: "A CAPTCHA or bot check", effect: .refuses, sentence: "Hand the tab to the user."),
+        AgentRuleEntry(rule: .p19, trigger: "Renaming a tab: the client's own agent tab freely, a tab the user shared after asking once per tab, and no other tab; a run renames its run tabs without asking", effect: .asks(sensitive: false),
+                       sentence: "Renaming a tab the user shared asks the user once for that tab."),
     ]
 
     public static func entry(_ rule: AgentRule) -> AgentRuleEntry {
@@ -225,6 +228,7 @@ public enum AgentPolicy {
 
     /// The decision for a step: refusals first, then sensitive cards, which no allowance covers, then the cards the mode asks for, which earlier allowances cover. No mode, grant, or setting turns a rule into an automatic approval.
     public static func decide(_ step: AgentPolicyStep, client: AgentClientKind, mode: AgentAccessLevel, allowances: AgentAllowances = AgentAllowances()) -> AgentDecision {
+        if client == .run { return runDecision(decide(step, client: .outside, mode: mode, allowances: allowances)) }
         switch step {
         case .interaction(let interaction): return decide(interaction, client: client, mode: mode, allowances: allowances)
         case .navigation(let facts):

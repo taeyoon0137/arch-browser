@@ -244,6 +244,11 @@ struct AgentSettingsPage: View {
         case .expired: return "Access expired"
         case .declined: return "Not allowed"
         case .refusedPeer: return "Connection refused: \(entry.outcome ?? "")"
+        case .agentRun:
+            var parts = ["Agent run"]
+            if let model = entry.model { parts.append(model) }
+            if let rule = entry.rule { parts.append("refused: \(rule)") } else if let outcome = entry.outcome { parts.append(outcome) }
+            return parts.joined(separator: " \u{00B7} ")
         }
     }
 }

@@ -43,8 +43,8 @@ import Testing
         let names = try await client.call("tools/list").decode(as: AgentToolList.self).tools
         let acting = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press",
                       "select_option", "scroll", "hover", "wait_for", "list_downloads", "search_history", "ask_user", "request_approval", "hand_to_user", "approval_wait", "guide"]
-        // The grant sheet may allow Watch Browser Events too, whose tool the service serves beside the tool host's.
-        #expect(names == acting + ["watch_events"])
+        // The service serves rename_tab and, since the grant sheet may allow Watch Browser Events, watch_events beside the tool host's tools.
+        #expect(names == acting + ["rename_tab", "watch_events"])
         #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == acting)
         // Read Only leaves out the actions that change data and the sensitive request_approval; the others come with Ask Before Acting, and search_history with its scope.
         let readOnly = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "scroll", "hover", "wait_for",
@@ -66,7 +66,7 @@ import Testing
         // The connection that made no call learns that its list changed, and lists again for the grant.
         #expect(try await idle.receive() == .notification(method: "tools/changed", params: nil))
         let names = try await idle.call("tools/list").decode(as: AgentToolList.self).tools
-        #expect(names == AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name))
+        #expect(names == AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) + ["rename_tab"])
     }
 
     @Test(arguments: [

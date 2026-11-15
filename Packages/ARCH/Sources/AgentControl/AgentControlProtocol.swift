@@ -450,3 +450,10 @@ public struct AgentHookListing: Codable, Equatable, Sendable {
         self.hooks = hooks
     }
 }
+
+// MARK: - Outside programs' agent runs
+
+extension AgentControlMethod {
+    /// One agent run for a client with Start Agent Tasks (`docs/hooks.md`, arch-cli agent run and rename): params the run's options as `arch.agent.run` takes them, with `tabs` as the client's tab handles, answered with the run's result (`status`, `code`, `message`, `actions`, `reply`, `model`, and `usage`) once it ends. Inside a shell hook's run, the run uses the hook's grant, feature, and run tabs.
+    public static let agentRun = "agent/run"
+}

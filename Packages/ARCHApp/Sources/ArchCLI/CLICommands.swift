@@ -1,4 +1,4 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `events`, `hooks`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `events`, `hooks`, `agent run`, `rename`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
 import AgentControl
 import Foundation
 
@@ -56,6 +56,15 @@ enum CLICommands {
             return events(subscribe, json: request.json)
         case .hooks(let action):
             return hooks(action, json: request.json)
+        case .agentRun(var options, let fromStandardInput):
+            if fromStandardInput {
+                let input = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+                if case .object(var fields) = options {
+                    fields["prompt"] = .string(input.hasSuffix("\n") ? String(input.dropLast()) : input)
+                    options = .object(fields)
+                }
+            }
+            return agentRun(options, json: request.json)
         }
     }
 
@@ -290,6 +299,39 @@ enum CLICommands {
             } catch AgentClientError.failed(let error) {
                 printError(error.message)
                 return .refused
+            }
+        }
+    }
+
+    // MARK: - agent run
+
+    /// Runs one agent in Arch and prints the result's sentence and the agent's reply, or the result as JSON with `--json`. It exits 0 when the run completed, 1 when it failed or was cancelled, 4 when a rule refused it, as for a grant without Start Agent Tasks' runs left, and 5 when it ran out of time.
+    private static func agentRun(_ options: AgentJSON, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let result: AgentJSON
+            do {
+                result = try connection.call(AgentControlMethod.agentRun, params: options) { printError($0) }
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .refused
+            }
+            let status = result["status"]?.stringValue ?? "failed"
+            if json {
+                if printJSON(result) != .done { return .internalError }
+            } else {
+                let sentences = ["completed": "The agent run completed.", "failed": "The agent run failed.", "timedOut": "The agent run ran out of time.",
+                                 "cancelled": "The agent run was cancelled.", "refused": "Arch refused the agent run."]
+                var line = sentences[status] ?? "The agent run ended."
+                if let message = result["message"]?.stringValue { line += " " + message }
+                if let code = result["code"]?.stringValue, result["message"] == nil { line += " (\(code))" }
+                printError(terminalSafe(line))
+                if let reply = result["reply"]?.stringValue { print(terminalSafe(reply)) }
+            }
+            switch status {
+            case "completed": return .done
+            case "refused": return .refused
+            case "timedOut": return .timedOut
+            default: return .toolError
             }
         }
     }

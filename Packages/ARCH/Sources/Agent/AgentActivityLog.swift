@@ -17,6 +17,8 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         case declined
         /// A connection failed the peer checks; `outcome` holds the reason.
         case refusedPeer
+        /// An outside client's agent run (`docs/hooks.md`, arch-cli agent run and rename), with its model, outcome, and the refusal's rule; each of its tool calls has an entry of its own.
+        case agentRun
     }
 
     /// How a call was decided.
@@ -53,9 +55,11 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     public var rule: String?
     /// The result's status, or the refusal's reason.
     public var outcome: String?
+    /// An agent run's model, as "provider/model".
+    public var model: String?
 
     public init(id: UUID = UUID(), date: Date, event: Event, grantID: UUID? = nil, sessionID: UUID? = nil, hookID: UUID? = nil, hookRunID: UUID? = nil, clientName: String, personaID: UUID? = nil, tool: String? = nil, toolClass: String? = nil,
-                site: String? = nil, decision: Decision? = nil, rule: String? = nil, outcome: String? = nil) {
+                site: String? = nil, decision: Decision? = nil, rule: String? = nil, outcome: String? = nil, model: String? = nil) {
         self.id = id
         self.date = date
         self.event = event
@@ -71,6 +75,7 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         self.decision = decision
         self.rule = rule
         self.outcome = outcome
+        self.model = model
     }
 
     /// The site an entry may name for an address: its host, without scheme, port, path, query, fragment, or credentials.
