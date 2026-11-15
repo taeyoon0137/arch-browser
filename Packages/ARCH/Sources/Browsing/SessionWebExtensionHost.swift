@@ -123,9 +123,11 @@ final class SessionWebExtensionHost: WebExtensionHost {
         }
     }
 
+    /// ⌘Z reopens only the tabs the user just closed, newest first, so a close that puts its record ahead of theirs ends that, as a page's own close does.
     func close(_ tab: any EngineWebContents) {
-        guard let tab = self.tab(tab) else { return }
-        session?.closeTab(tab, reason: .webExtension)
+        guard let session, let tab = self.tab(tab) else { return }
+        let remembers = TabCloseAction.of(tab, reason: .webExtension) == .close(remember: true)
+        if session.closeTab(tab, reason: .webExtension), remembers { session.forgetUndoableCloses() }
     }
 
     func present(_ popup: EngineExtensionPopup, for tab: (any EngineWebContents)?) -> Bool {

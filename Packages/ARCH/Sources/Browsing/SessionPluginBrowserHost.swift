@@ -55,10 +55,12 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         }
     }
 
-    /// The tab closes as a web extension's `tabs.remove` closes it, without asking its page (`BrowserSession.closeTab(_:reason:)`).
+    /// The tab closes as a web extension's `tabs.remove` closes it, without asking its page (`BrowserSession.closeTab(_:reason:)`). ⌘Z reopens only the tabs the user just closed, newest first, so a close that puts its record ahead of theirs ends that, as a page's own close does; Reopen Last Closed Tab and the Library still reopen it.
     public func closeTab(_ id: UUID, cause: BrowserEventCause) {
         guard let session, let tab = pluginTab(id) else { return }
-        session.events.withCause(cause) { _ = session.closeTab(tab, reason: .plugin) }
+        let remembers = TabCloseAction.of(tab, reason: .plugin) == .close(remember: true)
+        let closed = session.events.withCause(cause) { session.closeTab(tab, reason: .plugin) }
+        if closed, remembers { session.forgetUndoableCloses() }
     }
 
     public func selectTab(_ id: UUID, cause: BrowserEventCause) {
