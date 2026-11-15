@@ -37,7 +37,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         session?.activeWindow?.selectedPluginTab(of: persona)?.id
     }
 
-    /// The tab goes where a new tab that the user opens in the space goes, and its `tabOpened`, `tabSelected`, and first `pageLoaded` carry the cause, which the tab keeps for its first load. Its downloads ask until the user clicks in its page or loads an address in it, and an address of a file downloads nothing (`PageDownloadGate.pluginDidOpen()`).
+    /// The tab goes where a new tab that the user opens in the space goes, and its `tabOpened`, `tabSelected`, the `spaceSwitched` that the selection brings, and its first `addressChanged` and `pageLoaded` carry the cause, which the tab keeps for its first load. Its downloads ask until the user clicks in its page or loads an address in it, and an address of a file downloads nothing (`PageDownloadGate.pluginDidOpen()`).
     public func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID {
         guard let session, session.personas.contains(where: { $0.id == persona }) else { throw PluginError.closed }
         let space: Space
@@ -55,7 +55,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         }
     }
 
-    /// The tab closes as a web extension's `tabs.remove` closes it, without asking its page (`BrowserSession.closeTab(_:reason:)`). ⌘Z reopens only the tabs the user just closed, newest first, so a close that puts its record ahead of theirs ends that, as a page's own close does; Reopen Last Closed Tab and the Library still reopen it.
+    /// The tab closes as a web extension's `tabs.remove` closes it, without asking its page (`BrowserSession.closeTab(_:reason:)`), and its `tabClosed` and the `tabSelected` of each window that moves to another tab carry the cause. ⌘Z reopens only the tabs the user just closed, newest first, so a close that puts its record ahead of theirs ends that, as a page's own close does; Reopen Last Closed Tab and the Library still reopen it.
     public func closeTab(_ id: UUID, cause: BrowserEventCause) {
         guard let session, let tab = pluginTab(id) else { return }
         let remembers = TabCloseAction.of(tab, reason: .plugin) == .close(remember: true)
@@ -63,6 +63,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         if closed, remembers { session.forgetUndoableCloses() }
     }
 
+    /// The `tabSelected` and the `spaceSwitched` that the selection brings carry the cause.
     public func selectTab(_ id: UUID, cause: BrowserEventCause) {
         guard let session, let tab = pluginTab(id) else { return }
         session.events.withCause(cause) { select(tab, in: session) }

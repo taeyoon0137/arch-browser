@@ -20,7 +20,7 @@ import Testing
         try check(session, session.pluginBrowserHost)
     }
 
-    /// A tab that a plugin opens goes where a new tab of its Persona goes, the last main window's space while that is the Persona's, else the Persona's first space, or to the space the options name, in their engine, and is selected in a window of its Persona only. Its opening, its selection with the space switch it brings, and its first load carry the plugin's cause, and its next load none.
+    /// A tab that a plugin opens goes where a new tab of its Persona goes, the last main window's space while that is the Persona's, else the Persona's first space, or to the space the options name, in their engine, and is selected in a window of its Persona only. Its opening, its selection with the space switch it brings, and its first load carry the plugin's cause, and its next load none; so do a close and the selection that it moves to another tab.
     @Test func aPluginsTabOpensInItsPersonasSpaceWithItsCause() throws {
         try withSession { session, host in
             let home = try #require(session.spaces.first)
@@ -54,6 +54,12 @@ import Testing
             host.selectTab(behind, cause: cause)
             #expect(homeWindow.selectedTabID == behind && homeWindow.currentSpaceID == side.id)
             #expect(events == ["tabSelected true", "spaceSwitched true"])
+            // The window that showed a tab that the plugin closes selects another with the plugin's cause too.
+            let neighbor = session.openTab(url: address, in: side.id, select: false, engine: .webKit)
+            events = []
+            host.closeTab(behind, cause: cause)
+            #expect(homeWindow.selectedTabID == neighbor.id)
+            #expect(events == ["tabClosed true", "tabSelected true"])
         }
     }
 
