@@ -636,15 +636,15 @@ struct EngineVersionsTests {
         #expect(later.plugins.first?.dismissedVersionNotes == [.chromium] && later.missingEngine(of: reader.id) == nil)
         later.close()
 
-        // A plugin that both engines run offers both versions and asks for none; a failure to start on Chromium makes it ask.
+        // A plugin that both engines run offers no version and asks for none; a failure to start on Chromium offers the Chromium version and makes it ask.
         chromium.refusedNames = []
         let (both, bothRuntime) = launch()
         let everywhere = try await both.installEverything(from: package("everywhere", name: "Everywhere"), isEnabled: false)
-        #expect(both.versionEngines(of: everywhere.id) == [.webKit, .chromium] && both.missingEngine(of: everywhere.id) == nil)
+        #expect(both.versionEngines(of: everywhere.id).isEmpty && both.missingEngine(of: everywhere.id) == nil)
         chromium.refused = [WebExtensionManifest.extensionID(of: everywhere.id)]
         both.setEnabled(true, for: everywhere.id)
         await bothRuntime.waitForEngines()
-        #expect(both.missingEngine(of: everywhere.id) == .chromium)
+        #expect(both.missingEngine(of: everywhere.id) == .chromium && both.versionEngines(of: everywhere.id) == [.chromium])
 
         // A plugin that only Chromium runs asks for a WebKit version.
         webKit.refusedNames = ["Chromium Only"]

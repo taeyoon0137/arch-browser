@@ -59,10 +59,10 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         return engineChecks.values.contains(true) ? nil : "No engine on this Mac runs it."
     }
 
-    /// The engines, in the order of `EngineKind`, for which Settings offers Install <Engine> Version…: each of the engines that a pair divides (`PluginEngineVersions.engines`) that is among `running`, the engines that run the kind on this Mac, while the plugin runs on another engine, whatever the checks found, since an engine may run a package built for the other engine. None in a pair.
+    /// The engines, in the order of `EngineKind`, for which Settings offers Install <Engine> Version…: each of the engines that a pair divides (`PluginEngineVersions.engines`) that is among `running`, the engines that run the kind on this Mac, and on which the plugin does not run, after a refusal, after a failure to start, or before the engine has checked its package, while it runs on another engine. None in a pair, and none for a plugin that runs on every such engine.
     public func versionEngines(among running: Set<EngineKind>) -> [EngineKind] {
         guard counterpart == nil else { return [] }
-        return PluginEngineVersions.engines.filter { engine in running.contains(engine) && engines.contains { $0 != engine } }
+        return PluginEngineVersions.engines.filter { engine in running.contains(engine) && !engines.contains(engine) && engines.contains { $0 != engine } }
     }
 
     /// The engine whose version the plugin asks for, by the rule in Engine versions ▸ Guidance: one of `running` that has a current answer for the package and on which the plugin does not run, a failure to start counting, while it runs on another, and whose note the user has not dismissed. Nil in a pair.
