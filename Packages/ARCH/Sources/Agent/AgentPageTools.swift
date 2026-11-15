@@ -38,8 +38,8 @@ extension AgentToolHost {
     }
 
     /// A tab the client may read, whose page is one agents read now (P16) and whose handle is still the client's (P17).
-    private func pageTab(_ handle: String, _ grant: AgentGrant, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
-        switch readableTab(handle, grant, state: state) {
+    private func pageTab(_ handle: String, _ client: AgentToolClient, state: AgentGrantState) -> Resolved<(AgentTabInfo, String)> {
+        switch readableTab(handle, client, state: state) {
         case .outcome(let failure): return .outcome(failure)
         case .value(let resolved):
             if case .refused(let rule, let sentence) = AgentPolicy.mayRead(resolved.0.url, allowsAI: allowsAI) {
@@ -50,8 +50,8 @@ extension AgentToolHost {
     }
 
     /// After a script ran: the tab's page may have moved on to one agents do not read, and the user may have taken the tab over.
-    private func stillReadable(_ tab: AgentTabInfo, handle: String, reportedURL: String, _ grant: AgentGrant, state: AgentGrantState) -> Outcome? {
-        stillReadable(tab, handle: handle, reportedURL: reportedURL) { mayStillRead($0, grant, state: state) }
+    private func stillReadable(_ tab: AgentTabInfo, handle: String, reportedURL: String, _ client: AgentToolClient, state: AgentGrantState) -> Outcome? {
+        stillReadable(tab, handle: handle, reportedURL: reportedURL) { mayStillRead($0, as: tab, handle: handle, client, state: state) }
     }
 
     private func stillReadable(_ tab: AgentTabInfo, handle: String, reportedURL: String, mayRead: (AgentTabInfo) -> Bool) -> Outcome? {
@@ -71,8 +71,8 @@ extension AgentToolHost {
         return nil
     }
 
-    private func isShared(_ tab: AgentTabInfo, _ grant: AgentGrant, state: AgentGrantState) -> Bool {
-        if case .shared = access(to: tab, grant, state: state) { return true }
+    private func isShared(_ tab: AgentTabInfo, _ client: AgentToolClient, state: AgentGrantState) -> Bool {
+        if case .shared = access(to: tab, client, state: state) { return true }
         return false
     }
 
@@ -89,17 +89,20 @@ extension AgentToolHost {
 
     // MARK: snapshot
 
-    func snapshot(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+    func snapshot(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState) async -> Outcome {
         let handle = arguments["tab"]?.stringValue ?? ""
         let tab: AgentTabInfo
-        switch pageTab(handle, grant, state: state) {
+        switch pageTab(handle, client, state: state) {
         case .value(let resolved): tab = resolved.0
         case .outcome(let failure): return failure
         }
-        let shared = isShared(tab, grant, state: state)
+        let shared = isShared(tab, client, state: state)
         let pages = state.activity(of: tab.id).pages
-        return await snapshot(arguments, tab: tab, handle: handle, access: shared ? .shared : .owned, store: state.snapshots, pages: pages) { current in
-            state.activity(of: tab.id).pages == pages && isShared(current, grant, state: state) == shared && mayStillRead(current, grant, state: state)
+        // A session's Stop and Take Over replace its store, so that an outline begun before them leaves no refs or diff.
+        let store = state.snapshots
+        return await snapshot(arguments, tab: tab, handle: handle, access: shared ? .shared : .owned, store: store, pages: pages) { current in
+            state.snapshots === store && state.activity(of: tab.id).pages == pages && isShared(current, client, state: state) == shared
+                && mayStillRead(current, as: tab, handle: handle, client, state: state)
         }
     }
 
@@ -266,16 +269,16 @@ extension AgentToolHost {
 
     // MARK: screenshot
 
-    func screenshot(_ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState) async -> Outcome {
+    func screenshot(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState) async -> Outcome {
         let handle = arguments["tab"]?.stringValue ?? ""
         let tab: AgentTabInfo
-        switch pageTab(handle, grant, state: state) {
+        switch pageTab(handle, client, state: state) {
         case .value(let resolved): tab = resolved.0
         case .outcome(let failure): return failure
         }
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         let area = arguments["area"]?.stringValue ?? "viewport"
-        let shared = isShared(tab, grant, state: state)
+        let shared = isShared(tab, client, state: state)
         var element: AgentBox?
         if area != "viewport", area != "full" {
             guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[area], let target = AgentRefTarget(area, fingerprint: entry.fingerprint) else {
@@ -306,7 +309,7 @@ extension AgentToolHost {
                 failure.site = site
                 return failure
             }
-            if let refusal = stillReadable(tab, handle: handle, reportedURL: before.url, grant, state: state) { return refusal }
+            if let refusal = stillReadable(tab, handle: handle, reportedURL: before.url, client, state: state) { return refusal }
             // Chromium's full-page capture (`captureBeyondViewport`) lays the page out again at its full height, where a fixed dialog or a field below a viewport-high banner moves away from the boxes read in the page's own layout, and the page is back before the boxes are read again. So a Chromium page with anything to paint over gets no full-page screenshot.
             if full, tab.engine == .chromium, !before.boxes.isEmpty {
                 return Outcome(result: AgentToolResult(status: .error, code: "notAvailable",
@@ -322,7 +325,7 @@ extension AgentToolHost {
                                                        structured: ["tab": .string(handle)]), site: site)
             }
             guard case .value(let after) = await pageScript(.boxes(shared: shared), in: tab, as: AgentBoxesReply.self, handle: handle) else { break }
-            if let refusal = stillReadable(tab, handle: handle, reportedURL: after.url, grant, state: state) { return refusal }
+            if let refusal = stillReadable(tab, handle: handle, reportedURL: after.url, client, state: state) { return refusal }
             if after == before {
                 capture = AgentScreenshot.Capture(image: cgImage, boxes: before, fullPage: full)
                 break
@@ -348,10 +351,10 @@ extension AgentToolHost {
 
     // MARK: Actions
 
-    func act(_ tool: String, _ arguments: [String: AgentJSON], _ grant: AgentGrant, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
+    func act(_ tool: String, _ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let handle = arguments["tab"]?.stringValue ?? ""
         var tab: AgentTabInfo
-        switch pageTab(handle, grant, state: state) {
+        switch pageTab(handle, client, state: state) {
         case .value(let resolved): tab = resolved.0
         case .outcome(let failure): return failure
         }
@@ -365,7 +368,7 @@ extension AgentToolHost {
             guard let record = currentSnapshot(of: tab, state: state), let entry = record.refs[ref], let resolved = AgentRefTarget(ref, fingerprint: entry.fingerprint) else { return Self.stale(handle) }
             target = resolved
         }
-        let access = self.access(to: tab, grant, state: state)
+        let access = self.access(to: tab, client, state: state)
         let shared = access != .agentTab
         // The element's facts, which the policy reads; `press` without a ref reads the focused element. An agent tab scrolls the element into view to check that nothing covers it; a tab the user shared does not move before the user decides, and the action checks the cover once allowed.
         var facts: AgentElementFacts?
@@ -396,13 +399,15 @@ extension AgentToolHost {
         let typed = state.typedForms[tab.id].flatMap { $0.page == pages ? $0.keys : nil } ?? []
         // `type` with `submit` sends what it types itself.
         let typedIntoForm = (tool == "type" && submits) || (facts?.formKey.map(typed.contains) ?? false)
-        let step = AgentInteraction(tool: tool, tab: access, element: facts, text: text, submits: submits, typedIntoForm: typedIntoForm, pageHost: tab.url?.host)
+        // An in-app session's scope decides Act in Agent Tabs' free steps and P14; an outside client has none.
+        let siteInScope = client.kind != .inApp || (tab.url.flatMap { client.inAppSession?.scope.contains($0) } ?? false)
+        let step = AgentInteraction(tool: tool, tab: access, siteInScope: siteInScope, element: facts, text: text, submits: submits, typedIntoForm: typedIntoForm, pageHost: tab.url?.host)
         let allowances = AgentAllowances(page: state.pageAllowances[tab.id] == pages, site: site.map(state.siteAllowances.contains) ?? false)
         let sentence = Self.actionSentence(tool, arguments: arguments, facts: facts, site: site, submits: submits && tool != "click")
         var decision: AgentActivityEntry.Decision = .auto
         // The document the policy decides for, which a reload at the same address replaces.
         let document = tab.documentID
-        switch AgentPolicy.decide(.interaction(step), client: clientKind, mode: grant.level, allowances: allowances) {
+        switch AgentPolicy.decide(.interaction(step), client: client.kind, mode: client.level, allowances: allowances) {
         case .allow: break
         case .refuse(let rule, let sentence):
             guard let rule else {
@@ -412,11 +417,11 @@ extension AgentToolHost {
         case .deny(let rule), .leaveToUser(let rule), .dismiss(let rule):
             return Outcome(result: Self.refusal(rule, AgentPolicy.entry(rule).sentence, handle: handle), site: site)
         case .ask(let ask):
-            let card = await stepCard(sentence, ask: ask, tab: tab, handle: handle, grant: grant, state: state, element: facts?.box,
+            let card = await stepCard(sentence, ask: ask, tab: tab, handle: handle, client: client, state: state, element: facts?.box,
                                       exactText: tool == "type" ? text : nil, typing: tool == "type")
             box.approvalID = card.id
-            let answer = await approvals.request(card)
-            if let ended = answerOutcome(answer, card: card, handle: handle, grant: grant) {
+            let answer = await request(card, for: client)
+            if let ended = answerOutcome(answer, card: card, handle: handle, client: client) {
                 var outcome = ended
                 outcome.site = site
                 outcome.step = "\(answer.allows ? "Allowed" : "Not allowed"): \(sentence)"
@@ -427,10 +432,12 @@ extension AgentToolHost {
             if answer == .allowOnSite, let site { state.siteAllowances.insert(site) }
             if Task.isCancelled { return Self.ended }
             // The page may have moved on, or the user taken the tab over, while the card waited: the step runs only on the page the user allowed it on.
-            guard case .value(let current) = pageTab(handle, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
+            guard case .value(let current) = pageTab(handle, client, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
             tab = current.0
             if state.activity(of: tab.id).pages != pages || tab.url != address || tab.documentID != document { return Self.stale(handle) }
         }
+        // A session whose turn ended or that the user took over meanwhile acts on nothing.
+        guard !Task.isCancelled, client.isCurrent else { return Self.ended }
         let action = AgentPageAction(kind: tool == "select_option" ? "select" : tool, ref: target, text: arguments["text"]?.stringValue, replace: arguments["replace"] == .bool(true) ? true : nil,
                                      submit: arguments["submit"] == .bool(true) ? true : nil, keys: arguments["keys"]?.stringValue,
                                      values: Self.strings(arguments["values"]), count: arguments["count"].flatMap(Self.integer),
@@ -536,13 +543,13 @@ extension AgentToolHost {
     // MARK: Cards
 
     /// A card for a step the policy asks about, with the host's facts: the step, the tab and site, the element marked on a fresh capture of the viewport when the tab can be captured, and the exact text that would be sent.
-    func stepCard(_ sentence: String, ask: AgentAsk, tab: AgentTabInfo, handle: String, grant: AgentGrant, state: AgentGrantState, element: AgentBox?, exactText: String?, typing: Bool,
+    func stepCard(_ sentence: String, ask: AgentAsk, tab: AgentTabInfo, handle: String, client: AgentToolClient, state: AgentGrantState, element: AgentBox?, exactText: String?, typing: Bool,
                   agentSays: String? = nil, kind: AgentApprovalKind = .step) async -> AgentApproval {
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
         // The page the card is about, as before the capture, so that a page that moves on meanwhile withdraws it.
         let pages = state.activity(of: tab.id).pages
         let capture = await markedCapture(of: tab, element: element)
-        var card = AgentApproval(ownerID: grant.id, clientName: grant.client.displayName, isOutsideClient: clientKind == .outside, kind: kind, rules: ask.rules, isSensitive: ask.isSensitive,
+        var card = AgentApproval(ownerID: client.id, clientName: client.name, isOutsideClient: client.isOutsideClient, kind: kind, rules: ask.rules, isSensitive: ask.isSensitive,
                                  offers: AgentApproval.offers(for: ask), action: sentence, tabID: tab.id, tabHandle: handle, site: site, exactText: exactText, agentSays: agentSays,
                                  capture: capture, connectionID: connectionID, document: pages, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         card.documentID = tab.documentID
@@ -559,13 +566,13 @@ extension AgentToolHost {
     }
 
     /// The result of a card that did not allow the step: denied, the user's reply, Take Over, timed out, withdrawn, or ended. Nil when the user allowed it.
-    func answerOutcome(_ answer: AgentApprovalAnswer, card: AgentApproval, handle: String, grant: AgentGrant) -> Outcome? {
+    func answerOutcome(_ answer: AgentApprovalAnswer, card: AgentApproval, handle: String, client: AgentToolClient) -> Outcome? {
         let structured: AgentJSON = ["tab": .string(handle), "approval": .string(answer.title(site: card.site))]
         switch answer {
         case .allowOnce, .allowOnPage, .allowOnSite, .allowDownloadsFromSite: return nil
         case .deny: return Outcome(result: AgentToolResult(status: .denied, text: "The user denied this step in Arch.", structured: structured), decision: .denied)
         case .denyAndStop:
-            stopClient?(grant.id)
+            stopClient?(client.id)
             return Outcome(result: AgentToolResult(status: .denied, text: "The user denied this step and stopped this client's work in Arch.", structured: structured), decision: .denied)
         case .reply(let text), .answer(let text):
             return Outcome(result: AgentToolResult(status: .denied, text: "The user did not allow this step and wrote instead: \(text)", structured: ["tab": .string(handle), "reply": .string(text)]), decision: .denied)

@@ -45,7 +45,7 @@ struct AgentApprovalCard: View {
                     .accessibilityLabel("The page, with the element marked")
             }
             if let exactText = approval.exactText {
-                Text(verbatim: exactText)
+                exactTextView(exactText)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -75,6 +75,18 @@ struct AgentApprovalCard: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(approval.isSensitive ? Color.orange.opacity(0.6) : Color.primary.opacity(0.1)))
+    }
+
+    /// The exact text, and for an address the session has not seen (P13), the parts no page or the user showed, marked.
+    private func exactTextView(_ text: String) -> Text {
+        guard let question = approval.addressQuestion else { return Text(verbatim: text) }
+        let marked = question.markedAddress
+        var address = AttributedString(marked.text)
+        for part in marked.unseen {
+            guard let range = Range(part, in: address) else { continue }
+            address[range].backgroundColor = Color.orange.opacity(0.3)
+        }
+        return Text(address)
     }
 
     private var questionAnswer: Binding<String> {

@@ -1,4 +1,4 @@
-// A folder's row in a space's tab list, above the folder's indented folders and tabs, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row, drags it, and reports its frame, so a dragged tab or folder can find it.
+// A folder's row in a space's tab list, above the folder's indented folders and tabs, with a session's waiting step under an agent folder's row, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row, drags it, and reports its frame, so a dragged tab or folder can find it.
 import Agent
 import LiveFolders
 import SwiftUI
@@ -44,6 +44,18 @@ struct TabFolderRowView: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row
+            // A session's waiting cards show under its folder's row, beside the page and never over it (docs/agents.md, Approval interface).
+            if let owner = windowModel.agentSession(of: folder), let approvals = session.agents?.approvals {
+                SessionFolderCards(approvals: approvals, ownerID: owner.id) {
+                    Task { await windowModel.perform(.show, on: folder, reviewed: owner) }
+                }
+            }
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 8) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
@@ -165,6 +177,34 @@ private struct SessionFolderState: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .lineLimit(1)
+    }
+}
+
+/// The step a folder's session waits on, under the folder's row: the first waiting card's sentence and Review, which opens the session's panel at its cards, where the user answers with the card's facts, capture, and exact text in view.
+private struct SessionFolderCards: View {
+    @ObservedObject var approvals: AgentApprovals
+    let ownerID: UUID
+    let review: () -> Void
+
+    var body: some View {
+        let waiting = approvals.pending.filter { $0.ownerID == ownerID }
+        if let first = waiting.first {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(first.action)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+                Button(waiting.count > 1 ? "Review \(waiting.count)" : "Review", action: review)
+                    .buttonStyle(.link)
+                    .font(.system(size: 12))
+                    .accessibilityLabel(waiting.count > 1 ? "Review \(waiting.count) requests" : "Review the request")
+            }
+            // Under the folder's name, past its symbol.
+            .padding(.leading, 36)
+            .padding(.trailing, 10)
+            .padding(.bottom, 6)
+        }
     }
 }
 

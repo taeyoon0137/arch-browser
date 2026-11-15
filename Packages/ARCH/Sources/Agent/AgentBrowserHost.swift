@@ -63,7 +63,7 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Whose agent tabs these are: an outside client's grant, and in-app sessions with plan task VII.17.1 (docs/agents.md, In the browser ▸ Agent folders). Its tabs sit in one agent folder named `folderName` among the open tabs of the space `spaceID`.
+/// Whose agent tabs these are: an outside client's grant, or an in-app session, whose folder takes the session's title (docs/agents.md, In the browser ▸ Agent folders). Its tabs sit in one agent folder named `folderName` among the open tabs of the space `spaceID`.
 public struct AgentTabOwner: Equatable, Sendable {
     /// The grant's or session's ID, which the agent folder keeps as its `agentSessionID`.
     public var id: UUID

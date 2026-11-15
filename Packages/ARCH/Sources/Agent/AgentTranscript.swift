@@ -134,11 +134,12 @@ struct AgentTranscript: Equatable {
 
 /// The step sentences of the tools this build's host runs, and a plain one for the rest.
 enum AgentStepText {
-    static func step(for call: AgentToolCall, result: AgentToolResult, tabHandle: String?, tabID: UUID?) -> AgentStep {
-        AgentStep(tool: call.name, sentence: sentence(for: call, result: result), tabHandle: tabHandle, tabID: tabID, status: result.status)
+    /// `hostStep` is the tool host's sentence for a step that acts or navigates, such as "Clicked “Next” on example.org", whose page names stand in quotes.
+    static func step(for call: AgentToolCall, result: AgentToolResult, tabHandle: String?, tabID: UUID?, hostStep: String? = nil) -> AgentStep {
+        AgentStep(tool: call.name, sentence: sentence(for: call, result: result, hostStep: hostStep), tabHandle: tabHandle, tabID: tabID, status: result.status)
     }
 
-    static func sentence(for call: AgentToolCall, result: AgentToolResult) -> String {
+    static func sentence(for call: AgentToolCall, result: AgentToolResult, hostStep: String? = nil) -> String {
         let done: String
         switch call.name {
         case "ask_user": done = "Asked you a question"
@@ -151,9 +152,12 @@ enum AgentStepText {
         case "guide":
             // The model wrote the topic, so only a topic the guide has appears in the sentence.
             done = call.arguments["topic"]?.stringValue.flatMap(AgentGuideTopic.init(rawValue:)).map { "Read the guide\u{2019}s \($0.rawValue) topic" } ?? "Read the guide"
+        case "open_tab": done = "Opened a tab"
+        case "navigate": done = "Opened a page"
+        case "close_tab": done = "Closed a tab"
         default:
             guard let tool = AgentToolCatalog.tool(named: call.name) else { return "Unrecognized tool" }
-            done = "Requested " + tool.name.replacingOccurrences(of: "_", with: " ")
+            done = hostStep ?? "Requested " + tool.name.replacingOccurrences(of: "_", with: " ")
         }
         // The sentence names a known code in words and never quotes the result's text; the activity log keeps the code.
         let reason: String? = switch result.code {

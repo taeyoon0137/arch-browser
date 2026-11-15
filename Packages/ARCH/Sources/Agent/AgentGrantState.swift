@@ -1,4 +1,4 @@
-// What the tool host keeps for one grant for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, the calls that still run, which a Stop cancels, and the calls that wait for the user past the first answer.
+// What the tool host keeps for one grant, or for one in-app session, for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, the calls that still run, which a Stop cancels, and the calls that wait for the user past the first answer.
 import AgentControl
 import Foundation
 
@@ -143,8 +143,12 @@ struct AgentTabActivity: Equatable {
     /// The day the count is for, as the start of the day, and the calls made in it.
     private var callsDay: Date?
     private var calls = 0
-    /// Each tab's latest snapshot, and how many it had this launch.
-    let snapshots = AgentSnapshotStore()
+    /// Each tab's latest snapshot, and how many it had this launch. A session replaces the store at Stop and Take Over, so that no ref or diff outlives them.
+    var snapshots = AgentSnapshotStore()
+    /// An in-app session's navigations by an address the agent wrote, by tab, until the call that started one ends: their redirect hops are checked against the site scope (P13).
+    var writtenLoads: [UUID: URL] = [:]
+    /// A redirect hop of a written address's navigation that the scope stopped, by tab, which the call that waits for the load asks the user about.
+    var heldHops: [UUID: AgentAddressQuestion] = [:]
     /// Allow on This Page: the tab's page count when the user allowed it, which lasts until the tab shows another page.
     var pageAllowances: [UUID: Int] = [:]
     /// Allow on <site> for This Session, and Allow Downloads from This Site for This Session, by host.

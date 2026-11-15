@@ -184,10 +184,14 @@ import Foundation
         }
         host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
         host.agentTabMayLoad = { [weak self] owner, tab, url in self?.agentTab(tab, of: owner, mayLoad: url) ?? false }
-        host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.states[owner]) ?? false }
+        host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.toolState(of: owner)) ?? false }
         approvals.authenticator = dependencies.authenticator
         approvals.didAdd = { [weak self] approval in self?.cardDidOpen(approval) }
-        approvals.didEnd = { [weak self] ownerID in self?.dependencies.withdrawAttention(ownerID) }
+        approvals.didEnd = { [weak self] ownerID in
+            // A session waits for the user while one of its cards waits, also a card a page in its agent tab opened.
+            self?.session(withID: ownerID)?.setWaitingForAnswer(false)
+            self?.dependencies.withdrawAttention(ownerID)
+        }
         panel.showTab = { [weak host] in host?.showTab($0) }
         panel.stop = { [weak self] in self?.stopClient($0) }
         host.agentPanel = panel
@@ -645,7 +649,11 @@ import Foundation
         tools.approvalWindow = dependencies.approvalWindow
         tools.connectionID = connectionID
         tools.callID = callID
-        tools.stopClient = { [weak self] in self?.stopClient($0) }
+        // Deny and Stop on a session's card stops its turn; on an outside client's, it disconnects the client.
+        tools.stopClient = { [weak self] ownerID in
+            guard let self else { return }
+            if let session = self.session(withID: ownerID) { session.stop() } else { self.stopClient(ownerID) }
+        }
         return tools
     }
 
@@ -911,7 +919,7 @@ import Foundation
         updateSessionsChannel()
     }
 
-    /// Stop All Agents: every session's turn stops and its queued messages go, every outside client's running call is cancelled, every card that waits for the user is denied, which ends the calls waiting on it, and every outside client is disconnected; the grants stay. Plan task VII.17.1 also cancels the sessions' running calls and denies their pending approvals.
+    /// Stop All Agents: every session's turn stops, its queued messages go, its running calls are cancelled, and its cards are denied; every outside client's running call is cancelled, every card that waits for the user is denied, which ends the calls waiting on it, and every outside client is disconnected; the grants stay.
     public func stopAllAgents() {
         runService?.cancelAll()
         for session in sessions where !session.hasEnded { session.stop() }
@@ -1135,30 +1143,37 @@ import Foundation
                 runner?.toolCallDidEnd()
             }
             // A call the client cancelled was answered then, and one cancelled before it ran ran nothing.
-            let result = await sessionResult(of: call, in: session, arrivedAt: epoch, connectionID: connection.id) {
+            let outcome = await sessionResult(of: call, in: session, arrivedAt: epoch, connectionID: connection.id, callID: running.callID) {
                 !running.isCancelled && self.connections[connection.id] != nil
             }
             guard !running.isCancelled, connections[connection.id] != nil else { return }
-            record(call, result: result, in: session)
-            reply(connection, requestID, Self.json(result))
+            record(call, outcome: outcome, in: session)
+            reply(connection, requestID, Self.json(outcome.result))
         }
     }
 
-    private func record(_ call: AgentToolCall, result: AgentToolResult, in session: AgentSession) {
+    /// A session's call as a step in its transcript, with the host's sentence for the tools that act, and as an entry in the activity log with its site and the user's decision.
+    private func record(_ call: AgentToolCall, outcome: AgentToolHost.Outcome, in session: AgentSession) {
+        let result = outcome.result
         let tool = AgentToolCatalog.sessionTool(named: call.name)
         let tabHandle = result.structured?["tab"]?.stringValue ?? call.arguments["tab"]?.stringValue
-        session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
+        session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:)), hostStep: outcome.step))
         let decision: AgentActivityEntry.Decision
         switch (call.name, result.status) {
+        case (_, .refused): decision = .refused
         case ("ask_user", .ok), ("request_tab", .ok): decision = .approved
         case ("ask_user", .denied), ("request_tab", .denied): decision = .denied
         case ("ask_user", .timeout), ("request_tab", .timeout): decision = .timedOut
-        case (_, .refused): decision = .refused
-        default: decision = .auto
+        default: decision = outcome.decision ?? .auto
         }
         activity.record(AgentActivityEntry(date: dependencies.now(), event: .toolCall, grantID: session.grantID, sessionID: session.id, clientName: session.clientName,
-                                           personaID: session.personaID, tool: tool?.name, toolClass: tool?.toolClass.rawValue,
+                                           personaID: session.personaID, tool: tool?.name, toolClass: tool?.toolClass.rawValue, site: outcome.site,
                                            decision: decision, rule: result.status == .refused ? result.code : nil, outcome: result.status.rawValue))
+    }
+
+    /// The tool host bound to a session, as an HTTP session's loop runs it; tests run a CLI session's calls through it too.
+    func sessionTools(for session: AgentSession) -> any AgentSessionTools {
+        SessionTools(service: self, session: session)
     }
 
     /// Binds the HTTP tool loop to this session for its full lifetime, without a peer, a ticket, or a socket.
@@ -1235,33 +1250,33 @@ import Foundation
 
         func run(_ call: AgentToolCall) async -> AgentToolResult {
             guard let service, let session, !session.hasEnded else { return AgentToolResult(status: .refused, code: "stopped", text: "The session ended.") }
-            let result = await service.sessionResult(of: call, in: session, arrivedAt: session.callEpoch)
-            if !Task.isCancelled { service.record(call, result: result, in: session) }
-            return result
+            let outcome = await service.sessionResult(of: call, in: session, arrivedAt: session.callEpoch)
+            if !Task.isCancelled { service.record(call, outcome: outcome, in: session) }
+            return outcome.result
         }
     }
 
     /// Shared permission, turn, and budget checks for CLI and HTTP sessions.
-    private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, connectionID: UUID? = nil, isConnected: () -> Bool = { true }) async -> AgentToolResult {
+    private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, connectionID: UUID? = nil, callID: Int? = nil,
+                               isConnected: () -> Bool = { true }) async -> AgentToolHost.Outcome {
         guard await session.ready.wait(timeout: sessionReadyWait) else {
-            if Task.isCancelled { return AgentToolHost.ended.result }
-            if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
-            return AgentToolResult(status: .refused, code: "notReady", text: "Arch did not see the session's tool start as it asked, so it runs none of this session's tool calls.")
+            if Task.isCancelled { return AgentToolHost.ended }
+            if let stale = session.staleCallResult(arrivedAt: epoch) { return AgentToolHost.Outcome(result: stale) }
+            return AgentToolHost.Outcome(result: AgentToolResult(status: .refused, code: "notReady", text: "Arch did not see the session's tool start as it asked, so it runs none of this session's tool calls."))
         }
         // A call the turn's end or Stop cut off, or whose connection closed while it waited, runs nothing.
-        if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
+        if let stale = session.staleCallResult(arrivedAt: epoch) { return AgentToolHost.Outcome(result: stale) }
         guard await session.handedBack.wait(timeout: sessionTakeOverWait) else {
-            if Task.isCancelled { return AgentToolHost.ended.result }
-            if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
-            return AgentToolResult(status: .timeout, text: session.hasEnded ? "The session ended." : "The user took the session over and has not handed it back. Wait for the user's next message.")
+            if Task.isCancelled { return AgentToolHost.ended }
+            if let stale = session.staleCallResult(arrivedAt: epoch) { return AgentToolHost.Outcome(result: stale) }
+            return AgentToolHost.Outcome(result: AgentToolResult(status: .timeout, text: session.hasEnded ? "The session ended." : "The user took the session over and has not handed it back. Wait for the user's next message."))
         }
-        if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
+        if let stale = session.staleCallResult(arrivedAt: epoch) { return AgentToolHost.Outcome(result: stale) }
         guard !Task.isCancelled, isConnected() else {
-            return AgentToolResult(status: .refused, code: "stopped", text: "The call was cancelled.")
+            return AgentToolHost.Outcome(result: AgentToolResult(status: .refused, code: "stopped", text: "The call was cancelled."))
         }
-        if let refusal = session.countCall() { return refusal }
-        var toolHost = toolHost(connectionID: connectionID)
-        toolHost.clientKind = session.isFromOutsideClient ? .outside : .inApp
+        if let refusal = session.countCall() { return AgentToolHost.Outcome(result: refusal) }
+        var toolHost = toolHost(connectionID: connectionID, callID: callID)
         toolHost.approvalWindow = sessionQuestionWindow
         let generation = session.takeoverGeneration
         let read: AgentReadPage?
@@ -1272,24 +1287,28 @@ import Foundation
         } else {
             read = nil
         }
-        let result: AgentToolResult
+        let outcome: AgentToolHost.Outcome
         if call.name == "request_tab" {
-            result = await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
+            outcome = AgentToolHost.Outcome(result: await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected))
         } else {
-            result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
+            outcome = await toolHost.runSession(call, in: session, searchesHistory: searchesHistory(session))
         }
         if !approvals.pending.contains(where: { $0.ownerID == session.id }) {
             session.setWaitingForAnswer(false)
         }
-        if Task.isCancelled || !isConnected() { return AgentToolHost.ended.result }
-        if let stale = session.staleCallResult(arrivedAt: epoch) { return stale }
-        if session.isTakenOver || generation != session.takeoverGeneration {
-            return AgentToolResult(status: .refused, code: "stopped", text: "The user took over while this call was running. Request the step again when the user hands the session back.")
+        // The decision stays with a call whose card the user answered before its turn ended.
+        func refused(_ result: AgentToolResult) -> AgentToolHost.Outcome {
+            AgentToolHost.Outcome(result: result, site: outcome.site, decision: outcome.decision)
         }
-        if result.status == .ok, let read, currentReadPage(read, in: session) != nil {
+        if Task.isCancelled || !isConnected() { return refused(AgentToolHost.ended.result) }
+        if let stale = session.staleCallResult(arrivedAt: epoch) { return refused(stale) }
+        if session.isTakenOver || generation != session.takeoverGeneration {
+            return refused(AgentToolResult(status: .refused, code: "stopped", text: "The user took over while this call was running. Request the step again when the user hands the session back."))
+        }
+        if outcome.result.status == .ok, let read, currentReadPage(read, in: session) != nil {
             session.recordRead(read)
         }
-        return result
+        return outcome
     }
 
     /// The card keeps local titles and addresses. Only the resulting read handle goes to the model.
@@ -1535,7 +1554,7 @@ import Foundation
     /// A client's `tools/cancel` for a call on this connection: the call stops waiting, whether on its card, which is withdrawn, on the grant sheet, which stays open for the client's next call, or on an in-app session's gates, runs no further step, ends with status `error` and code `cancelled`, which `arch-mcp` drops, and frees its slot. An `approval_wait` cancels the call it waits on too, whose card is withdrawn, so that the step never runs once the client stopped waiting for it. A call that has ended, or one of another connection, is left alone.
     private func cancelCall(_ params: AgentJSON?, on connection: ClientConnection) {
         guard let cancel = try? params?.decode(as: AgentToolCancel.self), let running = connection.cancelCall(cancel.call) else { return }
-        for state in states.values {
+        for state in Array(states.values) + sessions.map(\.toolState) {
             for card in state.cancelCall(cancel.call, onConnection: connection.id) { approvals.end(card, because: "The client cancelled the call.") }
         }
         // Handles are the grant's, so the call waited on is one of this client's.
@@ -1568,18 +1587,29 @@ import Foundation
         return state
     }
 
+    /// What the tool host keeps for an owner of agent tabs: a grant's state from its first call, or a session's own.
+    private func toolState(of ownerID: UUID) -> AgentGrantState? {
+        states[ownerID] ?? session(withID: ownerID)?.toolState
+    }
+
+    /// What an agent tab reported, for its owner's next result and cards. Each document a session's agent tab finishes is an address the session has seen (Site scope and navigation).
     private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
+        let session = session(withID: ownerID)
         switch report {
         case .takenOver, .closed, .loaded, .addressChanged:
-            if let session = session(withID: ownerID), session.transcript.containsRead(of: tabID) { session.objectWillChange.send() }
+            if let session, session.transcript.containsRead(of: tabID) { session.objectWillChange.send() }
         default: break
         }
-        let client = grants.first { $0.id == ownerID }?.client.displayName ?? ""
-        toolHost().tab(tabID, of: ownerID, didReport: report, state: states[ownerID], client: client)
+        if let session, !session.hasEnded, case .loaded(let url?, _) = report { session.scope.see(url) }
+        let client = session.map { AgentToolClient(session: $0, searchesHistory: false) } ?? grants.first { $0.id == ownerID }.map(AgentToolClient.init(grant:))
+        var tools = toolHost()
+        // A session's cards about its pages' downloads and links to other apps wait as long as its other cards.
+        if session != nil { tools.approvalWindow = sessionQuestionWindow }
+        tools.tab(tabID, of: ownerID, didReport: report, state: toolState(of: ownerID), client: client)
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, mayLoad url: URL) -> Bool {
-        toolHost().tab(tabID, mayLoad: url, state: states[ownerID])
+        toolHost().tab(tabID, mayLoad: url, state: toolState(of: ownerID), scope: session(withID: ownerID)?.scope)
     }
 
     /// A call's step in the agent panel: the tool host's sentence for the user, or the tool and its tab, with how it ended.

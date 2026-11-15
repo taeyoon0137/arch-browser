@@ -1,4 +1,4 @@
-// The agent panel's conversation (docs/agents.md, In the browser ▸ The agent panel): a header with the session's title, its tool and model, the mode menu that lowers the mode at once and raises it only after a confirmation, the site scope, and Stop; the transcript, with the agent's replies rendered as the page reader renders them, thinking collapsed, one row per tool step from Arch's host with a button that shows its tab, questions and tab-sharing requests for the user, errors with one action, and the model and tokens under each turn; the queued messages with Remove; Take Over and Hand Back; and the field for the next message, whose Send becomes Stop while a turn runs. The browser places it in the trailing column.
+// The agent panel's conversation (docs/agents.md, In the browser ▸ The agent panel): a header with the session's title, its tool and model, the mode menu that lowers the mode at once and raises it only after a confirmation, the site scope, and Stop; the transcript, with the agent's replies rendered as the page reader renders them, thinking collapsed, one row per tool step from Arch's host with a button that shows its tab, every card the session waits on (steps and addresses to allow, questions, tab-sharing requests, downloads, and links to other apps), errors with one action, and the model and tokens under each turn; the queued messages with Remove; Take Over and Hand Back; and the field for the next message, whose Send becomes Stop while a turn runs. The browser places it in the trailing column.
 import AgentControl
 import AI
 import SwiftUI
@@ -178,14 +178,9 @@ public struct AgentSessionPanel: View {
 
     // MARK: Transcript
 
+    /// Every card the session waits on shows inline after the transcript: its steps, addresses (P13), questions, tab requests, and the downloads and links to other apps its pages start.
     private var transcript: some View {
-        let cards = approvals.pending.filter { card in
-            guard card.ownerID == session.id else { return false }
-            switch card.kind {
-            case .question, .shareSessionTab: return true
-            default: return false
-            }
-        }
+        let cards = approvals.pending.filter { $0.ownerID == session.id }
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {

@@ -1,4 +1,5 @@
 // The page area and split view. The page area of either kind of window shows the selected tab, or the split view it belongs to: two to four tabs side by side, each in its own pane. The selected tab is the focused pane, which the address pill, the find bar, and the menus act on, and a click in another pane selects that pane's tab. A pane whose tab another window shows holds a placeholder instead. Each pane of a split view has a control that takes its tab out, and a tab dragged from the sidebar onto a pane opens beside it. The session keeps each space's split view (`BrowserSession`, Split view).
+import Agent
 import SwiftUI
 
 /// The page area of either kind of window: the window's panes, or the empty page frame with no tab open, at `margins` from the window's edges and controls, with the preview panel over it and room beside it for docked developer tools. While the selected page fills the window in fullscreen, only its pane shows, without margins, and the window enters full screen with it. A pane whose page another window shows holds a placeholder, because a page's view has one superview (window rule 1).
@@ -119,6 +120,12 @@ private struct PagePaneView: View {
                 }
             }
             .overlay(frameBorder.allowsHitTesting(false))
+            // An agent tab whose session's turn runs gets a thin frame in the margin around its page, outside the page area.
+            .overlay {
+                if !isPageFullscreen, let owner = tab.agentOwnerID.flatMap({ session.agents?.session(withID: $0) }) {
+                    AgentActingFrame(owner: owner).allowsHitTesting(false)
+                }
+            }
             // The find bar and the question popover act on the selected tab, so they float over that pane's top trailing corner, the popover below the bar. In a narrow pane they keep clear of its leading edge and of a split view pane's close control. A region capture hides them without closing them, so that their fields do not take the focus again when it ends, and so does a prompt card, under which they wait, going and coming back with its dimming.
             .overlay(alignment: .topTrailing) {
                 if isSelected {
@@ -163,6 +170,18 @@ private struct PagePaneView: View {
     /// Selecting the tab again would close an internal page over it.
     private func selectTab() {
         if windowModel.selectedTabID != tab.id { windowModel.selectTab(tab.id) }
+    }
+}
+
+/// The frame around an agent tab's page while its session's turn runs and the user has not taken the session over (docs/agents.md, Sidebar and attention): a 2-point ring in the accent color 2 points outside the page frame, in the window's margin, so it never covers the page.
+private struct AgentActingFrame: View {
+    @ObservedObject var owner: AgentSession
+
+    var body: some View {
+        if owner.isTurnRunning, !owner.isTakenOver, !owner.hasEnded {
+            PageFrameShape().inset(by: -3).stroke(Color.accentColor, lineWidth: 2)
+                .accessibilityHidden(true)
+        }
     }
 }
 

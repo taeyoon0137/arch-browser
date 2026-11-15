@@ -158,8 +158,8 @@ import Testing
             toolHost.approvals.authenticator = FakeAuthenticator()
             let state = state
             let toolHost = toolHost
-            let name = grant.client.displayName
-            host.agentTabDidReport = { owner, tab, report in toolHost.tab(tab, of: owner, didReport: report, state: state, client: name) }
+            let client = AgentToolClient(grant: grant)
+            host.agentTabDidReport = { owner, tab, report in toolHost.tab(tab, of: owner, didReport: report, state: state, client: client) }
             host.agentTabMayLoad = { _, tab, url in toolHost.tab(tab, mayLoad: url, state: state) }
             host.agentTabMayDownload = { _, tab, url in toolHost.tab(tab, mayDownload: url, state: state) }
         }

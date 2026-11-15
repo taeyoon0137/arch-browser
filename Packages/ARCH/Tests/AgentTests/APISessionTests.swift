@@ -76,7 +76,7 @@ final class ScriptedClient: AIClient, @unchecked Sendable {
     }
 }
 
-/// The tool host behind an outside client's grant, standing in for the session binding that plan task VII.17.1 adopts.
+/// The tool host behind an outside client's grant, run on the same path as a session's calls.
 @MainActor final class GrantSessionTools: AgentSessionTools {
     let toolHost: AgentToolHost
     let grant: AgentGrant

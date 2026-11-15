@@ -104,6 +104,8 @@ public struct AgentApproval: Identifiable {
     public var exactText: String?
     /// Arch's note under the exact text, as what an allowance for the page or site lets the site receive.
     public var exactTextNote: String?
+    /// A P13 card's question: the address it would open, whose parts the session has not seen the card marks.
+    var addressQuestion: AgentAddressQuestion?
     /// The agent's explanation, its question, or its message.
     public var agentSays: String?
     /// A viewport capture with the element's box marked, which only the user sees, so it is not painted over.

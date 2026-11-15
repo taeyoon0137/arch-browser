@@ -623,7 +623,7 @@ import UserNotifications
         #expect(request.instructions == AgentHarness.sessionInstructions)
         #expect(request.toolServer.arguments == ["--session"])
         #expect(request.toolServer.environment == [AgentMCPServer.ticketVariable: try #require(session.ticket).text])
-        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"])
+        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press", "select_option", "scroll", "hover", "wait_for", "list_downloads", "ask_user", "request_approval", "hand_to_user", "guide"])
         #expect(request.skills?.plugin == "arch")
         #expect(request.skills?.names == AgentHarness.sessionSkills.map(\.name))
         let skills = try #require(request.skills)
@@ -868,7 +868,7 @@ import UserNotifications
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
         #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
-        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"]])
+        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "scroll", "hover", "wait_for", "list_downloads", "ask_user", "hand_to_user", "guide"]])
         // Before `ready`, a call waits and is then refused, so no page data flows before the start check passed.
         let early = try await client.callTool("list_tabs")
         #expect(early.status == .refused && early.code == "notReady")
@@ -879,7 +879,8 @@ import UserNotifications
         #expect(info.status == .ok)
         #expect(info.text.hasPrefix("This session works in Default / Home (s1), in Read Only."))
         #expect(info.text.contains("Site scope: no sites yet."))
-        #expect(info.text.contains("Opening, navigating and interacting with pages require the user."))
+        #expect(info.text.contains("An address you write opens without asking only when a page or the user showed it"))
+        #expect(info.text.contains("Interactions other than scroll and hover are refused"))
         #expect(info.text.contains("149 of 150 tool calls left for this message"))
         #expect(session.items.contains { $0.kind == .step(AgentStep(tool: "session_info", sentence: "Read the session\u{2019}s details", tabHandle: nil, tabID: nil, status: .ok)) })
         #expect(service.activity.entries.last?.sessionID == session.id && service.activity.entries.last?.tool == "session_info")
@@ -887,15 +888,16 @@ import UserNotifications
         #expect(guide.text == AgentHarness.sessionInstructions)
         let research = try await client.callTool("guide", ["topic": "research"])
         #expect(research.text.contains("Shared Tabs") && !research.text.contains("open_tab"))
-        // Raising the mode tells the session's connection. This build serves reading tools only, so the next list is the same and the runner hears of no change; a list that differs from the last one reported reaches it once.
+        // Raising the mode tells the session's connection, and the next list, which adds the interactions and request_approval, reaches the runner once; a list that differs from the last one reported reaches it again.
         session.setMode(.askBeforeActing)
         #expect(try await client.receive() == .notification(method: AgentControlMethod.toolsChangedNotification, params: nil))
+        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press", "select_option", "scroll", "hover", "wait_for", "list_downloads", "ask_user", "request_approval", "hand_to_user", "guide"]])
         _ = try await client.call(AgentControlMethod.toolsList)
-        #expect(runner.reportedTools.isEmpty)
+        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press", "select_option", "scroll", "hover", "wait_for", "list_downloads", "ask_user", "request_approval", "hand_to_user", "guide"]])
         session.reportedTools = ["session_info"]
         _ = try await client.call(AgentControlMethod.toolsList)
         _ = try await client.call(AgentControlMethod.toolsList)
-        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"]])
+        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press", "select_option", "scroll", "hover", "wait_for", "list_downloads", "ask_user", "request_approval", "hand_to_user", "guide"], ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press", "select_option", "scroll", "hover", "wait_for", "list_downloads", "ask_user", "request_approval", "hand_to_user", "guide"]])
         // While the user has taken the session over, calls wait until Hand Back.
         session.takeOver()
         let waiting = Task { try await client.callTool("list_spaces") }
@@ -1257,7 +1259,8 @@ import UserNotifications
         let denied = try await bound.callTool("ask_user", ["question": "Show a question despite the task setting"])
         #expect(denied.status == .denied && service.approvals.pending.isEmpty)
         let tools = try await bound.call(AgentControlMethod.toolsList).decode(as: AgentToolList.self)
-        #expect(!tools.tools.contains("request_tab") && !tools.tools.contains("open_tab"))
+        // A session an outside client started opens its own agent tabs but asks for none of the user's.
+        #expect(!tools.tools.contains("request_tab") && tools.tools.contains("open_tab"))
         let outsidePick = try await bound.callTool("request_tab", ["access": "read", "reason": "Pick any tab"])
         #expect(outsidePick.status == .refused && service.approvals.pending.isEmpty && session.handles.sharedTabIDs.isEmpty)
         // A space of another Persona is not the grant's.

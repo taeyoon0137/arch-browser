@@ -101,7 +101,7 @@ public struct AgentInteraction: Equatable, Sendable {
     var entersText: Bool { tool == "type" || tool == "press" }
 }
 
-/// What the host knows of an address an agent navigates to, for in-app sessions' rule P13 (docs/agents.md, Site scope and navigation). The session's scope and seen addresses are VII.17's; outside clients pass none of this.
+/// What the host knows of an address an agent navigates to, for in-app sessions' rule P13 (docs/agents.md, Site scope and navigation). The tool host reads them from the session's scope (`AgentSiteScope`); outside clients pass none of this.
 public struct AgentNavigationFacts: Equatable, Sendable {
     /// The agent wrote the address (`url`), rather than following a link by ref or going back, forward, or reloading.
     public var isWritten: Bool

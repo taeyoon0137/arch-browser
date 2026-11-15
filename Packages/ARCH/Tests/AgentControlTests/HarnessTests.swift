@@ -145,19 +145,20 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(odd.markdown != skill.markdown)
     }
 
-    @Test func inAppGuidanceOnlyNamesOfferedToolsAndKeepsTheOutsideGuide() {
+    @Test func inAppGuidanceNamesTheSessionsToolsAndKeepsTheOutsideGuide() {
         let guide = AgentHarness.guideResult(arguments: [:], inSession: true)
         #expect(guide.text == AgentHarness.sessionInstructions)
-        for name in ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"] {
-            #expect(guide.text.contains(name))
+        for name in ["session_info", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "wait_for", "ask_user", "request_approval", "hand_to_user", "guide"] {
+            #expect(guide.text.contains(name), "\(name)")
         }
-        #expect(!guide.text.contains("open_tab"))
+        // An in-app session's call waits on its card, so its guidance never sends it to approval_wait.
         for topic in AgentGuideTopic.allCases {
             let text = AgentHarness.guideResult(arguments: ["topic": .string(topic.rawValue)], inSession: true).text
-            for unavailable in ["navigate(", "open_tab", "request_approval", "hand_to_user", "wait_for", "screenshot"] {
+            for unavailable in ["approval_wait", "approvalPending", "arch-cli guide"] {
                 #expect(!text.contains(unavailable), "\(topic) describes \(unavailable)")
             }
         }
+        #expect(!guide.text.contains("approval_wait"))
         let outside = AgentMCPServer(mode: .outside, version: "test")
         let bound = AgentMCPServer(mode: .session(ticket: "fixture"), version: "test")
         #expect(outside.instructions == AgentHarness.mcpInstructions && outside.instructions.contains("request_approval"))

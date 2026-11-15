@@ -117,6 +117,20 @@ struct AgentAddressQuestion: Equatable {
     var unseenParts: [Part]
     var isOutsideScope: Bool
 
+    /// The address as the card shows it, with the ranges of the parts the session has not seen, which the card marks.
+    var markedAddress: (text: String, unseen: [Range<String.Index>]) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false), let text = components.string else { return (url.absoluteString, []) }
+        let ranges = unseenParts.compactMap { part -> Range<String.Index>? in
+            switch part {
+            case .host: return components.rangeOfHost
+            case .path: return components.rangeOfPath.flatMap { $0.isEmpty ? nil : $0 }
+            case .query: return components.rangeOfQuery
+            case .fragment: return components.rangeOfFragment
+            }
+        }
+        return (text, ranges)
+    }
+
     /// The card's sentence, such as "The agent wants to open shop.example/t?d=… — an address no page showed, on a site you did not name."
     var sentence: String {
         var reasons: [String] = []
