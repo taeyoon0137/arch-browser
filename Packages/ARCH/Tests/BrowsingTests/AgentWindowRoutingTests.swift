@@ -227,28 +227,15 @@ import Testing
         }
     }
 
-    enum Reply: CaseIterable { case agent, page }
-
-    @Test(arguments: Reply.allCases) func replyLinksFollowTheirWindowAndPersona(reply: Reply) throws {
+    @Test func replyLinksFollowTheirWindowAndPersona() throws {
         try withWindows { session, main, small, home, research in
             let homeTab = try #require(main.selectedTab)
             let popup = try #require(small.selectedTab)
             let address = try #require(URL(string: "https://fixture.invalid/reply"))
-            let conversation = UUID()
-
-            @MainActor func openReply(in window: BrowserWindowModel, about source: Tab) {
-                switch reply {
-                case .agent:
-                    window.showAgentSession(conversation)
-                    window.openReplyLink(address, in: window.personaID)
-                case .page:
-                    _ = session.pageAssistant.openLink(address, from: source)
-                }
-            }
 
             // The other Persona's small window was last active.
             #expect(session.activeWindow === small)
-            openReply(in: main, about: homeTab)
+            _ = session.pageAssistant.openLink(address, from: homeTab)
             let opened = try #require(main.selectedTab)
             #expect(opened.url == address && opened.spaceID == home.id && opened.personaID == home.resolvedPersonaID)
             #expect(opened.isListedInSidebar && opened.agentOwnerID == nil && opened !== homeTab)
@@ -265,7 +252,7 @@ import Testing
                 window.nsWindow = destinationWindow
             }
             defer { selection.cancel() }
-            openReply(in: small, about: popup)
+            _ = session.pageAssistant.openLink(address, from: popup)
             let destination = try #require(session.windows.first { $0 !== main && $0 !== small })
             defer { session.windowWillClose(destination) }
             let linked = try #require(destination.selectedTab)

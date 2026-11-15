@@ -214,12 +214,12 @@ public struct AgentComposer: View {
                 if let warning = codexInstructionsWarning {
                     note(warning)
                 }
-                if let problem = context.problem {
-                    Text(problem)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            }
+            if let problem = context.problem {
+                Text(problem)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
