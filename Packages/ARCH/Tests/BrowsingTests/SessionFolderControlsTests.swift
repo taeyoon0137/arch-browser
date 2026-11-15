@@ -198,10 +198,11 @@ import Testing
         let space = try #require(browser.spaces.first)
         let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let tab = browser.openTab(url: URL(string: "https://fixture.invalid/page"), in: space.id, select: false)
-        let reviewed = try #require(window.sidebarAgentDraft(for: tab))
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: tab, settings: settings))
         // The page commits another document while the menu shows.
         tab.webContents(tab.webContents, didCommitDocumentAt: tab.url)
-        window.askAgentAboutSidebarTab(tab, reviewed: reviewed)
+        window.askAgentAboutSidebarTab(tab, reviewed: reviewed, settings: settings)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a draft without the page"); return }
         #expect(draft.tab == nil && draft.problem != nil && service.sessions.isEmpty)
     }
