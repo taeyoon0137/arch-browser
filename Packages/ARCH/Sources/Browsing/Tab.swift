@@ -31,9 +31,10 @@ import LiveFolders
             savedPage = isPinned ? currentPage : nil
             // Pinning or unpinning is the user's own act on the tab, so the archive and unload timers count from it; otherwise a pin left alone for days, once unpinned, would be archived at the next check.
             lastActivatedAt = Date()
+            if !isPinned { pendingSyncEngine = nil }
         }
     }
-    /// A synced engine choice waits while a window shows this page.
+    /// A synced engine choice waits while a window shows this page. Only a pinned tab syncs, so unpinning drops it.
     var pendingSyncEngine: EngineKind?
     /// A newer site-settings choice cancels an engine switch still copying cookies.
     var requestedEngineSwitch: EngineKind?
@@ -53,7 +54,7 @@ import LiveFolders
     /// The name a hook gave the tab's document, shown while the user has not named the tab, or a mark that the user turned it down. Another address clears it once the tab commits it (`committedURL`), even one a single-page site sets within its document, since the name may no longer fit; another fragment does not. The session restores it.
     @Published var suggestedTitle: SuggestedTitle?
     @Published public private(set) var url: URL?
-    /// The address of the document the tab shows, which its events carry and a hook's name goes by. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails, stops, or becomes a download, while Chromium reports an address only once it commits, so `url` counts at once when it changes while the page does not load, and otherwise once the load or its document's load ends.
+    /// The address of the document the tab shows, which its events carry and a hook's name goes by. WebKit reports a navigation's address before it commits and the earlier address again once the navigation fails, stops, or becomes a download, so the tab takes a new document's address when the engine commits it, and `url` at once when it changes while the page does not load, as within the document, and otherwise once the load or its document's load ends.
     @Published private(set) var committedURL: URL?
     @Published public private(set) var isLoading: Bool
     @Published public private(set) var canGoBack: Bool
@@ -61,9 +62,7 @@ import LiveFolders
     @Published public private(set) var favicon: NSImage?
     /// Whether the page plays sound, for a speaker badge on its row.
     @Published public private(set) var isAudible = false
-    /// Whether the page uses the camera or the microphone, which keeps the tab loaded (bookmark rule 5).
-    @Published public private(set) var isCapturingMedia = false
-    /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). Another web contents starts without.
+    /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). A main document's commit clears it, and another web contents starts without.
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
     var answersBeforeUnloadWithStay = false
@@ -95,6 +94,8 @@ import LiveFolders
     var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
+    /// Denies an agent tab's request without asking, as the session's permission answers do.
+    var denyPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show Arch's open or save panel for the page's file chooser, as a sheet that waits in the tab's prompts until a window shows the page. Without it the page gets no file.
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
@@ -123,7 +124,7 @@ import LiveFolders
     var recordedURL: URL?
     /// The session sets this callback to record a visit to a page, with its title, in its history store.
     var recordVisit: ((URL, String) -> Void)?
-    /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens. Closing a pinned tab clears it (`unloadToSavedPage()`).
+    /// The session sets this for tabs it restores from the saved session, and for the pinned tabs that browser import or sidebar sync adds only while they join the list (`BrowserSession.appendJoiningPins(_:)`). Closing a pinned tab clears it (`unloadToSavedPage()`).
     var isRestored = false
     /// The cause of a navigation or new tab that code started, which the event source attaches to the tab's next `addressChanged` events and `pageLoaded`, which uses it up (`docs/hooks.md`, Causes). A load that ends without a `pageLoaded` drops it, and so does a navigation the user starts in the tab from the app.
     var pendingCause: BrowserEventCause?
@@ -219,13 +220,11 @@ import LiveFolders
         self.folderID = folderID
     }
 
-    /// Takes what a pinned tab that browser import opens keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2). It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
+    /// Takes what a pinned tab that browser import adds keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2).
     func takeImport(_ pinned: SidebarImport.Plan.PinnedTab) {
         folderID = pinned.folderID
         customTitle = pinned.customTitle
         savedPage = SavedPage(url: pinned.url, title: pinned.title)
-        isRestored = true
-        recordedURL = pinned.url
     }
 
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
@@ -272,9 +271,6 @@ import LiveFolders
         pageDownloads.userDidNavigate()
     }
 
-    /// Present only on a research tab the user explicitly opened. Releasing it to the user restores normal navigation.
-    var researchLoad: ((URL) -> Bool)?
-
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
     public var agentOwnerID: UUID? {
         folderID.flatMap { agentOwnerOfFolder?($0) }
@@ -288,7 +284,7 @@ import LiveFolders
 }
 
 /// Where agent tabs report what happened in them and ask about their navigations (docs/agents.md, Permissions, approvals, and injection defenses). `BrowserAgentHost` is the session's.
-protocol AgentTabMonitor: AnyObject {
+@MainActor protocol AgentTabMonitor: AnyObject {
     func userDocumentDidEnd(in tabID: UUID, document: UUID)
     func userTabAddressDidChange(_ tabID: UUID)
     /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
@@ -315,15 +311,16 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if let originalEngineState, let url, originalEngineState.url != url { self.originalEngineState = nil }
         reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
-        if !webContents.isLoading { commitURL() }
+        if !webContents.isLoading { commit(url) }
         if isPinned, savedPage == nil, let url { savedPage = SavedPage(url: url, title: "") }
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
-    public func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents) { isCapturingMedia = webContents.isCapturingMedia }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
+    /// A page's request to be shown, such as an opener's `focus()` on its popup. An agent's tab never takes focus or switches the window's space, so it asks for nothing; picture in picture's way back to the tab, which comes the same way, then does nothing either, and the user reaches the tab through its folder.
     public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {
-        if agentOwnerID == nil || researchLoad == nil { requestActivation?() }
+        guard agentOwnerID == nil else { return }
+        requestActivation?()
     }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
@@ -335,7 +332,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         canGoBack = webContents.canGoBack
         canGoForward = webContents.canGoForward
         if !isLoading {
-            commitURL()
+            commit(url)
             didFinishLoad?()
         }
         if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
@@ -348,24 +345,23 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
         guard webContents === self.webContents else { return }
         documentID = UUID()
+        hasTypedInput = false
         engineCommittedURL = url
+        // The commit can come long before the load ends, and before the engine reports the address as `url`.
+        if let url = url?.withoutCredentials { commit(url) }
         pageDownloads.documentDidCommit(site: Self.site(of: url))
         didCommitDocument?()
     }
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
-        commitURL()
+        commit(url)
         didLoadDocument.send()
         reportToAgent(.loaded(url: webContents.url, title: webContents.title))
     }
 
-    /// Takes `url` as the committed address, then drops a hook's name, or its refusal, that is not for it.
-    private func commitURL() {
-        if committedURL != url { committedURL = url }
-        if let url, let suggested = suggestedTitle, !suggested.isFor(url) { suggestedTitle = nil }
-    }
-
-    public func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool {
-        agentOwnerID == nil || researchLoad == nil
+    /// Takes `address` as the committed address, then drops a hook's name, or its refusal, that is not for it.
+    private func commit(_ address: URL?) {
+        if committedURL != address { committedURL = address }
+        if let address, let suggested = suggestedTitle, !suggested.isFor(address) { suggestedTitle = nil }
     }
 
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
@@ -375,11 +371,12 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         guard webContents === self.webContents else { return }
         takeReplacement?(replacement)
     }
-    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user.
+    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user. Its denial leaves the Persona's kept answers as they were (`denyPermission`).
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
         if agentOwnerID != nil {
             reportToAgent(.permissionDenied(request.types))
-            return completion(false)
+            guard let denyPermission else { return completion(false) }
+            return denyPermission(request, completion)
         }
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
@@ -388,7 +385,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
         if let owner = agentOwnerID {
-            guard researchLoad == nil else { return false }
             guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
                 reportToAgent(.downloadAsked(url))
                 return false
@@ -423,7 +419,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
         isAudible = replacement.isAudible
-        isCapturingMedia = replacement.isCapturingMedia
         hasTypedInput = false
         answersBeforeUnloadWithStay = false
         hasCrashed = false
@@ -652,9 +647,6 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
     /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
-        if agentOwnerID != nil, let researchLoad {
-            return action.disposition == .currentTab && researchLoad(action.url) ? .allow : .cancel
-        }
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), let openURLInNewTab {

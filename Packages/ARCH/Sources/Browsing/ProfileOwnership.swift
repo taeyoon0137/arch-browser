@@ -10,9 +10,13 @@ public final class ProfileOwnership {
         let fd = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-            let error = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            // A volume without advisory locks can't be guarded, so this copy starts as builds before the lock did.
+            guard errno == EWOULDBLOCK else {
+                descriptor = fd
+                return
+            }
             close(fd)
-            throw error
+            throw POSIXError(.EWOULDBLOCK)
         }
         descriptor = fd
     }

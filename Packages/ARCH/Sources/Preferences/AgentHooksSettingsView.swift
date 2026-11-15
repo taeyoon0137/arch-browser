@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Agent Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Agent Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, and every hook in run order. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
+// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
 import Agent
 import AI
 import Browsing
@@ -56,7 +56,7 @@ struct AgentHooksPage: View {
         } footer: {
             formFootnote("A hook runs a script when something happens in a tab, such as a new tab loading its first page. Hooks run one after another, in this list's order, after Arch's own AI features. While Run Hooks is off, no hook runs.")
         }
-        Section("Hooks") {
+        Section {
             if registry.hooks.isEmpty {
                 Text("No hooks yet.").foregroundStyle(.secondary)
             }
@@ -69,6 +69,15 @@ struct AgentHooksPage: View {
                 // `onMove` counts the destination before the moved row leaves.
                 registry.move(hook.id, to: destination > from ? destination - 1 : destination)
             }
+            HStack {
+                Spacer()
+                Button("Clear Activity") { registry.clearActivity() }
+                    .disabled(registry.lastRuns.isEmpty && registry.log.entries.isEmpty)
+            }
+        } header: {
+            Text("Hooks")
+        } footer: {
+            formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run.")
         }
         .sheet(item: $sheet) { draft in
             ScriptHookSheet(registry: registry, draft: draft, currentTab: currentTab) { sheet = nil }
@@ -134,11 +143,8 @@ struct AgentHooksPage: View {
                     let providers = registry.providersForReview(of: hook.id)
                     guard !providers.isEmpty else { return registry.resume(hook.id) }
                     let settings = AIService.shared.settings
-                    let destinations = providers.map { item in
-                        let name = settings.providers.first { $0.id == item.id }?.name ?? item.id.rawValue
-                        return "\(name) — \(item.destination)"
-                    }
-                    providerReview = ProviderReview(hook: hook.id, providers: providers, description: destinations.joined(separator: "\n"))
+                    let described = providers.map { item in settings.providers.first { $0.id == item.id }.map(HookSummary.review(of:)) ?? item.id.rawValue }
+                    providerReview = ProviderReview(hook: hook.id, providers: providers, description: ([HookSummary.reviewIntro] + described).joined(separator: "\n\n"))
                 }
             case .user, .needsNewerArch:
                 EmptyView()
@@ -186,7 +192,11 @@ struct AgentHooksPage: View {
     // MARK: Actions
 
     private func edit(_ hook: Hook, reviewing: Bool) {
-        sheet = HookScriptActions.draft(editing: hook, file: registry.scriptFile(of: hook.id), places: registry.places, reviewing: reviewing)
+        do {
+            sheet = try HookScriptActions.draft(editing: hook, file: registry.scriptFile(of: hook.id), places: registry.places, reviewing: reviewing)
+        } catch {
+            message = error.localizedDescription
+        }
     }
 
     private func runOnCurrentTab(_ hook: Hook) {
@@ -240,15 +250,16 @@ enum HookScriptActions {
         var errorDescription: String? { sentence }
     }
 
-    /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest.
-    static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) -> ScriptHookDraft {
-        let script = file.flatMap { String(data: $0.contents, encoding: .utf8) } ?? ""
-        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || file?.matchesDigest == false)
+    /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest. Refused for a file that is missing or not text, which an empty editor would replace unseen.
+    static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) throws -> ScriptHookDraft {
+        guard let file, let script = String(data: file.contents, encoding: .utf8) else { throw Refusal(sentence: "Arch cannot read the script of \u{201C}\(hook.name)\u{201D}.") }
+        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || !file.matchesDigest)
     }
 
-    /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch.
+    /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch, and for an outside program's hook, whose copy would lose the caps of its origin.
     static func copy(of hook: Hook, file: HookScriptFile?) throws -> (hook: Hook, script: Data) {
         let name = "\u{201C}\(hook.name)\u{201D}"
+        guard !hook.origin.isOutsideProgram else { throw Refusal(sentence: "Hooks that other programs added cannot be duplicated.") }
         guard let file else { throw Refusal(sentence: "Arch cannot read the script of \(name).") }
         guard file.matchesDigest else { throw Refusal(sentence: "The script of \(name) changed outside Arch. Review it before you duplicate the hook.") }
         var copy = hook
@@ -263,7 +274,7 @@ enum HookScriptActions {
 
 // MARK: - Texts
 
-/// The sentences Settings ▸ AI ▸ Agent Hooks shows for hooks, their places, their runs, and the notices about `hooks.json`.
+/// The sentences Settings ▸ AI ▸ Hooks shows for hooks, their places, their runs, and the notices about `hooks.json`.
 @MainActor
 enum HookSummary {
     /// The row's lines under the name: the situation, the scope, and the sites; an agent hook's model and record; the last run; and the program that added the hook.
@@ -384,6 +395,24 @@ enum HookSummary {
         }
     }
 
+    /// What the provider review says first: the settings came from outside Settings ▸ AI ▸ Providers.
+    static let reviewIntro = "Arch did not see these provider settings set up in Settings ▸ AI ▸ Providers, so another program may have changed them. The hook sends nothing until you allow them. Allow only settings you recognize."
+
+    /// A provider as its review shows it, from its settings now: an HTTP provider's base address, or a command-line tool's executable, arguments, and environment, which can send its requests elsewhere, with the values of variables whose names suggest a secret hidden. The digest that `hooks.json` records changes with any of them, so it would show nothing to compare.
+    static func review(of provider: AIProviderConfiguration) -> String {
+        switch provider.kind {
+        case .http(let http):
+            return "\(provider.name) \u{2014} \(http.baseURL.absoluteString)"
+        case .commandLine(let tool):
+            var lines = ["\(provider.name) \u{2014} " + ([tool.executable.path] + tool.arguments).joined(separator: " ")]
+            for (name, value) in tool.environment.sorted(by: { $0.key < $1.key }) {
+                let secret = ["KEY", "TOKEN", "SECRET"].contains { name.uppercased().contains($0) }
+                lines.append("\(name)=\(secret ? "\u{2022}\u{2022}\u{2022}\u{2022}" : value)")
+            }
+            return lines.joined(separator: "\n")
+        }
+    }
+
     static func sentence(for reason: HookPauseReason) -> String {
         switch reason {
         case .user: return "Paused."
@@ -404,7 +433,7 @@ enum HookSummary {
         switch notice {
         case .setAside: return "hooks.json could not be opened, so Arch renamed it hooks.json.unreadable and started with no hooks."
         case .keyUnavailable(let reason): return "The Keychain did not give the key of hooks.json, so no hook runs: \(reason)"
-        case .newerVersion(let version): return "hooks.json is from a newer version of Arch, version \(version). Arch kept a copy as hooks-v\(version).json and lists the hooks it cannot read without running them."
+        case .newerVersion(let version): return "hooks.json is from a newer version of Arch, version \(version). Arch lists the hooks it cannot read without running them."
         case .notSaved(let reason): return "Arch could not save the last change to the hooks: \(reason)"
         }
     }

@@ -430,6 +430,18 @@ import Testing
         #expect(try folder.contents(of: "session.unreadable.json") == Data(unreadable.utf8))
     }
 
+    @Test func aFileThatCannotBeReadMovesAsideAndSavingRecovers() throws {
+        let folder = try SessionFolder()
+        try folder.write(version11File)
+        let file = folder.url.appendingPathComponent("session.json")
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path)
+        let store = folder.store
+        #expect(store.load() == nil)
+        #expect(try folder.fileNames() == ["session.unreadable.json"])
+        try store.saveNow(SessionSnapshot(spaces: [], currentSpaceID: spaceA, favorites: [], tabs: [])).get()
+        #expect(try folder.fileNames() == ["session.json", "session.unreadable.json"])
+    }
+
     @Test func aMissingFileLoadsNothing() throws {
         let folder = try SessionFolder()
         #expect(folder.store.load() == nil)

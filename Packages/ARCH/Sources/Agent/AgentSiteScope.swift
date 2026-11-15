@@ -157,11 +157,6 @@ struct AgentSiteScope: Equatable {
         AgentSite.of(url).map(sites.contains) ?? false
     }
 
-    /// A link the agent follows, by a ref or a click: the page wrote its address, which can carry only what the page has, so it opens. Its site does not join the scope.
-    func followed(_ url: URL) -> AgentScopeDecision {
-        .opens
-    }
-
     /// An address the agent wrote in `open_tab` or `navigate`.
     func written(_ url: URL) -> AgentScopeDecision {
         guard let address = AgentSeenAddress(url) else { return .asks(AgentAddressQuestion(url: url, unseenParts: [.path], isOutsideScope: true)) }

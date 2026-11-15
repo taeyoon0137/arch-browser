@@ -1,4 +1,5 @@
-// The texts of Settings ▸ AI ▸ Agent Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
+// The texts of Settings ▸ AI ▸ Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
+import Agent
 import AI
 import Events
 import Foundation
@@ -26,6 +27,8 @@ import Testing
         try draft.configureAgent(in: &hook)
         #expect(hook.agent?.model == draft.agentModel)
         #expect(hook.grant.agent?.tools.isEmpty == true && hook.agent?.tabAccess == .title)
+        // The agent runs' daily count agrees with the hook's.
+        #expect(hook.grant.agent?.runsPerDay == hook.timing.runsPerDay)
         draft.agentRenamesTabs = true
         draft.readsPageText = true
         try draft.configureAgent(in: &hook)
@@ -65,6 +68,8 @@ import Testing
         #expect(hook.grant.agent?.minimumRecord == .activity && hook.grant.agent?.maximumRecord == .activity)
         #expect(hook.agent?.limits == hook.grant.agent?.limits && hook.agent?.limits.rounds == 1)
         #expect(hook.timing.runsPerDay == 11 && hook.grant.agent?.runsPerDay == 11)
+        // The hook's timeout starts before its script and the agent run, so it leaves the run its whole limit.
+        #expect(hook.timing.timeout == .seconds(15))
         #expect(bytes == Data(AgentHookTemplate.script(for: .tabClosed).utf8))
         draft.editGeneratedScript()
         draft.script = "const mine = true;"
@@ -72,18 +77,20 @@ import Testing
         draft.readsTabs = true
         let custom = try draft.makeHook()
         #expect(custom.script == Data(draft.script.utf8) && custom.hook.grant.permissions == [.tabs, .agent])
-        draft.generated = true
+        // Agent runs off leave the edited script without the agent, and restoring Arch's script, which runs one, turns them back on.
+        draft.enablesAgent = false
+        let off = try draft.makeHook().hook
+        #expect(!off.grant.permissions.contains(.agent) && off.grant.agent == nil && off.agent == nil)
+        draft.restoreGeneratedScript()
         let restored = try draft.makeHook()
         #expect(restored.script == Data(AgentHookTemplate.script(for: .tabSelected).utf8) && restored.hook.grant.permissions == [.agent])
     }
 
     @Test func thePresetOpensAsANewEditableDraftAndTheTabNamesWarningFollowsTheTwoLoadEvents() throws {
         let preset = HookPresets.tidyTabNames
-        var draft = ScriptHookDraft(editing: preset, script: AgentHookTemplate.script(for: .pageLoaded), places: places, reviewing: false, isNew: true)
-        #expect(draft.stored == nil && draft.guided && draft.generated && !draft.startsEnabled)
+        let draft = ScriptHookDraft(editing: preset, script: AgentHookTemplate.script(for: .pageLoaded), places: places, reviewing: false, isNew: true)
+        #expect(draft.stored == nil && draft.guided && draft.generated)
         #expect(draft.agentModel == .tier(.fast) && draft.agentRenamesTabs && !draft.readsPageText)
-        #expect(try draft.makeHook().hook.state == .paused(.user))
-        draft.startsEnabled = true
         let saved = try draft.makeHook().hook
         #expect(saved.id == preset.id && saved.origin == .preset("tidyTabNames") && saved.state == .active)
         #expect(saved.trigger == preset.trigger && saved.filter.tabKinds == [.open, .pinned] && saved.agent == preset.agent)
@@ -93,6 +100,20 @@ import Testing
             #expect(!TabNamesWarning.applies(renames: true, kind: kind, tabNames: AIRoute(isEnabled: false)))
             #expect(!TabNamesWarning.applies(renames: false, kind: kind, tabNames: AIRoute(isEnabled: true)))
         }
+    }
+
+    /// A hand-written script hook with agent runs opens in the guided editor, which still lets the user turn the runs off.
+    @Test func aHandWrittenAgentScriptHookCanTurnItsAgentRunsOff() throws {
+        var hook = Hook(name: "Mine", trigger: .tabOpened, script: .javaScript(digest: "", generated: false))
+        let grant = AgentRunGrant(tools: ["rename_tab"], maximumRecord: .none)
+        hook.grant = HookGrant(permissions: [.agent, .tabsRename], agent: grant)
+        hook.agent = AgentRunOptions(prompt: "Name it.", model: .tier(.fast), tools: ["rename_tab"])
+        var draft = ScriptHookDraft(editing: hook, script: "arch.events.on(\"tabOpened\", async () => {});", places: places, reviewing: false)
+        #expect(draft.guided && !draft.generated && draft.enablesAgent)
+        draft.enablesAgent = false
+        let saved = try draft.makeHook().hook
+        #expect(saved.grant.permissions == [.tabsRename] && saved.grant.agent == nil && saved.agent == nil)
+        #expect(ScriptHookDraft.label(of: .spaceDeleted) == "Its Persona is deleted" && !ScriptHookDraft.offeredCloseReasons.contains(.hook))
     }
 
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {
@@ -117,9 +138,10 @@ import Testing
         #expect(draft.trigger == hook.trigger)
         #expect(draft.filter == filter)
         #expect(draft.renamesTabs && !draft.readsTabs)
-        // Where lists no Persona while there is one, so its place opens as Everywhere, which covers the same.
+        // Where lists no Persona while there is one, so its place opens as Everywhere, which covers the same; a save keeps the Persona, so a Persona added later stays out.
         let personaWide = Hook(name: "Persona", trigger: .tabOpened, filter: BrowserEventFilter(scope: .places([.persona(persona)])))
-        #expect(ScriptHookDraft(editing: personaWide, script: "", places: places, reviewing: false).filter.scope == .everywhere)
+        let personaDraft = ScriptHookDraft(editing: personaWide, script: "", places: places, reviewing: false)
+        #expect(personaDraft.isEverywhere && personaDraft.filter.scope == .places([.persona(persona)]))
         var new = ScriptHookDraft(new: places)
         #expect(new.script == ScriptHookDraft.template(for: .pageLoaded))
         new.siteChoice = .only
@@ -145,13 +167,31 @@ import Testing
         #expect(draft.tabKinds.isEmpty)
     }
 
+    /// A command-line provider's review shows what its digest stands for, so that a proxy another program added shows, without secret values.
+    @Test func aProvidersReviewShowsItsInvocationWithoutSecrets() {
+        let tool = AICommandLineConfiguration(executable: URL(fileURLWithPath: "/opt/homebrew/bin/claude"), arguments: ["-p"],
+                                              environment: ["HTTPS_PROXY": "http://proxy.example:8080", "API_TOKEN": "abc123"])
+        let text = HookSummary.review(of: AIProviderConfiguration(name: "Claude Code", kind: .commandLine(tool)))
+        #expect(text == "Claude Code \u{2014} /opt/homebrew/bin/claude -p\nAPI_TOKEN=\u{2022}\u{2022}\u{2022}\u{2022}\nHTTPS_PROXY=http://proxy.example:8080")
+        let http = AIProviderConfiguration(name: "Test", kind: .http(AIHTTPConfiguration(format: .chatCompletions, baseURL: URL(string: "https://models.example.test/v1")!)))
+        #expect(HookSummary.review(of: http) == "Test \u{2014} https://models.example.test/v1")
+    }
+
     @Test func aScriptChangedOutsideArchOpensOnlyForReviewAndIsNotCopied() throws {
         let hook = Hook(name: "Names", trigger: .tabOpened)
         let changed = HookScriptFile(contents: Data("changed".utf8), matchesDigest: false)
         let checked = HookScriptFile(contents: Data("checked".utf8), matchesDigest: true)
-        let review = HookScriptActions.draft(editing: hook, file: changed, places: places, reviewing: false)
+        let review = try HookScriptActions.draft(editing: hook, file: changed, places: places, reviewing: false)
         #expect(review.isReview && review.script == "changed")
-        #expect(!HookScriptActions.draft(editing: hook, file: checked, places: places, reviewing: false).isReview)
+        #expect(try !HookScriptActions.draft(editing: hook, file: checked, places: places, reviewing: false).isReview)
+        // A missing file or one that is not text opens no editor whose empty script a save would record.
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.draft(editing: hook, file: nil, places: places, reviewing: true) }
+        let binary = HookScriptFile(contents: Data([0xFF, 0xFE, 0xFD]), matchesDigest: false)
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.draft(editing: hook, file: binary, places: places, reviewing: true) }
+        // A copy of an outside program's hook would be the user's, without the caps of its origin.
+        var outside = hook
+        outside.origin = .outsideClient(.signed(identifier: "com.example.client", team: "TEAM"), name: "Codex")
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: outside, file: checked) }
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: changed) }
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: nil) }
         let copy = try HookScriptActions.copy(of: hook, file: checked)

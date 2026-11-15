@@ -1,3 +1,4 @@
+import ARCHEngine
 import Browsing
 import CloudKit
 import Foundation
@@ -7,6 +8,7 @@ import Testing
 @MainActor @Suite struct SyncControllerTests {
     private final class Sidebar: SyncedSidebar {
         let needsFullSidebarSync = false
+        let defaultEngine = EngineKind.webKit
         func finishSidebarSyncRecovery() {}
         var sidebarSyncState: SidebarSyncState
         var onSidebarSyncSave: ((SidebarSyncState) -> Void)?
@@ -83,6 +85,11 @@ import Testing
             try await engine.sendChanges()
             return engine
         }
+        /// Waits for the send that the controller starts once a hold ends.
+        func waitForBatches(_ count: Int, of engine: FakeSyncEngine) async {
+            let deadline = ContinuousClock.now + .seconds(3)
+            while engine.batches.count < count && ContinuousClock.now < deadline { await Task.yield() }
+        }
         func setAppearance(_ value: String) {
             defaults.set(value, forKey: "ARCHAppearance")
             center.post(name: UserDefaults.didChangeNotification, object: defaults)
@@ -101,12 +108,13 @@ import Testing
         await f.controller.refreshIfRequested()
         await f.controller.refreshIfRequested()
         #expect(f.checks == 0 && f.engines.isEmpty && running.isEmpty && !f.controller.hasCheckedAvailability)
+        #expect(f.sidebar.onSidebarSyncSave == nil)
         await f.controller.setEnabled(true)
-        #expect(f.checks == 1 && f.engines.count == 1 && running == [true])
+        #expect(f.checks == 1 && f.engines.count == 1 && running == [true] && f.sidebar.onSidebarSyncSave != nil)
         await f.controller.refreshIfRequested()
         #expect(f.checks == 2 && running == [true])
         await f.controller.setEnabled(false)
-        #expect(running == [true, false])
+        #expect(running == [true, false] && f.sidebar.onSidebarSyncSave == nil)
         f.newController()
         await f.controller.refreshIfRequested()
         #expect(f.checks == 2 && f.engines.count == 1)
@@ -172,6 +180,43 @@ import Testing
         #expect(f.engines.last?.pendingChanges.isEmpty == true)
     }
 
+    /// A record this build cannot apply, such as a space with a newer build's tint, waits on the server with the tab in it: the rest of the fetch applies, and a later save neither deletes nor overwrites them. A later launch that can apply them, as a newer build can, shows them instead of deleting them.
+    @Test func aRecordThisBuildCannotApplyWaitsWhileTheRestSyncs() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        let lab = UUID().uuidString, labTab = UUID().uuidString, work = UUID().uuidString
+        func row(_ type: SyncRecordType, _ name: String, _ fields: [String: SyncValue]) -> CKRecord {
+            SyncCloudKitRecords.ckRecord(from: SyncRecord(recordType: type, recordName: name, fields: fields, modifiedAt: f.clock))
+        }
+        func space(_ name: String, tint: String) -> CKRecord {
+            row(.space, name, ["persona": .reference("default"), "name": .text("Room"), "symbol": .text("star"), "tint": .text(tint), "order": .number(5)])
+        }
+        engine.fetchScript = [.fetchedChanges(.init(records: [space(work, tint: "green"), space(lab, tint: "ultraviolet"),
+            row(.tab, labTab, ["persona": .reference("default"), "space": .reference(lab), "engine": .text("webKit"), "order": .number(1)])]))]
+        await f.controller.refresh()
+        #expect(f.controller.lastError == nil && f.controller.lastSync != nil)
+        #expect(f.sidebar.sidebarSyncState.spaces.map(\.id.uuidString).contains(work))
+        #expect(!f.sidebar.sidebarSyncState.spaces.map(\.id.uuidString).contains(lab) && f.sidebar.sidebarSyncState.pinnedTabs.isEmpty)
+        #expect(f.copy.records[lab] != nil && f.copy.records[labTab] != nil)
+        f.sidebar.renameSpace("Edited")
+        try f.sidebar.saveNow().get()
+        #expect(engine.pendingChanges == [.saveRecord(f.space.id.uuidString)])
+        #expect(f.copy.unapplied == [lab, labTab])
+        // A launch of a build that reads the tint, as this file then holds it.
+        try await engine.sendChanges()
+        var file = f.copy
+        file.records[lab] = space(lab, tint: "green")
+        try file.write(to: f.file, database: f.database)
+        f.newController()
+        await f.controller.refresh()
+        let later = try #require(f.engines.last)
+        #expect(f.sidebar.sidebarSyncState.spaces.map(\.id.uuidString).contains(lab))
+        #expect(f.sidebar.sidebarSyncState.pinnedTabs.map(\.id.uuidString) == [labTab])
+        #expect(!later.pendingChanges.contains(.deleteRecord(lab)) && !later.pendingChanges.contains(.deleteRecord(labTab)))
+        #expect(f.copy.unapplied.isEmpty)
+    }
+
     @Test func settingsAndSidebarPreserveTheirOwnQueueAndNeverUploadAnUnsavedSidebarEdit() async throws {
         let f = Fixture()
         defer { f.clean() }
@@ -235,10 +280,10 @@ import Testing
         f.newController()
         await f.controller.refresh()
         let resumed = try #require(f.engines.last)
-        #expect(resumed.startedFrom == previous.engineState && resumed.pendingChanges == [.saveRecord(id)])
-        #expect(f.copy.pendingSaves == previous.pendingSaves)
-        try await resumed.sendChanges()
-        #expect(f.copy.pendingSaves.isEmpty && resumed.batches.count == 1)
+        #expect(resumed.startedFrom == previous.engineState && previous.pendingSaves.map(\.recordName) == [id])
+        await f.waitForBatches(1, of: resumed)
+        #expect(resumed.batches.first?.records.first?.encryptedValues["name"] as? String == "Offline")
+        #expect(f.copy.pendingSaves.isEmpty && resumed.batches.count == 1 && resumed.pendingChanges.isEmpty)
         let other = SyncDatabase(containerIdentifier: "different", environment: "Production")
         try f.copy.write(to: f.file, database: other)
         f.newController()
@@ -257,9 +302,10 @@ import Testing
         #expect(!f.controller.canSendRecords && engine.pendingChanges.isEmpty)
         engine.deliver([.fetchEnded(failure: nil)])
         #expect(engine.pendingChanges == [.saveRecord(f.space.id.uuidString)])
-        try await engine.sendChanges()
+        // The engine asked for this batch while the fetch held it and asks for none again, so the controller sends it.
+        await f.waitForBatches(2, of: engine)
         #expect(f.copy.records[f.space.id.uuidString]?.encryptedValues["name"] as? String == "Written during fetch")
-        #expect(engine.batches.count == 2)
+        #expect(engine.batches.count == 2 && engine.pendingChanges.isEmpty)
     }
 
     @Test func aRefusedSaveMergesAgainstItsBaseAndResendsOnlyTheSurvivingFields() async throws {
@@ -290,7 +336,8 @@ import Testing
         #expect(engine.batches.count == 4 && engine.pendingChanges.isEmpty && f.controller.lastError != nil)
         #expect(f.copy.pendingSaves.count == 1)
         await f.controller.refresh()
-        #expect(engine.pendingChanges == [.saveRecord(id)])
+        await f.waitForBatches(5, of: engine)
+        #expect(engine.batches.count == 5 && engine.pendingChanges.isEmpty && f.copy.pendingSaves.isEmpty)
     }
 
     @Test(arguments: [false, true]) func unknownItemWaitsForFetchBeforeDeletingOrResending(tombstone: Bool) async throws {
@@ -395,14 +442,14 @@ import Testing
         engine.deliver([.accountChange(change)])
         await f.controller.refresh()
         #expect(f.controller.availability == .unavailable(.noAccount))
-        #expect(f.controller.statusExplanation == SyncAvailability.Reason.noAccount.message)
+        #expect(f.controller.offReason == .accountChanged)
         #expect(!f.controller.isEnabled && f.sidebar.sidebarSyncState == local && !FileManager.default.fileExists(atPath: f.file.path))
         f.newController()
         f.answer = { .available(f.database) }
         await f.controller.refresh()
-        #expect(f.controller.offReason == .accountChanged && f.controller.statusExplanation == SyncOffReason.accountChanged.message)
+        #expect(f.controller.offReason == .accountChanged && f.controller.availability == .available(f.database))
         await f.controller.setEnabled(true)
-        #expect(f.controller.offReason == nil && f.controller.statusExplanation == nil && f.engines.last?.startedFrom == nil)
+        #expect(f.controller.offReason == nil && f.engines.last?.startedFrom == nil)
     }
 
     @Test func accountStatusCanReportSignOutBeforeTheEngineEvent() async throws {
@@ -416,7 +463,41 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: f.file.path) && f.sidebar.sidebarSyncState == local)
         f.answer = { .available(f.database) }
         await f.controller.refresh()
-        #expect(f.engines.count == 1 && f.controller.statusExplanation == SyncOffReason.accountChanged.message)
+        #expect(f.engines.count == 1 && f.controller.offReason == .accountChanged && f.controller.availability == .available(f.database))
+    }
+
+    /// An opt-in on a Mac without an iCloud account has nothing to invalidate, so it waits for an account as for the other reasons rather than turning off as after an account change.
+    @Test func anOptInWithoutAnAccountWaitsForOne() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let container = NSObject()
+        f.controller.observeAccountChanges(of: container)
+        f.answer = { .unavailable(.noAccount) }
+        await f.controller.setEnabled(true)
+        #expect(f.controller.isEnabled && f.controller.offReason == nil && f.engines.isEmpty)
+        f.answer = { .available(f.database) }
+        f.center.post(name: .CKAccountChanged, object: container)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while f.engines.isEmpty && ContinuousClock.now < deadline { await Task.yield() }
+        #expect(f.engines.count == 1 && f.engines.first?.startedFrom == nil)
+    }
+
+    /// A quit while Delete iCloud Data waits leaves the data in iCloud and `sync.json` from before the request, so the next launch syncs and says to delete again.
+    @Test func aQuitBeforeTheDeletionReachesTheServerAsksToDeleteAgain() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        engine.zoneFailure = .networkUnavailable
+        await f.controller.deleteCloudData()
+        #expect(f.controller.isDeletingCloudData && engine.pendingChanges.contains(.deleteZone))
+        f.newController()
+        await f.controller.refresh()
+        let relaunched = try #require(f.engines.last)
+        #expect(f.controller.isEnabled && !f.controller.isDeletingCloudData && !relaunched.pendingChanges.contains(.deleteZone))
+        #expect(f.controller.lastError == "Arch quit before it deleted its iCloud data. Delete it again to remove it.")
+        f.newController()
+        await f.controller.refresh()
+        #expect(f.controller.lastError == nil)
     }
 
     @Test(arguments: [SyncZoneDeletionReason.deleted, .purged]) func aDeletedZoneKeepsLocalDataAndExplainsItsReset(reason: SyncZoneDeletionReason) async throws {
@@ -429,7 +510,7 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: f.file.path))
         f.newController()
         await f.controller.refresh()
-        #expect(f.controller.statusExplanation == SyncOffReason.zoneDeleted.message && f.engines.count == 1)
+        #expect(f.controller.offReason == .zoneDeleted && f.controller.availability == .available(f.database) && f.engines.count == 1)
     }
 
     @Test func togglingOffPreservesTheFileAndEditsMadeWhileOffUploadOnResume() async throws {
@@ -447,8 +528,8 @@ import Testing
         #expect(try Data(contentsOf: f.file) == state)
         await f.controller.setEnabled(true)
         let resumed = try #require(f.engines.last)
-        #expect(resumed.startedFrom == token && Set(resumed.pendingChanges) == [.saveRecord(id), .saveRecord("ARCHAppearance")])
-        try await resumed.sendChanges()
+        await f.waitForBatches(1, of: resumed)
+        #expect(resumed.startedFrom == token && Set(resumed.batches.flatMap(\.records).map(\.recordID.recordName)) == [id, "ARCHAppearance"])
         let n = resumed.fetchCount
         resumed.deliver([.accountChange(.signIn)])
         let deadline = ContinuousClock.now + .seconds(3)
@@ -480,12 +561,17 @@ import Testing
         let engine = try await f.startAndSend()
         f.sidebar.renameSpace("Local")
         try f.sidebar.saveNow().get()
+        let token = f.copy.engineState
         engine.zoneFailure = .permissionFailure
         await f.controller.deleteCloudData()
         #expect(f.controller.isEnabled && !f.controller.isDeletingCloudData && f.controller.lastError != nil)
-        #expect(!engine.pendingChanges.contains(.deleteZone) && FileManager.default.fileExists(atPath: f.file.path))
-        #expect(engine.pendingChanges == [.saveRecord(f.space.id.uuidString)])
-        engine.zoneFailure = .zoneNotFound
+        // A new engine starts from the file kept from before the deletion, so it fetches again what the deletion's wait dropped.
+        let resumed = try #require(f.engines.last)
+        #expect(f.engines.count == 2 && engine.isStopped && resumed.startedFrom == token)
+        #expect(!resumed.pendingChanges.contains(.deleteZone) && FileManager.default.fileExists(atPath: f.file.path))
+        await f.waitForBatches(1, of: resumed)
+        #expect(resumed.batches.first?.records.map(\.recordID.recordName) == [f.space.id.uuidString])
+        resumed.zoneFailure = .zoneNotFound
         await f.controller.deleteCloudData()
         #expect(!f.controller.isEnabled && f.controller.offReason == .zoneDeleted && f.space.name == "Local")
         #expect(!FileManager.default.fileExists(atPath: f.file.path))

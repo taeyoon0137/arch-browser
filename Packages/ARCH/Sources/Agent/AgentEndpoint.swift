@@ -74,14 +74,18 @@ final class AgentEndpoint: @unchecked Sendable {
         guard socket >= 0 else { throw AgentEndpointError.system("A socket could not be made: \(String(cString: strerror(errno))).") }
         _ = fcntl(socket, F_SETFD, FD_CLOEXEC)
         var address = location.address()
-        // The socket file takes mode 0600 from the umask at bind; the folder's 0700 already keeps other users out.
-        let previousMask = umask(0o177)
         let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
-        let bindError = errno
-        umask(previousMask)
         guard bound == 0 else {
+            let error = errno
             Darwin.close(socket)
-            throw AgentEndpointError.system("The agent socket could not be bound: \(String(cString: strerror(bindError))).")
+            throw AgentEndpointError.system("The agent socket could not be bound: \(String(cString: strerror(error))).")
+        }
+        // The socket file gets mode 0600 after bind, inside the 0700 folder that already keeps other users out; `umask` would apply to every thread of the process.
+        guard chmod(location.path, 0o600) == 0 else {
+            let error = errno
+            Darwin.close(socket)
+            unlink(location.path)
+            throw AgentEndpointError.system("The agent socket's mode could not be set: \(String(cString: strerror(error))).")
         }
         guard listen(socket, 16) == 0 else {
             let error = errno

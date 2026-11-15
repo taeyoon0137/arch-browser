@@ -93,7 +93,7 @@ public enum BrowserEventPayload: Codable, Hashable, Sendable {
     case tabOpened(tab: BrowserTabRef, openerTabID: UUID?)
     /// Posted while the session still lists the tab, so a consumer can read its last name and address during delivery.
     case tabClosed(tab: BrowserTabRef, reason: BrowserTabCloseReason)
-    /// `isRestore`: the first load of a tab restored from the saved session or of a pinned tab that a browser import opened. `isFirstLoadAfterOpen`: the tab's first load with an `http` or `https` address since this launch's `tabOpened` for it.
+    /// `isRestore`: the first load of a tab restored from the saved session. `isFirstLoadAfterOpen`: the tab's first load with an `http` or `https` address since this launch's `tabOpened` for it.
     case pageLoaded(tab: BrowserTabRef, isRestore: Bool, isFirstLoadAfterOpen: Bool)
     case addressChanged(tab: BrowserTabRef, previousURL: URL?)
     case titleChanged(tab: BrowserTabRef, source: BrowserTitleSource)

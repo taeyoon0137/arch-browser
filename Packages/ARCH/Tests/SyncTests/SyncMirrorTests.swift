@@ -5,7 +5,7 @@ import Testing
 @testable import Sync
 
 @Suite struct SyncMirrorTests {
-    /// A placeholder database; no real container identifier appears in the repository.
+    /// A placeholder database.
     private let database = SyncDatabase(containerIdentifier: "iCloud.example.first", environment: "Production")
 
     private func date(_ seconds: TimeInterval) -> Date {

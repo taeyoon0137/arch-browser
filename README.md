@@ -42,7 +42,7 @@ We also recommend [Dia](https://www.diabrowser.com), the new browser from the te
 
 ## 🧭 Role
 
-Arch is a sidebar-first macOS browser. Keep tabs pinned in a space, compare pages in split view, and ask your own agent about a tab while the page stays in view. Each Persona has its own spaces.
+Arch is a sidebar-first macOS browser with its own implementation: Personas with their own spaces, pinned tabs, split view, a command bar, plugins, media controls, and your own agents working with your tabs.
 
 The core goals are:
 
@@ -84,8 +84,8 @@ git config core.hooksPath .githooks
 ### Start a task from a tab
 
 1. Right-click an open web tab or favorite in the sidebar, choose **Ask Agent About This Tab…**, and type your question. The tab you were reading stays selected. For a question from the command palette, the **Ask Agent** row shows which page it will share. If you close the panel during setup, return to the same space and choose **View ▸ Show Agent Panel** to resume your draft.
-2. If the draft shows **Open Providers**, add an HTTP model with tool calling or a Claude Code or Codex preset. For a preset, sign in through Arch’s terminal. **Open Features** takes you to the **Agent Tasks** switch when it is off. Return to the draft, review the tab and model, and choose **Start**. If the agent asks a question, choose a suggested answer, enter your own, or cancel.
-3. Open **Shared Tabs** in the session to add or remove a tab. If the agent requests a tab, review the address in the panel before choosing **Share**. To read a link from a shared page, open the session menu and choose **Open in Research Tab…**. Pick a link from the page outline, review its full address, and confirm. The new tab opens in the background. To continue a question from the page reader, choose **Continue as Agent Task**. You can preview and attach the reader excerpt before starting.
+2. If the draft shows **Open Providers**, add an HTTP model with tool calling or a Claude Code or Codex preset. For a preset, sign in through Arch’s terminal. Return to the draft, review the tab and model, and choose **Start**. If the agent asks a question, choose a suggested answer, enter your own, or cancel.
+3. Open **Shared Tabs** in the session to add or remove a tab. If the agent requests a tab, review the address in the panel before choosing **Share**. To continue a question from the page reader, choose **Continue as Agent Task**. The reader excerpt is shared unless you turn it off; you can preview it before starting.
 
 <a id="docs"></a>
 
@@ -119,8 +119,8 @@ git config core.hooksPath .githooks
 | :-- | :-- |
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout and again after the pin changes. `ARCH_CEF_ARCHIVE` installs a local archive instead, to try an engine build before its release (see Getting started). |
 | `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, `arch-cli` with its `arch-mcp` link, the app icon, and the scripting definition, and signs it. It runs `scripts/opaque_icon.swift` to prepare the icon. With a provisioning profile that suits the signing identity, it embeds the profile and gives the app the iCloud and push entitlements the profile grants. |
-| `./scripts/check_page_reads.py` | Checks visible text and editable-field exclusion in both engines, using local fixture pages, a temporary Chromium profile and an in-memory WebKit store. Run after assembling the debug bundle. |
-| `./scripts/check_engine_restore/run.py` | Checks that one pinned tab keeps its Chromium choice through a temporary WebKit fallback and a third launch. Run after assembling the debug bundle. It uses a disposable profile and a local page. Add `--interrupt` to verify that a rename saved before a forced exit also survives. |
+| `./scripts/check_page_reads.py` | Checks Chromium's visible text and editable-field exclusion on a local fixture page with a temporary profile. `swift test` covers WebKit (`WebKitReadableContentTests`). Run after assembling the debug bundle. |
+| `./scripts/check_engine_restore/run.py` | Checks that one pinned tab keeps its Chromium choice through a temporary WebKit fallback and a third launch. Run after assembling the debug bundle. It uses a disposable profile and a local page. |
 | `./scripts/provision_app.sh` | Gets the development and Developer ID provisioning profiles for `xyz.taeyoon.arch` through Xcode's automatic signing of a stand-in project in a temporary folder, signed in with the Xcode account or an App Store Connect API key (`ARCH_ASC_KEY_ID`, `ARCH_ASC_ISSUER_ID`, `ARCH_ASC_KEY_PATH`), and reports each profile without the team. `--dry-run` prints the steps and the installed profiles. |
 | `./scripts/install_app.sh` | Copies the signed `build/Arch.app` into `/Applications` as a real bundle for native apps, such as 1Password, that accept only browsers there. It refuses a bundle signed ad hoc or unsigned and replaces only an earlier Arch or a link. `ARCH_APP_SOURCE` and `ARCH_INSTALL_DIR` change the source and the destination folder. |
 | `./scripts/readme_update.sh` | Regenerates `README.md` and `resources/readme-hero.svg` from `resources/README.preset.md` and `resources/readme-hero.preset.svg`. |
@@ -143,7 +143,7 @@ arch-browser
 │   │   ├── ARCHEngineWebKit/       # WebKit adapter
 │   │   ├── ARCHPrivateAPI/         # Private API registry and flags
 │   │   └── CEFBridge/              # Objective-C++ bridge to the CEF C++ API
-│   └── ARCHKit/Tests/              # Tests: ARCHEngineChromiumTests, ARCHEngineTests, ARCHEngineWebKitTests, ARCHPrivateAPITests
+│   └── ARCHKit/Tests/              # Tests: ARCHEngineChromiumTests, ARCHEngineReadCheck, ARCHEngineTests, ARCHEngineWebKitTests, ARCHPrivateAPITests
 ├── docs/                           # Design documents
 ├── resources/                      # README source, hero images, and app icon
 ├── scripts/                        # Build, install, and README scripts (see Scripts)

@@ -42,24 +42,12 @@ public final class SitePermissionStore: ObservableObject {
         decisions[origin]?[type]
     }
 
-    /// A draft shows only permission types, never the sites whose answers an ordinary Persona inherits.
+    /// A draft shows only permission types, never the sites whose answers an ordinary Persona inherits. Agent tabs deny every request they make themselves, so only an allowed answer, which a Chromium profile applies before asking, needs a note.
     func agentPermissionNote(for personaID: UUID, agentOnlyPersonaID: UUID?) -> String? {
         guard personaID != agentOnlyPersonaID else { return nil }
-        let types: [(EnginePermissionType, String)] = [(.camera, "camera"), (.microphone, "microphone"), (.geolocation, "location")]
-        var allowed: [String] = []
-        var blocked: [String] = []
-        for (type, name) in types {
-            if decisions.values.contains(where: { $0[type] == .allow }) { allowed.append(name) }
-            if decisions.values.contains(where: { $0[type] == .deny }) { blocked.append(name) }
-        }
-        var sentences: [String] = []
-        if !allowed.isEmpty {
-            sentences.append("Sites previously allowed to use \(allowed.formatted(.list(type: .or))) may keep that access in Chromium agent tabs.")
-        }
-        if !blocked.isEmpty {
-            sentences.append("Sites previously denied access to \(blocked.formatted(.list(type: .or))) remain blocked for those permissions.")
-        }
-        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
+        let types: [(EnginePermissionType, String)] = [(.camera, "the camera"), (.microphone, "the microphone"), (.geolocation, "your location")]
+        let allowed = types.filter { type, _ in decisions.values.contains { $0[type] == .allow } }.map(\.1)
+        return allowed.isEmpty ? nil : "Sites you allowed to use \(allowed.formatted(.list(type: .or))) keep that access in agent tabs that run in Chromium."
     }
 
     /// Remembers `decision` for each of `types`, or forgets their answers when it is `nil` and lists them in `removed`, and saves the file.

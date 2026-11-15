@@ -1,4 +1,4 @@
-// What a WebKit page's readable content holds of its selection: text selected outside fields and editable areas, and none for a selection that reaches an editable area, also one in an open shadow tree, so a draft never goes with a question. The tests use a private profile and load no page from the network.
+// What a WebKit page's readable content holds: its visible text without field values or editable areas, and of its selection, text selected outside fields and editable areas, and none for a selection that reaches an editable area, also one in an open shadow tree, so a draft never goes with a question. The tests use a private profile and load no page from the network.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation

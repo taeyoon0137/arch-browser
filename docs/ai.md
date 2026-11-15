@@ -442,7 +442,7 @@ public struct AIJSONLinePaths: Codable, Sendable {
 - Arch decodes output as UTF-8 across chunk boundaries. It skips non-JSON lines in `jsonLines` mode. It accepts replies delivered at the end by tools that buffer output without a terminal.
 - Cancellation sends `SIGTERM` to the process group and `SIGKILL` two seconds later if it still runs. Timeouts: 120 seconds until the first output and 60 seconds between outputs. Output ends a second after the tool exits, even when a process the tool started in the background keeps standard output open.
 - A tool that can run commands could be steered by text in a page. Requests that carry page, selection, file, or download parts therefore go to a command-line provider only when `runsWithoutTools` is on. Settings ▸ AI explains this next to the checkbox. Arch cannot check the claim; it only keeps the working directory empty and the environment small.
-- The Claude Code and Codex presets (Add Provider ▸ Claude Code or Codex) set `agent`. A preset finds `claude` or `codex` in the login shell's PATH, starts with the tool's default model and two concurrent requests, and keeps only its environment, models, and limits editable; its environment never carries `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. The editor shows the version and sign-in from the tool's own status command (`AIAgentToolStatus`) with Sign In, which types the tool's sign-in at the built-in terminal's prompt, and Check runs the status command and the probes, never a model.
+- The Claude Code and Codex presets (Add Provider ▸ Claude Code or Codex) set `agent`. A preset finds `claude` or `codex` in the login shell's PATH, starts with the tool's default model and two concurrent requests, and keeps only its environment, models, and limits editable; its environment never carries `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, or `CODEX_API_KEY`, and it takes the tool's `CLAUDE_CONFIG_DIR` or `CODEX_HOME` from the login shell unless it sets one. The editor shows the version and sign-in from the tool's own status command (`AIAgentToolStatus`) with Sign In, which types the tool's sign-in at the built-in terminal's prompt, and Check runs the status command and the probes, never a model.
 - Agent sessions (`AIService.startAgentSession(_:)`, `docs/agents.md`, Sessions on the user's CLI) are the only exception to the rule that command-line tools get no tools from Arch, and they get only Arch's MCP server. Arch builds every argument: the tool's own tools, settings, hooks, plugins, and other MCP servers are off, except Codex's code-mode host, through which its current models call any tool, the reviewed built-in Claude Code plugins that no argument turns off, and a session's own skill folder. Arch checks Claude Code's start event on every turn and watches Codex's stream, and ends a run that shows anything else with `blockedByPolicy(.agentUsedOwnTools(_:))`.
 - A preset's ordinary requests run with Arch's arguments for them and every tool off, after the same probes, and read the reply with the session's decoder: Claude Code's text deltas and Codex's completed messages. A Claude Code `init` that lists any tool or server ends the request before the reply. So the presets accept page data without `runsWithoutTools`.
 - `AIModelCapability.agent` is derived: a preset's models and HTTP models with `tools` have it, and an override in `ai.json` or Settings neither adds nor removes it (`AIProviderConfiguration.capabilities(of:)`). The `agent` feature requires it.
@@ -473,7 +473,7 @@ public struct AIRoute: Codable, Sendable {
 }
 ```
 
-A request can also name its route, as agent runs do (`docs/hooks.md`, Model choice and tiers): a model tier, whose models the user assigns in Settings ▸ AI ▸ Model Tiers, or models of its own.
+A request can also name its route, as agent runs do (`docs/hooks.md`, Model choice and tiers): a model tier, whose models the user assigns in Settings ▸ AI ▸ Features, or models of its own.
 
 ```swift
 public enum AIModelTier: String, Codable, Hashable, Sendable, CaseIterable {
@@ -681,7 +681,7 @@ public enum AIHookEvent: Sendable {
 public struct AIPageLoad: Sendable {
     public var tabID: UUID
     public var url: URL
-    /// The first load of a tab restored from the saved session or of a pinned tab that a browser import opened.
+    /// The first load of a tab restored from the saved session.
     public var isRestore: Bool
 }
 
@@ -702,7 +702,7 @@ public struct AIDownloadFinish: Sendable {
 }
 ```
 
-- `BrowserHooks` in `Browsing` subscribes to the session's browser event bus (`docs/hooks.md`, Browser events), so `BrowserSession` only attaches it, and posts the bus's events under their identifiers with `post(_:event:)`, never for agent tabs. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists, with the file's URL from the session's entry. A pinned tab that a browser import opens counts as restored (`docs/import-browsers.md`): it posts no `tabOpened`, and its first `pageLoaded` has `isRestore`. A download that started while Settings ▸ General asked where to save each download is named by the user.
+- `BrowserHooks` in `Browsing` subscribes to the session's browser event bus (`docs/hooks.md`, Browser events), so `BrowserSession` only attaches it, and posts the bus's events under their identifiers with `post(_:event:)`, never for agent tabs. It posts `pageLoaded` whenever a tab has an address and its main frame finishes loading a document, as the engines report through `webContentsDidFinishLoadingDocument`. Frames inside the page that load later and navigations within the document post nothing. It posts `tabOpened` for a tab that joins the session after launch and is not restored, and `downloadFinished` once a download entry's state turns `completed` and its file exists, with the file's URL from the session's entry. A pinned tab that browser import or sidebar sync adds posts no `tabOpened`, and its first load is the user's, without `isRestore` (`docs/import-browsers.md`). A download that started while Settings ▸ General asked where to save each download is named by the user.
 - `AIDownloadInfo` carries the file's name, media type (from its extension), size, source address, and the address of the page the download started from (`EngineDownloadItem.pageURL`), without the page's title. Site exclusions apply to both addresses, so a file from an excluded page reaches no hook even when it comes from another site.
 - `BrowserHooks` ends a tab's chains for other documents when the tab commits another document, ignoring the fragment (`scheduler.cancel(subject:otherThan:)`), ends its chains except the close's own when it closes (`scheduler.cancel(subject:except:)`), and calls `cancel(subject:)` when the user removes a download from the list.
 
@@ -817,8 +817,8 @@ public enum AIHookAction: Sendable {
 
 The first hooks (`BuiltInHooks` in `Browsing`):
 
-- `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips the first load of a restored tab and of a pinned tab that a browser import opened, so that launching and importing send no requests, and a page that has a suggested title or a refusal already. It reads the tab's page with a 2,000-character limit, skips a page it cannot read or that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
-- `hook.downloadName` (Download Names), on `downloadFinished`. It skips a file whose name the user chose, sends the download part only, not the file's contents, and asks for a descriptive file name without an extension.
+- `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips the first load of a restored tab, so that launching sends no requests, and a page that has a suggested title or a refusal already. It reads the tab's page with a 2,000-character limit, skips a page it cannot read or that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
+- `hook.downloadName` (Download Names), on `downloadFinished`. It skips a file whose name the user chose and a download that started in an agent tab, sends the download part only, not the file's contents, and asks for a descriptive file name without an extension.
 - Both ask for at most 256 output tokens and take the reply's first line without the quotes, emphasis, or final period a model may add.
 
 ## Features that AI adds at run time
@@ -957,8 +957,7 @@ public struct AIPrice: Codable, Sendable {
 ## Settings ▸ AI
 
 - Providers: Add Provider chooses HTTP API or Command-Line Tool. An HTTP provider has a name, format, base URL, key (entered once, then shown only as set, with Replace and Remove), extra headers, and models (Refresh from the provider or add by name). Each model has an input limit, price, and capability overrides. A command-line tool has a name, executable (found in the login shell's PATH or chosen with `NSOpenPanel`), arguments, environment, output format and paths, the Runs Without Its Own Tools checkbox with its explanation, Open Terminal, and Check. Each provider has its limits.
-- Features: one row per registered `stored` feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request. A `perRequest` feature has no row, since its requests name their routes.
-- Model Tiers: a sentence on what a tier does and that the features under Features use the models chosen there, then Fast, Standard, and Deep, each with the Features rows' model menus (a model and up to two fallbacks, starting at None) and a sentence on what the tier is for, which names no feature. Every connected model is listed.
+- Features: one row per registered `stored` feature with its switch, its models (primary and up to two fallbacks), what it sends in words, and its last error, plus Resume when its hooks are paused. An automatic feature's last error comes from the hook center, since its hooks can stop before a request. A `perRequest` feature has no row, since its requests name their routes. The page ends with Fast Tier, Standard Tier, and Deep Tier, each with the feature rows' model menus (a model and up to two fallbacks, starting at None) and a sentence on what the tier is for, which names no feature; the first also says that the features above use the models chosen for them. Every connected model is listed.
 - Sites: the exclusion list.
 - Usage: the totals, the monthly spending limit, and the daily limit for automatic features. Totals keep each feature's name, so a `perRequest` feature is listed by name.
 - Activity: the in-memory request list. Show Content appears only for an entry with content.

@@ -11,8 +11,6 @@ public struct AgentSessionPanel: View {
     let actions: AgentPanelActions
     private let keepTabs: (() -> Void)?
     @State private var problem: String?
-    @State private var showsResearchPages = false
-    @State private var researchChoice: AgentResearchPage?
     @State private var showsSharedTabs = false
     @State private var sharingProblem: String?
     @State private var raisingTo: AgentAccessLevel?
@@ -66,7 +64,7 @@ public struct AgentSessionPanel: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer()
-                if session.isTakenOver {
+                if session.isTakenOver && !session.hasEnded {
                     Button("Hand Back", action: session.handBack).controlSize(.small)
                 }
                 if session.isTurnRunning {
@@ -78,13 +76,6 @@ public struct AgentSessionPanel: View {
                         Button("Take Over") { service.takeOver(session, showTab: actions.showTab) }
                             .disabled(session.hasEnded)
                     }
-                    if service.canEditAttachments(of: session) {
-                        Button("Open in Research Tab…") {
-                            researchChoice = nil
-                            showsResearchPages = true
-                        }
-                            .disabled(session.isTakenOver)
-                    }
                     if let keepTabs { Button("Keep Tabs", action: keepTabs) }
                     Divider()
                     Button("Delete Session…", role: .destructive) { deleting = session }
@@ -94,7 +85,6 @@ public struct AgentSessionPanel: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .sheet(isPresented: $showsResearchPages) { researchPages }
                 .help("Session")
                 .accessibilityLabel("Session actions")
             }
@@ -123,12 +113,6 @@ public struct AgentSessionPanel: View {
         .padding(.vertical, 8)
     }
 
-    private var researchPages: some View {
-        AgentResearchSheet(pages: service.researchChoices(for: session) + service.manualOutlineLinks(for: session),
-                           choice: $researchChoice, open: { await service.reviewManualResearchPage($0, in: session) },
-                           close: { showsResearchPages = false })
-    }
-
     private var sharedTabs: some View {
         let shared = session.handles.sharedTabIDs
         let visible = service.host.userTabs(in: session.personaID)
@@ -150,7 +134,7 @@ public struct AgentSessionPanel: View {
                     }
                 }
             }.frame(maxHeight: shared.isEmpty ? 0 : min(160, CGFloat(shared.count) * 32))
-            Menu("Share a Tab…") {
+            Menu("Share Tab") {
                 ForEach(available) { tab in
                     Button(labels[tab.id] ?? tab.attachmentLabel) {
                         sharingProblem = service.share(tab, with: session) ? nil : "This tab changed or is no longer available."
@@ -198,7 +182,7 @@ public struct AgentSessionPanel: View {
         let cards = approvals.pending.filter { card in
             guard card.ownerID == session.id else { return false }
             switch card.kind {
-            case .question, .shareSessionTab, .openSessionResearch: return true
+            case .question, .shareSessionTab: return true
             default: return false
             }
         }
@@ -210,7 +194,7 @@ public struct AgentSessionPanel: View {
                                            retry: item.id == session.transcript.retryableErrorID && !session.hasEnded ? { retry(item.id) } : nil)
                             .id(item.id)
                     }
-                    if session.isTakenOver {
+                    if session.isTakenOver && !session.hasEnded {
                         note("You took over. The agent waits until you hand the session back.")
                     }
                     ForEach(cards) { card in
@@ -315,95 +299,6 @@ public struct AgentSessionPanel: View {
     }
 }
 
-/// The user's research picker retains the selected source and exact address until they confirm.
-struct AgentResearchSheet: View {
-    let pages: [AgentResearchPage]
-    @Binding var choice: AgentResearchPage?
-    let open: (AgentResearchPage) async -> AgentManualResearchResult
-    let close: () -> Void
-    @State private var opening: Task<Void, Never>?
-    @State private var problem: String?
-    @State private var replacements: [AgentResearchPage: AgentResearchPage] = [:]
-
-    private var presentedPages: [AgentResearchPage] {
-        pages.map { replacements[$0] ?? $0 }
-    }
-
-    private var currentChoice: AgentResearchPage? {
-        choice.flatMap { presentedPages.contains($0) ? $0 : nil }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Open in Research Tab").font(.headline)
-            if pages.isEmpty {
-                Text("Write an eligible web address in a message or share a tab to open it here.")
-            } else {
-                Picker("Address", selection: $choice) {
-                    Text("Choose an address").tag(nil as AgentResearchPage?)
-                    ForEach(presentedPages, id: \.self) { page in
-                        let label = page.outlineLabel ?? page.url.absoluteString
-                        Text(verbatim: page.originalOutlineChoice == nil ? label : "Updated · \(label)").tag(Optional(page))
-                    }
-                }
-                .disabled(opening != nil)
-            }
-            if let choice = currentChoice {
-                if let label = choice.outlineLabel {
-                    Text(verbatim: label).font(.callout).fixedSize(horizontal: false, vertical: true)
-                }
-                ScrollView {
-                    Text(verbatim: choice.url.absoluteString)
-                        .font(.body.monospaced()).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: 64)
-            }
-            if let problem { Text(problem).foregroundStyle(.secondary) }
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    opening?.cancel()
-                    close()
-                }.keyboardShortcut(.cancelAction)
-                Button("Open in Research Tab", action: confirm)
-                    .disabled(currentChoice == nil || opening != nil)
-            }
-        }
-        .padding(16).frame(width: 420)
-        .onChange(of: pages) {
-            replacements = replacements.filter { pages.contains($0.key) }
-            if currentChoice == nil { choice = nil }
-        }
-        .onChange(of: choice) { if choice != nil { problem = nil } }
-        .onDisappear { opening?.cancel() }
-    }
-
-    private func confirm() {
-        guard opening == nil, let currentChoice else { return }
-        opening = Task { @MainActor in
-            guard !Task.isCancelled else { return }
-            let result = await open(currentChoice)
-            guard !Task.isCancelled else { return }
-            opening = nil
-            switch result {
-            case .opened:
-                close()
-            case .changed(let updated):
-                if let original = updated.originalOutlineChoice { replacements[original] = updated }
-                choice = nil
-                problem = "This link’s address changed. Select the updated link to review its new address."
-            case .staleLink:
-                choice = nil
-                problem = "This link is no longer available. Choose another address or ask the agent for a fresh page outline."
-            case .unavailable:
-                problem = "The address is unavailable or the session has reached its tab limit."
-            }
-        }
-    }
-}
-
 /// One item of the transcript.
 private struct AgentTranscriptRow: View {
     let item: AgentTranscriptItem
@@ -482,10 +377,10 @@ private struct AgentTranscriptRow: View {
                                 if let current = readTab(row.page) { actions.showReadTab(current.id) }
                             }
                             .buttonStyle(.link)
-                            .font(.caption)
+                            .font(.system(size: 11))
                         }
                     }
-                    .font(.caption)
+                    .font(.system(size: 11))
                 }
             }
         }

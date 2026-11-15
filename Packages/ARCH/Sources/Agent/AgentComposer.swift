@@ -77,7 +77,10 @@ public struct AgentReaderExcerpt: Equatable {
     public var place: String
     /// The document reviewed when this draft opened.
     public var tab: AgentTabInfo?
-    public var readerExcerpt: AgentReaderExcerpt?
+    /// The reader's selection and answer, which Share reader excerpt shares from the start; the user can preview it or turn it off.
+    public var readerExcerpt: AgentReaderExcerpt? {
+        didSet { sharesExcerpt = readerExcerpt != nil }
+    }
     @Published public var text: String
     @Published var attachesTab = true
     @Published var sharesExcerpt = false
@@ -100,7 +103,7 @@ public struct AgentReaderExcerpt: Equatable {
 
     /// The selected tab when it has a document the user can share with this session.
     public func attachableTab(allowsAI: (URL) -> Bool) -> AgentTabInfo? {
-        guard let tab, tab.canAttachToSession(allowsAI: allowsAI) else { return nil }
+        guard let tab, tab.canShareWithAgent(allowsAI: allowsAI) else { return nil }
         return tab
     }
 
@@ -132,7 +135,7 @@ public struct AgentComposer: View {
         self.didStart = didStart
     }
 
-    var selectedPermissionNote: String? { context.usesAgentsPersona ? nil : permissionNote }
+    private var selectedPermissionNote: String? { context.usesAgentsPersona ? nil : permissionNote }
 
     private var models: [AIModelRef] { service.agentModels() }
 
@@ -214,12 +217,12 @@ public struct AgentComposer: View {
                 if let warning = codexInstructionsWarning {
                     note(warning)
                 }
-                if let problem = context.problem {
-                    Text(problem)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            }
+            if let problem = context.problem {
+                Text(problem)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
@@ -401,7 +404,7 @@ extension AgentTabInfo {
 
     private func attachmentLabel(address: String?) -> String {
         guard let address else { return title.isEmpty ? "Tab" : title }
-        if title.isEmpty || title == url?.host || title == url?.absoluteString { return address }
+        if title.isEmpty || title == url?.host || url.map({ AgentAddress.isOwnAddress(title, of: $0) }) == true { return address }
         return "\(title) · \(address)"
     }
 

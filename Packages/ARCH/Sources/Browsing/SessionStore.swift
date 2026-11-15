@@ -25,7 +25,7 @@ struct SessionSnapshot: Codable {
         var engine: EngineKind?
         /// The engine's restorable page state, such as WebKit's back-forward list, which the file keeps sealed from version 13. `nil` for engines that keep none, in closed-tab records, in files before version 3, and when the state cannot be sealed or opened.
         var state: Data?
-        /// A synced engine change that waits until this tab is no longer visible.
+        /// A pinned tab's synced engine change that waits until no window shows the tab, which the next launch opens it in. Optional, so it needs no new version; `nil` in files written before sync.
         var pendingSyncEngine: EngineKind? = nil
         /// The tab's Persona. `nil` in files before version 9; `normalized()` gives an open tab its space's Persona, and a closed tab keeps its own.
         var personaID: UUID?
@@ -225,18 +225,8 @@ extension SessionSnapshot {
 
     /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch. A folder whose tabs the user kept is an ordinary folder.
     @MainActor static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
-        var agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
-        guard !agentFolderIDs.isEmpty else { return (tabs, folders) }
-        // An older hierarchy can contain descendants of an agent folder. Its owner marker is
-        // intentionally never encoded, so exclude the whole subtree before writing the file.
-        let children = Dictionary(grouping: folders, by: \.parentID)
-        var pending = Array(agentFolderIDs)
-        while let parent = pending.popLast() {
-            for folder in children[parent] ?? [] where agentFolderIDs.insert(folder.id).inserted {
-                pending.append(folder.id)
-            }
-        }
-        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !agentFolderIDs.contains($0.id) })
+        let agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
+        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !$0.isAgentFolder })
     }
 }
 
@@ -279,7 +269,7 @@ final class SessionStore {
     /// Read at startup so a session still awaiting backup also keeps its live folders' local data.
     var keepsUnknownLiveFolders: Bool { pendingBackup != nil || FileManager.default.fileExists(atPath: unreadableFileURL.path) }
 
-    /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
+    /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that cannot be read or does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
     func load() -> SessionSnapshot? {
         let data: Data
         do {
@@ -287,7 +277,11 @@ final class SessionStore {
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return nil
         } catch {
-            pendingBackup = unreadableFileURL
+            do {
+                try Self.rename(fileURL, to: unreadableFileURL)
+            } catch {
+                pendingBackup = unreadableFileURL
+            }
             return nil
         }
         let directory = fileURL.deletingLastPathComponent()
@@ -318,7 +312,7 @@ final class SessionStore {
         var version: Int?
     }
 
-    /// Capture on the main queue after half a quiet second, or after five seconds of continuous changes. The file is written on the serial writer.
+    /// Runs the newest `snapshot` closure on the main thread half a second after the last call, or five seconds after the first call since the last capture while calls continue, and writes nothing when it returns nil. The file is written on `writeQueue`. `now` and `enqueue` let tests supply the clock and the main queue.
     func scheduleSave(at now: DispatchTime = .now(),
                       enqueue: (DispatchTime, DispatchWorkItem) -> Void = { DispatchQueue.main.asyncAfter(deadline: $0, execute: $1) },
                       _ snapshot: @escaping () -> SessionSnapshot?) {
@@ -376,7 +370,16 @@ final class SessionStore {
             let data = try JSONEncoder().encode(snapshot.mappingPageState(seal.seal))
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             if let backup = pendingBackup {
-                try Self.write(Data(contentsOf: fileURL), to: backup)
+                // A file that cannot be read moves aside. A newer version's file is copied. A file that is gone leaves nothing to set aside.
+                do {
+                    if backup == unreadableFileURL {
+                        try Self.rename(fileURL, to: backup)
+                    } else {
+                        try Self.write(Data(contentsOf: fileURL), to: backup)
+                    }
+                } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                } catch let error as POSIXError where error.code == .ENOENT {
+                }
                 pendingBackup = nil
             }
             try Self.write(data, to: fileURL)

@@ -43,5 +43,8 @@ import Testing
         #expect(throws: EngineInputError.unsupported) { try ChromiumInput.textEvents(for: "a\nb") }
         #expect(throws: EngineInputError.unsupported) { try ChromiumInput.textEvents(for: "a\r\nb") }
         #expect(throws: EngineInputError.unsupported) { try ChromiumInput.textEvents(for: "ok 👍") }
+        // A control character could go out with Return's key code.
+        #expect(throws: EngineInputError.unsupported) { try ChromiumInput.textEvents(for: "a\u{3}") }
+        #expect(throws: EngineInputError.unsupported) { try ChromiumInput.textEvents(for: "a\tb") }
     }
 }

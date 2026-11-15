@@ -3,7 +3,7 @@ import Agent
 import LiveFolders
 import SwiftUI
 
-/// Clicking the row collapses or expands the folder, Rename Folder in its context menu edits the name in place, and the menu's folder items nest it (bookmark rule 6). The row lights up while a dragged tab or folder is over it and would go into the folder, as a space's symbol does. A live folder's row shows its source's symbol, its unread items' count, a progress indicator in the chevron's place while it refreshes, and a warning symbol after a failed refresh, and its menu has the live folder's commands (`docs/bookmarks.md`, Live folders ▸ Interface).
+/// Clicking the row collapses or expands the folder, Rename Folder in its context menu edits the name in place, and the menu's folder items nest it (bookmark rule 6). The row lights up while a dragged tab or folder is over it and would go into the folder, as a space's symbol does. A live folder's row shows its source's symbol, its unread items' count, a progress indicator in the chevron's place while it refreshes, and a warning symbol after a failed refresh, and its menu has the live folder's commands (`docs/bookmarks.md`, Live folders ▸ Interface). An agent folder's menu shows its session's commands (`SessionFolderMenu`), or Keep Tabs for an outside client's folder.
 struct TabFolderRowView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -103,7 +103,7 @@ struct TabFolderRowView: View {
             if let owner = folder.agentSessionID.flatMap({ session.agents?.session(withID: $0) }) {
                 SessionFolderMenu(owner: owner, perform: { action in
                     Task { await windowModel.perform(action, on: folder, reviewed: owner) }
-                }, delete: { deleting = owner })
+                }, rename: { windowModel.renamingFolderID = folder.id }, delete: { deleting = owner })
                 .disabled(windowModel.agentSession(of: folder) == nil)
             } else {
                 if folder.live != nil {
@@ -171,12 +171,14 @@ private struct SessionFolderState: View {
 private struct SessionFolderMenu: View {
     @ObservedObject var owner: AgentSession
     let perform: (BrowserWindowModel.AgentFolderAction) -> Void
+    let rename: () -> Void
     let delete: () -> Void
 
     var body: some View {
         Button("Show Session") { perform(.show) }
         Button("Stop") { perform(.stop) }.disabled(!owner.isTurnRunning)
         Button("Keep Tabs") { perform(.keepTabs) }
+        Button("Rename Folder", action: rename)
         Divider()
         Button("Delete Session…", role: .destructive, action: delete)
     }

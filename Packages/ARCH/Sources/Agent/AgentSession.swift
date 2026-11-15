@@ -105,7 +105,6 @@ extension AgentAPISession: AgentSessionRunning {
         didSet { siteScope = scope.sites }
     }
     var handles = AgentGrantHandles()
-    var researchPages: [UUID: AgentResearchPage] = [:]
     var snapshots = AgentSnapshotStore()
     let ready = AgentGate(isOpen: false)
     let handedBack = AgentGate(isOpen: true)
@@ -138,7 +137,7 @@ extension AgentAPISession: AgentSessionRunning {
     var reportedTools: [String]
     /// The service's: tells the session's connections that their tools changed, after a mode change.
     var modeDidChange: (() -> Void)?
-    /// Dismiss this session's question cards when the user or runner ends their turn.
+    /// Ends every card this session owns, questions and tab requests, when its turn ends, it is stopped or taken over, or it ends.
     var dismissQuestions: (() -> Void)?
     /// Withdraw outstanding tab requests that display a tab whose sharing has changed.
     var attachmentDidChange: ((UUID) -> Void)?
@@ -395,7 +394,9 @@ extension AgentAPISession: AgentSessionRunning {
 
     /// An error that is not the runner's, such as a skill folder that could not be written for a retry.
     func noteError(_ error: Error) {
-        transcript.append(.error(error.localizedDescription, .retry))
+        // Retry fits only an error that another try can get past; Agent Tasks switched off or a removed model offers AI Settings.
+        let (sentence, action) = describe(Self.aiError(error))
+        transcript.append(.error(sentence, action))
     }
 
     // MARK: Mode and take-over
@@ -457,16 +458,8 @@ extension AgentAPISession: AgentSessionRunning {
         transcript.append(.notice("Another program tried to use this session\u{2019}s access."))
     }
 
-    /// Ending research ownership retires its original handle even if the user subsequently shares this tab again.
-    func forgetResearchTab(_ id: UUID) {
-        guard researchPages.removeValue(forKey: id) != nil else { return }
-        handles.tabs.remove(id)
-        snapshots.remove(id)
-    }
-
     /// A tab the user shares later, with its handle; its site joins the scope.
     func share(tabID: UUID, url: URL?) -> String {
-        forgetResearchTab(tabID)
         if !handles.sharedTabIDs.contains(tabID) {
             objectWillChange.send()
             handles.sharedTabIDs.append(tabID)
@@ -493,7 +486,6 @@ extension AgentAPISession: AgentSessionRunning {
     func end(keepingThread: Bool, because reason: String = "The session was deleted.") async {
         guard !hasEnded else { return }
         hasEnded = true
-        for id in researchPages.keys { forgetResearchTab(id) }
         snapshots = AgentSnapshotStore()
         readerExcerpt = nil
         messageDraft = ""

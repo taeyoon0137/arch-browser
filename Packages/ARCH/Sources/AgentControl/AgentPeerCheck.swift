@@ -73,7 +73,7 @@ public enum AgentCodeIdentity {
         guard status == errSecSuccess, let code else { throw AgentPeerCheckFailure.invalidCode(status) }
         status = SecCodeCheckValidity(code, [], nil)
         guard status == errSecSuccess else { throw AgentPeerCheckFailure.invalidCode(status) }
-        // `SecCodeCopySigningInformation` takes a running code as well as a static one (`SecCode.h`), and then reports the hash the kernel holds for the running process.
+        // For a running code, `SecCodeCopySigningInformation` reports the code directory hash of the on-disk code this `SecCode` resolved to, not a hash the kernel holds. `SecCodeCheckValidity` on this same object has just confirmed that code matches the running process, so both calls must stay on one `SecCode` and the validity check must never be skipped.
         return try uniqueHash(of: unsafeBitCast(code, to: SecStaticCode.self))
     }
 

@@ -1042,8 +1042,7 @@ private:
     ExtensionsBrowserDidCreate(self);
     if (popup) {
         [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
-        // A popup can acquire AppKit's first responder while CEF is still creating
-        // it. Once CEF finishes, activate its page only if it already has the keys.
+        // CEF activates a page, which document.hasFocus() needs, only after an address the app loads (LoadMainFrameURL) or when its window becomes key while the page holds the first responder, so a popup that opens in the key window gets neither. A UI delegate that gives the popup the keys, as a small window does through focusPage, queues that before this block, so on this turn the page holds the first responder only if it should take the keys.
         __weak ARCHCEFBrowser *weakPopup = self;
         dispatch_async(dispatch_get_main_queue(), ^{
             ARCHCEFBrowser *popupBrowser = weakPopup;

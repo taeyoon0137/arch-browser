@@ -139,7 +139,7 @@ public struct HookRunSummary: Identifiable, Sendable {
     /// In seconds.
     public var duration: Double?
     public var actions: [String: Int]?
-    /// A failed run's message, its first 200 characters; never on disk, and nil at Keep Nothing.
+    /// A failed run's message, its first 200 characters; never on disk. At Keep Nothing only Arch's own sentences stay.
     public var message: String?
     public var test: Bool
 
@@ -155,14 +155,15 @@ public struct HookRunSummary: Identifiable, Sendable {
         test = entry.test
     }
 
-    /// What Keep Nothing keeps of the last run: its time and outcome.
+    /// The failures whose message is Arch's own sentence, never a script's or a model's words.
+    static let archSentenceCodes: Set<String> = ["notConfigured", "unknownProvider", "scriptChanged", "runnerMissing"]
+
+    /// What Keep Nothing keeps of the last run or skip: its time, outcome, code, and reason, and Arch's own sentence for a failure.
     var reduced: HookRunSummary {
         var summary = self
-        summary.code = nil
-        summary.reason = nil
         summary.duration = nil
         summary.actions = nil
-        summary.message = nil
+        if !Self.archSentenceCodes.contains(code ?? "") { summary.message = nil }
         return summary
     }
 }
@@ -222,7 +223,7 @@ public final class HookRegistry: ObservableObject {
 
     /// In run order.
     @Published public private(set) var hooks: [Hook] = []
-    /// Settings ▸ AI ▸ Agent Hooks ▸ Run Hooks. While it is off, no event reaches a hook; turning it off stops running runs without changing the hooks' states.
+    /// Settings ▸ AI ▸ Hooks ▸ Run Hooks. While it is off, no event reaches a hook; turning it off stops running runs without changing the hooks' states.
     @Published public var runsHooks = true {
         didSet { runsHooksDidChange(from: oldValue) }
     }
@@ -234,6 +235,8 @@ public final class HookRegistry: ObservableObject {
     @Published public private(set) var notice: HookStoreNotice?
     /// Whether `hooks.json` has been read. Until then no event reaches a hook and no change is accepted.
     @Published public private(set) var isReady = false
+    /// A hook's feature ended: the hook was removed, or an editor test of edited settings ended. The app shell deletes the feature's kept runs.
+    public var featureDidEnd: ((AIFeatureID) -> Void)?
     public let log: HookRunLog
 
     private let store: HookStore
@@ -351,9 +354,9 @@ public final class HookRegistry: ObservableObject {
         }
     }
 
-    /// The first write records the providers `ai.json` holds then (`docs/hooks.md`, Known providers).
+    /// The first write records the providers `ai.json` holds then, unless an earlier `hooks.json` was sealed (`docs/hooks.md`, Known providers).
     private func write() {
-        if !store.hasFile {
+        if store.trustsCurrentProviders {
             knownProviders = ai.settings.providers.map(HookKnownProvider.init)
         }
         var settings = HookSettings()
@@ -403,7 +406,8 @@ public final class HookRegistry: ObservableObject {
         updated.script = try script.map { try store.writeScript($0, for: updated) } ?? stored.script
         hooks[index] = updated
         register(updated)
-        if updated.state != .active || updated.usesAgent || stored.usesAgent { cancelRuns(of: updated) }
+        // A running script keeps the grant and tabs it started with.
+        cancelRuns(of: updated)
         persist()
     }
 
@@ -414,6 +418,7 @@ public final class HookRegistry: ObservableObject {
         cancelRuns(of: hook)
         store.removeScripts(of: id)
         ai.unregister(.agentHook(id))
+        featureDidEnd?(.agentHook(id))
         lastRuns[id] = nil
         dayCounts[id] = nil
         failureCounts[id] = nil
@@ -421,6 +426,12 @@ public final class HookRegistry: ObservableObject {
         limiter.reset(hook.owner)
         for tab in firstLoadCarryOvers.keys { firstLoadCarryOvers[tab]?.remove(id) }
         persist()
+    }
+
+    /// Settings' Clear Activity: empties the run log and every row's last runs.
+    public func clearActivity() {
+        log.clear()
+        lastRuns = [:]
     }
 
     public func move(_ id: UUID, to index: Int) {
@@ -461,6 +472,8 @@ public final class HookRegistry: ObservableObject {
         let ids = Set(reviewed.map(\.id))
         knownProviders.removeAll { ids.contains($0.id) }
         knownProviders += reviewed
+        // A hook that stays paused, as one left without a place, still keeps the approval.
+        persist()
         resume(id)
     }
 
@@ -482,7 +495,7 @@ public final class HookRegistry: ObservableObject {
         persist()
     }
 
-    /// Stop All Agents: stops the running runs of every hook with `agent` and pauses each active one until the user resumes it.
+    /// Stop All Agents: stops the running runs of every hook with `agent` and pauses each active one, or one paused after provider errors, which a route change would resume, until the user resumes it.
     public func stopAgentHooks() {
         for run in activeRuns.values {
             if let owner = draftOwner[run.hookID], hook(withID: owner)?.usesAgent != true { run.cancelScript() }
@@ -490,7 +503,7 @@ public final class HookRegistry: ObservableObject {
         var changed = false
         for index in hooks.indices where hooks[index].usesAgent {
             cancelRuns(of: hooks[index])
-            if hooks[index].state == .active {
+            if hooks[index].state == .active || hooks[index].state == .paused(.providerErrors) {
                 hooks[index].state = .paused(.stopAllAgents)
                 changed = true
             }
@@ -688,8 +701,8 @@ public final class HookRegistry: ObservableObject {
             case .allowed:
                 break
             case .overSubject:
-                // A page that changes its own title after each rename keeps such a hook running without a cause.
-                if hook.trigger.kind == .titleChanged { pauseHook(hook.id, .ranTooOften) }
+                // Code that answers each rename with another, as a plugin may, keeps such a hook running. A page's own title changes only skip, since a hook's name hides them.
+                if hook.trigger.kind == .titleChanged, event.cause != nil { pauseHook(hook.id, .ranTooOften) }
                 recordSkip(of: hook, event: event, .rateLimit)
                 continue
             case .overOwner:
@@ -754,6 +767,7 @@ public final class HookRegistry: ObservableObject {
     /// Waits for a slot, checks the daily count and the script against its digest, and runs it. The scheduler's timeout covers the wait.
     private func execute(_ run: HookRun, requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async {
         guard let hook = hook(withID: run.hookID) else { return }
+        run.stepStartedAt = .now
         let deadline = ContinuousClock.now + hook.timing.timeout
         do {
             try await slots.acquire(run: run.id, hook: hook.id)
@@ -852,8 +866,13 @@ public final class HookRegistry: ObservableObject {
         case .failed(let error):
             record(.failed(code: "error", message: error.localizedDescription), of: run)
         case .timedOut:
-            // A run whose time passed while it waited for a slot never started, which is no failure of its script.
-            if run.startedAt == nil { recordSkip(of: run, .dropped) } else { record(.timedOut, of: run) }
+            // A run whose time passed while it waited for a slot never started, which is no failure of its script, and one that waited first had less than its time.
+            if let started = run.startedAt {
+                let waited = run.stepStartedAt.map { started - $0 > .seconds(1) } ?? false
+                record(.timedOut, of: run, countsAsFailure: !waited)
+            } else {
+                recordSkip(of: run, .dropped)
+            }
         case .stopped:
             if run.startedAt != nil { record(.cancelled, of: run) }
             keepsCarryOver = true
@@ -908,11 +927,18 @@ public final class HookRegistry: ObservableObject {
         guard draftOwner[preview.id] == nil else { return .notRun("This draft is already running a test.") }
         preview.script = preview.script.withDigest(HookStore.digest(of: script))
         do { preview = try Self.checked(preview) } catch { return .notRun(error.localizedDescription) }
+        // Before the first save, the key's generation tells whether the providers in `ai.json` count as the user's.
+        if !store.hasFile, !store.hasKey { try? await store.prepareKey() }
         register(preview)
         draftOwner[preview.id] = draft.id
         defer {
             draftOwner[preview.id] = nil
-            if let saved = hook(withID: preview.id) { register(saved) } else { ai.unregister(.agentHook(preview.id)) }
+            if let saved = hook(withID: preview.id) {
+                register(saved)
+            } else {
+                ai.unregister(.agentHook(preview.id))
+                featureDidEnd?(.agentHook(preview.id))
+            }
         }
         return await test(preview, script: script, onTab: tabID, applying: applying)
     }
@@ -928,7 +954,7 @@ public final class HookRegistry: ObservableObject {
         guard var invocation = invocation(for: hook, run: run, script: script, deadline: deadline, applying: applying, requestDidEnd: { _ in }) else {
             return .notRun("This hook gets no events from this site, since the site is excluded from AI.")
         }
-        if draftOwner[id] != nil, !store.hasFile {
+        if draftOwner[id] != nil, !store.hasFile, store.trustsCurrentProviders {
             invocation.knownProviders = Dictionary(ai.settings.providers.map { ($0.id, HookKnownProvider($0).destination) }, uniquingKeysWith: { first, _ in first })
         }
         let runner = runner(for: hook)
@@ -997,7 +1023,8 @@ public final class HookRegistry: ObservableObject {
             pauseHook(hook.id, .unknownProvider, stopping: true)
             return
         }
-        guard countsAsFailure else { return }
+        // The agent runs' daily count, which `ai-usage.json` keeps across launches, says so in the row without pausing the hook.
+        guard countsAsFailure, entry.code != "dailyRuns" else { return }
         let count = (failureCounts[hook.id] ?? 0) + 1
         failureCounts[hook.id] = count
         if count >= Self.failuresBeforePause { pauseHook(hook.id, .failures) }
@@ -1008,9 +1035,8 @@ public final class HookRegistry: ObservableObject {
         recordSkip(of: hook, event: run.event, reason)
     }
 
-    /// A skip is no run, so Keep Nothing keeps no trace of it. A hook past a limit logs one skip of it a minute, or a day for its daily count, since a page that reloads itself would otherwise log one at each load.
+    /// A hook past a limit notes one skip of it a minute, or a day for its daily count, since a page that reloads itself would otherwise note one at each load. Keep Nothing keeps the skip in memory only, as for a run.
     private func recordSkip(of hook: Hook, event: BrowserEvent, _ reason: HookRunEntry.SkipReason) {
-        guard hook.record != .none else { return }
         let date = now()
         switch reason {
         case .rateLimit, .budget:
@@ -1026,7 +1052,7 @@ public final class HookRegistry: ObservableObject {
         note(entry, message: nil, of: hook)
     }
 
-    /// Keep the Session and Keep Activity Only log the entry and keep it in the hook's last runs; Keep Nothing keeps the last run's time and outcome in memory only.
+    /// Keep the Session and Keep Activity Only log the entry and keep it in the hook's last runs; Keep Nothing keeps the last run's reduced summary in memory only.
     private func note(_ entry: HookRunEntry, message: String?, of hook: Hook) {
         let summary = HookRunSummary(entry, message: message)
         if hook.record == .none {
@@ -1088,6 +1114,8 @@ final class HookRun {
     var declined: Decline?
     /// The run waited for a slot among more than the registry keeps waiting.
     var wasDropped = false
+    /// When its step started, before the wait for a slot.
+    var stepStartedAt: ContinuousClock.Instant?
     /// When its script started, after its slot.
     var startedAt: ContinuousClock.Instant?
     var outcome: HookRunOutcome?

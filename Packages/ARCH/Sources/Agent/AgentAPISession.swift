@@ -217,14 +217,12 @@ extension AgentSessionTools {
     nonisolated static let unreadableResult = "Arch did not send this result: its page text could not be told apart from Arch's own."
     nonisolated static let imageWithoutPage = "Arch did not send this image: the page it shows is not known."
 
-    /// The host's result as the model reads it: a status line unless the call succeeded, then the content, with each untrusted block that names its page as a page part (`AgentUntrusted.segments(in:)`) and each image as an image part whose source is the page it shows, so that the AI interface checks both sites. Text with an untrusted marker that does not parse makes the result refused, and an image whose page is not known goes as a note. The note says what the result held, without page text. It is an error result unless it succeeded or waits for the user, as MCP marks it.
+    /// The host's result as the model reads it: a status line unless the call succeeded, then the content, with each untrusted block that names its page as a page part (`AgentUntrusted.segments(in:)`) and each image as an image part whose source is the page it shows, so that the AI interface checks both sites. Text with an untrusted marker that does not parse makes the result refused, and an image whose page is not known goes as a note. The note says what the result held, without page text. It is an error result unless it succeeded.
     nonisolated static func result(_ result: AgentToolResult, of call: AgentToolCall, callID: String) -> AIToolResult {
         var parts: [AIPart] = []
         switch result.status {
         case .ok:
             break
-        case .approvalPending:
-            parts.append(.text("Waiting for the user in Arch; call approval_wait with this ID: \(result.approval ?? "")"))
         default:
             parts.append(.text("Status: \(result.status.rawValue)" + (result.code.map { " (\($0))" } ?? "") + "."))
         }
@@ -263,7 +261,7 @@ extension AgentSessionTools {
         let tab = call.arguments["tab"]?.stringValue.flatMap { $0.count <= 16 && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) } ? " on \($0)" : nil } ?? ""
         let status = result.status.rawValue + (result.code.map { " (\($0))" } ?? "")
         let note = "Earlier \(call.name)\(tab): \(status), \(held.joined(separator: " and ")), left out to save space."
-        return AIToolResult(callID: callID, parts: parts, isError: result.status != .ok && result.status != .approvalPending, note: note)
+        return AIToolResult(callID: callID, parts: parts, isError: result.status != .ok, note: note)
     }
 
     /// The page an image shows: the address in the result's `structured` `url`, as a tab's results carry it (VII.13's `screenshot` sets it to the tab's address), or else the one address of the result's page blocks.

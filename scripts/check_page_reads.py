@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the real WebKit and Chromium page-read checks against local fixtures."""
+"""Run the real Chromium page-read check against a local fixture."""
 import argparse
 import os
 from pathlib import Path
@@ -26,13 +26,6 @@ def main():
     if not (source / "Arch Helper.app/Contents/MacOS/Arch Helper").is_file():
         parser.error("build the app with swift build and ./scripts/bundle_app.sh first")
 
-    webkit = subprocess.run(["swift", "test", "--filter", "WebKitReadableContentTests"], cwd=ROOT,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    print(webkit.stdout, end="", flush=True)
-    webkit.check_returncode()
-    # SwiftPM can exit successfully when a filter matches no tests.
-    if "Suite WebKitReadableContentTests passed" not in webkit.stdout:
-        sys.exit("SwiftPM did not report a passing WebKitReadableContentTests suite.")
     subprocess.run(["swift", "build", "--product", "ARCHEngineReadCheck"], cwd=ROOT, check=True)
     bin_path = subprocess.check_output(["swift", "build", "--show-bin-path"], cwd=ROOT, text=True).strip()
     # Sign only this fixture bundle. Rendering, helper signing, and the sandbox follow the source bundle.

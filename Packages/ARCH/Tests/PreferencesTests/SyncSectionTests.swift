@@ -1,4 +1,5 @@
 import AppKit
+import ARCHEngine
 import Browsing
 import Foundation
 import SwiftUI
@@ -34,6 +35,7 @@ import Testing
 
     private final class Sidebar: SyncedSidebar {
         let needsFullSidebarSync = false
+        let defaultEngine = EngineKind.webKit
         func finishSidebarSyncRecovery() {}
         var onSidebarSyncSave: ((SidebarSyncState) -> Void)?
         var sidebarSyncState: SidebarSyncState { .init(personas: [], spaces: [], folders: [], favorites: [], pinnedTabs: []) }

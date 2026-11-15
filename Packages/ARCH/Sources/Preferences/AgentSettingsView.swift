@@ -66,7 +66,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Agent Sessions")
         } footer: {
-            formFootnote("A session the user starts begins in this mode and can be lowered at any time; raising it asks first. Sessions that a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; Claude Code keeps none of Arch\u{2019}s sessions.")
+            formFootnote("A session you start begins in this mode. You can lower it at any time; raising it asks first. Sessions a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; a delete that fails or that quitting cuts off leaves the copy. Claude Code keeps none of Arch\u{2019}s sessions.")
         }
         .disabled(!service.canChangeSettings)
     }
@@ -337,7 +337,7 @@ struct AgentCommandLineToolsSection: View {
             if AgentCommandLineTools.hasTools(bundle) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("arch-cli and arch-mcp are in")
-                    pathText(bundle.helpersURL.path)
+                    AgentPathText(bundle.helpersURL.path)
                 }
                 .task { await readTools() }
                 .alert("Install Command-Line Tools?", isPresented: $isConfirmingInstall) {
@@ -374,7 +374,7 @@ struct AgentCommandLineToolsSection: View {
                 Text("Not linked into a folder on your PATH.").foregroundStyle(.secondary)
             } else {
                 Text("Linked on your PATH:")
-                ForEach(installed, id: \.location.path) { pathText(AgentCommandLineTools.line($0)) }
+                ForEach(installed, id: \.location.path) { AgentPathText(AgentCommandLineTools.line($0)) }
             }
             if let problem {
                 Text(problem).font(.callout).foregroundStyle(.red)
@@ -404,12 +404,8 @@ struct AgentCommandLineToolsSection: View {
                     NSPasteboard.general.setString(text, forType: .string)
                 }
             }
-            pathText(text)
+            AgentPathText(text)
         }
-    }
-
-    private func pathText(_ text: String) -> some View {
-        Text(text).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
     }
 
     /// Reads the login shell's PATH and the links already on it. A failed read leaves `tools` nil, and Install reads again.

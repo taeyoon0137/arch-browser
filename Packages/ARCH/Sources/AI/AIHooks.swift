@@ -15,7 +15,7 @@ public enum AIHookEventKind: String, Hashable, Sendable {
 public enum AIHookEvent: Sendable {
     /// A tab's main frame finished loading a document.
     case pageLoaded(AIPageLoad)
-    /// A tab opened, other than one restored from the saved session or a pinned tab that a browser import opened.
+    /// A tab opened, other than one restored from the saved session or a pinned tab that browser import or sidebar sync adds.
     case tabOpened(AITabOpen)
     /// A download finished, and its file is in place.
     case downloadFinished(AIDownloadFinish)
@@ -61,7 +61,7 @@ public enum AIHookEvent: Sendable {
 public struct AIPageLoad: Sendable {
     public var tabID: UUID
     public var url: URL
-    /// The first load of a tab restored from the saved session or of a pinned tab that a browser import opened.
+    /// The first load of a tab restored from the saved session.
     public var isRestore: Bool
     public var documentID: UUID?
 

@@ -12,7 +12,7 @@ import Testing
         #expect(AgentMCPConfiguration.text(.codex, mcpPath: path) == """
             [mcp_servers.arch]
             command = "/Applications/Arch.app/Contents/Helpers/arch-mcp"
-            tool_timeout_sec = 120
+            tool_timeout_sec = 645
             """)
         let json = try AgentJSON.decode(Data(AgentMCPConfiguration.text(.json, mcpPath: path).utf8))
         #expect(json == ["mcpServers": ["arch": ["command": .string(path)]]])

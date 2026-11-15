@@ -35,7 +35,6 @@ private func due(_ configuration: LiveFolderConfiguration, _ state: LiveFolderSt
         #expect(LiveFolderSchedule.nextAttempt(configuration: feed, state: state(attempt: nil), lowPowerMode: false) == .distantPast)
         #expect(!LiveFolderSchedule.shouldRefresh(.timer, configuration: feed, state: state(), now: start + minutes(29), lowPowerMode: false))
         #expect(LiveFolderSchedule.shouldRefresh(.timer, configuration: feed, state: state(), now: start + minutes(30), lowPowerMode: false))
-        #expect(LiveFolderSchedule.shouldRefresh(.created, configuration: feed, state: state(), now: start, lowPowerMode: false))
         #expect(LiveFolderSchedule.shouldRefresh(.refreshNow, configuration: feed, state: state(earliest: start + minutes(60)), now: start, lowPowerMode: false))
     }
 

@@ -52,7 +52,7 @@ public final class PreferencesWindowController: NSWindowController {
     public static var syncController: SyncController?
     /// The agents' service whose outside access, grants, and activity Settings ▸ AI ▸ Agents shows. The app shell sets it at launch, before Settings first opens; without it the page is left out.
     public static var agents: AgentService?
-    /// The hook registry whose hooks Settings ▸ AI ▸ Agent Hooks lists. The app shell sets it at launch, before Settings first opens; without it the page is left out.
+    /// The hook registry whose hooks Settings ▸ AI ▸ Hooks lists. The app shell sets it at launch, before Settings first opens; without it the page is left out.
     public static var hooks: HookRegistry?
 
     /// Sign In for a Claude Code or Codex provider outside Settings, as from the agent panel: the built-in terminal with the tool's sign-in typed, as the provider's editor types it.

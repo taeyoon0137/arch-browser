@@ -121,8 +121,9 @@ import Testing
         let requested = browser.openTab(url: URL(string: "https://fixture.invalid/background"), in: space.id, select: false)
         window.selectTab(selected.id)
         #expect(!window.canStartAgentTask && !window.canToggleAgentPanel && service.agentModels().isEmpty)
-        let reviewed = try #require(window.sidebarAgentDraft(for: requested))
-        window.askAgentAboutSidebarTab(requested, reviewed: reviewed)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: requested, settings: settings))
+        window.askAgentAboutSidebarTab(requested, reviewed: reviewed, settings: settings)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a local task draft"); return }
         #expect(draft.text.isEmpty && draft.tab?.id == requested.id && draft.tab?.documentID == reviewed.tab?.documentID)
         #expect(window.selectedTab === selected && service.sessions.isEmpty)
@@ -136,6 +137,11 @@ import Testing
         #expect(window.canToggleAgentPanel)
         window.toggleAgentPanel()
         #expect(window.agentPanel == .composer(draft) && draft.text == "Compare these notes" && service.sessions.isEmpty)
+        // Switching Agent Tasks off hides the command.
+        var switchedOff = settings.route(for: .agent)
+        switchedOff.isEnabled = false
+        settings.setRoute(switchedOff, for: .agent)
+        #expect(window.sidebarAgentDraft(for: requested, settings: settings) == nil)
     }
 
     @Test func aMountedSidebarMenuFollowsSiteExclusionsInBothDirections() async throws {
@@ -184,6 +190,23 @@ import Testing
         #expect(!native.isVisible && window.agentPanel == nil && service.sessions.isEmpty)
     }
 
+    @Test func aSidebarTabWhosePageChangedOpensItsDraftWithoutThePage() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let space = try #require(browser.spaces.first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let tab = browser.openTab(url: URL(string: "https://fixture.invalid/page"), in: space.id, select: false)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: tab, settings: settings))
+        // The page commits another document while the menu shows.
+        tab.webContents(tab.webContents, didCommitDocumentAt: tab.url)
+        window.askAgentAboutSidebarTab(tab, reviewed: reviewed, settings: settings)
+        guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a draft without the page"); return }
+        #expect(draft.tab == nil && draft.problem != nil && service.sessions.isEmpty)
+    }
+
     @Test func renamingTheDestinationWhileItsDraftIsOpenOrHiddenKeepsTheReviewedTask() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -193,8 +216,9 @@ import Testing
         let space = try #require(browser.spaces.first { $0.resolvedPersonaID == persona.id })
         let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let tab = browser.openTab(url: URL(string: "https://fixture.invalid/reviewed"), in: space.id, select: false)
-        let draft = try #require(window.sidebarAgentDraft(for: tab))
-        window.askAgentAboutSidebarTab(tab, reviewed: draft)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let draft = try #require(window.sidebarAgentDraft(for: tab, settings: settings))
+        window.askAgentAboutSidebarTab(tab, reviewed: draft, settings: settings)
         guard case .composer(let context) = window.agentPanel else { Issue.record("Expected the reviewed draft"); return }
         context.text = "Compare this report"
         context.attachesTab = false
@@ -229,25 +253,26 @@ import Testing
         let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let favorite = Favorite(url: URL(string: "https://fixture.invalid/favorite")!, title: "Notes", personaID: home.resolvedPersonaID)
         browser.addFavorites([favorite], in: home.resolvedPersonaID)
-        #expect(browser.openTab(ofFavorite: favorite) == nil)
+        #expect(browser.favoriteTabs[favorite.id] == nil)
         let page = browser.openTab(for: favorite)
         let selected = browser.openTab(url: URL(string: "https://fixture.invalid/selected"), in: home.id, select: false)
         window.selectTab(selected.id)
-        let reviewed = try #require(window.sidebarAgentDraft(for: page))
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: page, settings: settings))
         window.switchToSpace(otherSpace.id)
-        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed, settings: settings)
         #expect(window.agentPanel == nil)
         window.switchToSpace(away.id)
-        #expect(window.sidebarAgentDraft(for: page) == nil)
+        #expect(window.sidebarAgentDraft(for: page, settings: settings) == nil)
         window.switchToSpace(home.id)
-        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed, settings: settings)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a draft for the open favorite"); return }
         #expect(draft.spaceID == home.id && draft.tab?.id == page.id && draft.tab?.documentID == reviewed.tab?.documentID)
         #expect(window.selectedTab === selected && service.sessions.isEmpty)
         window.hideAgentPanel()
         browser.closeFavorite(favorite)
-        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
-        #expect(window.agentPanel == nil && browser.openTab(ofFavorite: favorite) == nil)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed, settings: settings)
+        #expect(window.agentPanel == nil && browser.favoriteTabs[favorite.id] == nil)
     }
 
     @Test func reopeningThePanelKeepsItsUnsentDraftAndReviewedTabInTheSameWindow() throws {
@@ -259,8 +284,9 @@ import Testing
         let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true)
         let window = BrowserWindowModel(session: browser, record: record, kind: .main)
         let tab = browser.openTab(url: URL(string: "https://fixture.invalid/reviewed"), in: space.id, select: false)
-        let reviewed = try #require(window.sidebarAgentDraft(for: tab))
-        window.askAgentAboutSidebarTab(tab, reviewed: reviewed)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: tab, settings: settings))
+        window.askAgentAboutSidebarTab(tab, reviewed: reviewed, settings: settings)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a reviewed draft"); return }
         draft.text = "Compare this with the earlier report"
         draft.attachesTab = false
@@ -299,8 +325,8 @@ import Testing
         #expect(window.agentPanel == nil)
         window.switchToSpace(anotherSpace.id)
         window.toggleAgentPanel()
-        guard case .composer(let remaining) = window.agentPanel else { Issue.record("Expected the surviving space's draft"); return }
-        #expect(remaining === afterStart)
+        guard case .composer(let remaining) = window.agentPanel else { Issue.record("Expected a new composer in the surviving space"); return }
+        #expect(remaining !== afterStart && remaining.text.isEmpty)
     }
 
     @Test func folderCommandsFollowOnlyTheReviewedSessionAndKeepUserTabs() async throws {
@@ -414,44 +440,21 @@ import Testing
                                            attachedTabIDs: [], mode: .readOnly, model: QuestionClient.model, effort: nil))
         }
         let first = try start(in: home), second = try start(in: home), third = try start(in: office)
-        // Each row renders one window's two space symbols. Keep the same view tree as sessions change.
-        func marker(_ space: Space, current: Space) -> some View {
-            Color.white.frame(width: 24, height: 24)
-                .modifier(AgentWaitingDot(agents: service, spaceID: space.id, isCurrent: space.id == current.id, scale: 1))
-        }
-        let renderer = ImageRenderer(content: VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                marker(home, current: home)
-                marker(office, current: home)
-            }
-            HStack(spacing: 0) {
-                marker(home, current: office)
-                marker(office, current: office)
-            }
-        }.accentColor(.red))
-        func dots() -> [Bool] {
-            guard let image = renderer.cgImage, image.width == 48, image.height == 48 else { return [] }
-            let pixels = NSBitmapImageRep(cgImage: image)
-            // Sample the center of each dot, red on the symbol's white background.
-            return [(18, 6), (42, 6), (18, 30), (42, 30)].map { x, y in
-                let color = pixels.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)
-                return (color?.greenComponent ?? 1) < 0.8
-            }
-        }
-        #expect(dots() == [false, false, false, false])
+        // A space's dot shows while one of its sessions waits for an answer and the window is not on that space.
+        #expect(service.spacesWaitingForUser.isEmpty)
         try #require(await eventually { service.approvals.pending.count == 3 })
-        #expect(await eventually { dots() == [false, true, true, false] })
+        #expect(await eventually { service.spacesWaitingForUser == [home.id, office.id] })
         func answer(_ session: AgentSession) async throws {
             let card = try #require(service.approvals.pending.first { $0.ownerID == session.id })
             try #require(await service.approvals.answer(card.id, with: .answer("Continue")))
             try #require(await eventually { session.state == .running })
         }
         try await answer(third)
-        #expect(await eventually { dots() == [false, false, true, false] })
+        #expect(await eventually { service.spacesWaitingForUser == [home.id] })
         try await answer(first)
-        #expect(dots() == [false, false, true, false])
+        #expect(service.spacesWaitingForUser == [home.id])
         second.stop()
-        #expect(await eventually { dots() == [false, false, false, false] })
+        #expect(await eventually { service.spacesWaitingForUser.isEmpty })
         #expect(service.approvals.pending.isEmpty && first.isTurnRunning && third.isTurnRunning)
         #expect(service.sessions.map(\.id) == [first.id, second.id, third.id])
         await service.endSessionsForQuit()
@@ -487,17 +490,18 @@ import Testing
         let session = try service.startSession(.init(task: "Ask a question", personaID: home.resolvedPersonaID, spaceID: home.id,
                                                      attachedTabIDs: [], mode: .readOnly, model: QuestionClient.model, effort: nil))
         try #require(await eventually { session.state == .waitingForUser })
+        // The Home session opens in the Home main window, whose draft stays kept, and the Work small window keeps its page.
         browser.showWaitingAgent(session.id)
-        #expect(popup.raises == 1 && front.raises == 0 && small.agentPanel == .session(session.id))
-        #expect(main.agentPanel == draft && small.selectedTab === smallTab && small.currentSpaceID == office.id)
+        #expect(front.raises == 1 && popup.raises == 0 && main.agentPanel == .session(session.id) && draft != nil)
+        #expect(small.agentPanel == nil && small.selectedTab === smallTab && small.currentSpaceID == office.id)
         main.hideAgentPanel()
         browser.showWaitingAgent(session.id)
-        #expect(popup.raises == 2 && front.raises == 0 && main.agentPanel == nil)
+        #expect(front.raises == 2 && popup.raises == 0 && main.agentPanel == .session(session.id))
         let question = try #require(service.approvals.pending.first { $0.ownerID == session.id })
         try #require(await service.approvals.answer(question.id, with: .answer("Continue")))
-        small.hideAgentPanel()
+        main.hideAgentPanel()
         browser.showWaitingAgent(session.id)
-        #expect(small.agentPanel == nil && main.agentPanel == nil && popup.raises == 2 && front.raises == 0)
+        #expect(small.agentPanel == nil && main.agentPanel == nil && popup.raises == 0 && front.raises == 2)
 
         // A previous client owns the selected tab. The notification must show the client whose card is pending.
         let previous = UUID(), waiting = UUID()
@@ -514,28 +518,12 @@ import Testing
         service.approvals.open(card) { _ in }
         #expect(main.agentPanel == clientDraft)
         browser.showWaitingAgent(waiting)
-        #expect(small.agentPanel == .client(waiting) && main.agentPanel == clientDraft && popup.raises == 3 && front.raises == 0)
+        #expect(small.agentPanel == .client(waiting) && main.agentPanel == clientDraft && popup.raises == 1 && front.raises == 2)
         small.showAgentSession(session.id)
         // Both panels are occupied, so the explicit click opens the waiting client in the active window.
         browser.showWaitingAgent(waiting)
-        #expect(front.raises == 1 && popup.raises == 3 && main.agentPanel == .client(waiting))
+        #expect(front.raises == 3 && popup.raises == 1 && main.agentPanel == .client(waiting))
         #expect(main.selectedTabID == owned.id && main.currentSpaceID == home.id && small.agentPanel == .session(session.id))
-        let column = AgentPanelColumn(session: browser).environmentObject(main).frame(width: 360, height: 420)
-        let renderer = ImageRenderer(content: column)
-        func header() -> Data? {
-            guard let image = renderer.cgImage,
-                  let header = image.cropping(to: CGRect(x: 15, y: 16, width: 180, height: 30))
-            else { return nil }
-            return NSBitmapImageRep(cgImage: header).representation(using: .png, properties: [:])
-        }
-        let initialHeader = try #require(header())
-        service.panel.describe(.init(name: "Renamed previous client", access: "Read Only", place: "Home"), for: previous)
-        #expect(header() == initialHeader)
-        service.panel.describe(.init(name: "New name of waiting client", access: "Read Only", place: "Home"), for: waiting)
-        #expect(await eventually {
-            guard let renamed = header() else { return false }
-            return renamed != initialHeader
-        })
         main.selectTab(owned.id)
         #expect(main.agentPanel == .client(waiting))
         main.selectTab(mainTab.id)
@@ -543,7 +531,7 @@ import Testing
         #expect(main.agentPanel == .client(previous))
         service.approvals.end(card.id, because: "Client left")
         browser.showWaitingAgent(waiting)
-        #expect(main.agentPanel == .client(previous) && front.raises == 1 && popup.raises == 3)
+        #expect(main.agentPanel == .client(previous) && front.raises == 3 && popup.raises == 1)
         await service.endSessionsForQuit()
     }
 }

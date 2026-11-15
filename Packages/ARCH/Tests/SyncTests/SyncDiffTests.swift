@@ -188,11 +188,11 @@ import Testing
     }
 
     @Test func settingsOutsideTheScopeAreNeitherSavedNorDeleted() {
-        // `ARCHUnloadAfterHours` stands for a key that only a newer build lists, and `ARCHSearchEngine` for a listed key whose mirror value this build refuses, so its local value stays out of the comparison.
+        // `ARCHNotListedSetting` stands for a key that only a newer build lists, and `ARCHSearchEngine` for a listed key whose mirror value this build refuses, so its local value stays out of the comparison.
         func setting(_ key: String, _ value: String) -> SyncRecord {
             SyncRecord(recordType: .setting, recordName: key, fields: ["value": .text(value)], fieldModifiedAt: ["value": date(10)], modifiedAt: date(10))
         }
-        let mirror = [setting("ARCHAppearance", "dark"), setting("ARCHUnloadAfterHours", "12"), setting("ARCHSearchEngine", "newer-engine")]
+        let mirror = [setting("ARCHAppearance", "dark"), setting("ARCHNotListedSetting", "12"), setting("ARCHSearchEngine", "newer-engine")]
         let compared: Set<String> = ["ARCHAppearance"]
         let appearance = local(.setting, "ARCHAppearance", ["value": .text("light")])
 
@@ -202,7 +202,7 @@ import Testing
 
         // A scope of every setting would delete both.
         let everySetting = SyncDiff.changes(local: [appearance], scope: { $0.recordType == .setting }, mirror: mirror, pending: [], foundAt: date(100))
-        #expect(everySetting.deletions == ["ARCHSearchEngine", "ARCHUnloadAfterHours"])
+        #expect(everySetting.deletions == ["ARCHNotListedSetting", "ARCHSearchEngine"])
     }
 
     @Test func aNewItemTakesTheTimeItIsFoundAndAKeyAfterItsSiblings() {

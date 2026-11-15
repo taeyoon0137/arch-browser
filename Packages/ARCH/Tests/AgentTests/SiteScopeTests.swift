@@ -1,4 +1,4 @@
-// An in-app session's site scope (docs/agents.md, Site scope and navigation; rule P13): what joins the scope, sites as registrable domains, followed links against written addresses, written addresses on a site in scope whose path, query, or fragment no page showed, seen addresses after normalizing, the search engine's results address and its other addresses, bare origins, and redirect hops of written and followed navigations.
+// An in-app session's site scope (docs/agents.md, Site scope and navigation; rule P13): what joins the scope, sites as registrable domains, written copies of seen links, written addresses on a site in scope whose path, query, or fragment no page showed, seen addresses after normalizing, the search engine's results address and its other addresses, bare origins, and redirect hops of written and followed navigations.
 import Foundation
 import Testing
 @testable import Agent
@@ -35,18 +35,16 @@ import Testing
         #expect(!scope.contains(url("https://www.google.com/")))
     }
 
-    @Test func followedLinksOpenAndWrittenCopiesOfThemOnlyAsSeen() {
+    @Test func writtenCopiesOfSeenLinksOpenOnlyAsSeen() {
         var scope = AgentSiteScope()
         scope.add(url("https://news.example/today"))
         // The full address behind a link ref in a snapshot.
         let link = url("https://elsewhere.example/story/42?ref=front")
         scope.see(link)
-        #expect(scope.followed(link) == .opens)
-        #expect(scope.followed(url("https://tracker.example/?d=secret")) == .opens)
         // Written, the same address opens because the page showed it; with another query it asks, naming only the part no page showed.
         #expect(scope.written(link) == .opens)
         #expect(scope.written(url("https://elsewhere.example/story/42?ref=secret")) == .asks(AgentAddressQuestion(url: url("https://elsewhere.example/story/42?ref=secret"), unseenParts: [.query], isOutsideScope: true)))
-        // Following a link adds nothing to the scope.
+        // Seeing a link adds nothing to the scope.
         #expect(!scope.contains(link))
     }
 

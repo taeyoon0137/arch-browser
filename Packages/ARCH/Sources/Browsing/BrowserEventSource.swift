@@ -1,4 +1,4 @@
-// The session's side of the browser event bus (`docs/hooks.md`, The source): follows the session's tabs (the spaces', the favorites', and the small windows'), its windows, and its downloads, and posts every kind of event to the session's bus. The session attaches it once its saved tabs are back, tells it about each close from `closeTab`, and restores windows inside `restoringWindows(_:)`.
+// The session's side of the browser event bus (`docs/hooks.md`, The source): follows the session's tabs (the spaces', the favorites', and the small windows'), its windows, and its downloads, and posts every kind of event to the session's bus. The session attaches it once its saved tabs are back, tells it about each close from `removeTab`, and restores windows inside `restoringWindows(_:)`.
 import ARCHEngine
 import Combine
 import Events
@@ -105,7 +105,7 @@ final class BrowserEventSource {
 
     // MARK: Tabs
 
-    /// Follows each tab's loads, address, and shown name, and posts `tabOpened` for a tab that joins, other than one restored from the saved session or a pinned tab that a browser import opened. A tab opened inside `withCause` keeps the cause for its first load. A tab that leaves is no longer followed.
+    /// Follows each tab's loads, address, and shown name, and posts `tabOpened` for a tab that joins, other than one restored from the saved session or a pinned tab that browser import or sidebar sync adds. A tab opened inside `withCause` keeps the cause for its first load. A tab that leaves is no longer followed.
     func follow(tabs current: [Tab], postingNewTabs: Bool) {
         let ids = Set(current.map(\.id))
         for id in tabs.keys where !ids.contains(id) {

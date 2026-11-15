@@ -47,7 +47,7 @@ import Testing
         document = UUID()
         pages.finishRead(returning: AIPageContent(url: selection.pageURL, title: selection.pageTitle, text: "A draft from the old document"))
         try await Self.waitUntilAnswered(conversation)
-        #expect(Self.isStopped(conversation.exchanges.first))
+        if case .failed(let error)? = conversation.exchanges.first?.state { #expect(error is PageConversation.PageReloaded) } else { Issue.record("Expected the reload failure.") }
         #expect(client.requestCount == 0)
     }
 

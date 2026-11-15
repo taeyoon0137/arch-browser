@@ -140,7 +140,7 @@ public enum BrowserWindowKind {
     /// Selects the tab `id`, or the empty page for nil, and does what a selection does, in this order (`docs/windows-personas.md`, `BrowserWindowModel`). Selecting the tab already selected runs every step except the end of step 2.
     ///
     /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
-    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), and follows its space. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
+    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), follows its space, and, while the agent panel shows an outside client, switches it to the client that owns the newly selected agent tab. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
     /// 3. The session updates the focused tab.
     /// 4. The docked developer tools follow the tab.
     /// 5. The window republishes the tab's changes, and keyboard focus leaves another pane of the split view.
@@ -434,8 +434,8 @@ public enum BrowserWindowKind {
         selectTab(copy.id)
     }
 
-    /// Asks in a sheet on the window with one text field for each of `fields`, which starts with its value, and passes the fields' text to `use` when the user chooses `button`. Nothing shows while the window shows another sheet.
-    private func askForText(title: String, message: String?, fields: [(placeholder: String, value: String)], button: String, then use: @escaping ([String]) -> Void) {
+    /// Asks in a sheet on the window with one labeled text field for each of `fields`, which starts with its value, and passes the fields' text to `use` when the user chooses `button`. Nothing shows while the window shows another sheet.
+    private func askForText(title: String, message: String?, fields: [(label: String, value: String)], button: String, then use: @escaping ([String]) -> Void) {
         guard let nsWindow, nsWindow.attachedSheet == nil, !fields.isEmpty else { return }
         let alert = NSAlert()
         alert.messageText = title
@@ -444,16 +444,20 @@ public enum BrowserWindowKind {
         alert.addButton(withTitle: "Cancel")
         let textFields = fields.map { field in
             let textField = NSTextField(string: field.value)
-            textField.placeholderString = field.placeholder
-            textField.widthAnchor.constraint(equalToConstant: 280).isActive = true
+            textField.setAccessibilityLabel(field.label)
+            textField.widthAnchor.constraint(equalToConstant: 240).isActive = true
             return textField
         }
-        let stack = NSStackView(views: textFields)
-        stack.orientation = .vertical
-        stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 280, height: CGFloat(24 * textFields.count + 8 * (textFields.count - 1)))
+        let grid = NSGridView(views: zip(fields, textFields).map { field, textField in
+            [NSTextField(labelWithString: "\(field.label):"), textField]
+        })
+        grid.rowSpacing = 8
+        grid.columnSpacing = 8
+        grid.rowAlignment = .firstBaseline
+        grid.column(at: 0).xPlacement = .trailing
+        grid.frame.size = grid.fittingSize
         zip(textFields, textFields.dropFirst()).forEach { $0.nextKeyView = $1 }
-        alert.accessoryView = stack
+        alert.accessoryView = grid
         alert.window.initialFirstResponder = textFields[0]
         alert.beginSheetModal(for: nsWindow) { response in
             if response == .alertFirstButtonReturn { use(textFields.map(\.stringValue)) }
@@ -486,15 +490,15 @@ public enum BrowserWindowKind {
             guard let self, let preview else { return }
             runtime.browser.takeOwnership(of: popup)
             self.showOpenedPage(preview.webContents, personaID: personaID, preferredEngine: preview.requestedEngine)
-            self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents)
+            self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents, preferredEngine: preview.requestedEngine)
             DispatchQueue.main.async { [weak self] in
                 if let self, self.preview === preview { self.removePreview(closingPage: false) }
             }
         }
-        // A preview asks the user nothing, so its page's permission requests are denied. Chromium would keep the denial for the site, so its kept answers then return to the remembered ones.
+        // A preview asks the user nothing, so its page's permission requests are denied without changing the profile's kept answers.
         preview.requestPermission = { [weak self] request, completion in
-            completion(false)
-            DispatchQueue.main.async { self?.session.permissionAnswers.restoreRememberedAnswers(for: request, in: runtime.context) }
+            guard let self else { return completion(false) }
+            self.session.permissionAnswers.denyWithoutAsking(request, personaID: personaID, in: runtime.context, completion: completion)
         }
         preview.didClose = { [weak self] in self?.closePreview() }
         self.preview = preview
@@ -789,10 +793,10 @@ public enum BrowserWindowKind {
 
     /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
     func sidebarAgentDraft(for tab: Tab, settings: AISettingsStore? = nil) -> AgentComposerContext? {
-        guard kind == .main, session.agents != nil, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
+        let settings = settings ?? AIService.shared.settings
+        guard kind == .main, session.agents != nil, settings.route(for: .agent).isEnabled, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
               session.allTabs.contains(where: { $0 === tab }) else { return nil }
-        return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas,
-                                     allowsAI: (settings ?? AIService.shared.settings).allowsAI(on:))
+        return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas, allowsAI: settings.allowsAI(on:))
     }
 
     static func sidebarAgentDraft(for tab: AgentTabInfo, in space: Space, personas: [Persona], allowsAI: (URL) -> Bool) -> AgentComposerContext? {
@@ -802,10 +806,14 @@ public enum BrowserWindowKind {
         return context.attachableTab(allowsAI: allowsAI) == nil ? nil : context
     }
 
-    func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext) {
-        guard let context = sidebarAgentDraft(for: tab), context.spaceID == reviewed.spaceID, context.personaID == reviewed.personaID,
-              let document = context.tab, let original = reviewed.tab, document.id == original.id,
-              document.documentID == original.documentID, document.url == original.url else { return }
+    func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext, settings: AISettingsStore? = nil) {
+        guard let context = sidebarAgentDraft(for: tab, settings: settings), context.spaceID == reviewed.spaceID, context.personaID == reviewed.personaID,
+              let document = context.tab, let original = reviewed.tab, document.id == original.id else { return }
+        // A page the user did not see while the menu showed is never attached, as with askAgent.
+        if document.documentID != original.documentID || document.url != original.url {
+            context.tab = nil
+            context.problem = "The page changed. Review the task before starting."
+        }
         showAgentPanel(.composer(context))
     }
 
@@ -842,16 +850,17 @@ public enum BrowserWindowKind {
     }
 
     /// Continue as Agent Task in the page reader and the question popover, whose questions are about the selected tab's page: the composer with the question and that tab.
-    func continueAsAgentTask(_ question: String, from source: AgentHandoffSource, excerpt: AgentReaderExcerpt?) {
+    func continueAsAgentTask(_ question: String, from source: AgentHandoffSource, excerpt: AgentReaderExcerpt?, settings: AISettingsStore? = nil) {
+        let settings = settings ?? AIService.shared.settings
         guard !isSelectedPageCovered, let tab = selectedTab, tab.id == source.tabID, tab.documentID == source.documentID,
-              let url = tab.url, url == source.url, AIService.shared.settings.allowsAI(on: url) else { return }
+              let url = tab.url, url == source.url, settings.allowsAI(on: url) else { return }
         if let id = source.questionID {
             guard pageQuestion?.id == id else { return }
         } else if !isPageReaderVisible {
             return
         }
         let context = agentComposerContext(text: question)
-        if let excerpt, let attached = context.attachableTab(allowsAI: AIService.shared.settings.allowsAI(on:)), excerpt.matches(attached) {
+        if let excerpt, let attached = context.attachableTab(allowsAI: settings.allowsAI(on:)), excerpt.matches(attached) {
             context.readerExcerpt = excerpt
         }
         closePageQuestion()
@@ -859,7 +868,7 @@ public enum BrowserWindowKind {
     }
 
     /// Resolve the live owner again when a menu action or its confirmation returns.
-    @MainActor func agentSession(of folder: TabFolder) -> AgentSession? {
+    func agentSession(of folder: TabFolder) -> AgentSession? {
         guard let id = folder.agentSessionID, let owner = session.agents?.session(withID: id),
               !owner.hasEnded, owner.spaceID == currentSpaceID, owner.personaID == personaID,
               session.folders.contains(where: { $0.id == folder.id && $0.agentSessionID == id && $0.spaceID == currentSpaceID }) else { return nil }
@@ -868,7 +877,7 @@ public enum BrowserWindowKind {
 
     enum AgentFolderAction { case show, stop, keepTabs, deleteSession }
 
-    @MainActor func perform(_ action: AgentFolderAction, on folder: TabFolder, reviewed owner: AgentSession) async {
+    func perform(_ action: AgentFolderAction, on folder: TabFolder, reviewed owner: AgentSession) async {
         guard agentSession(of: folder) === owner else { return }
         switch action {
         case .show: showAgentSession(owner.id)
@@ -933,17 +942,21 @@ public enum BrowserWindowKind {
     }
 
     var resumableAgentDraft: AgentComposerContext? {
-        guard let draft = agentDrafts[currentSpaceID], draft.personaID == personaID else { return nil }
+        guard let draft = agentDrafts[currentSpaceID], draft.personaID == personaID,
+              !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return draft
     }
 
-    /// Each window has one local draft per space. Even a blank task can hold reviewed sharing choices.
+    /// Each window has one local draft per space. A blank one gives way.
     func canReceiveAgentDraft(_ draft: AgentComposerContext) -> Bool {
-        agentDrafts[draft.spaceID] == nil
+        agentDrafts[draft.spaceID].map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true
     }
 
+    /// A blank composer that shows for the same space gives way to the moved draft, so the panel shows the draft this window keeps.
     func receiveAgentDraft(_ draft: AgentComposerContext, showing: Bool) {
-        if showing && agentPanel == nil && !isPageReaderVisible {
+        if case .composer(let shown) = agentPanel, shown.spaceID == draft.spaceID {
+            showAgentPanel(.composer(draft))
+        } else if showing && agentPanel == nil && !isPageReaderVisible {
             showAgentPanel(.composer(draft))
         } else {
             agentDrafts[draft.spaceID] = draft

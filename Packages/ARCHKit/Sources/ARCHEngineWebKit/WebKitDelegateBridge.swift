@@ -37,8 +37,6 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
                 owner?.loadingStateDidChange()
             },
             webView.observe(\.estimatedProgress) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeLoadingState($0) } },
-            webView.observe(\.cameraCaptureState) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeMediaCapture($0) } },
-            webView.observe(\.microphoneCaptureState) { [weak owner] _, _ in owner.map { $0.uiDelegate?.webContentsDidChangeMediaCapture($0) } },
         ]
     }
 
@@ -177,7 +175,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     // MARK: WKUIDelegate
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        guard let delegate = owner.uiDelegate, delegate.webContentsMayCreatePopup(owner) else { return nil }
+        guard let delegate = owner.uiDelegate else { return nil }
         let disposition = Self.linkTabDisposition(of: navigationAction) ?? .newForegroundTab
         // A new window for a link that belongs to another app opens no tab, as on the Chromium engine.
         if let url = navigationAction.request.url, Self.opensExternally(url) {

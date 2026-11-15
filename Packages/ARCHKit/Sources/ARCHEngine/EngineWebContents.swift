@@ -61,7 +61,7 @@ public protocol EngineWebContents: AnyObject {
     var restorableState: Data? { get }
     /// Whether a media element in the page plays sound that is not muted. Sound from Web Audio, or from media elements outside the document or inside shadow roots, does not count.
     var isAudible: Bool { get }
-    /// Whether the page uses the camera or the microphone, also while the page has muted it. `webContentsDidChangeMediaCapture` reports each change.
+    /// Whether the page uses the camera or the microphone, also while the page has muted it. Read when needed; no delegate call reports changes.
     var isCapturingMedia: Bool { get }
     /// Whether a video of the page plays in the system's picture-in-picture window, whose window closes with the page, also while the video is paused or muted. Read when needed; no delegate call reports changes.
     var isInPictureInPicture: Bool { get }
@@ -131,7 +131,7 @@ public protocol EngineInput: AnyObject {
     func scroll(at point: CGPoint, deltaX: Double, deltaY: Double, modifiers: EngineInputModifiers) throws
     /// Presses and releases a key in the page's focused element, or in its document when no element has focus.
     func press(_ key: EngineKey, modifiers: EngineInputModifiers) throws
-    /// Inserts text at the selection of the page's focused element, as an input method commits it: the page receives input events, and on Chromium a keypress for each character, but no keydown or keyup. Engines refuse text with a line break, which can submit a form as Enter does; `press(.enter, modifiers:)` types one. Nothing is inserted while no editable element has focus.
+    /// Inserts text at the selection of the page's focused element, as an input method commits it: the page receives input events, and on Chromium a keypress for each character, but no keydown or keyup. Engines refuse text with a line break or a control character, which can submit a form as Enter does; `press(.enter, modifiers:)` types one. Nothing is inserted while no editable element has focus.
     func insertText(_ text: String) throws
 }
 
@@ -145,7 +145,7 @@ public enum EngineInputError: Error, Equatable, Sendable {
     case noPage
     /// The input needs the page's window to be the key window, or a key needs the page to have its window's keyboard focus, and it does not.
     case notFocused
-    /// The engine does not deliver this input as the user's own, such as a key combination, a character without a key, text with a line break, a click with Control or a count outside 1 to 3, or a wheel delta that is not finite.
+    /// The engine does not deliver this input as the user's own, such as a key combination, a character without a key, text with a line break or a control character, a click with Control or a count outside 1 to 3, or a wheel delta that is not finite.
     case unsupported
 }
 

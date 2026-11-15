@@ -65,6 +65,14 @@ public struct BrowserWindowView: View {
                 // While the library is open, the page and the panel beside it move aside at their size, dimmed and still, as the sidebar's visible part is; a click on them closes the library.
                 HStack(spacing: 0) {
                     PageAreaView(session: session, sidebarDrag: sidebarDrag, margins: pageMargins)
+                        // In the page's own corner, so an agent panel or page reader beside the page keeps its controls.
+                        .overlay(alignment: .bottomTrailing) {
+                            if !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
+                                LibraryButton(session: session, activityOnly: true)
+                                    .background(.regularMaterial, in: Capsule())
+                                    .padding(2 * Self.pageMargin)
+                            }
+                        }
                     if !windowModel.isPageFullscreen {
                         if windowModel.agentPanel != nil {
                             AgentPanelColumn(session: session)
@@ -86,13 +94,6 @@ public struct BrowserWindowView: View {
                     }
                 }
                 .accessibilityHidden(libraryPush > 0)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
-                    LibraryButton(session: session, activityOnly: true)
-                        .background(.regularMaterial, in: Capsule())
-                        .padding(2 * Self.pageMargin)
-                }
             }
             if !windowModel.isSidebarVisible || isSidebarPeeking, !windowModel.isPageFullscreen {
                 peekingSidebar

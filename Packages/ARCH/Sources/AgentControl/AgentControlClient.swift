@@ -1,6 +1,7 @@
 // The client end of the control socket, for `arch-cli` and `arch-mcp` (docs/agents.md, Local control channel ▸ Client checks of Arch; Framing and methods): it connects, checks that the listening process is the Arch of the bundle that contains the client before it sends a byte, waits for Arch's `ready`, and says `hello`. Every frame it reads must come while the checked process holds Arch's end. Calls are blocking, which suits a command-line process that does one thing at a time.
 import Darwin
 import Foundation
+import Security
 
 public enum AgentClientError: Error, Equatable {
     /// Neither the home folder's socket path nor the temporary folder's fits `sun_path`.
@@ -46,7 +47,14 @@ public enum AgentClientError: Error, Equatable {
         switch self {
         case .noSocketLocation: return "The home folder's path is too long for Arch's control socket, and so is the temporary folder's."
         case .notRunning: return "Arch is not running, or agent access is off. Open Arch and turn on Allow Outside Clients in Settings ▸ AI ▸ Agents."
-        case .notArch(let failure): return "The socket is not Arch's: \(failure.description)."
+        case .notArch(let failure):
+            switch failure {
+            case .invalidCode(errSecCSStaticCodeChanged), .otherCode:
+                // A bundle rebuilt or updated under a running Arch fails validity with a changed static code, and another copy of Arch has another hash; both look like a stranger, so the sentence names the likely fix without claiming either.
+                return "The program at Arch's socket is not the Arch that contains this arch-cli (\(failure.description)). If Arch was rebuilt or updated while open, or another copy of Arch is open, quit Arch and open the one that contains this arch-cli."
+            default:
+                return "The socket is not Arch's: \(failure.description)."
+            }
         case .protocolMismatch(let arch): return "Arch speaks version \(arch) of the control protocol, and this program speaks version \(AgentControlProtocol.version). Use the arch-cli inside the running Arch."
         case .refused(let refusal): return refusal.message
         case .closedBeforeAnswer: return "Arch refused this connection. Use the arch-cli inside the running Arch."
@@ -96,6 +104,10 @@ public final class AgentControlConnection {
         let peer: AgentPeer
         do {
             peer = try check(socket)
+        } catch let AgentPeerCheckFailure.unreadablePeer(code) where code == ENOTCONN || code == EINVAL {
+            // The listener closed before the check read it, as Arch closes a client that fails its own check; nothing was sent.
+            Darwin.close(socket)
+            throw AgentClientError.closedBeforeAnswer
         } catch let failure as AgentPeerCheckFailure {
             Darwin.close(socket)
             throw AgentClientError.notArch(failure)

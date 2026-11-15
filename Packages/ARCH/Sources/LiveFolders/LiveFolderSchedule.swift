@@ -2,8 +2,6 @@
 import Foundation
 
 public enum LiveFolderTrigger: Sendable {
-    /// The folder was just made, or its source changed.
-    case created
     case refreshNow
     /// The check every 5 minutes.
     case timer
@@ -21,11 +19,11 @@ public enum LiveFolderSchedule {
     /// The longest wait that failures give.
     public static let longestBackoff: TimeInterval = 6 * 3_600
 
-    /// Whether `trigger` refreshes the folder at `now`. Creation and Refresh Now always do; the timer does once the next attempt is due; activation does for a GitHub folder whose next attempt is due, or, while it has not failed, once the activation gap has passed since its last attempt and any time the source named.
+    /// Whether `trigger` refreshes the folder at `now`. Refresh Now always does; the timer does once the next attempt is due; activation does for a GitHub folder whose next attempt is due, or, while it has not failed, once the activation gap has passed since its last attempt and any time the source named.
     public static func shouldRefresh(_ trigger: LiveFolderTrigger, configuration: LiveFolderConfiguration, state: LiveFolderState, now: Date, lowPowerMode: Bool) -> Bool {
         let due = nextAttempt(configuration: configuration, state: state, lowPowerMode: lowPowerMode)
         switch trigger {
-        case .created, .refreshNow:
+        case .refreshNow:
             return true
         case .timer:
             return now >= due

@@ -5,7 +5,7 @@ import Testing
 @testable import Sync
 
 @Suite struct SyncAvailabilityTests {
-    /// Placeholders; no real container identifier appears in the repository.
+    /// Placeholders.
     private let first = "iCloud.example.first"
     private let second = "iCloud.example.second"
 

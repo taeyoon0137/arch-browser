@@ -1,4 +1,4 @@
-// The harness: every guide topic the design names, the tool, parameter, and value names and the statuses the topics use, the MCP instructions within 2,000 characters, the skills made from the same text with front matter of only `name` and `description` and the version line with its digest first, the version line and digest check, and the `guide` tool's results.
+// The harness: every guide topic the design names, the tool, parameter, and value names and the statuses the topics use, the skills made from the same text with front matter of only `name` and `description` and the version line with its digest first, the version line and digest check, and the `guide` tool's results.
 import AgentControl
 import CryptoKit
 import Foundation
@@ -118,7 +118,7 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         for status in AgentResultStatus.allCases where status != .ok {
             #expect(text.contains("- \(status.rawValue):"), "\(status)")
         }
-        for code in ["notInteractable", "notVisible", "tabNotFound", "navigationFailed"] {
+        for code in ["notInteractable", "notVisible", "tabNotFound", "navigationFailed", "pageChanged"] {
             #expect(text.contains(code), "\(code)")
         }
     }
@@ -128,11 +128,6 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(text.contains("Prepare, never finish"))
         #expect(text.contains("request_approval"))
         #expect(text.contains("hand_to_user"))
-    }
-
-    @Test func theMCPInstructionsFitAndNameTheGuide() {
-        #expect(AgentHarness.mcpInstructions.count <= 2_000)
-        #expect(AgentHarness.mcpInstructions.contains("Call guide first"))
     }
 
     @Test func theEntrySkillNamesArchCLIByItsPath() throws {
@@ -153,12 +148,13 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
     @Test func inAppGuidanceOnlyNamesOfferedToolsAndKeepsTheOutsideGuide() {
         let guide = AgentHarness.guideResult(arguments: [:], inSession: true)
         #expect(guide.text == AgentHarness.sessionInstructions)
-        for name in ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "snapshot", "read_text", "ask_user", "guide"] {
+        for name in ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"] {
             #expect(guide.text.contains(name))
         }
+        #expect(!guide.text.contains("open_tab"))
         for topic in AgentGuideTopic.allCases {
             let text = AgentHarness.guideResult(arguments: ["topic": .string(topic.rawValue)], inSession: true).text
-            for unavailable in ["navigate(", "request_approval", "hand_to_user", "wait_for", "screenshot"] {
+            for unavailable in ["navigate(", "open_tab", "request_approval", "hand_to_user", "wait_for", "screenshot"] {
                 #expect(!text.contains(unavailable), "\(topic) describes \(unavailable)")
             }
         }

@@ -51,7 +51,7 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
         }
     }
 
-    /// The destination sealed with a user-approved hook. Includes the CLI invocation's preset, arguments and environment.
+    /// Where the provider's requests go, as a hook's `knownProviders` records it: an HTTP provider's base address, whose headers and format cannot send them to another host, or a command-line tool's executable path followed by the SHA-256 of its preset, arguments, and environment, any of which can, such as through a variable that names another server.
     public var hookDestination: String {
         switch kind {
         case .http(let http):

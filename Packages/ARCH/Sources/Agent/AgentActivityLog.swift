@@ -81,6 +81,8 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
 
 @MainActor public final class AgentActivityLog: ObservableObject {
     public static let keptDays = 90
+    /// At most this many entries stay, oldest dropped first, so that each save and the launch read stay small.
+    nonisolated public static let keptEntries = 10_000
 
     private struct File: Codable {
         var version = 1
@@ -91,15 +93,19 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     @Published public private(set) var entries: [AgentActivityEntry] = []
     let fileURL: URL
     private let now: () -> Date
+    private let entryLimit: Int
     private var pendingSave: DispatchWorkItem?
 
-    init(fileURL: URL, now: @escaping () -> Date) {
+    /// Tests give a smaller `keptEntries`.
+    init(fileURL: URL, now: @escaping () -> Date, keptEntries: Int = AgentActivityLog.keptEntries) {
         self.fileURL = fileURL
         self.now = now
+        entryLimit = keptEntries
         guard let data = try? Data(contentsOf: fileURL) else { return }
         if let file = try? Self.decoder.decode(File.self, from: data) {
             entries = file.entries
             dropOldEntries()
+            dropOverflowingEntries()
         } else {
             // As in the other stores, a file that does not decode is set aside, so that the first save does not overwrite it.
             let unreadable = fileURL.appendingPathExtension("unreadable")
@@ -111,6 +117,7 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     func record(_ entry: AgentActivityEntry) {
         entries.append(entry)
         dropOldEntries()
+        dropOverflowingEntries()
         scheduleSave()
     }
 
@@ -140,6 +147,11 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     private func dropOldEntries() {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -Self.keptDays, to: now()), entries.contains(where: { $0.date < cutoff }) else { return }
         entries.removeAll { $0.date < cutoff }
+    }
+
+    private func dropOverflowingEntries() {
+        guard entries.count > entryLimit else { return }
+        entries.removeFirst(entries.count - entryLimit)
     }
 
     /// Combines rapid changes into one file write, like the AI usage store.

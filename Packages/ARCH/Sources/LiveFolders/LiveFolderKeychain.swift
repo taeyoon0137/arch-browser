@@ -9,8 +9,6 @@ public protocol LiveFolderAddressStore: AnyObject, Sendable {
     /// Gives a folder's item the label of the folder's new name; a folder without an item gets none.
     func setFolderName(_ folderName: String, for folder: UUID) async throws
     func removeAddress(for folder: UUID) async throws
-    /// Removes the address of every folder not in `kept`, so a folder, space, or Persona that goes, or a folder that stops being a private feed's, leaves no item behind.
-    func removeAddresses(except kept: Set<UUID>) async throws
 }
 
 /// One generic password item per folder: service `xyz.taeyoon.arch.live-folders`, account the folder's ID, label `Arch Live Folder: <folder name>`, accessible when unlocked, not synchronizable. Like `AIKeychain`, it uses the login keychain, since the data protection keychain needs entitlements the bundle does not have.
@@ -84,34 +82,6 @@ public final class LiveFolderKeychain: LiveFolderAddressStore, @unchecked Sendab
         }
     }
 
-    /// Lists the service's items by their attributes, which reads no address, and deletes those of other folders.
-    public func removeAddresses(except kept: Set<UUID>) async throws {
-        try await onQueue {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: Self.service,
-                kSecAttrSynchronizable as String: false,
-                kSecReturnAttributes as String: true,
-                kSecMatchLimit as String: kSecMatchLimitAll,
-            ]
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            guard status == errSecSuccess || status == errSecItemNotFound else { throw LiveFolderError.keychain(Self.message(status)) }
-            let accounts = (result as? [[String: Any]] ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
-            for account in accounts {
-                // An item whose account is no folder ID cannot belong to a folder.
-                if let folder = UUID(uuidString: account), kept.contains(folder) { continue }
-                var item = query
-                item[kSecReturnAttributes as String] = nil
-                item[kSecMatchLimit as String] = nil
-                item[kSecAttrAccount as String] = account
-                let removal = SecItemDelete(item as CFDictionary)
-                guard removal == errSecSuccess || removal == errSecItemNotFound else { throw LiveFolderError.keychain(Self.message(removal)) }
-                if let folder = UUID(uuidString: account) { self.remember(nil, for: folder) }
-            }
-        }
-    }
-
     private func onQueue<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { continuation.resume(with: Result(catching: body)) }
@@ -166,10 +136,6 @@ public final class InMemoryLiveFolderKeychain: LiveFolderAddressStore, @unchecke
 
     public func removeAddress(for folder: UUID) async throws {
         locked { addresses[folder] = nil }
-    }
-
-    public func removeAddresses(except kept: Set<UUID>) async throws {
-        locked { addresses = addresses.filter { kept.contains($0.key) } }
     }
 
     /// The label each item would have in the Keychain.

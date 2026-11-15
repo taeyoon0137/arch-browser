@@ -1,3 +1,4 @@
+import ARCHEngine
 import Browsing
 import Foundation
 
@@ -7,6 +8,8 @@ import Foundation
     var needsFullSidebarSync: Bool { get }
     func finishSidebarSyncRecovery()
     var sidebarSyncState: SidebarSyncState { get }
+    /// The engine of an incoming tab whose record names none.
+    var defaultEngine: EngineKind { get }
     var onSidebarSyncSave: ((SidebarSyncState) -> Void)? { get set }
     func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions)
     func applyFirstSidebarSync(_ state: SidebarSyncState, replacements: SidebarSyncReplacements)

@@ -1,4 +1,4 @@
-// The client end of the control socket against a listener in a temporary folder, which stands in for Arch: no listener reads as Arch not running (exit 69); the code identity check runs before a byte is sent, passes for the listener's own code, and fails for other code and outside an app bundle (exit 77); against a real second process (a `nc` listener) the check reads the peer's code, not this process's; the client waits for Arch's `ready` before it sends `hello`, which carries the protocol version and returns the answer; another protocol version exits 75, a refusal with outside access off 69, and a connection closed before the answer 6.
+// The client end of the control socket against a listener in a temporary folder, which stands in for Arch: no listener reads as Arch not running (exit 69); the code identity check runs before a byte is sent, passes for the listener's own code, and fails for other code and outside an app bundle (exit 77); against a real second process (a `nc` listener) the check reads the peer's code, not this process's; a `ready` that a shell the listener started writes fails as another process (exit 77) before `hello` is sent; the client waits for Arch's `ready` before it sends `hello`, which carries the protocol version and returns the answer; another protocol version exits 75, a refusal with outside access off 69, and a connection closed before the answer 6.
 import AgentControl
 import Darwin
 import Foundation
@@ -129,6 +129,7 @@ private let passes: (Int32) throws -> AgentPeer = { try AgentPeer.read(socket: $
         }
         #expect(wait())
         #expect(AgentClientError.notArch(.noExpectedCode).exitCode.rawValue == 77)
+        #expect(AgentClientError.notArch(.invalidCode(errSecCSStaticCodeChanged)).message.hasSuffix("quit Arch and open the one that contains this arch-cli."))
     }
 
     @Test func helloReturnsArchsAnswer() throws {
@@ -182,6 +183,18 @@ private let passes: (Int32) throws -> AgentPeer = { try AgentPeer.read(socket: $
         #expect(wait())
     }
 
+    /// The peer can no longer be read once the listener has closed, which a refusal can do before the client's check runs.
+    @Test func aConnectionClosedBeforeTheCheckExits6() throws {
+        let listener = try TestListener()
+        let closed = listener.serveOnce { _ in }
+        #expect(throws: AgentClientError.closedBeforeAnswer) {
+            try AgentControlConnection(location: listener.location) { socket in
+                #expect(closed())
+                return try passes(socket)
+            }
+        }
+    }
+
     @Test func aListenerThatDoesNotAnswerTimesOut() throws {
         let listener = try TestListener()
         let release = DispatchSemaphore(value: 0)
@@ -190,6 +203,30 @@ private let passes: (Int32) throws -> AgentPeer = { try AgentPeer.read(socket: $
         #expect(throws: AgentClientError.timedOut) { try connection.hello(AgentHello(client: .cli, version: "0.1.0"), timeout: 0.2) }
         release.signal()
         #expect(wait())
+    }
+
+    /// The listener passes the check at connect, then a shell it starts writes `ready` on the accepted socket with its own `printf` and stays alive: the client reads the frame while another live process holds Arch's end, so it fails without sending `hello`. (A writer that exits at once would leave a token Arch's end can no longer name, which the client allows.)
+    @Test func aFrameFromAnotherProcessThanTheCheckedOneFails() throws {
+        let listener = try TestListener()
+        let ready = try AgentFrame.encode(AgentRPCMessage.notification(method: "ready", params: nil).encoded()).map { String(format: "\\%03o", $0) }.joined()
+        let received = JSONBox()
+        let started = DispatchSemaphore(value: 0)
+        let wait = listener.serveOnce { connection in
+            let child = Process()
+            child.executableURL = URL(fileURLWithPath: "/bin/sh")
+            child.arguments = ["-c", "printf \"$0\"; sleep 2", ready]
+            child.standardOutput = FileHandle(fileDescriptor: connection, closeOnDealloc: false)
+            try? child.run()
+            started.signal()
+            child.waitUntilExit()
+            // Reading only after the child exits keeps this process from becoming the peer before the client checks the frame.
+            received.value = TestListener.readMessage(from: connection).map { _ in ["read": true] }
+        }
+        let connection = try AgentControlConnection(location: listener.location, check: passes)
+        started.wait()
+        #expect(throws: AgentClientError.notArch(.peerChanged)) { try connection.hello(AgentHello(client: .cli, version: "0.1.0")) }
+        #expect(wait())
+        #expect(received.value == nil)
     }
 
     /// A second process stands in for the listener, so the peer the check reads is not this process. The check passes for the peer's own running-code hash and fails for this process's, which proves it reads the peer through `LOCAL_PEERTOKEN` rather than `SecCodeCopySelf`.

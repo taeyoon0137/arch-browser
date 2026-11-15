@@ -38,7 +38,7 @@ public struct AgentToolResult: Codable, Equatable, Sendable {
     public var code: String?
     /// Text and images. The text starts with one sentence about what happened.
     public var content: [AgentToolContent]
-    /// The same facts as a JSON object, with the events since the previous call, the limits that applied, and an action's `inputKind`, for `arch-cli --json` and MCP's `structuredContent`.
+    /// The same facts as a JSON object, with the events since the previous call, the limits that applied, and an action's `inputKind`, for `arch-cli --json` and the API-key session.
     public var structured: AgentJSON?
     /// For `approvalPending`: the approval that `approval_wait` waits on.
     public var approval: String?

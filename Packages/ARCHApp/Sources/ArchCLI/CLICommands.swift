@@ -71,6 +71,17 @@ enum CLICommands {
         FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 
+    /// Text from a page or a model without the controls a terminal acts on: C0 and C1 controls other than a line feed and a tab, and the bidirectional overrides and isolates. JSON output escapes them itself.
+    static func terminalSafe(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.unicodeScalars.filter { scalar in
+            switch scalar.value {
+            case 0x0A, 0x09: return true
+            case 0x00...0x1F, 0x7F...0x9F, 0x202A...0x202E, 0x2066...0x2069: return false
+            default: return true
+            }
+        }))
+    }
+
     private static func printJSON(_ value: AgentJSON) -> AgentExitCode {
         do {
             print(String(decoding: try value.encoded(), as: UTF8.self))
@@ -130,10 +141,11 @@ enum CLICommands {
             let result = try callWaiting(call, on: connection)
             if json {
                 if printJSON(result.structured ?? .null) != .done { return .internalError }
+                if result.status != .ok { printError(terminalSafe(result.text)) }
             } else if result.status == .ok {
-                print(result.text)
+                print(terminalSafe(result.text))
             } else {
-                printError(result.text)
+                printError(terminalSafe(result.text))
             }
             return AgentExitCode(status: result.status)
         }
@@ -144,7 +156,8 @@ enum CLICommands {
         withConnection { connection, _ in
             let result = try callWaiting(call, on: connection)
             guard result.status == .ok, let image = result.content.lazy.compactMap(\.imageData).first else {
-                if json { _ = printJSON(result.structured ?? .null) } else { printError(result.text) }
+                if json { _ = printJSON(result.structured ?? .null) }
+                if !json || result.status != .ok { printError(terminalSafe(result.text)) }
                 return result.status == .ok ? .internalError : AgentExitCode(status: result.status)
             }
             let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withYear, .withMonth, .withDay, .withTime]).replacingOccurrences(of: ":", with: "")
@@ -160,7 +173,7 @@ enum CLICommands {
                 structured["file"] = .string(file.path)
                 return printJSON(.object(structured))
             }
-            print("\(result.text)\nWrote \(file.path).")
+            print("\(terminalSafe(result.text))\nWrote \(file.path).")
             return .done
         }
     }
@@ -201,14 +214,14 @@ enum CLICommands {
                 } else {
                     switch event.kind {
                     case .text:
-                        print(event.text, terminator: "")
+                        print(terminalSafe(event.text), terminator: "")
                         fflush(stdout)
                         atLineStart = event.text.hasSuffix("\n")
                     case .step:
-                        print((atLineStart ? "" : "\n") + "[Arch] \(event.text)")
+                        print((atLineStart ? "" : "\n") + "[Arch] \(terminalSafe(event.text))")
                         atLineStart = true
                     case .notice:
-                        printError(event.text)
+                        printError(terminalSafe(event.text))
                     case .turnFinished, .failed:
                         if !atLineStart { print("") }
                     }
@@ -216,7 +229,7 @@ enum CLICommands {
                 switch event.kind {
                 case .turnFinished: return .done
                 case .failed:
-                    if !json { printError(event.text) }
+                    if !json { printError(terminalSafe(event.text)) }
                     return .toolError
                 case .text, .step, .notice: continue
                 }
@@ -328,6 +341,10 @@ enum CLICommands {
         process.waitUntilExit()
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
             printError("\(arguments[0]) mcp add ended with status \(process.terminationStatus).")
+            if client == .claude {
+                let remove = AgentMCPConfiguration.shellCommand(["claude", "mcp", "remove", "--scope", "user", AgentMCPServer.serverName])
+                printError("If Claude Code already has an arch server, as after Arch moved, run \(remove), then arch-cli setup claude again.")
+            }
             return .toolError
         }
         print("\(client.title) now starts arch-mcp when it uses Arch's tools.")

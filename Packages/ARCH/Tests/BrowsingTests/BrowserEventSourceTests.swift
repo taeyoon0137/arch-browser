@@ -1,4 +1,4 @@
-// The browser event source on fake web contents: a new tab but no restored tabs, an agent folder's tab as `agent`, a name from code under the suggested name rules with its cause, also when it comes while a WebKit navigation waits to commit, the hook host's tabs by their committed addresses, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
+// The browser event source on fake web contents: a new tab but no restored tabs, an agent folder's tab as `agent`, a name from code under the suggested name rules with its cause, also when it comes while a WebKit navigation waits to commit, the hook host's tabs by their committed addresses, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, a document's address and the end of an earlier name at its commit, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
 import AppKit
 import ARCHEngine
 import Combine
@@ -318,6 +318,26 @@ import Testing
             "addressChanged https://example.org/pricing > https://example.net/", "titleChanged page https://example.net/", "pageLoaded https://example.net/",
         ])
         #expect(tab.suggestedTitle == nil && tab.displayTitle == "Example")
+    }
+
+    /// A document that commits while its load runs counts from the commit, as Chromium reports it before the address: its address posts then with the new document, and a hook's name for the earlier document goes, long before the load ends.
+    @Test func aDocumentThatCommitsDuringItsLoadPostsItsAddressAndDropsTheEarlierName() {
+        let named = URL(string: "https://example.org/a")!
+        let (tab, page) = makeTab(named.absoluteString, space: space)
+        tab.suggestedTitle = SuggestedTitle(title: "Seoul Weather", url: named)
+        source.follow(tabs: [tab], postingNewTabs: false)
+        load(tab, page) {
+            tab.webContents(page, didCommitDocumentAt: URL(string: "https://example.net/b"))
+            #expect(tab.suggestedTitle == nil && tab.committedURL == URL(string: "https://example.net/b"))
+            #expect(recorder.events.map(Self.describeAddress) == ["addressChanged https://example.org/a > https://example.net/b"])
+            #expect(recorder.events.first?.tab?.documentID == tab.documentID)
+            page.url = URL(string: "https://example.net/b")
+            tab.webContentsDidChangeURL(page)
+            tab.webContentsDidFinishLoadingDocument(page)
+        }
+        #expect(recorder.events.map(Self.describeAddress) == [
+            "addressChanged https://example.org/a > https://example.net/b", "titleChanged page https://example.net/b", "pageLoaded https://example.net/b",
+        ])
     }
 
     @Test func selectionsAndSpaceSwitchesPostWithThePersonaChangeButNotWhileWindowsAreRestored() {

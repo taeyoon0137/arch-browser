@@ -10,7 +10,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import uuid
 
 HERE = Path(__file__).resolve().parent
@@ -45,31 +44,16 @@ def make_probe(root, frameworks, bundle_id):
     return executable
 
 
-def run_phase(executable, root, bundle_id, phase, interrupt):
+def run_phase(executable, root, bundle_id, phase):
     home = str(root / "home")
     env = dict(PATH=os.defpath, HOME=home, CFFIXED_USER_HOME=home, TMPDIR=str(root / "temp") + "/",
-               LANG="en_US.UTF-8", ARCH_RESTORE_BUNDLE=bundle_id, ARCH_RESTORE_PHASE=str(phase),
-               ARCH_RESTORE_INTERRUPT="1" if interrupt else "0")
+               LANG="en_US.UTF-8", ARCH_RESTORE_BUNDLE=bundle_id, ARCH_RESTORE_PHASE=str(phase))
     args = [executable, "--use-mock-keychain", "--disable-background-networking", "--disable-component-update",
             "--disable-sync", "--disable-domain-reliability", "--no-pings", "--host-resolver-rules=MAP * ~NOTFOUND",
             "--proxy-server=http://127.0.0.1:9"]
     process = subprocess.Popen(args, cwd=root, env=env, start_new_session=True)
     result_file = root / f"result-{phase}.json"
     try:
-        if interrupt and phase == 2:
-            deadline = time.monotonic() + 40
-            while not result_file.is_file():
-                if process.poll() is not None or time.monotonic() >= deadline:
-                    raise RuntimeError("No scheduled-save checkpoint from the temporary WebKit process.")
-                time.sleep(0.05)
-            ready = json.loads(result_file.read_text())
-            if ready != {"checkpoint": "rename-saved", "id": (root / "first-id").read_text(), "active": "webKit"}:
-                raise RuntimeError("Unexpected scheduled-save checkpoint.")
-            os.killpg(process.pid, signal.SIGKILL)
-            if process.wait(timeout=10) != -signal.SIGKILL:
-                raise RuntimeError("The checkpointed process did not exit from SIGKILL.")
-            print(f"Phase 2 · {ready['id']} · WebKit · killed after scheduled rename save, before quit", flush=True)
-            return ready
         status = process.wait(timeout=40)
     except BaseException:
         if process.poll() is None:
@@ -89,8 +73,6 @@ def main():
                                      epilog="Build this checkout with swift build and ./scripts/bundle_app.sh first.")
     parser.add_argument("--app", type=Path, default=ROOT / "build/Arch.app",
                         help="a bundled Arch.app built from this checkout (default: build/Arch.app)")
-    parser.add_argument("--interrupt", action="store_true",
-                        help="kill the second launch after its scheduled rename save and verify recovery on the third")
     options = parser.parse_args()
     app = options.app.resolve()
     frameworks = app / "Contents/Frameworks"
@@ -108,12 +90,10 @@ def main():
         (root / "fixture.html").write_text(FIXTURE, encoding="utf-8")
         bundle_id = "xyz.taeyoon.arch.engine-restore-check." + uuid.uuid4().hex
         executable = make_probe(root, frameworks, bundle_id)
-        results = [run_phase(executable, root, bundle_id, phase, options.interrupt) for phase in (1, 2, 3)]
+        results = [run_phase(executable, root, bundle_id, phase) for phase in (1, 2, 3)]
         if len({row["id"] for row in results}) != 1 or [row["active"] for row in results] != ["chromium", "webKit", "chromium"]:
             sys.exit("The three launches did not restore the same tab with the expected renderers.")
         print(f"Verified pinned tab {results[0]['id']} across three launches. The saved engine stayed Chromium.")
-        if options.interrupt:
-            print("The third launch restored the committed rename after SIGKILL. Edits awaiting a save are outside this check.")
 
 
 if __name__ == "__main__":

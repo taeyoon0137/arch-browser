@@ -115,7 +115,7 @@ import WebKit
         #expect(recorder.requests.map(\.mode) == [.openFile])
     }
 
-    /// The adapter's favicon lookup runs with the gesture `evaluateJavaScript` carries, so it runs in a world of the app's own, where a DOM method that the page replaced is the original. The page's own timer, which clicks the input all along, shows that the lookup leaves the page no activation either.
+    /// The adapter's favicon lookup runs with the gesture `evaluateJavaScript` carries, so it runs in a world of the app's own, where a DOM method that the page replaced is the original. The page's own timer, which clicks the input all along, opens no chooser after it.
     @Test func theIconLookupRunsNoCodeOfThePage() async throws {
         let recorder = ChooserRecorder(answer: [file("a.txt")])
         let tab = try await loadedTab(page: Self.page + Self.replacedQuerySelector, uiDelegate: recorder)

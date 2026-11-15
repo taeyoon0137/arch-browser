@@ -24,7 +24,7 @@ public enum AINotConfiguredReason: Sendable {
     case noModel
     case noUsableModel
     case unknownFeature
-    /// The request named a tier that has no model in Settings ▸ AI ▸ Model Tiers.
+    /// The request named a tier that has no model in Settings ▸ AI ▸ Features.
     case emptyTier(AIModelTier)
 }
 

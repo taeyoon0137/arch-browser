@@ -17,7 +17,6 @@ public final class BrowserEventBus {
     private var pending: [BrowserEvent] = []
     private var isDelivering = false
 
-    /// Nonisolated, so that the session, which is not isolated yet, can make it with itself.
     public nonisolated init() {}
 
     /// The cause of the innermost enclosing `withCause` block, which code that starts a change finishing later, such as a navigation, keeps for its events.

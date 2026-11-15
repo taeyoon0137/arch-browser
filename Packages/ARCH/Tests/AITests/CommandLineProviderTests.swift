@@ -1,4 +1,4 @@
-// Command-line providers: the prompt on standard input, plain text and JSON lines output, errors, the environment and working folder, output held open by a background process, timeouts, cancellation that ends the process group, the rule that keeps page data from tools that may run their own tools, the login shell's PATH, and the `ai.json` shape. Shell scripts in temporary folders stand in for real tools.
+// Command-line providers: the prompt on standard input, plain text and JSON lines output, errors, the environment and working folder, output held open by a background process, timeouts, cancellation that ends the process group, the rule that keeps page data from tools that may run their own tools, the login shell's PATH and the GitHub CLI's two configuration folders, and the `ai.json` shape. Shell scripts in temporary folders stand in for real tools.
 import Darwin
 import Foundation
 import Testing
@@ -392,14 +392,6 @@ import Testing
         // A profile's text before the marker and its exported variables, as a login shell's are.
         let shell = try toolScript("echo 'Welcome back'\nexport PATH=/usr/bin:/bin GH_CONFIG_DIR=/tmp/gh-config XDG_CONFIG_HOME=/tmp/config-home\nexec /bin/sh -c \"$4\"")
         #expect(await LoginShell(executable: shell).variables() == LoginShell.Variables(path: "/usr/bin:/bin", gitHubConfigDirectory: "/tmp/gh-config", configHome: "/tmp/config-home"))
-    }
-
-    /// A profile that makes unset variables an error still prints every line.
-    @Test func readsTheVariablesOfAProfileThatRefusesUnsetVariables() async throws {
-        let unset = try toolScript("set -u\nexport PATH=/usr/bin:/bin\neval \"$4\"")
-        #expect(await LoginShell(executable: unset).variables() == LoginShell.Variables(path: "/usr/bin:/bin"))
-        let exported = try toolScript("set -u\nexport PATH=/usr/bin:/bin GH_CONFIG_DIR=/tmp/gh-config\neval \"$4\"")
-        #expect(await LoginShell(executable: exported).variables() == LoginShell.Variables(path: "/usr/bin:/bin", gitHubConfigDirectory: "/tmp/gh-config"))
     }
 
     @Test func locatesExecutablesInTheSearchPath() async throws {

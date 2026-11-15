@@ -1,5 +1,5 @@
 import Agent
-import AI
+@testable import AI
 import ARCHEngine
 import Foundation
 import Testing
@@ -13,6 +13,7 @@ import Testing
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
         let browser = try BrowserSession(testRegistry: registry, directory: directory)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
         let space = try #require(browser.spaces.first)
         let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true)
         let window = BrowserWindowModel(session: browser, record: record, kind: .main)
@@ -33,19 +34,19 @@ import Testing
         #expect(!old.conversation.isAnswering && active.conversation.isAnswering)
         let before = AgentReaderExcerpt(tabID: tab.id, documentID: tab.documentID, url: url, selection: "From the source", reply: nil)
         window.dismissPageQuestion(old.id)
-        window.continueAsAgentTask("Old request", from: beforeReplacement, excerpt: before)
-        otherWindow.continueAsAgentTask("Latest request", from: source, excerpt: before)
+        window.continueAsAgentTask("Old request", from: beforeReplacement, excerpt: before, settings: settings)
+        otherWindow.continueAsAgentTask("Latest request", from: source, excerpt: before, settings: settings)
         #expect(active.conversation.isAnswering && window.pageQuestion?.id == active.id)
         #expect(window.agentPanel == nil && otherWindow.agentPanel == nil)
-        window.continueAsAgentTask("Hidden reader action", from: .init(tab: tab, documentID: tab.documentID), excerpt: before)
+        window.continueAsAgentTask("Hidden reader action", from: .init(tab: tab, documentID: tab.documentID), excerpt: before, settings: settings)
         #expect(window.agentPanel == nil && active.conversation.isAnswering)
 
         tab.webContents(tab.webContents, didCommitDocumentAt: url)
-        window.continueAsAgentTask("Latest request", from: source, excerpt: before)
+        window.continueAsAgentTask("Latest request", from: source, excerpt: before, settings: settings)
         #expect(window.agentPanel == nil)
         let (current, reviewed) = try present("Question still being answered")
         window.selectTab(other.id)
-        window.continueAsAgentTask("Wrong tab", from: reviewed, excerpt: nil)
+        window.continueAsAgentTask("Wrong tab", from: reviewed, excerpt: nil, settings: settings)
         #expect(window.pageQuestion == nil && window.agentPanel == nil && !current.conversation.isAnswering)
         window.selectTab(tab.id)
         let (last, ready) = try present("The user's last question")
@@ -53,7 +54,7 @@ import Testing
         let excerpt = ContinueAsAgentTaskButton.excerpt(tabID: tab.id, documentID: tab.documentID, url: url,
                                                         exchange: last.conversation.exchanges.last, selection: nil)
         #expect(prompt == "The user's last question" && excerpt == nil)
-        window.continueAsAgentTask(prompt, from: ready, excerpt: before)
+        window.continueAsAgentTask(prompt, from: ready, excerpt: before, settings: settings)
         guard case .composer(let context) = window.agentPanel else {
             Issue.record("The reviewed question did not open its composer")
             return

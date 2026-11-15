@@ -1,6 +1,6 @@
 # Hooks design
 
-This note designs hooks for Arch, feature rows 66 to 68, 71, and 72. A hook runs a script when a browser event matches it, and the script can run an agent. Each part has one job, one interface, and its own tests, so a later feature can use one part without the others: browser events, the shared hook scheduler, model tiers, the hook registry, the script runner, the agent run API, the agent hook editor with the Tidy Tab Names preset, and the same parts for outside programs. Browser events, the shared hook scheduler, model tiers, the hook registry, and the JavaScript script runner with Settings ▸ AI ▸ Agent Hooks are built; tasks VII.27 to VII.32 in `docs/plan.md` build the rest, and VII.23.1, VII.24.1, VII.25.1, and VII.26.1 check the built parts from the bundle. The design builds on the AI interface (`docs/ai.md`), the plugin system (`docs/plugins.md`), and agents (`docs/agents.md`), whose rules apply unless this note says otherwise.
+This note designs hooks for Arch, feature rows 66 to 68, 71, and 72. A hook runs a script when a browser event matches it, and the script can run an agent. Each part has one job, one interface, and its own tests, so a later feature can use one part without the others: browser events, the shared hook scheduler, model tiers, the hook registry, the script runner, the agent run API, the agent hook editor with the Tidy Tab Names preset, and the same parts for outside programs. Browser events, the shared hook scheduler, model tiers, the hook registry, the JavaScript script runner with Settings ▸ AI ▸ Hooks, the agent hook editor, Tidy Tab Names, and part of the agent run API are built; tasks VII.27, VII.30, VII.31, and VII.32 in `docs/plan.md` build the rest, and VII.23.1, VII.24.1, VII.25.1, and VII.26.1 check the built parts from the bundle. The design builds on the AI interface (`docs/ai.md`), the plugin system (`docs/plugins.md`), and agents (`docs/agents.md`), whose rules apply unless this note says otherwise.
 
 Terms: an "event" is a `BrowserEvent` delivered by the browser event bus. A "hook" is a trigger, a filter, and a script that Arch runs for each matching event. A "run" is one script handling one event. An "agent run" is one call of the agent run API: a prompt with a model choice, a record level, tools, and limits, run to completion without the user. An "agent hook" is a hook whose script the agent hook editor writes around one agent run.
 
@@ -23,11 +23,11 @@ Terms: an "event" is a `BrowserEvent` delivered by the browser event bus. A "hoo
 | Browser events | `Events` (new) | Turns session changes into typed events and delivers them | `BrowserEventBus`, `BrowserEvent`, `BrowserEventFilter`, `BrowserEvent.view(_:)` | The AI hook center through `BrowserHooks`, the hook registry, plugins' events, outside subscribers | VII.23 (built) |
 | Hook scheduler | `AI` | Runs each event's hooks one at a time per subject in one order, with waits, replacement, timeouts, cancellation, failure pauses, and budget checks | `AIHookScheduler`, `AIHookStep`, `AIHookStepOutcome` | The AI hook center, plugin hooks, the hook registry | VII.23 (built) |
 | Model tiers | `AI` | Names models by tier (Fast, Standard, Deep) and lets a request carry its route | `AIModelTier`, `AIRouteChoice`, `AIFeatureRouting`, `AIService.resolvedModels(for:route:)` | Agent runs, `arch-cli agent run`, the agent composer's model menu | VII.24 (built) |
-| Hook registry | `Hooks` (new) | Keeps hooks and matches events to them; runs their scripts as steps of the shared scheduler with limits, loop protection, and pausing; logs runs | `HookRegistry`, `Hook`, `HookStore`, `HookRunLog` | Settings ▸ AI ▸ Agent Hooks, the editor, `arch-cli hooks` | VII.25 (built) |
+| Hook registry | `Hooks` (new) | Keeps hooks and matches events to them; runs their scripts as steps of the shared scheduler with limits, loop protection, and pausing; logs runs | `HookRegistry`, `Hook`, `HookStore`, `HookRunLog` | Settings ▸ AI ▸ Hooks, the editor, `arch-cli hooks` | VII.25 (built) |
 | Script runner | `Hooks`, on `Plugins`' script runtime | Runs one script for one event: JavaScript in the script plugin sandbox, or a shell script the user trusts | `HookScriptRunning`, `HookScriptRunner`, the script API | The hook registry | VII.26 (JavaScript, built), VII.31 |
-| Agent run API | `Agent` | Runs one agent to completion for a caller, with a model choice, a record level, tools, and limits | `AgentRunner.run(_:)`, `arch.agent.run`, `agent/run`, `arch-cli agent run` | Hook scripts, the editor's Test, outside programs | VII.25 (its value types, built), VII.27 |
-| Agent hook editor | `Preferences`, `Hooks` | Writes an agent hook: its situation, instructions, model, record, actions, limits, and script | Settings ▸ AI ▸ Agent Hooks, `AgentHookTemplate` | The user | VII.28 |
-| Tidy Tab Names | `Hooks` | A preset agent hook | `HookPresets.tidyTabNames` | The editor | VII.29 |
+| Agent run API | `Agent` | Runs one agent to completion for a caller, with a model choice, a record level, tools, and limits | `AgentRunner.run(_:personaID:rename:)`, `arch.agent.run`, `agent/run`, `arch-cli agent run` | Hook scripts, the editor's Test, outside programs | VII.25 (value types, built), VII.27 (partly built) |
+| Agent hook editor | `Preferences`, `Hooks` | Writes an agent hook: its situation, instructions, model, record, actions, limits, and script | Settings ▸ AI ▸ Hooks, `AgentHookTemplate` | The user | VII.28 (built) |
+| Tidy Tab Names | `Hooks` | A preset agent hook | `HookPresets.tidyTabNames` | The editor | VII.29 (built) |
 | Outside programs | `AgentControl`, `ArchCLI`, `Agent`, `Hooks` | Events, hooks, agent runs, and renames for `arch-cli` and `arch-mcp` under grants | `events/*`, `hooks/*`, `agent/run`; the tools `watch_events` and `rename_tab`; `AgentHookRegistrar` | Scripts and agents outside Arch | VII.30 |
 
 ```
@@ -43,20 +43,6 @@ AgentRunner ──▶ AIService (AI: tiers, routes, budgets, usage)
    └─▶ AIAgentSession on claude or codex (VII.16, VII.17) ──▶ arch-mcp --session ──▶ AgentToolHost
 ```
 
-`Package.swift` additions, by hand:
-
-```swift
-.library(name: "Events", targets: ["Events"]),
-.library(name: "Hooks", targets: ["Hooks"]),
-
-.target(name: "Events", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Events"),
-// `Agent` and `AgentControl` give the agent run's values and the JSON values that keep a later build's members of `hooks.json`, and `Plugins` the script runtime.
-.target(name: "Hooks", dependencies: ["Events", "AI", "Plugins", "Agent", "AgentControl"], path: "Packages/ARCH/Sources/Hooks"),
-.testTarget(name: "EventsTests", dependencies: ["Events"], path: "Packages/ARCH/Tests/EventsTests"),
-// `Fixtures` holds the hook scripts the runner tests run, and from VII.31 the shell scripts.
-.testTarget(name: "HooksTests", dependencies: ["Hooks"], path: "Packages/ARCH/Tests/HooksTests", resources: [.copy("Fixtures")]),
-```
-
 - `Browsing` depends on `Events`. `Plugins` and `Agent` add `Events`, and `Browsing`, `Preferences`, and `Arch` add `Hooks`, with the tasks that use them. `AI` gains no dependency, and `ArchCLI` still depends on `AgentControl` alone: it prints events, hooks, and run results as JSON from Arch, as it does for tool results.
 - The parts are separate modules because they serve different users: `Agent` and `Plugins` both need events and cannot depend on `Hooks`, which depends on both; the AI interface stays free of browser types.
 
@@ -69,14 +55,14 @@ Code comments and documents cite these as "hook decision 1" and so on.
 3. A hook's action is always a script. An agent hook is a hook whose script the editor writes; within a hook, only a script's call to the agent run API runs an agent.
 4. Scripts are JavaScript in the script plugin sandbox by default. A shell script runs only after the user turns on Allow Shell Scripts and trusts the file with Touch ID or the login password. Arch then runs its own copy, checked by digest. Arch never writes, generates, or edits a shell script, and outside programs cannot add one.
 5. Agent runs never ask the user. A call that would ask under agents' rules is refused with `wouldAsk`. A run works only on the tabs its caller may give it (hook decision 16) and calls only the tools its options name within its grant.
-6. A run names a model or a tier (Fast, Standard, Deep) whose models the user assigns once in Settings ▸ AI ▸ Model Tiers. Tiers are routes in `ai.json`. An empty tier fails rather than falling back to another tier or the default route, since the user chose the tier for its cost.
+6. A run names a model or a tier (Fast, Standard, Deep) whose models the user assigns once in Settings ▸ AI ▸ Features. Tiers are routes in `ai.json`. An empty tier fails rather than falling back to another tier or the default route, since the user chose the tier for its cost.
 7. Three record levels: Keep the Session, Keep Activity Only, and Keep Nothing (Record levels). No level writes a prompt, reply, title, page text, or address path to disk: Claude Code runs without session persistence and Codex with `--ephemeral` at every level, and Keep Nothing keeps only usage counters. Runs for outside programs keep at least the activity.
 8. `hooks.json` is sealed like `agent.json`, with its own Keychain key, and holds each script's digest and the providers the user set up (Known providers). A program that edits Arch's files therefore cannot add a hook, change one's script, or send a hook's data to a provider it wrote into `ai.json`. A hook script can read signed-in pages through agent runs and write tab names, which `session.json` keeps. Allowing a program to add a hook by editing the file would let it read the user's signed-in pages through Arch; for the same reason, hooks that outside programs propose stay within what the proposing grant can read (Hooks from outside programs).
 9. Loop protection by causes: every event caused by code names the hooks whose runs led to it. A hook never runs for its own runs' effects, and no hook runs for an event three hooks deep. Rate limits skip runs past their caps, and a `titleChanged` hook that keeps running for one tab pauses.
 10. Outside programs may watch events under a grant scope and propose hooks. Each proposed hook takes effect only after the user allows it in Arch with Touch ID or the login password, reaches no more than the proposing grant can read, and pauses when that grant ends. This is the one exception to agents' rule that no command changes Arch's settings (`docs/agents.md`, What the agent can never change). The only other hook change a client can make is removing its own hooks.
 11. `arch-mcp` offers events as a tool, `watch_events`, not as MCP notifications, because MCP clients do not pass a server's notifications to their model. It offers no hook tool or agent run tool, so a client that has only MCP can neither propose hooks nor start agent runs. A client with a shell can run `arch-cli hooks add` and `arch-cli agent run`, and a page can steer it to. The proposal sheet with Touch ID, the caps on outside programs' hooks, the record floor, and the grant's runs per day bound what that gains (Hooks from outside programs).
 12. Tidy Tab Names runs on a new tab's first page load, not when the tab opens, since it has no title then and often no address.
-13. Renames from code (AI hooks, plugins, hook scripts, and agents) set the tab's suggested name under the AI hooks' `renameTab` rules (`docs/ai.md`, Actions). Each rename names the document it belongs to: an AI hook's event address, a hook run's document for the tab (Run tabs), or, for plugins, sessions, and outside clients, the tab's address when the call arrives. It applies only while the tab still shows that document, ignoring the fragment, and is `stale` otherwise. The user's own name always wins, and a name the user rejects stays rejected for that address.
+13. Renames from code (AI hooks, plugins, hook scripts, and agents) set the tab's suggested name under the AI hooks' `renameTab` rules (`docs/ai.md`, Actions). Each rename names the document it belongs to: an AI hook's event address, a hook run's document for the tab (Run tabs), or, for plugins, sessions, and outside clients, the tab's address when the call arrives. It applies only while the tab still shows that document, ignoring the fragment, and is `stale` otherwise. The user's own name always wins, and a name the user rejects stays rejected for that address. A live folder item's tab takes no suggested name.
 14. Site exclusions are an AI boundary. They keep events from hooks with the `agent` permission and from outside programs, keep the titles and addresses of tabs on excluded sites out of such hooks' tab lists, and the agent run API keeps tabs on excluded sites out of every run (rule P16). A hook without `agent`, which cannot reach a model, runs on every site its filter covers, as plugins do.
 15. One scheduler. The AI hook center's scheduling becomes `AIHookScheduler`, which the center, plugin hooks, and the hook registry share: one event's hooks run in one ordered chain per kind and subject, under one set of rules for waits, replacement, timeouts, cancellation at a close or a new document, failure pauses, and budgets (The shared scheduler). It lives in `AI` because `AI` depends on nothing, so both the center and `Hooks` can use it. Plugins never register with the center.
 16. A hook reaches only the tabs its filter covers in the event's Persona, never agent tabs: its script's tab calls and its agent runs accept no other tab (Run tabs). A hook from an outside program reaches only the event's own tab.
@@ -85,108 +71,15 @@ Code comments and documents cite these as "hook decision 1" and so on.
 
 ### Kinds and payloads
 
-```swift
-// Events
-public enum BrowserEventKind: String, Codable, Hashable, Sendable, CaseIterable {
-    case tabOpened, tabClosed, pageLoaded, addressChanged, titleChanged, tabSelected, downloadFinished, spaceSwitched
-}
-
-public enum BrowserTabKind: String, Codable, Hashable, Sendable, CaseIterable {
-    /// A space's tab outside its pinned list.
-    case open
-    case pinned
-    /// A favorite's tab, which belongs to no space.
-    case favorite
-    case smallWindow
-    /// A tab in an agent folder (`docs/agents.md`, Agent folders). Hooks and the AI hook center never see these.
-    case agent
-}
-
-public struct BrowserTabRef: Codable, Hashable, Sendable {
-    public var id: UUID
-    public var personaID: UUID
-    /// nil for a favorite's tab.
-    public var spaceID: UUID?
-    public var kind: BrowserTabKind
-    public var engine: EngineKind
-    /// The committed address; nil until the engine reports one.
-    public var url: URL?
-}
-
-public struct BrowserDownloadRef: Codable, Hashable, Sendable {
-    public var id: UUID
-    public var personaID: UUID
-    /// The tab the download started from, while that tab is open.
-    public var tabID: UUID?
-    /// The file's name, which the server or the page chose; never its folder or contents.
-    public var filename: String
-    public var mediaType: String?
-    public var byteCount: Int64?
-    public var sourceURL: URL?
-    public var pageURL: URL?
-    /// The user chose the name in a save panel.
-    public var isNamedByUser: Bool
-    /// The source tab's kind when the download started. It survives takeover and close.
-    public var tabKind: BrowserTabKind?
-}
-
-public enum BrowserTabCloseReason: String, Codable, Hashable, Sendable {
-    /// `TabCloseReason`'s cases, then closes by code and with a deleted space or Persona.
-    case user, page, crash, archive, download, webExtension, plugin, hook, agent, spaceDeleted, sync
-}
-
-public enum BrowserTitleSource: String, Codable, Hashable, Sendable {
-    /// The page's own title.
-    case page
-    /// The user named the tab or cleared its name (`Tab.customTitle`).
-    case user
-    /// A hook, plugin, or agent named the tab (`Tab.suggestedTitle`).
-    case suggested
-}
-
-/// The labels name each value, so the synthesized JSON reads `{"pageLoaded":{"tab":{…},"isRestore":false,"isFirstLoadAfterOpen":true}}`.
-public enum BrowserEventPayload: Codable, Hashable, Sendable {
-    case tabOpened(tab: BrowserTabRef, openerTabID: UUID?)
-    case tabClosed(tab: BrowserTabRef, reason: BrowserTabCloseReason)
-    /// `isFirstLoadAfterOpen`: the tab's first load with an `http` or `https` address since this launch's `tabOpened` for it.
-    case pageLoaded(tab: BrowserTabRef, isRestore: Bool, isFirstLoadAfterOpen: Bool)
-    case addressChanged(tab: BrowserTabRef, previousURL: URL?)
-    case titleChanged(tab: BrowserTabRef, source: BrowserTitleSource)
-    case tabSelected(tab: BrowserTabRef, windowID: UUID)
-    case downloadFinished(download: BrowserDownloadRef)
-    case spaceSwitched(windowID: UUID, spaceID: UUID, personaID: UUID, previousSpaceID: UUID?, previousPersonaID: UUID?)
-}
-
-public struct BrowserEvent: Identifiable, Codable, Hashable, Sendable {
-    public var id: UUID
-    /// One more than the previous event's in this launch; outside programs resume after it.
-    public var sequence: UInt64
-    public var date: Date
-    public var payload: BrowserEventPayload
-    /// What made the change, when code made it (Causes).
-    public var cause: BrowserEventCause?
-
-    public var kind: BrowserEventKind { get }
-    /// The tab of a tab event; nil for downloads and space switches.
-    public var tab: BrowserTabRef? { get }
-    /// The tab, download, or window the event is about.
-    public var subject: UUID { get }
-    /// For `spaceSwitched`, the Persona of the space the window switched to.
-    public var personaID: UUID { get }
-    /// The tab's space, or for `spaceSwitched` the space the window switched to; nil for a favorite's tab and for downloads, which belong to their Persona only.
-    public var spaceID: UUID? { get }
-    /// The addresses that site filters and exclusions apply to: the tab's, or the download's source and page.
-    public var urls: [URL] { get }
-}
-```
+The types are in `Events/BrowserEvent.swift`.
 
 | Kind | Posted when | Subject | Posts nothing for |
 |---|---|---|---|
-| `tabOpened` | A tab joins the session after launch, from any source: the palette, a link, a page, another app, a favorite's first opening, a plugin, an agent, or a hook | Tab | Tabs restored from the saved session, pinned tabs that a browser import opened, tabs that move between spaces or windows |
-| `tabClosed` | A tab leaves the session; posted while the session still lists it, so a consumer can read its last name and address during delivery (Closed tabs) | Tab | Tabs at quit |
+| `tabOpened` | A tab joins the session after launch, from any source: the palette, a link, a page, another app, a favorite's first opening, a plugin, an agent, or a hook | Tab | Tabs restored from the saved session, pinned tabs that a browser import opened or sidebar sync added, tabs that move between spaces or windows, a live folder item's tab, which a refresh adds |
+| `tabClosed` | A tab leaves the session; posted while the session still lists it, so a consumer can read its last name and address during delivery (Closed tabs) | Tab | Tabs at quit, item tabs that a live folder refresh removes; a pinned tab that a close unloads, and a live folder item's tab that unloads after its page crashes or it only pointed at a file, since both stay listed |
 | `pageLoaded` | The tab's main frame finishes loading a document while the tab has an address (`webContentsDidFinishLoadingDocument`) | Tab | Frames inside the page, navigations within the document |
-| `addressChanged` | The tab's committed address changes, including within the document (`webContentsDidChangeURL`); an address reported while the page loads posts once the load or its document's load ends, with the address the tab then shows | Tab | A report that repeats the tab's address, an address the tab leaves before it commits, as WebKit reports for a navigation that fails or becomes a download |
-| `titleChanged` | The tab row's name changes (`Tab.displayTitle`) while the tab shows its committed address; a change while its address waits to settle posts once it settles, if the name then differs, with the committed address | Tab | An input change that leaves the shown name unchanged, a name shown only while the tab is at an address it leaves before it commits |
+| `addressChanged` | The tab's committed address changes: a new document's address when the engine commits it, and an address within the document (`webContentsDidChangeURL`) at once while the page does not load, otherwise once the load or its document's load ends, with the address the tab then shows | Tab | A report that repeats the tab's address, an address the tab leaves before it commits, as WebKit reports for a navigation that fails or becomes a download |
+| `titleChanged` | The tab row's name changes (`Tab.displayTitle`) while the tab shows its committed address; a change while its address waits to settle posts once it settles, if the name then differs, with the committed address | Tab | An input change that leaves the shown name unchanged, a name shown only while the tab is at an address it leaves before it commits; a live folder item's tab shows its saved title, so a refresh that changes it posts `titleChanged` with source `page` |
 | `tabSelected` | A window selects the tab | Tab | Selections that restore windows at launch |
 | `downloadFinished` | A download entry's state becomes `completed` and its file exists | Download | Downloads that fail or are canceled |
 | `spaceSwitched` | A window's current space changes; `previousPersonaID` differs when the Persona changes with it | Window | The first space of each window at launch |
@@ -195,72 +88,16 @@ Scope filters, Persona checks, and a hook script's Persona treat `spaceSwitched`
 
 ### The bus
 
-```swift
-@MainActor
-public final class BrowserEventBus {
-    /// Nonisolated, so that the session, which is not isolated yet, can make it with itself.
-    public nonisolated init()
-    /// The cause of the innermost enclosing `withCause` block, which code that starts a change finishing later keeps for its events.
-    public var currentCause: BrowserEventCause? { get }
-    /// Gives the event its identifier, sequence, date, and the cause of the enclosing `withCause` block when it has none, then delivers it to every subscriber whose filter matches, in subscription order, before returning. A post from a handler is delivered once the current event has reached every subscriber.
-    public func post(_ payload: BrowserEventPayload, cause: BrowserEventCause? = nil)
-    @discardableResult
-    public func subscribe(_ filter: BrowserEventFilter, _ handler: @escaping @MainActor (BrowserEvent) -> Void) -> BrowserEventSubscription
-    /// Attaches `cause` to every event that `body`'s changes post before it returns.
-    public func withCause<T>(_ cause: BrowserEventCause, _ body: () throws -> T) rethrows -> T
-}
+`BrowserEventBus` is in `Events/BrowserEventBus.swift`, and `BrowserEventFilter` with `BrowserEventScope` and `BrowserPlace` in `Events/BrowserEventFilter.swift`.
 
-@MainActor
-public final class BrowserEventSubscription {
-    public func cancel()
-}
-
-public struct BrowserEventFilter: Codable, Hashable, Sendable {
-    /// Empty matches every kind.
-    public var kinds: Set<BrowserEventKind>
-    public var scope: BrowserEventScope
-    /// Empty matches every site. Otherwise an event matches only when one of its addresses matches a pattern, so an event without an address never matches a site list.
-    public var sites: [AISitePattern]
-    public var exceptSites: [AISitePattern]
-    /// Empty matches both engines. Events without a tab ignore it.
-    public var engines: Set<EngineKind>
-    /// Empty matches every kind but `agent`, which only a filter that names it matches. Events without a tab ignore it.
-    public var tabKinds: Set<BrowserTabKind>
-    public func matches(_ event: BrowserEvent) -> Bool
-}
-
-/// In JSON, `"everywhere"` or the list of places, each `{"persona": "<id>"}` or `{"space": "<id>"}`.
-public enum BrowserEventScope: Codable, Hashable, Sendable {
-    case everywhere
-    /// Whole Personas and single spaces, which the interface shows as "Persona" and "Persona / Space".
-    case places([BrowserPlace])
-}
-
-public enum BrowserPlace: Codable, Hashable, Sendable {
-    case persona(UUID)
-    case space(UUID)
-}
-```
-
+- A post gets its identifier, sequence, date, and the cause of the enclosing `withCause` block when it has none, and reaches every subscriber whose filter matches, in subscription order, before `post` returns. A post from a handler is delivered once the current event has reached every subscriber.
+- In a filter, an empty set or list matches every kind, site, or engine, and every tab kind but `agent`, which only a filter that names it matches, also for a download that started in an agent tab. An event without an address never matches a site list, and other events without a tab ignore engines and tab kinds. A scope is `"everywhere"` or a list of places, each `{"persona": "<id>"}` or `{"space": "<id>"}`, which the interface shows as "Persona" and "Persona / Space".
 - Handlers run immediately on the main actor and must not wait: each consumer queues its own work. Every consumer sees events in sequence order.
 - `BrowserSession` creates the bus (`BrowserSession.events`) and passes it to the consumers the app shell creates: `BrowserHooks`, each `PluginManager`, `AgentService`, and `HookRegistry`.
 
 ### Causes
 
-```swift
-public struct BrowserEventCause: Codable, Hashable, Sendable {
-    /// Labeled, so the JSON reads `{"agentSession":{"id":"…"}}`.
-    public enum Origin: Codable, Hashable, Sendable {
-        case hookRun(hook: UUID, run: UUID)
-        case agentSession(id: UUID)
-        case outsideClient(grant: UUID)
-        case plugin(id: String)
-    }
-    public var origin: Origin
-    /// The hooks whose runs led to this change, oldest first, at most three.
-    public var hookChain: [UUID]
-}
-```
+`BrowserEventCause`, in `Events/BrowserEvent.swift`, has an origin (`hookRun` with the hook and run, `agentSession`, `outsideClient` with the grant, or `plugin`) and the hooks whose runs led to the change, oldest first, at most three.
 
 - An immediate change from code, such as a rename, runs inside `withCause`, so its events carry the cause.
 - A navigation or new tab started by code finishes later. The source keeps the cause on the tab (`Tab.pendingCause`) and attaches it to that tab's next `addressChanged` events and `pageLoaded`, which uses it up, and to the `tabOpened` of a tab opened by code inside `withCause`, which keeps it for its first load. Code that starts a navigation sets `pendingCause` to the bus's `currentCause`. The cause belongs to that one navigation: a load that ends without a `pageLoaded`, as one that fails or becomes a download, drops it once the rest of that update has run, since WebKit reports the end of a load just before its document's load. The user's own navigation in the tab from the app, from the address field, Home, Back, Forward, the History menu, Reload, the page's context menu, or the crash notice's Reload, clears it. A link the user follows in the page while code's navigation still loads keeps the cause, since Chromium does not report such a click.
@@ -297,38 +134,7 @@ An outside program's line for one of the user's tabs:
 - Window events for an outside program: `tabSelected` reaches a grant only for a tab of its Persona, and `spaceSwitched` only when the grant's Persona is on one side of the switch. Windows get handles per grant (`win1`, `win2`, …), as tabs and spaces do, and never their identifiers. A space of the grant's Persona appears as its space handle (`s1`); the other side of a switch between Personas appears as `"otherPersona": true` with no identifier, so the line says only that the window entered or left the grant's Persona.
 - The registry adds `hook` for hook scripts (Script API); a plugin's event has none.
 
-```swift
-// Events
-public struct BrowserEventScriptAccess {
-    public var showsAddress: (URL) -> Bool
-    public var showsDownloadDetails: Bool
-    /// For a hook with `agent`, the AI interface's site check: an event with an address it refuses never reaches the hook, and a refused previous address stays out. nil for every other consumer.
-    public var allowsAI: ((URL) -> Bool)?
-    /// Addresses and download details with `tabs`.
-    public static func hook(tabs: Bool, allowsAI: ((URL) -> Bool)?) -> Self
-    /// Addresses with `tabs` or on the pages the granted sites cover, download details with `downloads`.
-    public static func plugin(tabs: Bool, downloads: Bool, covers: @escaping (URL) -> Bool) -> Self
-}
-
-/// What an outside program's view needs from its grant. `Agent` implements it over the grant's handle tables (VII.30).
-@MainActor
-public protocol BrowserEventOutsideReader: AnyObject {
-    var grantID: UUID { get }
-    var personaID: UUID { get }
-    /// `.own("t1")` or `.shared("t2")` by handle, or `.watched("w4")`, given on first use and never reused.
-    func name(ofTab id: UUID) -> BrowserEventOutsideTab
-    func handle(ofSpace id: UUID) -> String
-    func handle(ofWindow id: UUID) -> String
-    func allowsAI(on url: URL) -> Bool
-}
-
-extension BrowserEvent {
-    /// `BrowserEventScriptView`, with camel-case keys such as `personaId`, or nil when the event does not reach the consumer.
-    public func view(_ access: BrowserEventScriptAccess) -> BrowserEventScriptView?
-    /// `BrowserEventOutsideView`, one line of the outside view, or nil when the event does not reach the grant.
-    @MainActor public func view(_ reader: some BrowserEventOutsideReader) -> BrowserEventOutsideView?
-}
-```
+`BrowserEventScriptAccess`, `BrowserEventOutsideReader`, and both views are in `Events/BrowserEventView.swift`.
 
 - A tab's engine shows as `webkit` or `chromium` in both views, as `arch-cli` and the agent tools name it.
 - An outside program's tab carries `handle` and the reduced `url`, or `watch` and the host as `site`, or `excluded: true` without either; an address change adds `previousUrl` or `previousSite` unless the previous address is excluded. A download carries the name as `<untrusted source="page">…</untrusted>`, the type, the size, the source's host, and the agent tab's handle, or `excluded: true` without the name and host. A space switch carries `window`, `to`, and `from`, each `{"space": "s1"}` or `{"otherPersona": true}`:
@@ -341,13 +147,13 @@ extension BrowserEvent {
 
 `BrowserEventSource` in `Browsing` follows the session's tabs, favorites' tabs, small windows' tabs, windows, and downloads, as `BrowserHooks` now follows three kinds, and posts every kind.
 
-- `tabClosed` comes from `BrowserSession.closeTab(_:remember:reason:)`, with `TabCloseReason` mapped case by case, and from deleting a Persona, whose tabs close as `spaceDeleted`; deleting a space moves its tabs instead. A pinned tab removed by a sidebar sync deletion closes with the reason `sync`. Closes by code pass their reason (`plugin`, `hook`, or `agent`) through `closeTab(_:remember:reason:eventReason:)`. The source posts it before the session removes the tab from its lists, so the tab's last name and address are still there while subscribers handle the event.
+- `tabClosed` comes from `BrowserSession.removeTab(_:closedRecord:reason:eventReason:)`, which every close reaches through `closeTab(_:reason:)` and its `TabCloseAction`, live-folder dismissal, and sync removal, with `TabCloseReason` mapped case by case: a deleted Persona's tabs close with `persona`, which maps to `spaceDeleted`, and a pinned tab removed by a sidebar sync deletion with `sync`; deleting a space moves its tabs instead. `closeAgentTab(_:reason:)` passes `agent`. Closes by plugins and hooks will pass their reasons once those tasks add tab closing. A close that unloads a tab posts nothing, since the tab stays listed. The source posts it before the session removes the tab from its lists, so the tab's last name and address are still there while subscribers handle the event.
 - `tabOpened` follows the session's tab lists and names the opening tab, which the session sets before a popup's tab joins its list. The tabs listed when the session attaches the source are the restored ones.
 - `titleChanged` follows the inputs of `Tab.displayTitle` with the tab's committed address, and waits while the tab's address waits to settle, so a navigation the tab leaves before it commits posts no name for that address, and the page's title of a document that commits posts after its `addressChanged`. A suggested name that code gives while the address waits, which the tab takes for the document it still shows, keeps its cause, and the title change that names it posts with that cause once the address settles, so the hook or plugin that gave it still sees its own effect. Its source is the input that supplies the new name: `customTitle` set or cleared, or a hook's name that the user turns down (`user`); a hook's name in `suggestedTitle` (`suggested`); and otherwise the page's title or host (`page`), also when another address drops a hook's name.
-- `addressChanged` follows `Tab.committedURL`, which takes the tab's address at once when it changes while the page is not loading. WebKit reports a navigation's address before it commits and goes back to the earlier one when the navigation fails, is stopped, or becomes a download, while Chromium reports an address only once it commits, so an address that changes while the page loads waits until the load ends or its document loads, and posts only when the tab then shows an address it has not posted. The tab drops a hook's name at the same point, so the name stays through such a navigation, and every event's `BrowserTabRef.url` is the committed address.
+- `addressChanged` follows `Tab.committedURL`, which takes a new document's address when the engine commits it, just after the tab's document identifier changes, so the event carries the new document's, and takes the tab's address at once when it changes while the page is not loading. WebKit reports a navigation's address before it commits and goes back to the earlier one when the navigation fails, is stopped, or becomes a download, so another address that the tab reports while the page loads, as within the document, waits until the load ends or its document loads, and posts only when the tab then shows an address it has not posted. The tab drops a hook's name at the same points, so the name stays through a navigation that never commits, and every event's `BrowserTabRef.url` is the committed address.
 - `tabSelected` and `spaceSwitched` follow each `BrowserWindowModel`'s selected tab and `currentSpaceID`, with the window model's identifier as `windowID`. Reopening main windows from the saved session, or the last main window once none is open, runs inside `BrowserEventSource.restoringWindows(_:)`, so their selections and spaces, and what other windows give up for them, post nothing. A window's space when the source first sees it is no switch.
-- `pageLoaded` keeps the current rules for `isRestore`: the first load of a restored tab and of a pinned tab opened by a browser import.
-- A tab in an agent folder (`Tab.agentOwnerID`) posts with kind `agent`, also its `tabOpened`, since the session puts an agent's new tab and the popups its page opens in the folder before they join its list. A tab the user takes over, by dragging it out or with Keep Tabs, posts with its own kind from then on. Closes by the agents' code (`close_tab`, a popup past the agent tab limit, and a popup whose first address rule P16 refuses) give `agent`.
+- `pageLoaded` keeps the current rules for `isRestore`: the first load of a tab restored from the saved session. A pinned tab that browser import or sidebar sync adds is restored only while it joins the list, so it posts no `tabOpened`, and its first load is the user's.
+- A tab in an agent folder (`Tab.agentOwnerID`) posts with kind `agent`, also its `tabOpened`, since the session puts an agent's new tab and the popups its page opens in the folder before they join its list. A tab the user takes over, by dragging it out or with Keep Tabs, posts with its own kind from then on. Closes by the agents' code go through `BrowserSession.closeAgentTab(_:reason:)` and give `agent`.
 - Once both exist, the agents' tool host (VII.12) gets navigations, opened tabs, and downloads for its tool results' events from the bus, filtered to the session's agent tabs.
 
 ### The AI hook center
@@ -356,10 +162,10 @@ The center keeps `AIHookEvent`, its registrations, actions, and tests, and runs 
 
 | Bus event | The center or its scheduler |
 |---|---|
-| `pageLoaded(tab, isRestore, _)` | `post(.pageLoaded(AIPageLoad(tabID: tab.id, url: …, isRestore: isRestore)), event: event.id)` with the tab's address, which a `pageLoaded` always has |
+| `pageLoaded(tab, isRestore, _)` | `post(.pageLoaded(AIPageLoad(tabID: tab.id, url: …, isRestore: isRestore, documentID: tab.documentID)), event: event.id)` with the tab's address, which a `pageLoaded` always has |
 | `tabOpened(tab, _)` | `post(.tabOpened(AITabOpen(tabID: tab.id, url: tab.url)), event: event.id)` |
 | `downloadFinished(download)` | `post(.downloadFinished(AIDownloadFinish(…)), event: event.id)`, with the file's URL from the session's entry, omitted from the bus event, and `AIDownloadInfo` from the event's name, type, size, and addresses |
-| `addressChanged(tab, previousURL)` to another document, ignoring the fragment | `scheduler.cancel(subject: tab.id, otherThan: tab.url)` |
+| `addressChanged(tab, previousURL)` to another document, ignoring the fragment | `scheduler.cancel(subject: tab.id, otherThan: tab.url, documentID: tab.documentID)` |
 | `tabClosed(tab, _)` | `scheduler.cancel(subject: tab.id, except: event.id)` |
 
 Removing a download from the list still calls `cancel(subject:)` directly. The center's ordering, actions, checks, and built-in hooks stay as `docs/ai.md` describes them. `BrowserHooks.events`, the filter it subscribes with, names no tab kinds, so agent tabs stay out, which also keeps Tab Names off them, as VII.12 requires. `attach(events:service:)` hosts the center of any `AIService`, which the tests use.
@@ -368,55 +174,11 @@ Removing a download from the list still calls `cancel(subject:)` directly. The c
 
 The center's scheduling moves out of `AIHookCenter` into `AIHookScheduler`, in `AI` beside it (hook decision 15). The center owns it (`AIHookCenter.scheduler`), and the hook registry and the plugin managers post their steps to the same instance, so one event's hooks from every owner run in one chain.
 
-```swift
-// AI
-@MainActor
-public final class AIHookScheduler {
-    /// Adds steps to the chain of `kind` and `subject`. Steps posted with the same `event` join one chain in ascending order, ties in posting order, whoever posts them; a post with another event replaces the chain, which starts after the old one stops. `document` is the event's address for page events, and `urls` are the addresses site exclusions apply to: a step with a feature whose event has an excluded address skips at once, and a post left without steps changes no chain. `causes` are the owners whose runs led to the event: an event that the running step's owner caused joins that chain after its waiting steps instead of replacing it (Loop protection).
-    public func post(_ steps: [AIHookStep], kind: String, subject: UUID, event: UUID, document: URL?, urls: [URL] = [], causes: Set<String> = [])
-    /// The subject went away: cancels its chains, except the chain of `event`, the close's own.
-    public func cancel(subject: UUID, except event: UUID? = nil)
-    /// The tab committed another document: cancels its chains that have a document other than this one, ignoring the fragment. Chains without a document stay.
-    public func cancel(subject: UUID, otherThan document: URL?)
-    /// The owner's hooks went away: its waiting steps skip, and its running steps stop.
-    public func cancel(owner: String)
-    /// Owners paused after consecutive authentication or provider errors, until resumed or a route of their steps changes.
-    @Published public private(set) var pausedOwners: Set<String>
-    public func resume(owner: String)
-}
-
-public struct AIHookStep: Sendable {
-    /// What failure counts and pauses apply to: the feature ID for the center's hooks, `plugin.<id>` for plugin hooks, `hook.<hook id>` for the registry's.
-    public var owner: String
-    /// Built-in hooks 100, plugin hooks 200, the registry's hooks 1,000 plus their place in its list.
-    public var order: Int
-    /// The AI feature the step's requests use, whose checks the scheduler applies; nil for a script hook without `agent`.
-    public var feature: AIFeatureID?
-    /// The routes in `ai.json` that the step's requests resolve through, such as `hook.tabName` or `tier.fast`; a change to one resumes the owner.
-    public var routes: Set<String>
-    public var delay: Duration
-    public var timeout: Duration
-    /// The owner's own checks, run after the delay and before the step starts.
-    public var mayRun: @MainActor @Sendable () -> Bool
-    /// The step's work. It reports each AI request's end, nil for a reply, for the failure count.
-    public var run: @Sendable (_ requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async throws -> Void
-    /// Gets the step's one end, before the chain's next step starts.
-    public var didEnd: @MainActor @Sendable (AIHookStepOutcome) -> Void
-}
-
-/// Every posted step ends exactly once.
-public enum AIHookStepOutcome: Sendable {
-    case finished, failed(any Error), timedOut
-    /// Canceled while it ran: its chain was replaced or canceled, its owner was canceled, or one of its routes changed, also after its work returned but before the scheduler took its end.
-    case stopped
-    /// It never started: `canceled`, `declinedByOwner`, `paused`, `excludedSite`, `unavailable`, or `budgetReached(AIBudget)`.
-    case skipped(AIHookSkipReason)
-}
-```
+`AIHookScheduler`, `AIHookStep`, and `AIHookStepOutcome` are in `AI/AIHookScheduler.swift`. Every posted step ends exactly once: finished, failed, timed out, stopped while it ran, or skipped before it started.
 
 - What moves from the center unchanged: chains per kind and subject; each step's delay measured from the event, with a newer event of the same kind and subject replacing the chain, waiting steps included; one step at a time in order; a canceled step's chain waiting for it to stop, never past its timeout, before the next chain starts; timeouts; cancellation at quit; and, for steps with an AI feature, the checks before the step starts and again after its delay: the owner is not paused, the feature is automatic, switched on, and has a usable model, it is within the daily limit for automatic requests and the monthly spending limit, and the event's addresses are not excluded from AI.
 - Failure pause: three consecutive `authentication` or `providerUnavailable` request errors pause the owner, and any other end of a request resets its count. A change to one of the step's routes resumes it, as a changed route resumes the center's hooks now; for an agent hook this is the tier route its agent options name. Each owner keeps its other rules: the center its last errors, actions, and `appliedActions`; the registry its matching, loop protection, concurrency caps, daily counts, script failure pause, and run log.
-- Order: one event's steps from every owner join one chain, so Tab Names runs before Tidy Tab Names on the same page load, and the name Tidy Tab Names gives wins.
+- Order: one event's steps from every owner join one chain in ascending order, ties in posting order: built-in hooks at 100, plugin hooks at 200, and the registry's hooks at 1,000 plus their place in its list. So Tab Names runs before Tidy Tab Names on the same page load, and the name Tidy Tab Names gives wins.
 - Documents: steps of `pageLoaded`, `addressChanged`, and `titleChanged` events carry the event's address. When a tab commits another document, `BrowserHooks` cancels the tab's chains for other documents, whose renames would no longer fit and whose page reads would read the wrong page.
 - Closes: at `tabClosed`, the tab's other chains end, registry runs included, and the close's own chain runs.
 - `AIHookCenter.post(_:)` keeps its signature and posts under a new event identifier, so the center's tests pass unchanged; `post(_:event:)` takes the bus event's identifier. `pausedFeatures` and `resume(_:)` read and resume the scheduler's owners. The center's kinds use the bus's kind names, so its steps join the chain of the bus event they come from. A center hook's `stop` skips the center's later hooks only; the center applies a hook's actions when its step ends finished and records a failure, a timeout, or a reached budget as the feature's last error. Ending a subscription cancels its feature's steps (`cancel(owner:)`).
@@ -543,7 +305,7 @@ public enum HookOrigin: Codable, Hashable, Sendable {
 @MainActor
 public final class HookRegistry: ObservableObject {
     @Published public private(set) var hooks: [Hook]
-    /// Settings ▸ AI ▸ Agent Hooks ▸ Run Hooks. While it is off, no event reaches a hook.
+    /// Settings ▸ AI ▸ Hooks ▸ Run Hooks. While it is off, no event reaches a hook.
     @Published public var runsHooks: Bool
     /// The last runs of each hook (Run log).
     @Published public private(set) var lastRuns: [UUID: [HookRunSummary]]
@@ -563,13 +325,15 @@ public final class HookRegistry: ObservableObject {
     /// Settings' Try Again after the Keychain did not give the key.
     public func retryLoading()
     public func add(_ hook: Hook, script: Data) throws
-    /// Keeps the hook's origin, creation date, and state, which only `pause(_:)`, `resume(_:)`, and the registry's own pauses change.
+    /// Keeps the hook's origin, creation date, and state, which only `pause(_:)`, `resume(_:)`, and the registry's own pauses change, and stops its running runs, whose scripts keep the grant they started with.
     public func update(_ hook: Hook, script: Data?) throws
     public func remove(_ id: UUID)
     public func move(_ id: UUID, to index: Int)
+    /// Clear Activity: empties the run log and the rows' last runs.
+    public func clearActivity()
     public func pause(_ id: UUID)
     public func resume(_ id: UUID)
-    /// Stop All Agents: cancels running runs and pauses every hook with `agent` until the user resumes it.
+    /// Stop All Agents: cancels running runs and pauses every hook with `agent`, also one paused with `providerErrors`, until the user resumes it.
     public func stopAgentHooks()
     /// Runs the hook once for the tab as if its event had happened: the editor's Test and a row's Run on Current Tab. Without `applying`, actions are reported, not applied. A close hook treats the tab as closed without closing it (Closed tabs). A tab the hook's filter does not cover, such as an agent tab, is not run.
     public func test(_ id: UUID, onTab tab: UUID, applying: Bool) async -> HookRunResult
@@ -604,7 +368,6 @@ What VII.25 decided while building the registry:
 
 - The registry takes the AI service rather than the scheduler alone, since it also registers the hooks' features, reads site exclusions, and follows `AISettingsStore.providers`; the scheduler is the service's `hooks.scheduler`.
 - `HookBrowserHost` gives each Persona's open tabs (`tabs(inPersona:)`), from which the registry takes the run's tabs with the filter applied to each tab as to an event about it.
-- A hook with `agent` but without agent options, a script that names its own model in each call, posts its step without a feature, since the scheduler cannot check a `perRequest` feature without a route; its agent runs meet the AI interface's checks per request (VII.27).
 - An empty tier, or another missing model, fails the run with the AI interface's sentence, which the row shows, and counts toward no failure pause, since no setting of the hook changes it.
 - The daily counts, failure counts, and rate windows live in memory and start again at each launch, as Keep Nothing keeps them; agent runs' daily counts, which cost the user's plan, are kept in `ai-usage.json` by VII.27.
 - A test runs at once, outside the scheduler and the counts, within the hook's timeout, and is logged with `test` at the first two record levels. It runs only on a tab the hook's filter covers, so it never passes an agent tab or a tab outside the hook's reach to the script (hook decision 16). An editor test counts provider usage and leaves the hook's automatic daily allowance available.
@@ -659,9 +422,9 @@ What VII.25 decided while building the registry:
 ```
 
 - Seal: `HookStore` seals the file like `agent.json` (`docs/agents.md`, Sealed settings): an HMAC-SHA256 over the settings' JSON with sorted keys, including members unknown to this build, with a 32-byte key and the last write's generation in its own Keychain item, service `xyz.taeyoon.arch.hooks`. VII.25 made the seal reusable: `AgentSettingsFile`'s seal, generation record, and Keychain queue became `SealedSettingsFile` in `Agent`, which takes the file's address and a key store: `AgentKeychainSealKey` with the file's own Keychain service and account (account `hooks.json seal`). A sealed file's generation member stays out of the settings it reads, so `HookStore` keeps the other members as read. Both `agent.json` and `hooks.json` use it. Arch reads the key once per launch, only when the file exists or Arch first writes one, so a user without hooks sees no keychain prompt.
-- A file is renamed `hooks.json.unreadable` if its seal does not match, it cannot be read, its key is missing from the Keychain, or its generation is below the item's. Arch starts with no hooks and says so in Settings ▸ AI ▸ Agent Hooks. If the Keychain does not give the key, Arch leaves the file unchanged and runs no hook for that launch, with Try Again.
+- A file is renamed `hooks.json.unreadable` if its seal does not match, it cannot be read, its key is missing from the Keychain, or its generation is below the item's. Arch starts with no hooks and says so in Settings ▸ AI ▸ Hooks. If the Keychain does not give the key, Arch leaves the file unchanged and runs no hook for that launch, with Try Again.
 - Scripts live in `~/Library/Application Support/Arch/Hooks/<hook id>/`, mode 0700, as `hook.js` or `hook.sh`, mode 0600. The sealed file holds each script's SHA-256 digest; a script whose bytes no longer match is not run, and its hook pauses with `scriptChanged` until the user reviews it in the editor.
-- Versions: `version` starts at 1, and `HookStore.migrations` holds one step per later version. An earlier version is migrated in memory, step by step, and written at the next change after Arch copies it to `hooks-v<version>.json`. A later version is first copied to `hooks-v<version>.json` unless a copy is there already: once this build writes the file, it still says the later version, so a copy made at a later launch would hold this build's write instead of the newer Arch's file. Arch then reads what it knows and keeps unknown members and hooks unchanged in the sealed file. It lists a hook it cannot read as needing a newer Arch (`needsNewerArch`) and does not run it. In a later version's file, that includes a hook with a member this build does not know inside one of its values, such as one that narrows its filter or grant, since this build keeps only a hook's own unknown members and would drop the other at its next write.
+- Versions: `version` starts at 1, and `HookStore.migrations` holds one step per later version. An earlier version is migrated in memory, step by step, and written at the next change. Arch keeps no copy: the next write raises the key's generation, so a copy put back would be set aside. Of a later version, Arch reads what it knows and keeps unknown members and hooks unchanged in the sealed file. It lists a hook it cannot read as needing a newer Arch (`needsNewerArch`) and does not run it. In a later version's file, that includes a hook with a member this build does not know inside one of its values, such as one that narrows its filter or grant, since this build keeps only a hook's own unknown members and would drop the other at its next write.
 - Arch writes the file at each change, as it does for `agent.json`. Removing a hook deletes its folder and unregisters its feature; usage totals stay under the feature's identifier.
 - `knownProviders` lists the providers the user set up while Arch ran (Known providers).
 
@@ -673,7 +436,7 @@ What VII.25 decided while building the registry:
 4. Documents and closes. When a tab commits another document, its chains for earlier documents end, registry runs included; when that ends a `firstAfterOpen` run, the hook also matches the tab's next page load once, which `firstAfterOpen` alone would not, so a page that moves on during the run still gets its name. A tab's close ends its other chains, and the close's own chain runs (The shared scheduler).
 5. Concurrency. At most 4 registry runs at once, at most 2 for one hook. A step waiting for a slot holds its chain, and waiting steps start in arrival order; beyond 100 waiting steps, the oldest is dropped and logged as `dropped`.
 6. Checks before a run starts, after the delay: the hook is still active and within its daily count, which is checked again when the run gets its slot, since runs that waited for slots together all passed it before any of them ran; the subject still exists, except for `tabClosed`, whose subject is gone by design (Closed tabs); a `pageLoaded`, `addressChanged`, or `titleChanged` hook's tab still shows the event's address, ignoring the fragment; the site checks of Triggers and filters pass; and, for a hook with `agent`, the scheduler's checks for its feature pass.
-7. Timeout. At the hook's timeout, the runner cancels the run, which ends `timedOut`.
+7. Timeout. At the hook's timeout, the runner cancels the run, which ends `timedOut`. The timeout counts from the step's start, so a run that waited more than a second for a slot and then ran out of time is logged as timed out but counts toward no pause.
 
 ### Closed tabs
 
@@ -686,19 +449,19 @@ What VII.25 decided while building the registry:
 
 - Own effects: a hook never runs for an event whose `hookChain` holds it, so a script that renames, opens, or navigates tabs never restarts itself through those changes. Such an event never stops the run either: when it has the kind and subject of the chain the run runs in, as a `titleChanged` hook's rename does, the other hooks' steps for it join that chain after its waiting steps, and the registry passes the event's hook chain as the scheduler's `causes` for this.
 - Depth: an event whose chain holds three hooks reaches no hook, so two hooks that react to each other stop after three steps.
-- Rate: a hook skips runs beyond 10 for one subject or 60 in all within a minute (`BrowserEventRateLimiter`, which plugin events use too) and logs them as `skipped` with `rateLimit`, one entry a minute, so a burst of selections or new tabs only thins its runs and a page that reloads itself does not fill the log. A `titleChanged` hook that would start more than 10 runs for one tab in a minute pauses with `ranTooOften` until the user resumes it, since a page that changes its own title after each rename keeps it running without a cause. Hook scripts and agent runs cannot load or navigate pages, so the other kinds have no such loop.
+- Rate: a hook skips runs beyond 10 for one subject or 60 in all within a minute (`BrowserEventRateLimiter`, which plugin events use too) and logs them as `skipped` with `rateLimit`, one entry a minute, so a burst of selections or new tabs only thins its runs and a page that reloads itself does not fill the log. A `titleChanged` hook that would start more than 10 runs for one tab in a minute for events with a cause pauses with `ranTooOften` until the user resumes it, since code that answers each rename, as a plugin may, keeps it running; a page's own title changes past the cap only skip, as a hook's name hides them from the row. Hook scripts and agent runs cannot load or navigate pages, so the other kinds have no such loop.
 - `titleChanged` hooks react to page titles only unless the user picks other sources.
 - The daily count skips runs past the hook's `runsPerDay` until the next day, logs one `dailyLimit` entry that day, and its row says so.
 
 ### Pausing
 
-- A hook pauses when the user pauses it; after three consecutive failed or timed-out runs (`failures`); when the scheduler pauses its owner after three consecutive `authentication` or `providerUnavailable` errors (`providerErrors`), which a change to the tier route its options name resumes, also after a relaunch; with `ranTooOften`; at Stop All Agents for every hook with `agent`; when its scope is deleted, its script or a shell hook's interpreter changes outside Arch, shell scripts are switched off, or it needs a newer Arch; when the grant of the outside program that added it ends (`grantEnded`); and when a run would reach a provider Arch did not see the user set up (`unknownProvider`).
+- A hook pauses when the user pauses it; after three consecutive failed or timed-out runs (`failures`), not counting runs refused by the agent runs' daily count (`dailyRuns`), which `ai-usage.json` keeps across launches; when the scheduler pauses its owner after three consecutive `authentication` or `providerUnavailable` errors (`providerErrors`), which a change to the tier route its options name resumes, also after a relaunch; with `ranTooOften`; at Stop All Agents for every hook with `agent`, which replaces a provider-error pause so that no route change resumes it; when its scope is deleted, its script or a shell hook's interpreter changes outside Arch, shell scripts are switched off, or it needs a newer Arch; when the grant of the outside program that added it ends (`grantEnded`); and when a run would reach a provider Arch did not see the user set up (`unknownProvider`).
 - Resume clears the counts. A paused hook keeps its place and settings, and its row shows why with Resume or Review.
 - Turning Run Hooks off stops every hook without changing their states.
 
 ### Run log
 
-`~/Library/Application Support/Arch/hooks-activity.json` keeps runs for 30 days, at most the latest 10,000 entries, with Clear Activity in Settings. Arch writes it only after an entry or Clear Activity changes it, so a launch without runs leaves no file. A file that cannot be decoded is renamed `hooks-activity.json.unreadable`, as in other stores.
+`~/Library/Application Support/Arch/hooks-activity.json` keeps runs for 30 days, at most the latest 10,000 entries, with Clear Activity in Settings, which also empties the rows' last runs. Arch writes it only after an entry or Clear Activity changes it, so a launch without runs leaves no file. A file that cannot be decoded is renamed `hooks-activity.json.unreadable`, as in other stores.
 
 ```json
 { "id": "…", "date": "2026-11-14T09:30:14Z", "hook": "3B0D…", "event": "pageLoaded", "subject": "open", "site": "example.org",
@@ -708,7 +471,7 @@ What VII.25 decided while building the registry:
 
 - Outcomes: `completed`, `failed` with a code, `timedOut`, `cancelled`, and `skipped` with `loop`, `rateLimit`, `dailyLimit`, `budget`, or `dropped`. A hook past a limit logs one skip for it a minute, `rateLimit` and `budget`, or a day, `dailyLimit`.
 - Entries never hold page text, titles, assigned names, prompts, replies, script output, or an address's path or query. The site is the page's registrable domain, as in the agents' log (`AgentActivityEntry.site(of:)`).
-- The hook's `record` decides: Keep the Session and Keep Activity Only log every run; Keep Nothing logs none. `lastRuns` keeps the last 20 runs in memory for Settings, from the log at the first two levels. For Keep Nothing it keeps only the day's run count, failure count, and last run's time and outcome.
+- The hook's `record` decides: Keep the Session and Keep Activity Only log every run; Keep Nothing logs none. `lastRuns` keeps the last 20 runs in memory for Settings, from the log at the first two levels. For Keep Nothing it keeps only the day's run count, failure count, and the last run's or skip's time, outcome, code, and reason, with Arch's own failure sentence, never a script's or a model's words.
 - Events matching no hook's filter are not logged.
 
 ## Script runner
@@ -718,6 +481,7 @@ What VII.25 decided while building the registry:
 - A JavaScript hook script uses `Plugins`' unchanged script runtime: a `ScriptPlugin` instance with its hidden web view, `PluginSchemeHandler`, content security policy, rule list, Lockdown Mode, non-persistent data store, and bridge (`docs/plugins.md`, Sandboxing). The runner makes a package in memory: the manifest's identifier `xyz.taeyoon.arch.hook.<hook id>`, the hook's name, the plugin permissions of its grant's (`tabs` and `tabs.rename`, with the hook-only `arch.agent.run` bridge when the hook has an agent grant), `events` with the trigger's kind, and `hook.js` as the background script, which the scheme handler serves from the checked bytes the package holds. `Plugins` makes `ScriptPlugin` and the package initializer public for this. The plugin manager takes no part. Hook scripts are not plugins in Settings ▸ Plugins and have no storage, secrets, settings, network, clipboard, or notifications.
 - `HookScriptContext` in `Hooks` is the script's `PluginContext`, bound to the event's Persona with the hook's grant and the run's tabs (Run tabs). Every action carries the run's cause and honors its test flag. Storage and secrets are empty and read-only.
 - The script is a classic script of at most 256 KB and must parse. `JSCheckScriptSyntax` checks it without running it, as the composer checks plugins AI writes. It calls `arch.events.on(kind, listener)` when it loads; the run ends when the listener's promise settles. A rejected promise or thrown error fails the run with the error's message. Its first 200 characters stay in memory for the hook's last runs.
+- A script with `agent` calls `await arch.agent.run(event.hook.agent)`, or options that name the same saved route and stay within the grant; the result holds the reply only when the grant returns it. A listener's end, a change to the hook, and the run's end cancel its pending agent calls, and an instance that has `agent` is released after each run, so that no callback acts on a later event.
 - Instances: at most 2 per hook and Persona, each handling one run at a time. Every call an instance makes belongs to its current run. An instance stops after 30 seconds without a run. The hook's timeout replaces the plugins' 10-second hang rule: a timeout ends the instance.
 
 What VII.26 decided while building the runner:
@@ -731,7 +495,7 @@ What VII.26 decided while building the runner:
 - `arch.events.on` may set several listeners for a kind, which run one after another; one for a kind the manifest does not list never runs. The event's dates are ISO 8601.
 - The registry gives every run tab its document as the run starts, so the script context, and later the agent runner, bind renames alike. `BrowserHookHost` describes tabs as events do, by their committed addresses, so a WebKit tab whose navigation has not committed keeps the document it shows, for renames and for site exclusions alike. `rename(id)` without a name, or with `null`, removes a suggested name for that document, keeps a name the user turned down, and is not listed among the run's actions.
 - For a hook with `agent`, a tab's title and address stay out when its shown address or its committed document is on a site excluded from AI, since a tab that leaves such a page shows that page's title until the next one commits.
-- Storage and secrets refuse writes with `quotaExceeded`, `ui.copy` throws `permissionDenied`, and badges do nothing. `agent` maps to no plugin permission until VII.27 adds `PluginPermission.agent` with `runAgent(_:)`.
+- Storage and secrets refuse writes with `quotaExceeded`, `ui.copy` throws `permissionDenied`, and badges do nothing. `arch.agent.run` exists only for a hook with `agent` and saved agent options (`PluginAgentContext.permitsAgentRuns`), and needs no plugin permission.
 - A tab the script does not reach is refused with `PluginError.notGranted`, whose bridge name is `notGranted`. Tab objects name the engine as plugin tabs do (`webKit` or `chromium`), and events as their views do (`webkit` or `chromium`).
 
 ### The script API
@@ -739,7 +503,7 @@ What VII.26 decided while building the runner:
 | JavaScript | Needs | Does |
 |---|---|---|
 | `arch.events.on(kind, (event) => …)` | — | Receives the hook's events: the script view with `hook: {id, name, agent}` |
-| `arch.tabs.get(id)` | — | `{id, spaceId, kind, engine, isPinned, isSelected}`, with `title` and `url` under `tabs`, for a tab the hook reaches (Run tabs), otherwise `null`; for a hook with `agent`, a tab on a site excluded from AI has no `title` or `url` (hook decision 14) |
+| `arch.tabs.get(id)` | — | `{id, spaceId, kind, engine, isPinned, isSelected}`, with `title` and `url` under `tabs`, for a tab the hook reaches (Run tabs), otherwise `null`; `url` is the run's document for the tab, which its renames belong to, not a navigation's address that WebKit shows before it commits; for a hook with `agent`, a tab on a site excluded from AI has no `title` or `url` (hook decision 14) |
 | `arch.tabs.list()` | — | The tabs the hook reaches, in sidebar order, in the same form |
 | `arch.tabs.rename(id, name)` | `tabs.rename` | Sets the suggested name of a tab the hook reaches under hook decision 13, with the name's first line trimmed and cut to 60 characters. The name belongs to the run's document for the tab; it resolves `true` when the tab takes it and `false` when the user's name or refusal prevents it or the tab no longer shows that document. `null` clears the suggested name |
 | `arch.agent.run(options)` | `agent` | An agent run (Agent run API); resolves with its result, without `reply` for an outside program's hook |
@@ -751,24 +515,24 @@ The editor's script for Tidy Tab Names:
 
 ```js
 // Arch wrote this script for the agent hook "Tidy Tab Names".
-// Its instructions, model, record, actions, and limits are in event.hook.agent, which Settings ▸ AI ▸ Agent Hooks edits.
+// Its instructions, model, record, actions, and limits are in event.hook.agent, which Settings ▸ AI ▸ Hooks edits.
 arch.events.on("pageLoaded", async (event) => {
   await arch.agent.run({ ...event.hook.agent, tabs: [event.tab.id] });
 });
 ```
 
-The template for "A tab closes" passes the closed tab as data and the tabs left in its space as the run's tabs:
+The template for "A tab closes" passes the closed tab as data and the tabs left in its space as the run's tabs, and runs no agent when none is left, as the template for "You switch spaces" does for an empty space:
 
 ```js
 arch.events.on("tabClosed", async (event) => {
   const left = (await arch.tabs.list()).filter((tab) => tab.spaceId === event.tab.spaceId);
-  await arch.agent.run({ ...event.hook.agent, closedTab: event.tab.id, tabs: left.map((tab) => tab.id) });
+  if (left.length) await arch.agent.run({ ...event.hook.agent, closedTab: event.tab.id, tabs: left.map((tab) => tab.id) });
 });
 ```
 
 ### Shell scripts
 
-- Settings ▸ AI ▸ Agent Hooks ▸ Allow Shell Scripts is off by default. Turning it off pauses every shell hook with `shellScriptsOff`.
+- Settings ▸ AI ▸ Hooks ▸ Allow Shell Scripts is off by default. Turning it off pauses every shell hook with `shellScriptsOff`.
 - New Script Hook… ▸ Shell Script ▸ Choose File… opens `NSOpenPanel`. Arch shows the file's full text, its interpreter's resolved path, and what the script receives, and says: "Commands this script runs by name come from your PATH, and each of them gets this hook's access to Arch." After Touch ID or the login password, Arch trusts the file, copies it into the hook's folder as `hook.sh`, and records its SHA-256 digest and its interpreter in `hooks.json`. Update from File… does the same for a changed file and marks the changed lines. Arch runs only its own copy.
 - The file is a regular UTF-8 file of at most 1 MB. Its first line is `#!` with an absolute path to an executable, or `/usr/bin/env` and one program name.
 - Interpreter: at trust time Arch resolves the first line to an absolute path, looking a `/usr/bin/env` program up in the PATH the script will get and following links, and records the path and the SHA-256 of the executable (`HookInterpreter`). Before each run it checks both and starts that path itself, never through `env`. A changed interpreter, as after an update or a replaced file, pauses the hook with `scriptChanged`, whose Review shows the interpreter's path and asks for Touch ID again. Arch does not refuse interpreters in folders the user can write to, since package managers install there; the sheet names such a folder.
@@ -897,10 +661,13 @@ public enum AgentRunAction: Codable, Hashable, Sendable {
 
 @MainActor
 public final class AgentRunner {
-    public func run(_ request: AgentRunRequest) async -> AgentRunResult
+    /// Runs beyond two wait for a slot in arrival order within their time limit.
+    public func run(_ request: AgentRunRequest, personaID: UUID, rename: @escaping Rename) async -> AgentRunResult
     /// Runs kept with Keep the Session, newest first, at most 20 per hook or grant, in memory until deleted or quit.
-    @Published public private(set) var keptRuns: [AgentKeptRun]
-    public func deleteKeptRun(_ id: UUID) async
+    @Published public private(set) var keptRuns: [KeptRun]
+    public func deleteKeptRun(_ id: UUID)
+    /// A removed hook's, or an ended editor test's.
+    public func deleteKeptRuns(of feature: AIFeatureID)
     /// Stop All Agents.
     public func cancelAll()
 }
@@ -909,10 +676,6 @@ public final class AgentRunner {
 - Callers: hook scripts through `arch.agent.run`; the editor's Test and a hook row's Run on Current Tab through `HookRegistry.test(_:onTab:applying:)`; outside programs through the control method `agent/run` and `arch-cli agent run`; and a shell hook's `arch-cli agent run` under the hook's grant. `AgentService` owns the runner.
 - Before a run starts, the runner checks the options against the grant: tools within its tools, tab access at most its own, the record between its minimum and maximum, and limits at most its ceilings. A call that asks for more is `refused` with `notGranted` and a sentence naming the field. Each tab must be in `allowedTabs` when the request sets it and exist in the caller's Persona. A tab on a site excluded from AI is left out of the run, and the run is refused (P16) when that leaves it no tab and no closed tab, so a close run over a space's tabs skips an excluded one. `closedTab` must be the close of the run's own event. The daily run count comes next, then the route, which for a hook must resolve to a known provider.
 - In JavaScript and on the wire, options are JSON: `{"prompt": …, "tabAccess": "title", "model": {"tier": "fast"} or {"models": [{"provider": …, "model": …}]}, "record": "none", "tools": ["rename_tab"], "limits": {"timeout": 20, "rounds": 1, "toolCalls": 2}, "tabs": [<tab id>], "closedTab": <tab id>, "dryRun": false}`, with durations in seconds. Omitted fields use the grant's values for tools and tab access and the defaults above for the rest; `prompt` and `model` are required. `AgentRunOptions`' own decoding, which `hooks.json` uses, requires `tabAccess` and `tools` too, so the script API and `agent/run` fill them from the grant before decoding (VII.27).
-
-Saving agent options already checks the grant, prompt, tool access, record level, and run limits. The API-key runner checks those limits, its caller and tabs, and the provider destinations before reserving one daily run in the usage store. It supports title data, document-bound `rename_tab`, and individually granted `read_text` and `snapshot` with page access. The CLI hook runner uses the same checks and tools on one ephemeral turn. It requires its own process-bound ticket for tool calls and closes the connection after the turn. A route may contain HTTP models or CLI presets, with fallback within that transport. When the user grants both page access and `snapshot`, the hook can read page outlines with the same form-value redaction as a shared session tab. Its refs and diffs are private to this run and document. Read Page Text and Read Page Outline are separate choices. At a recording level that keeps activity, calls to either tool get metadata-only entries.
-
-The script editor’s Allow Agent Runs setting records a specific model and instructions. New grants send the title and address of the event’s tab. Separate switches allow suggesting a name, reading page text and reading a page outline. A script calls `await arch.agent.run(event.hook.agent)` or passes options naming that same saved route and a subset of its grant. The result returns the reply only when the grant allows it. A test previews changes unless Apply Changes is on. Pending model calls are canceled when the listener finishes, the hook changes, or the run ends. Agent-enabled script instances are released after each invocation so their callbacks cannot act on a later event. A provider destination first seen outside Settings requires approval in the hook’s Review sheet.
 
 ### Run tabs
 
@@ -924,43 +687,9 @@ The script editor’s Allow Agent Runs setting records a specific model and inst
 
 ### Model choice and tiers
 
-```swift
-// AI
-public enum AIModelTier: String, Codable, Hashable, Sendable, CaseIterable {
-    case fast, standard, deep
-}
+`AIModelTier` and `AIRouteChoice` are in `AI/AIRouting.swift`, `AIFeature.routing` (`stored` or `perRequest`) in `AI/AIFeature.swift`, and `resolvedModels(for:route:)` and `isAvailable(_:route:)` on `AIService`.
 
-public enum AIRouteChoice: Codable, Hashable, Sendable {
-    case tier(AIModelTier)
-    /// A model and up to two fallbacks.
-    case models([AIModelRef])
-}
-
-public enum AIFeatureRouting: String, Codable, Sendable {
-    /// The feature's route in `ai.json`, which Settings ▸ AI ▸ Features edits. The default.
-    case stored
-    /// Each request names its route. Features does not list the feature; Usage lists it by name.
-    case perRequest
-}
-
-// AIFeature
-public var routing: AIFeatureRouting
-// AIRequest and AIAgentSessionRequest
-public var route: AIRouteChoice?
-// AIRequest
-/// false leaves the request's Activity entry without content, so Show Content has nothing to show. true by default.
-public var recordsContent: Bool
-// AINotConfiguredReason
-case emptyTier(AIModelTier)
-// AIFeatureID: a tier's route in `ai.json`, which is not a feature
-public static func tier(_ tier: AIModelTier) -> AIFeatureID
-// AIService
-/// The models a request with `route` would try, in order, after Routing's step 3 without its page data rule.
-public func resolvedModels(for id: AIFeatureID, route: AIRouteChoice? = nil) throws -> [AIModelRef]
-public func isAvailable(_ id: AIFeatureID, route: AIRouteChoice? = nil) -> Bool
-```
-
-- Tiers are routes in `ai.json` under `tier.fast`, `tier.standard`, and `tier.deep`, each with a model and up to two fallbacks. Their `isEnabled` is written true and not read, so a hand-written tier may leave it out. Settings ▸ AI ▸ Model Tiers edits them with the Features rows' model menus, explains each tier's purpose in a sentence that names no feature, says that the features under Features use the models chosen there, and starts empty. A tier lists any connected model; requirements drop unsuitable models when a request resolves it.
+- Tiers are routes in `ai.json` under `tier.fast`, `tier.standard`, and `tier.deep`, each with a model and up to two fallbacks. Their `isEnabled` is written true and not read, so a hand-written tier may leave it out. The Fast Tier, Standard Tier, and Deep Tier sections at the end of Settings ▸ AI ▸ Features edit them with the feature rows' model menus, explain each tier's purpose in a sentence that names no feature, say that the features above use the models chosen for them, and start empty. A tier lists any connected model; requirements drop unsuitable models when a request resolves it.
 - Resolution: a `perRequest` feature takes the request's route and throws `notConfigured(.noModel)` without one. A `stored` feature with trigger `user` may use a request's route instead of its stored one, as the agent composer's model menu and `arch-cli agent run --tier` do. A `stored` automatic feature refuses one with `blockedByPolicy(.routeNotAllowed)`, so Tab Names keeps its own route; its sentence, "This feature uses the models chosen for it in Settings ▸ AI, so a request cannot name its own.", blames no provider, and it offers no action, since neither a retry nor a setting changes it. A tier resolves to its route's models; an empty tier throws `notConfigured(.emptyTier(_:))`, whose action is "Assign a model to the Fast tier in Settings ▸ AI." with Open AI Settings. Step 3 of Routing (`docs/ai.md`) then drops models without a required capability, and fallbacks follow the tier's list as for any route.
 - A stored automatic feature refuses a request's route before its switch is read, so the refusal does not depend on the switch. A route that lists no model throws `notConfigured(.noModel)`; one that lists more than three keeps the first three.
 - `AIAgentSessionRequest.route` applies when the request names no `model`, which stays the way to pin one model. A pinned model resolves as a route of that one model, so a stored automatic feature refuses it with `routeNotAllowed` and a stored feature's switch applies to it. A CLI session makes no Activity entry, so `recordsContent` is on `AIRequest` alone, which an API-key session's rounds use; a CLI session's transcript stays with its owner in memory.
@@ -971,12 +700,11 @@ public func isAvailable(_ id: AIFeatureID, route: AIRouteChoice? = nil) -> Bool
 
 ### Known providers
 
-The API interface checks each hook's approved provider destination again after waiting for a slot. For HTTP it checks after the Keychain read and before dispatch. For a CLI it checks before sign-in checks and again before handing the tool a message. A changed destination refuses the run before sending page data.
-
 `ai.json` is not sealed, so a program could add a provider with its own address, or change an existing provider's address, and point a tier at it; every hook on that tier would then send its titles and page text there. Hooks therefore use only providers Arch saw the user set up.
 
-- `hooks.json` keeps `knownProviders`: each provider's identifier and destination (`AgentRunRequest.destination(of:)`): an HTTP provider's base address, since its headers and format cannot send requests to another host, or a command-line tool's executable path followed by the SHA-256 of its preset, arguments, and environment, since a variable such as one that names another server or a proxy, or another argument, can send the tool's requests elsewhere. The registry follows `AISettingsStore.providers` while Arch runs and records each provider the user adds or changes in Settings ▸ AI ▸ Providers. When Arch first writes `hooks.json`, it records the providers `ai.json` holds then.
-- `AISettingsStore` reads `ai.json` only at launch, so a provider or destination that first appears at a later launch came from an edit outside Arch. A hook's run that resolves to it is refused with `unknownProvider` before any request, and the hook pauses with `unknownProvider`. Its row says "Its model is now \<provider> at \<destination>, which was not set up in Arch." with Review; Allow records the provider and resumes the hook.
+- `hooks.json` keeps `knownProviders`: each provider's identifier and destination (`AIProviderConfiguration.hookDestination`): an HTTP provider's base address, since its headers and format cannot send requests to another host, or a command-line tool's executable path followed by the SHA-256 of its preset, arguments, and environment, since a variable such as one that names another server or a proxy, or another argument, can send the tool's requests elsewhere. The registry follows `AISettingsStore.providers` while Arch runs and records each provider the user adds or changes in Settings ▸ AI ▸ Providers. When Arch first writes `hooks.json`, it records the providers `ai.json` holds then, but only when no earlier `hooks.json` was sealed with the key (`HookStore.trustsCurrentProviders`), so a program that deletes or corrupts the file and edits `ai.json` gains no known provider; one that also removes the Keychain item resets this.
+- The AI interface checks a hook's approved destination again after the wait for a provider slot: for HTTP after the Keychain read and before the request, and for a CLI before its sign-in check and again before the tool gets the message. A changed destination refuses the run before any page data goes out.
+- `AISettingsStore` reads `ai.json` only at launch, so a provider or destination that first appears at a later launch came from an edit outside Arch. A hook's run that resolves to it is refused with `unknownProvider` before any request, and the hook pauses with `unknownProvider`. Its row offers Review, whose dialog shows each such provider from its settings now: an HTTP provider's base address, or a command-line tool's executable, arguments, and environment, with the values of variables whose names contain KEY, TOKEN, or SECRET hidden, and says that another program may have changed them. Allow records the provider, saves `hooks.json`, and resumes the hook.
 - Outside clients' runs (`agentRun`) skip the check, since their results go to the client that asked anyway.
 
 ### Record levels
@@ -987,8 +715,7 @@ The API interface checks each hook's approved provider destination again after w
 | Keep Activity Only (`activity`) | None: dropped when the run ends | As above | Without content | Counted |
 | Keep Nothing (`none`) | None | None | Without content | Counted: the totals in `ai-usage.json` and the day's run count only |
 
-- Cancelling a pending page-text read releases its caller immediately and discards a later engine reply.
-- Recorded hook tool calls appear in Settings ▸ AI ▸ Agents ▸ Activity for API-key and CLI runs. Each entry keeps the time, hook ID, automatic run ID when present, Persona ID, and catalog tool name and class, decision and outcome. Unknown tool names, domains, addresses, titles, prompts, arguments, results and replies stay out of this file. Settings resolves the hook’s current name from its ID and displays “Agent Hook” after deletion. An interrupted call records cancellation and a previewed rename records its preview. Keep Nothing writes no tool entry. The activity store expires its entries after 90 days.
+- Recorded hook tool calls appear in Settings ▸ AI ▸ Agents ▸ Activity for API-key and CLI runs. Each entry keeps the time, hook ID, automatic run ID when present, Persona ID, and catalog tool name and class, decision and outcome. Unknown tool names, domains, addresses, titles, prompts, arguments, results and replies stay out of this file. Settings names the entry by its hook's current name, or “Agent Hook” when no saved hook has the entry's ID, as after deletion or for an editor test of edited settings. An interrupted call records cancellation and a previewed rename records its preview. Keep Nothing writes no tool entry. The activity store expires its entries after 90 days and keeps at most 10,000.
 - AI Activity applies to API-key runs, whose rounds are requests of the AI interface with `recordsContent` true only at Keep the Session. A CLI run makes no Activity entry at any level, as no CLI session does (Model choice and tiers); its usage counts all the same.
 - No level writes a prompt, reply, title, page text, or address path to disk; kept runs stay in memory, as agent sessions' transcripts do (`docs/agents.md`, Storage). Claude Code runs with `--no-session-persistence` and Codex with `--ephemeral` at every level, so neither tool keeps the run, and a kept run's transcript is Arch's copy in memory. Runs never resume, so no level needs the tool's own thread.
 - Keep Nothing is allowed only for hooks the user made in Arch, and only when every tool the run may call reads or changes no more than a tab's name: the read tools and `rename_tab` today. A later tool that opens or closes tabs or acts in a page raises the lowest level to Keep Activity Only, so the agent activity log keeps each such step.
@@ -1001,40 +728,40 @@ The API interface checks each hook's approved provider destination again after w
 |---|---|---|
 | `rename_tab` | `title` or `page` | Name one of the run's tabs |
 | `read_text` | `page` | Read a run tab's text, paged, within agents' limits |
-| `snapshot` | `page` | Read a run tab's outline; refs serve reading only, since a run has no interaction tool |
+| `snapshot` | `page` | Read a run tab's outline with form values hidden, marked read-only for the run; refs serve reading only, since a run has no interaction tool, and without `read_text` only the interactive mode, since a full outline holds the page's text |
 
 - Runs get no other tool: no navigation, interaction, approval, question, hand-over, history, or download tool, and no `guide`; the run's instructions are short and fixed.
 - A run has none of the agents' modes. Its tools and tabs define its reach. An outside client's run also stays within its grant's level, and no step asks (hook decision 5).
 - `rename_tab` joins the catalog in `AgentControl`: input `tab` and `name` (1 to 60 characters after taking and trimming the first line; an empty name clears a suggested name), output the name the row shows and whether it applied, class N, `refused` with `userNamed` when the user's name or refusal keeps the tab's name, and `stale` when the tab no longer shows the document the name belongs to (hook decision 13). The model never gives the address; the host binds it.
 - Rule P19, renaming a tab: in-app sessions and outside clients may rename their own agent tabs freely, a tab the user shared after asking once per tab, and no other tab. A run (client kind `run`) reads and renames its run tabs without asking, within its grant: for a hook, the tabs its filter covers (Run tabs); for an outside client's run, its own agent tabs and the tabs shared with it, so renaming a shared tab that the user has not allowed once would ask and is refused with `wouldAsk`.
 - `AgentPolicy` gains the client kind `run`: rules that ask become `refused` with `wouldAsk`, P16 refuses as for every client, P17 limits the run to its run tabs, and P19 applies as above.
-- Arch writes the first message: who the run works for; the prompt under "The user's instructions" for a hook the user made, or under "Instructions from \<name>, a program the user allowed" for an outside program's hook or run (`promptSource`), so the model does not take a program's words for the user's; each run tab with its handle (`t1`, …) and its title and reduced address as an untrusted block (`AgentUntrusted`); a close run's closed tab as an untrusted block without a handle; the tools; and "Finish without asking; nobody will answer." The instructions are `AgentHarness.runInstructions`, a short fixed text in `AgentHarness.swift`.
+- Arch writes the first message: who the run works for; the prompt under "The user's instructions" for a hook the user made, or under "Instructions from \<name>, a program the user allowed" for an outside program's hook or run (`promptSource`), so the model does not take a program's words for the user's; each run tab with its handle (`t1`, …) and its title and reduced address as an untrusted block (`AgentUntrusted`); a close run's closed tab as an untrusted block without a handle; the tools; and "Finish without asking; nobody will answer." The instructions are a short fixed text in `AgentRunner`.
 
 ### Limits
 
 - Rounds count model requests on API-key models and turns on CLIs. With one round, an API-key run performs the round's tool calls and ends without sending their results back, so a rename costs one request. Claude Code takes `--max-turns`. Codex has no turn limit flag, so the host ends its turn at the tool-call or time limit.
 - At a limit, the run stops and applied actions stay; the result names the limit.
 - The time limit covers the whole run, including the CLI's start.
-- At most 2 automatic runs at once; their requests wait in the providers' rate limiters, where an automatic request gives up after 15 seconds.
+- At most 2 runs at once; a later one waits for a slot in arrival order, within its time limit, and their requests wait in the providers' rate limiters, where an automatic request gives up after 15 seconds.
 - Runs per day count per feature in `ai-usage.json`, beside the day's automatic request counts, and for outside clients per grant there too.
 
 ### How a run runs
 
 1. The runner resolves the route and takes its first usable model.
-2. An API-key model with `tools` runs VII.19's loop (`AgentAPISession` on `AIClient.run`) with the run's tools as `AIToolHandler`s over the tool host as client `run`, the first round's model as the route of every later round (`route: .models([model])`; `docs/agents.md`, API-key sessions), and the rounds limit. It uses no socket.
-3. A Claude Code or Codex preset runs one turn of an `AIAgentSession` (VII.16): `AIService.startAgentSession(_:)` with the route, `runInstructions`, a tool server listing only the run's tools under a ticket bound to the run (VII.17's binding), `maxTurns` set to the rounds, and `ephemeral` true at every record level. It sends the first message, waits for `turnFinished`, and calls `end(keepingThread: false)`. A Claude Code turn that stops at `--max-turns` (`error_max_turns`) counts as completed. `AIAgentSessionRequest.maxTurns` sets Claude Code's bound. With `ephemeral` set, Codex includes `--ephemeral` on its first turn. The session refuses a second message and removes its folder after the first turn finishes. The runner never sets a thread to keep, so Keep Codex's Copy of Agent Conversations does not apply to runs. Before a bounded run reaches the tool, a cached probe checks Claude Code's missing-value diagnostic for `--max-turns` or Codex's `exec --ephemeral --help`. Both checks run without a model. Each run starts a process and takes a few seconds; the editor says so when the first model in a hook's choice is a CLI.
+2. An API-key model with `tools` runs `AIClient.run` with the run's tools as `AIToolHandler`s over the tool host as client `run`, the resolved models as the first round's route, the model that served the first round pinned for every later round (`AIRequest.pinnedModel`; `docs/agents.md`, API-key sessions), and the rounds limit. It uses no socket.
+3. A Claude Code or Codex preset runs one turn of an `AIAgentSession` (VII.16): `AIService.startAgentSession(_:)` with the route, the runner's instructions, a tool server listing only the run's tools under a ticket bound to the run (VII.17's binding), `maxTurns` set to the rounds, and `ephemeral` true at every record level. It sends the first message, waits for `turnFinished`, and calls `end(keepingThread: false)`. A Claude Code turn that stops at `--max-turns` (`error_max_turns`) ends completed with `roundLimit`, as an API-key run at its rounds limit does. `AIAgentSessionRequest.maxTurns` sets Claude Code's bound. With `ephemeral` set, Codex includes `--ephemeral` on its first turn. The session refuses a second message and removes its folder after the first turn finishes. The runner never sets a thread to keep, so Keep Codex's Copy of Agent Conversations does not apply to runs. Before a bounded run reaches the tool, a cached probe checks Claude Code's missing-value diagnostic for `--max-turns` or Codex's `exec --ephemeral --help`. Both checks run without a model. Each run starts a process and takes a few seconds; the editor says so when the first model in a hook's choice is a CLI.
 4. Fallbacks move to the next model only before the model's first output, as for sessions.
 5. Stop All Agents, a canceled hook run, and the time limit stop the turn or loop and end the session; no process of the run remains.
 6. The result lists the actions the tool host applied during the run, the last text, the model, and usage.
 
 ## Agent hook editor
 
-### Settings ▸ AI ▸ Agent Hooks
+### Settings ▸ AI ▸ Hooks
 
-- The page lists every agent and script hook in run order. The top has Run Hooks, Allow Shell Scripts, New Agent Hook…, New Script Hook…, and Presets with Tidy Tab Names. New Agent Hook… and the presets appear while a model with `agent` exists; script hooks need no AI.
-- Each row shows the hook's switch, name, situation ("When a new tab loads its first page · Everywhere · All sites"), model ("Fast · model-a"), record ("Keeps nothing"), last run ("2 minutes ago · renamed a tab"), and, for a hook added by an outside program, origin ("Added by Codex · Terminal"). A paused row gives the reason, with Resume, or Review for a changed script or interpreter and for an unknown provider. Edit… of a script changed outside Arch opens Review too, and Duplicate takes no changed script, so another program's bytes run only once the user has read and saved them (hook decision 8). The row's menu has Edit…, Run on Current Tab, Duplicate, and Delete, which asks first; dragging reorders rows. A row opens to its last runs, with Show Session for a kept run.
+- The page lists every agent and script hook in run order, then Clear Activity. The top has Run Hooks, Allow Shell Scripts, New Agent Hook…, New Script Hook…, and Presets with Tidy Tab Names. New Agent Hook… and the presets appear while a model with `agent` exists; script hooks need no AI.
+- Each row shows the hook's switch, name, situation ("When a new tab loads its first page · Everywhere · All sites"), model ("Fast · model-a"), record ("Keeps nothing"), last run ("2 minutes ago · renamed a tab"), and, for a hook added by an outside program, origin ("Added by Codex · Terminal"). A paused row gives the reason, with Resume, or Review for a changed script or interpreter and for an unknown provider. Edit… of a script changed outside Arch opens Review too, Edit… of a missing script or one that is not text says that Arch cannot read it, and Duplicate takes no changed script, so another program's bytes run only once the user has read and saved them (hook decision 8). Duplicate also refuses an outside program's hook, whose copy would lose the caps of its origin. The row's menu has Edit…, Run on Current Tab, Duplicate, and Delete, which asks first; dragging reorders rows. A row opens to its last runs, with Show Session for a kept run.
 - Notices: a file set aside, a key the Keychain did not provide (Try Again), and a file from a newer Arch.
-- Built with VII.26: Run Hooks, the notices and a change not saved, New Script Hook… (`ScriptHookSheet`) with the situation and its options, Everywhere or places named as Persona rule 7 names them (`BrowserSession.displayedPlace(ofPersona:space:among:)`: each Persona by its name and each space as "Persona / Space", or, with one Persona, its spaces by their names alone), sites, engines, tab kinds, Read Tab Titles and Addresses and Rename Tabs, and the script from a template for the situation, which Add, or Save for a hook that exists, checks with `HookScriptRunner.problem(in:)`; and the rows with the switch, name, situation, an agent hook's model and record, last run, origin, the pause with Resume or Review, the menu with Edit…, Run on Current Tab, Duplicate, and Delete…, dragging, and the last runs. Review opens the sheet on the script as the file holds it, and its Save records the digest and resumes a hook that the change paused. `HookRegistry.scriptFile(of:)` reads the file and says whether it still matches its digest, and pauses an active hook whose file does not with `scriptChanged`, so Edit… of such a file opens Review, and Duplicate is off for a hook paused with `scriptChanged` and refuses a changed file. The Tabs toggles keep the last kind left on, since an empty set means every kind. An unknown provider's Review, which names the provider and records it with Allow, comes with VII.27, which pauses hooks for one; until then its row has no button. Allow Shell Scripts comes with VII.31.
+- `ScriptHookSheet` edits a script hook's situation and its options, Everywhere or places named as Persona rule 7 names them (`BrowserSession.displayedPlace(ofPersona:space:among:)`), sites, engines, tab kinds, of which the last one left on stays on, since an empty set means every kind, and Read Tab Titles and Addresses, which an outside program's hook never offers, and Rename Tabs. Add, or Save for a hook that exists, checks the script with `HookScriptRunner.problem(in:)`. `HookRegistry.scriptFile(of:)` reads the file and pauses an active hook whose file no longer matches its digest with `scriptChanged`, so that Edit… opens Review and Duplicate refuses it. Allow Shell Scripts comes with VII.31.
 
 ### The editor
 
@@ -1045,12 +772,12 @@ The sheet provides these sections:
 1. Name.
 2. When: the situation in plain words: "A new tab opens", "A tab loads a page" (with "Only a new tab's first page", "Each new address", or "Every load"), "A tab's address changes" (with "Only a new site" or "Any change"), "A tab's title changes" (with "The page's title", "Your names", and "Names from hooks and agents"), "You select a tab", "A tab closes" (with its reasons), "A download finishes", and "You switch spaces" (with "Only when the Persona changes").
 3. Where: Everywhere, or "Persona / Space" entries; Sites: All Sites, Only These Sites, or All Sites Except These, as `AISitePattern` entries; Engines: Both, WebKit, or Chromium; Tabs: open tabs, pinned tabs, favorites' tabs, and small windows' tabs.
-4. What the agent does: the instructions, with a placeholder example; Give the Agent: The Tab's Title and Address, or Also the Page's Text, which says page text goes to the model automatically and sites excluded from AI are skipped. For "A tab closes", the agent gets the closed tab's last title and address as data and the tabs left in its space as the tabs it may act on, and the choice reads The Titles and Addresses, or Also the Pages' Text of the tabs left (Closed tabs).
-5. Model: Fast, Standard, or Deep, or A Specific Model… with connected models that have `agent`; below it, the resolved model, "Choose a model for the Fast tier" with the tier's menu inline when empty, and the note for a CLI model.
+4. Agent: the instructions, with a placeholder example, and the switches Read Page Text and Read Page Outline (Read Text of the Tabs Left and Read Outlines of the Tabs Left for "A tab closes"). Without either the editor says that the model receives titles and reduced addresses; with Read Page Text it says that the model may read page text on the allowed tabs, and with either that sites excluded from AI are skipped; with Read Page Outline it says that outlines hold headings, labels, and links, not the page's text, with form values hidden. For "A tab closes", the agent gets the closed tab's last title and address as data and the tabs left in its space as the tabs it may act on (Closed tabs).
+5. Model: the Use menu lists Fast, Standard, and Deep, then each connected model that has `agent`; below it, each resolved model with its provider's destination, "Choose a model for the Fast tier" with the tier's menu inline when empty, and the note for a CLI model.
 6. Record: Keep the Session, Keep Activity Only, or Keep Nothing, each with one sentence from Record levels.
 7. Allowed Actions: Rename the Tab, or Rename the Tabs Left for "A tab closes". The list grows with the run tools.
-8. Limits: Time Limit, Rounds, Runs per Day, which sets both the hook's daily count and its agent runs', and Wait Before Running.
-9. Test on Current Tab: runs the hook once on the front window's selected tab; a close hook treats that tab as closed without closing it (Closed tabs). It reports actions without applying them unless Apply Changes is checked. The sheet shows the result until it closes: what would change, the agent's reply, the model, tokens, and time. A test counts toward usage, not the hook's daily count, and is logged with `test` at the first two record levels.
+8. Limits: Time Limit, which the hook's timeout exceeds by 5 seconds, Model Rounds, Tool Calls, Runs per Day, which sets both the hook's daily count and its agent runs', and Wait Before Running. Time Limit, Model Rounds, Tool Calls, and Runs per Day take a typed number beside their steppers.
+9. Test on Current Tab: runs the hook once on the front window's selected tab; a close hook treats that tab as closed without closing it (Closed tabs). It reports actions without applying them unless Apply Changes is checked. The sheet shows the result until it closes: what would change, the agent's reply, the model, tokens, and time. A test counts toward usage, not the hook's daily count. The editor's test is not logged; a row's Run on Current Tab is logged with `test` at the first two record levels. The test is not offered while the sheet reviews a script changed outside Arch, or while agent runs are off.
 10. Script: Show Script reveals the generated script, read-only; Edit Script makes it the user's (`generated` false). The editor then edits the situation and agent block but no longer writes the script. Restore Arch's Script writes the template again. The syntax check runs when the user saves an edited script.
 11. Save: writes the hook with a grant derived exactly from its options, `agent` with the options' tools, tab access, record, limits, and runs per day, and registers its feature. An edited script calling `arch.tabs` needs `tabs` or `tabs.rename`, which the Script section then offers as checkboxes. The user's edits in Arch need no Touch ID, as switching on Tab Names needs none.
 
@@ -1071,18 +798,10 @@ The sheet provides these sections:
 
 Instructions: "Give this browser tab a short name that tells it apart from other tabs: at most four words, in the language of its title. Use the title and address in the tab block, and drop site names, slogans, counters, and separators unless the name needs them. Call rename_tab once with the name. If the title is already short and clear, do not call it."
 
-- Choosing Presets ▸ Tidy Tab Names opens a new, editable draft with Enable this hook when saved off. Add saves it paused unless the user turns that switch on. The saved hook also has its own switch in the list. Opening and canceling a preset installs nothing. When the Fast tier is empty, the Model section asks for its model inline.
+- Choosing Presets ▸ Tidy Tab Names opens the editor with each choice filled in for the user to see before saving. Opening and canceling a preset installs nothing. When the Fast tier is empty, the Model section asks for its model inline.
 - Tab Names (`hook.tabName`, Settings ▸ AI ▸ Features) is an AI hook: a plain model request without tools on every new document of a tab, with up to 2,000 characters of page text, under its own stored route. It and Tidy Tab Names both set the suggested name, so both send a request on a new tab's first page. Both run in that load's chain, Tab Names first (The shared scheduler), so the name Tidy Tab Names gives wins. Arch does not merge them. Whenever an active hook renames on `tabOpened` or `pageLoaded` while Tab Names is on, the editor and hook's row say "Tab Names also names tabs. Turn on one of them." with Turn Off Tab Names.
 - Which to turn on: Tidy Tab Names for the user's case of new tabs only, a fast model, no page text, and no record. Tab Names remains for naming every page a tab loads from its text.
 - The preset is data, `HookPresets.tidyTabNames`. Once saved it is an ordinary hook that the user can edit, duplicate, or delete.
-
-### Bundle checks 89 and 90
-
-In an isolated profile, a signed debug build opened New Agent Hook… and the preset from Settings. A loopback server served the fixture pages and streamed a Chat Completions response that requested one `rename_tab` call. The editor showed the Fast tier’s model and endpoint, revealed its generated script, accepted a script edit, and restored Arch’s template. The title-only preview reported the suggested name. With Apply Changes on, the editor reported the rename.
-
-For the saves and relaunch, the same build used a fixture seal store under that profile in place of the login Keychain. The hand-created hook saved with the preset’s instructions, model, record level, grant, trigger, limits, tab kinds, and script digest. The preset saved paused and started after its row switch was turned on. A dry run left the fixture tab’s original title intact, and Apply Changes renamed it. A new WebKit tab and a new Chromium tab each issued exactly one model request with only `rename_tab`. Reopening the saved session issued no request and kept the suggested name. Keep Nothing left no `hooks-activity.json`. The built-in Tab Names warning and its Turn Off action worked in the editor and on the active row, preserving the feature’s model choice.
-
-The real-provider part of check 90 remains. Run it with a connected API-key account, then the user’s Claude Code and Codex, and verify CLI process cleanup and Codex thread retention after each turn. Production Keychain persistence was outside these isolated checks.
 
 ## Outside programs
 
@@ -1107,7 +826,7 @@ A hook that an outside program proposes reaches no more than the proposing grant
 | Instructions | Labeled in the first message as the program's, not the user's |
 | Shell scripts | Refused |
 
-- When the grant that proposed a hook ends, by Revoke, expiry, `arch-cli release`, the end of the process it was bound to, or quit for a grant until Arch quits, the hook pauses with `grantEnded` until the user resumes it in Settings ▸ AI ▸ Agent Hooks. Resume needs no Touch ID, and the hook keeps its caps.
+- When the grant that proposed a hook ends, by Revoke, expiry, `arch-cli release`, the end of the process it was bound to, or quit for a grant until Arch quits, the hook pauses with `grantEnded` until the user resumes it in Settings ▸ AI ▸ Hooks. Resume needs no Touch ID, and the hook keeps its caps.
 - The proposal sheet says: "Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read."
 - The `cli` guide topic lists `hooks add` and `agent run` from the command table with the sentence that each proposal waits for the user's approval in Arch, and the entry skill tells agents to propose a hook only when the user's own message asks for one.
 
@@ -1213,7 +932,7 @@ The app shell sets `AgentService.hookRegistrar` once both exist. The proposal sh
 | A script changed outside Arch | The hook pauses: "Its script changed outside Arch." with Review |
 | `hooks.json` set aside or unreadable | The notice in Settings; no hooks run |
 | Shell scripts switched off | Shell hooks pause: "Shell scripts are off." |
-| A hook that ran too often | Runs past the caps are skipped and logged; a `titleChanged` hook that keeps running for one tab pauses: "This hook ran too often, so Arch paused it." with Resume |
+| A hook that ran too often | Runs past the caps are skipped and logged; a `titleChanged` hook that code keeps running for one tab pauses: "This hook ran too often, so Arch paused it." with Resume |
 | A rename after the tab moved to another document | `rename_tab` returns `stale`; `arch.tabs.rename` resolves `false` |
 | A run that would reach a provider not set up in Arch | `refused`, `unknownProvider`; the hook pauses with Review |
 | A shell hook's interpreter changed | The hook pauses: "Its interpreter changed." with Review |
@@ -1223,10 +942,10 @@ The app shell sets `AgentService.hookRegistrar` once both exist. The proposal sh
 ## Tests
 
 - `EventsTests` (VII.23): each payload's JSON against fixed text; `kind`, `subject`, `personaID` (the new side for `spaceSwitched`), and `urls` for every case; filters by kind, scope (whole Personas and single spaces, with `spaceSwitched` matched by its new space), sites and exceptions through `AISitePattern`, engines, and tab kinds, with `agent` matched only when named and events without an address never matching a site list; every delivery view, with no titles, addresses only under `tabs` or a covering grant, hosts and watch IDs for outside programs, downloads only from the client's agent tabs, `excluded: true`, and `byThisClient`; the outside view of `tabSelected` and `spaceSwitched`, delivered only with the grant's Persona on one side, with window handles, space handles for the grant's spaces, and `otherPersona: true` without identifiers for the other side; `withCause` and sequence order.
-- `BrowsingTests` (VII.23): the source posts each kind for session changes on fake web contents: a new tab but no restored tabs, closes with each reason and the tab's last address, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change through a WebKit navigation that becomes a download or is stopped before it commits, selection and space switches with a Persona change, a finished download, and `Tab.pendingCause` on the next load, dropped by a load that ends without one; `BrowserHooks` maps bus events to the AI hook center as before, cancels a tab's chains for an earlier document, not for an address the tab leaves before it commits, and at its close, and existing hook action tests pass unchanged. The tests build no session, so VII.23.1 confirms the session's code: `closeTab` posts `tabClosed` while the session still lists the tab, `adopt` and `openSmallWindow` set a popup's opener before its tab joins the list, every selection of `reopenWindows`, from `restoreWindows()` and `sidebarTarget()` alike, runs inside `restoringWindows(_:)`, and `deletePersona` closes its tabs with `eventReason: .spaceDeleted`. Nothing in the bundle subscribes to `tabSelected`, `spaceSwitched`, or a popup's opener before VII.26, so checks 87 and 91 observe them.
+- `BrowsingTests` (VII.23): the source posts each kind for session changes on fake web contents: a new tab but no restored tabs, closes with each reason and the tab's last address, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change through a WebKit navigation that becomes a download or is stopped before it commits, selection and space switches with a Persona change, a finished download, and `Tab.pendingCause` on the next load, dropped by a load that ends without one; `BrowserHooks` maps bus events to the AI hook center as before, cancels a tab's chains for an earlier document, not for an address the tab leaves before it commits, and at its close, and existing hook action tests pass unchanged. The tests build no session, so VII.23.1 confirms the session's code: `removeTab` posts `tabClosed` while the session still lists the tab, `adopt` and `openSmallWindow` set a popup's opener before its tab joins the list, every selection of `reopenWindows`, from `restoreWindows()` and `sidebarTarget()` alike, runs inside `restoringWindows(_:)`, and `deletePersona` closes its tabs with reason `.persona`, which posts `spaceDeleted`. Nothing in the bundle subscribes to `tabSelected`, `spaceSwitched`, or a popup's opener before VII.26, so checks 87 and 91 observe them.
 - `AITests` (VII.23): `AIHookScheduler` with steps of one event from two owners in order, steps of another event replacing the chain, `cancel(subject:except:)` keeping the close's own chain, `cancel(subject:otherThan:)` ending only other documents' chains, the per-owner pause after three authentication or provider errors and its resume when one of the step's routes changes, the feature checks for steps with a feature and none without, and a step stopped after its work returned but before its chain took the end ending as stopped; the center's existing hook tests pass unchanged.
 - `AITests` (VII.24, built in `ModelTierTests.swift`): tier resolution with fallbacks, an empty tier's error, request routes accepted for `perRequest` and user features and refused for stored automatic ones, capability drops after a tier, budgets for `perRequest` automatic features, `recordsContent` false leaving Activity without content, a session started on a tier, `AIRouteChoice`'s JSON, and the tier routes read and written in `ai.json`.
-- `HooksTests` (VII.25, built in `HookStoreTests.swift` and `HookRegistryTests.swift`): `hooks.json` read and written sealed; an edited file, a restored earlier copy, and a missing key handled as for `agent.json`; a test migration from version 0, and a file from a later version copied and kept, with its unknown hook listed but not run; triggers and filters; list order after the center's hooks in one chain through the scheduler; delay and replacement; a newer event canceling a run; a new document ending a run for the earlier one, and a `firstAfterOpen` hook so ended running once for the next load; a `tabClosed` hook running after the tab is gone, with the closed tab's last name and address kept in memory only; a close ending the tab's other runs; concurrency caps and the dropped oldest run; loop protection (own effects, depth, runs past the caps skipped as `rateLimit` without a pause and logged once a minute, and the `titleChanged` pause); pausing after three failures, after the scheduler's pause, also across a relaunch, and Resume; an update that keeps the state; Stop All Agents; a deleted place; a changed digest; the daily count, also for runs that waited for slots together; a later version's hook with an unknown member inside a value listed but not run, and its copy kept across launches; a command-line provider's destination; a test only on a tab the filter covers; run log entries with no title, name given, prompt, reply, output, or address path, with none at Keep Nothing; no file without hooks; and the log's latest entries. `AgentTests` (VII.25, built in `AgentRunTests.swift`): the JSON of `AgentRunOptions`, `AgentRunLimits`, `AgentRunGrant`, `AgentRunRecord`, `AgentRunTabAccess`, and `AgentRunResult` against fixed text, with `closedTab` and the grant's `minimumRecord` and `returnsReply`. `AITests` (VII.25, built in `AIHookSchedulerTests.swift`): a `perRequest` step skipped as `unavailable` without its route and run with a tier that has a model.
+- `HooksTests` (VII.25, built in `HookStoreTests.swift` and `HookRegistryTests.swift`): `hooks.json` read and written sealed; an edited file, a restored earlier copy, and a missing key handled as for `agent.json`; a test migration from version 0, and a file from a later version kept, with its unknown hook listed but not run; triggers and filters; list order after the center's hooks in one chain through the scheduler; delay and replacement; a newer event canceling a run; a new document ending a run for the earlier one, and a `firstAfterOpen` hook so ended running once for the next load; a `tabClosed` hook running after the tab is gone, with the closed tab's last name and address kept in memory only; a close ending the tab's other runs; concurrency caps and the dropped oldest run; loop protection (own effects, depth, runs past the caps skipped as `rateLimit` without a pause and logged once a minute, and the `titleChanged` pause); pausing after three failures, after the scheduler's pause, also across a relaunch, and Resume; an update that keeps the state; Stop All Agents; a deleted place; a changed digest; the daily count, also for runs that waited for slots together; a later version's hook with an unknown member inside a value listed but not run; a command-line provider's destination; a test only on a tab the filter covers; run log entries with no title, name given, prompt, reply, output, or address path, with none at Keep Nothing; no file without hooks; and the log's latest entries. `AgentTests` (VII.25, built in `AgentRunTests.swift`): the JSON of `AgentRunOptions`, `AgentRunLimits`, `AgentRunGrant`, `AgentRunRecord`, `AgentRunTabAccess`, and `AgentRunResult` against fixed text, with `closedTab` and the grant's `minimumRecord` and `returnsReply`. `AITests` (VII.25, built in `AIHookSchedulerTests.swift`): a `perRequest` step skipped as `unavailable` without its route and run with a tier that has a model.
 - `HooksTests` and `PluginsTests` (VII.26, built in `HookScriptRunnerTests.swift` with `Fixtures`, `PluginEventsTests.swift`, and, for the rename rule, `BrowserEventSourceTests.swift`, with the row texts in `AgentHooksSummaryTests.swift`): a fixture hook script in the sandbox receiving its event; `arch.tabs.get` without `tabs` lacking title and address; `arch.tabs.list` and `get` limited to the tabs the hook's filter covers in the event's Persona, without agent tabs, and, for a hook with `agent`, without the title and address of a tab on an excluded site; `rename` of a tab outside the filter refused; `rename` through a fake `PluginBrowserHost` under the suggested name rules, carrying the run's cause and reporting in a test, bound to the run's document and resolving `false` after the tab moves to another document; a timed-out run ending its instance; a held instance kept past its idle limit; a listener's thrown values as the run's message; a run tab's committed document from the registry keeping an excluded page's title out while the tab shows another address; the syntax check; plugin events through the script view for a manifest's `events`, never for the plugin's own renames and at most 10 for one tab a minute (`PluginEventsTests.swift`, with `BrowserEventRateLimiterTests.swift` in `EventsTests`); a run's own effect joining its chain without stopping it (`AIHookSchedulerTests.swift`, `HookRegistryTests.swift`); a deferred name's cause and the hook host's committed addresses (`BrowserEventSourceTests.swift`); and `scriptFile(of:)`, Edit… and Duplicate on a changed file, and the last tab kind kept on (`HookRegistryTests.swift`, `AgentHooksSummaryTests.swift`).
 - `AgentTests` (VII.27): options checked against the grant, with the record between its minimum and maximum; tabs outside `allowedTabs` refused with `notGranted`, so a script that passes every tab of the Persona reaches none outside its filter; `closedTab` accepted only from its own close and given as an untrusted block without a handle; the `run` client kind refusing every asking rule with `wouldAsk` and other tabs with P17; P19 as a policy table for sessions, outside clients, and runs, with a run renaming and reading its run tabs without asking and an outside client's run refused with `wouldAsk` on a shared tab not yet allowed; `rename_tab` bound to the run's document, `stale` after a navigation during the run; each record level's files and memory, and no reply for a grant that returns none; the first message's label for the user's and a program's instructions; a hook's run refused with `unknownProvider` for a provider outside `knownProviders`; one round ending after its tool calls without sending results back, through the scripted provider; a CLI run's arguments with `--max-turns`, `--ephemeral` at every record level, and only the run's tools, through the fake CLIs of `AITests`; the daily run count; and Stop All Agents.
 - `PreferencesTests` and `HooksTests` (VII.28, VII.29): the editor's choices turned into a hook, a grant, and the template script, the close template among them; an edited script kept and the template restored; Test reporting a rename without applying it, and Test of a close hook treating the selected tab as closed; row summaries with "Persona / Space" entries; the Tidy Tab Names preset's values; `firstAfterOpen` matching a new tab's first page but neither its second nor a restored tab's; and the Tab Names warning.
@@ -1237,7 +956,7 @@ The app shell sets `AgentService.hookRegistrar` once both exist. The proposal sh
 
 Each task that needs the app adds its check to the regression checklist in `docs/plan.md` with these numbers. Run them on both engines with a fresh Application Support folder.
 
-87. Script hooks: with Run Hooks on, New Script Hook… with a JavaScript script that renames a new tab's first page to its host through `arch.tabs.rename` renames tabs on both engines and leaves tabs the user named alone, and Save refuses a script that does not parse. A second hook that renames on `titleChanged` with the source "Names from hooks and agents" runs once for each of the first hook's renames and never for its own; Pause and Resume work. A hook on "A tab closes" runs once for each tab the user closes. Right after a relaunch, hooks on "You select a tab" and "You switch spaces" have not run; each then runs once for each selection and switch the user makes. A hook on "A new tab opens" gets a sign-in popup's opener as `openerTabId`. Dragging a row reorders the hooks, Duplicate and Delete… work, and Run on Current Tab reports what the hook did. Editing `hook.js` in another editor pauses the hook with Review, whose Save lets it run again. Editing `hooks.json` by hand sets it aside, shows the notice, and no hook runs.
+87. Script hooks: with Run Hooks on, New Script Hook… with a JavaScript script that renames a new tab's first page to its host through `arch.tabs.rename` renames tabs on both engines and leaves tabs the user named alone, and Save refuses a script that does not parse. A second hook that renames on `titleChanged` with the source "Names from hooks and agents" runs once for each of the first hook's renames and never for its own; Pause and Resume work. A hook on "A tab closes" runs once for each unpinned tab the user closes. Right after a relaunch, hooks on "You select a tab" and "You switch spaces" have not run; each then runs once for each selection and switch the user makes. A hook on "A new tab opens" gets a sign-in popup's opener as `openerTabId`. Dragging a row reorders the hooks, Duplicate and Delete… work, and Run on Current Tab reports what the hook did. Editing `hook.js` in another editor pauses the hook with Review, whose Save lets it run again. Editing `hooks.json` by hand sets it aside, shows the notice, and no hook runs.
 88. Agent runs: with an API-key model with tools as the Fast tier, a script hook calling `arch.agent.run` with the Fast tier and `rename_tab` renames a new tab in one request (Settings ▸ AI ▸ Activity). At Keep Nothing, `hooks-activity.json` gains no entry and the Activity entry has no Show Content; at Keep Activity Only, an entry has no title or address path; at Keep the Session, the row's last runs offer Show Session. An empty Fast tier fails with its sentence.
 89. The editor: New Agent Hook… makes the hook described in Tidy Tab Names by hand. Test on Current Tab shows the proposed name without renaming; Apply Changes renames. Show Script shows the template, Edit Script keeps the user's change, and Restore Arch's Script restores the template.
 90. Tidy Tab Names: the preset with the Fast tier on an API-key model renames each new tab once on both engines, leaves restored tabs alone after a relaunch, and keeps nothing. With Claude Code, then Codex, as the Fast tier, each new tab's run ends with no `claude`, `codex`, or `arch-mcp` process left, and Codex keeps no thread. With Tab Names also on, the warning appears, and Turn Off Tab Names switches it off.

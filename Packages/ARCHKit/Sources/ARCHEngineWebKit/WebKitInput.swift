@@ -66,10 +66,10 @@ final class WebKitInput: EngineInput {
         events.forEach(webView.sendKeyEvent)
     }
 
-    /// WebKit inserts the text as it does an input method's text outside a key press, also in a page that no window shows. Text that is a line break alone submits a single-line field's form, as Enter does, so no text with a line break goes.
+    /// WebKit inserts the text as it does an input method's text outside a key press, also in a page that no window shows. Text that is a line break alone submits a single-line field's form, as Enter does, so no text with a line break or a control character goes.
     func insertText(_ text: String) throws {
         guard let webView else { throw EngineInputError.noPage }
-        guard !text.contains(where: \.isNewline) else { throw EngineInputError.unsupported }
+        guard !text.contains(where: \.isNewline), !text.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { throw EngineInputError.unsupported }
         webView.insertText(text)
     }
 

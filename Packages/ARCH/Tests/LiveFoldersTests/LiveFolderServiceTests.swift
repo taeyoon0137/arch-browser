@@ -125,10 +125,6 @@ private final class GatedKeychain: LiveFolderAddressStore, @unchecked Sendable {
     }
 
     func removeAddress(for folder: UUID) async throws {
-        try await stored.removeAddress(for: folder)
-    }
-
-    func removeAddresses(except kept: Set<UUID>) async throws {
         await withCheckedContinuation { continuation in
             let passes = lock.withLock {
                 removals += 1
@@ -137,7 +133,7 @@ private final class GatedKeychain: LiveFolderAddressStore, @unchecked Sendable {
             }
             if passes { continuation.resume() }
         }
-        try await stored.removeAddresses(except: kept)
+        try await stored.removeAddress(for: folder)
         lock.withLock { finished += 1 }
     }
 }
@@ -182,10 +178,11 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         try await keychain.setAddress(try #require(made.keychainAddress), for: folder, folderName: "Tracker")
         try await keychain.setAddress(whole, for: stale, folderName: "Gone")
         let service = try service(fetchers, addresses: keychain)
+        service.store.update(stale) { $0.dismiss("x") }
         service.register([folder: LiveFolderConfiguration(source: made.source)])
         #expect(await waitUntil { service.store[folder].lastSuccess != nil })
         #expect(fetchers.addresses == [whole])
-        // The Keychain items of folders that are no private feeds' go.
+        // The Keychain items of folders that the store lists and that are no private feeds' go.
         #expect(await waitUntil { keychain.folders == [folder] })
     }
 
@@ -249,6 +246,7 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         let other = UUID(), folder = UUID(), stale = UUID()
         let whole = URL(string: "https://tracker.example.org/feed.atom?token=abc123")!
         try await keychain.setAddress(whole, for: stale, folderName: "Gone")
+        service.store.update(stale) { $0.dismiss("x") }
         try await service.setPrivateAddress(whole, for: folder, folderName: "Tracker")
         // Another window registers before the new folder's does.
         service.register([other: feedConfiguration])
@@ -278,20 +276,24 @@ private func service(_ fetchers: StubFetchers, addresses: any LiveFolderAddressS
         #expect(await waitUntil { keychain.folders.isEmpty })
     }
 
-    @Test func aCleanupThatChoseWhatToKeepBeforeAWriteLeavesTheWrittenAddress() async throws {
+    @Test func aWriteForAFolderWhoseRemovalIsUnderWayLandsAfterTheRemoval() async throws {
         let keychain = GatedKeychain()
         let service = try service(StubFetchers(), addresses: keychain)
         let folder = UUID()
-        let whole = URL(string: "https://tracker.example.org/feed.atom?token=abc123")!
-        service.register([UUID(): feedConfiguration])
+        let first = URL(string: "https://tracker.example.org/feed.atom?token=abc123")!
+        let second = URL(string: "https://tracker.example.org/feed.atom?token=def456")!
+        try await service.setPrivateAddress(first, for: folder, folderName: "Tracker")
+        service.register([folder: LiveFolderConfiguration(source: try LiveFolderSource.makeFeed(address: first).source)])
+        // The folder stops being a private feed, so its address goes; the removal waits at the Keychain.
+        service.register([folder: feedConfiguration])
         #expect(await waitUntil { keychain.startedRemovals == 1 })
-        let write = Task { try await service.setPrivateAddress(whole, for: folder, folderName: "Tracker") }
-        // Time for a write that does not wait for the cleanup to pass it.
+        let write = Task { try await service.setPrivateAddress(second, for: folder, folderName: "Tracker") }
+        // Time for a write that does not wait for the removal to pass it.
         try? await Task.sleep(for: .milliseconds(200))
         keychain.open()
         try await write.value
         #expect(await waitUntil { keychain.finishedRemovals == 1 })
-        #expect(keychain.stored.folders == [folder])
+        #expect(try await keychain.stored.address(for: folder) == second)
     }
 
     @Test func aChangedItemLimitKeepsTheItemsWithinItAndRefreshesWithoutValidators() async throws {
