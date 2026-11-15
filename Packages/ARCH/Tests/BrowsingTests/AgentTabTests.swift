@@ -362,10 +362,20 @@ import Testing
             completion(.answered(PromptAnswer(buttonID: "ok")))
         }
 
-        // P8: denied without asking.
+        // P8: denied without asking, through the session's denial that leaves the profile's kept answers as they were.
+        var denied = 0
+        agentTab.denyPermission = { _, completion in
+            denied += 1
+            completion(false)
+        }
         var granted: Bool?
         agentTab.webContents(page, requestPermission: EnginePermissionRequest(origin: URL(string: "https://example.org")!, types: [.camera]), completion: { granted = $0 })
-        #expect(granted == false && asked == 0)
+        #expect(granted == false && asked == 0 && denied == 1)
+        // An agent tab never asks to be shown, as an opener's focus() on its popup would.
+        var activations = 0
+        agentTab.requestActivation = { activations += 1 }
+        agentTab.webContentsDidRequestActivation(page)
+        #expect(activations == 0)
         // P10: an alert is dismissed without a card; P9: a confirm waits for the user on a card.
         var dismissed = false
         // Each report names the frame's origin, by which the tool host keeps another site's text from the agent.

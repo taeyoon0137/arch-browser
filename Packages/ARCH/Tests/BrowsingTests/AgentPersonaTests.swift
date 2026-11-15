@@ -93,6 +93,27 @@ import Testing
         #expect(cards == 0)
     }
 
+    /// Chromium keeps the denial of an agent tab's request, so the profile's kept answers go back to the remembered ones, or to none in the agent-only Persona.
+    @Test func aDenialWithoutAskingLeavesTheKeptAnswersAsRemembered() async throws {
+        let folder = try Folder()
+        let store = SitePermissionStore(directory: folder.url)
+        store.set(.allow, for: [.camera], origin: Self.origin)
+        let agents = UUID()
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil), agentOnlyPersonaID: agents)
+        let request = EnginePermissionRequest(origin: Self.site, types: [.camera, .geolocation])
+        let user = KeptAnswers()
+        let agentOnly = KeptAnswers()
+        var granted: [Bool] = []
+        answers.denyWithoutAsking(request, personaID: Persona.defaultID, in: user) { granted.append($0) }
+        answers.denyWithoutAsking(request, personaID: agents, in: agentOnly) { granted.append($0) }
+        #expect(granted == [false, false])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(user.kept["camera \(Self.site.absoluteString)"] == .some(true))
+        #expect(user.kept["geolocation \(Self.site.absoluteString)"] == .some(nil))
+        #expect(agentOnly.kept["camera \(Self.site.absoluteString)"] == .some(nil))
+        #expect(store.decision(for: .geolocation, origin: Self.origin) == nil)
+    }
+
     @Test func appleScriptAndListTabsReadOneSidebarOrder() {
         let personaID = Persona.defaultID
         let first = Space(name: "First", personaID: personaID)

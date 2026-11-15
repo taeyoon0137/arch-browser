@@ -93,6 +93,8 @@ import LiveFolders
     var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
+    /// Denies an agent tab's request without asking, as the session's permission answers do.
+    var denyPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show Arch's open or save panel for the page's file chooser, as a sheet that waits in the tab's prompts until a window shows the page. Without it the page gets no file.
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
@@ -318,8 +320,10 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
     public func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents) { isCapturingMedia = webContents.isCapturingMedia }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
+    /// A page's request to be shown, such as an opener's `focus()` on its popup. An agent's tab never takes focus or switches the window's space, so it asks for nothing; picture in picture's way back to the tab, which comes the same way, then does nothing either, and the user reaches the tab through its folder.
     public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {
-        if agentOwnerID == nil || researchLoad == nil { requestActivation?() }
+        guard agentOwnerID == nil else { return }
+        requestActivation?()
     }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
@@ -371,11 +375,12 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         guard webContents === self.webContents else { return }
         takeReplacement?(replacement)
     }
-    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user.
+    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user. Its denial leaves the Persona's kept answers as they were (`denyPermission`).
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
         if agentOwnerID != nil {
             reportToAgent(.permissionDenied(request.types))
-            return completion(false)
+            guard let denyPermission else { return completion(false) }
+            return denyPermission(request, completion)
         }
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)

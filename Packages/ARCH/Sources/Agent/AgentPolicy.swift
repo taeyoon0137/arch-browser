@@ -289,10 +289,10 @@ public enum AgentPolicy {
         }
     }
 
-    /// Whether `press` presses Enter or Space, with or without modifiers, on a control that a click activates: a button, a submit, reset, image, or button input, a link, a checkbox, a radio button, or a switch. A page's own key handlers act on such a key as on a click, untrusted events too, so the step counts as a click on the control for P3, P4, and P5; P7 refuses a file input whatever the tool.
+    /// Whether `press` presses Enter or Space, with or without modifiers, on an element other than a text field or a select: a page's own key handlers can act on such a key as on a click, untrusted events too, on any element, such as a menu item or a tab, so the step counts as a click on it for P3, P4, and P5; P7 refuses a file input whatever the tool. P4 reads a generic element's name only when it is labeled, since the script names only some roles by their text.
     static func pressActivates(_ keys: String?, on element: AgentElementFacts) -> Bool {
         guard let key = keys?.split(separator: "+", omittingEmptySubsequences: false).last, ["Enter", "Space", " "].contains(String(key)) else { return false }
-        return ["button", "link", "checkbox", "radio", "switch"].contains(element.role) || (element.tag == "input" && ["submit", "reset", "image", "button"].contains(element.inputType ?? ""))
+        return !element.isEditable && !element.isSelect && !["textbox", "searchbox", "combobox", "listbox", "spinbutton", "slider"].contains(element.role)
     }
 
     // MARK: Addresses

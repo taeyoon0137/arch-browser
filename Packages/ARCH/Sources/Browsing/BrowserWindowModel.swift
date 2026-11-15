@@ -491,10 +491,10 @@ public enum BrowserWindowKind {
                 if let self, self.preview === preview { self.removePreview(closingPage: false) }
             }
         }
-        // A preview asks the user nothing, so its page's permission requests are denied. Chromium would keep the denial for the site, so its kept answers then return to the remembered ones.
+        // A preview asks the user nothing, so its page's permission requests are denied without changing the profile's kept answers.
         preview.requestPermission = { [weak self] request, completion in
-            completion(false)
-            DispatchQueue.main.async { self?.session.permissionAnswers.restoreRememberedAnswers(for: request, in: runtime.context) }
+            guard let self else { return completion(false) }
+            self.session.permissionAnswers.denyWithoutAsking(request, personaID: personaID, in: runtime.context, completion: completion)
         }
         preview.didClose = { [weak self] in self?.closePreview() }
         self.preview = preview

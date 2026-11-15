@@ -1,4 +1,4 @@
-// The policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules): every rule P1 to P18 in every mode for in-app sessions and outside clients, the allowances that cover the mode's cards and never a sensitive one, Enter or Space by `press` on a control as a click on it, P5's sites as registrable domains, the scope rule for written addresses and redirect hops, and the word lists the rules and the page script read.
+// The policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules): every rule P1 to P18 in every mode for in-app sessions and outside clients, the allowances that cover the mode's cards and never a sensitive one, Enter or Space by `press` on any element but a text field or select as a click on it, P5's sites as registrable domains, the scope rule for written addresses and redirect hops, and the word lists the rules and the page script read.
 import AgentControl
 import Foundation
 import Testing
@@ -172,6 +172,15 @@ import Testing
             #expect(press("Space", on: AgentElementFacts(tag: "div", role: role, name: "I agree to the terms")) == .asksSensitive([.p4]), "\(role)")
         }
         #expect(press("Enter", on: AgentElementFacts(tag: "input", role: "button", name: "", inputType: "submit", value: "Buy now", submitsForm: true, formKey: "0:0")) == .asksSensitive([.p4]))
+        // Any other element a key handler can act on, such as a menu item or a tab, asks as a click on it would, in both acting modes and whatever the allowances.
+        for element in [AgentElementFacts(tag: "div", role: "menuitem", name: "Delete account"), AgentElementFacts(tag: "div", role: "tab", name: "Delete")] {
+            for keys in ["Enter", "Space"] {
+                for mode in [AgentAccessLevel.askBeforeActing, .actInAgentTabs] {
+                    let step = AgentInteraction(tool: "press", element: element, text: keys, pageHost: "shop.example")
+                    #expect(Expected(AgentPolicy.decide(.interaction(step), client: .outside, mode: mode, allowances: AgentAllowances(page: true, site: true))) == .asksSensitive([.p4]), "\(element.role) \(keys) \(mode)")
+                }
+            }
+        }
         // A submit control submits its form: P3 for the form's fields, and P5 for another site once the session typed into it.
         #expect(press("Enter", on: Self.button("Continue", submits: true, formFields: [.password])) == .asksSensitive([.p3]))
         #expect(press("Space", on: Self.button("Continue", submits: true, action: "collect.other.example"), typed: true) == .asksSensitive([.p5]))

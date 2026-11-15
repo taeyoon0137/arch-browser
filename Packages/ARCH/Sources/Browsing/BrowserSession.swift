@@ -981,6 +981,10 @@ final class EngineRuntime {
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
+        tab.denyPermission = { [weak self, weak tab] request, completion in
+            guard let self, let tab else { return completion(false) }
+            self.permissionAnswers.denyWithoutAsking(request, personaID: tab.personaID, in: self.runtime(of: tab)?.context, completion: completion)
+        }
         tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
         // The page fills the window that shows it. A page that no window shows leaves fullscreen; the engine is still in its callback, so that happens on the next turn of the run loop.
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
