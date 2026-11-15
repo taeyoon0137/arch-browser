@@ -288,10 +288,9 @@ private struct PluginSection: View {
                 PluginSettingRow(plugins: plugins, plugin: plugin.id, setting: setting) { failure = $0.localizedDescription }
             }
             .disabled(!plugin.isEnabled)
-            // The plugin's commands share one row at its trailing end, as the AI pages' commands do. The row shows only with a command, since an empty one would still take a row in the form.
+            // The plugin's commands share one row at its trailing end, as the AI pages' commands do, each at its whole title, and those that do not fit continue on a line below. The row shows only with a command, since an empty one would still take a row in the form.
             if reloadable || !versionEngines.isEmpty || canJoin || separable || removable {
-                HStack {
-                    Spacer()
+                CommandRowLayout {
                     if reloadable {
                         Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
                     }
@@ -385,6 +384,63 @@ private struct PluginSection: View {
             for id in ids { try plugins.remove(id) }
         } catch {
             failure = error.localizedDescription
+        }
+    }
+}
+
+/// The commands of a plugin's row at the row's trailing end, each at its ideal width, so that no title is cut, with the system's spacing between neighbors as an `HStack` gives it; a command that does not fit after the others on a line starts the next line, also at the trailing end.
+private struct CommandRowLayout: Layout {
+    private struct Line {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lines = lines(of: subviews, within: proposal.width)
+        let height = lines.reduce(0) { $0 + $1.height } + lineSpacings(between: lines, of: subviews).reduce(0, +)
+        return CGSize(width: proposal.width ?? lines.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let lines = lines(of: subviews, within: bounds.width)
+        let spacings = lineSpacings(between: lines, of: subviews) + [0]
+        var y = bounds.minY
+        for (line, spacing) in zip(lines, spacings) {
+            var x = bounds.maxX - line.width
+            for (position, index) in line.indices.enumerated() {
+                if position > 0 { x += subviews[line.indices[position - 1]].spacing.distance(to: subviews[index].spacing, along: .horizontal) }
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (line.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width
+            }
+            y += line.height + spacing
+        }
+    }
+
+    /// The commands in lines of at most `width`, in their order.
+    private func lines(of subviews: Subviews, within width: CGFloat?) -> [Line] {
+        var lines: [Line] = []
+        var line = Line()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let spacing = line.indices.last.map { subviews[$0].spacing.distance(to: subviews[index].spacing, along: .horizontal) } ?? 0
+            if let width, !line.indices.isEmpty, line.width + spacing + size.width > width {
+                lines.append(line)
+                line = Line()
+            }
+            line.width += (line.indices.isEmpty ? 0 : spacing) + size.width
+            line.height = max(line.height, size.height)
+            line.indices.append(index)
+        }
+        if !line.indices.isEmpty { lines.append(line) }
+        return lines
+    }
+
+    /// The system's spacing between each line and the next, from the first command of each.
+    private func lineSpacings(between lines: [Line], of subviews: Subviews) -> [CGFloat] {
+        zip(lines, lines.dropFirst()).map { above, below in
+            subviews[above.indices[0]].spacing.distance(to: subviews[below.indices[0]].spacing, along: .vertical)
         }
     }
 }
