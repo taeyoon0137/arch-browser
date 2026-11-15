@@ -952,16 +952,50 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Contributions
 
-    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. The plugin receives the invocation's tab without what its grant does not cover. A command that fails, or whose plugin fails to start, beeps.
+    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. The plugin receives the invocation as `shown(_:to:)` gives it. A command that fails, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
         guard let installed = enabledPlugin(command.plugin), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
-        var redacted = invocation
-        redacted.tab = invocation.tab?.redacted(for: installed.grant)
         do {
-            try await start(installed)?.run(command.command, redacted)
+            try await start(installed)?.run(command.command, shown(invocation, to: installed.grant))
         } catch {
             NSSound.beep()
         }
+    }
+
+    /// The invocation as a plugin with the grant sees it: its tab as `shown(_:to:)` gives it, and for a plugin with `ai`, none of what the user clicked on when the tab's page is on a site excluded from AI, and no link or image address on such a site, which its code could send to a model as text.
+    private func shown(_ invocation: PluginInvocation, to grant: PluginGrant) -> PluginInvocation {
+        var shown = invocation
+        shown.tab = invocation.tab.map { self.shown($0, to: grant) }
+        if let tab = invocation.tab, excludesAI(tab, for: grant) {
+            shown.linkURL = nil
+            shown.imageURL = nil
+            shown.selection = nil
+        }
+        if excludesAI(shown.linkURL, for: grant) { shown.linkURL = nil }
+        if excludesAI(shown.imageURL, for: grant) { shown.imageURL = nil }
+        return shown
+    }
+
+    /// The tab as a plugin with the grant sees it: without what the grant does not cover, and for a plugin with `ai` without the title and address of a page on a site excluded from AI, which its code could send to a model as text (hook decision 14).
+    fileprivate func shown(_ tab: PluginTab, to grant: PluginGrant) -> PluginTab {
+        var shown = tab.redacted(for: grant)
+        if excludesAI(tab, for: grant) {
+            shown.title = nil
+            shown.url = nil
+            shown.documentURL = nil
+        }
+        return shown
+    }
+
+    /// Whether a plugin with the grant reaches AI and the tab's address or its document's is on a site excluded from AI.
+    private func excludesAI(_ tab: PluginTab, for grant: PluginGrant) -> Bool {
+        excludesAI(tab.url, for: grant) || excludesAI(tab.documentURL, for: grant)
+    }
+
+    /// Whether a plugin with the grant reaches AI and the address is on a site excluded from AI.
+    private func excludesAI(_ url: URL?, for grant: PluginGrant) -> Bool {
+        guard grant.permissions.contains(.ai), let ai, let url else { return false }
+        return !ai.settings.allowsAI(on: url)
     }
 
     /// The panel of a sidebar item whose action is `.panel`, from its plugin, which starts first if it has not started. Nil, with a beep, when the plugin offers no panel for the item or fails to start.
@@ -995,7 +1029,7 @@ public final class PluginManager: ObservableObject {
     public func receive(_ message: EnginePageScriptMessage, from tab: PluginTab) async -> String? {
         guard let installed = plugins.first(where: { $0.id.pageScriptWorld == message.world }), installed.isEnabled,
               let frameURL = message.frameURL, installed.grant.covers(frameURL),
-              !installed.grant.permissions.contains(.ai) || ai.map({ ai in ([frameURL] + [tab.url].compactMap { $0 }).allSatisfy(ai.settings.allowsAI(on:)) }) ?? true,
+              !excludesAI(frameURL, for: installed.grant), !excludesAI(tab, for: installed.grant),
               let body = try? JSONDecoder().decode(PluginValue.self, from: Data(message.json.utf8)) else { return nil }
         let page = PluginPageMessage(tab: tab.redacted(for: installed.grant), frameURL: frameURL, isMainFrame: message.isMainFrame, body: body)
         do {
@@ -1019,7 +1053,7 @@ public final class PluginManager: ObservableObject {
             guard let view = event.view(.plugin(tabs: grant.permissions.contains(.tabs), downloads: false, covers: grant.covers)),
                   eventLimiter.admit(installed.id.rawValue, subject: event.subject, at: Date()) == .allowed else { continue }
             if installed.runsHooks, ai != nil {
-                steps.append(hookStep(for: installed.id, view: view))
+                steps.append(hookStep(for: installed.id, view: view, tab: event.tab?.id, document: Self.document(of: event)))
             } else {
                 Task { try? await start(installed)?.handle(.browser(view)) }
             }
@@ -1029,22 +1063,25 @@ public final class PluginManager: ObservableObject {
                                 documentID: event.tab?.documentID, urls: event.urls, causes: Self.owners(causing: event))
     }
 
-    /// The step that runs the plugin's listeners for one event under the plugin's feature, so that the scheduler applies the feature's checks: it is on and automatic, has a model of its own, the event's addresses are not excluded from AI, and the daily limit for automatic requests and the monthly spending limit leave room. It runs while the plugin is still enabled with `ai`, after the plugin's earlier steps, within the scheduler's 30-second timeout; what the listener throws goes nowhere.
-    private func hookStep(for id: PluginID, view: BrowserEventScriptView) -> AIHookStep {
+    /// The step that runs the plugin's listeners for one event under the plugin's feature, so that the scheduler applies the feature's checks: it is on and automatic, has a model of its own, the event's addresses are not excluded from AI, and the daily limit for automatic requests and the monthly spending limit leave room. It runs while the plugin is still enabled with `ai`, after the plugin's earlier steps, within the scheduler's 30-second timeout; what the listener throws goes nowhere. `tab` and `document` are the event's tab and, for a page, address, or title event, its address, to which the step's renames of that tab apply.
+    private func hookStep(for id: PluginID, view: BrowserEventScriptView, tab: UUID?, document: URL?) -> AIHookStep {
         let feature = AIFeatureID.plugin(id.rawValue)
         return AIHookStep(owner: feature.rawValue, order: Self.hookOrder, feature: feature, routes: [feature.rawValue],
                           mayRun: { [weak self] in self?.enabledPlugin(id)?.runsHooks == true },
-                          run: { [weak self] requestDidEnd in try await self?.runHook(of: id, view, requestDidEnd: requestDidEnd) })
+                          run: { [weak self] requestDidEnd in try await self?.runHook(of: id, view, tab: tab, document: document, requestDidEnd: requestDidEnd) })
     }
 
-    /// Starts the plugin if needed and hands it the event once its earlier steps have ended. The AI requests its listener starts meanwhile belong to the step: their errors count toward the scheduler's pause, and they stop when the scheduler stops the step, as at the tab's next document or close, or a change to the plugin's route.
-    private func runHook(of id: PluginID, _ view: BrowserEventScriptView, requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async throws {
+    /// Starts the plugin if needed and hands it the event once its earlier steps have ended, unless the scheduler stopped the step meanwhile. The AI requests the plugin asks for while its listener runs belong to the step, whichever of its listeners asks, since its calls do not say: their errors count toward the scheduler's pause, and when the scheduler stops the step, as at the tab's next document or close, or a change to the plugin's route, they end with `cancelled`, later ones end at once, and the step renames nothing more. The listener holds the plugin's later steps until it returns.
+    private func runHook(of id: PluginID, _ view: BrowserEventScriptView, tab: UUID?, document: URL?,
+                         requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) async throws {
         let queue = hookQueues[id] ?? PluginHookQueue()
         hookQueues[id] = queue
         try await queue.run {
             guard !Task.isCancelled, let installed = enabledPlugin(id), installed.runsHooks,
-                  let plugin = try await start(installed), let context = running[id]?.context, running[id]?.plugin === plugin else { return }
-            let step = PluginHookStep(requestDidEnd: requestDidEnd)
+                  let plugin = try await start(installed), let context = running[id]?.context, running[id]?.plugin === plugin,
+                  // The scheduler may have stopped the step while the plugin started.
+                  !Task.isCancelled else { return }
+            let step = PluginHookStep(tab: tab, document: document, requestDidEnd: requestDidEnd)
             context.hookStep = step
             defer { if context.hookStep === step { context.hookStep = nil } }
             try await withTaskCancellationHandler {
@@ -1187,7 +1224,7 @@ public final class PluginManager: ObservableObject {
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
         ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant,
                             storage: ScopedPluginStorage(file: storage(for: installed.id)), secrets: secrets(for: installed.id),
-                            ai: installed.grant.permissions.contains(.ai) ? ai.map { PluginAIClient(service: $0, feature: .plugin(installed.id.rawValue)) } : nil)
+                            ai: installed.grant.permissions.contains(.ai) ? ai.map { PluginAIRequests(service: $0, feature: .plugin(installed.id.rawValue)) } : nil)
     }
 
     /// The Persona's tabs before the grant applies.
@@ -1195,9 +1232,9 @@ public final class PluginManager: ObservableObject {
         browserHost?.tabs(in: persona) ?? []
     }
 
-    /// Renames a tab of the Persona for the document it shows now, with the plugin as the cause of the change.
-    fileprivate func renameTab(_ id: UUID, to name: String?, by plugin: PluginID) -> Bool {
-        browserHost?.renameTab(id, to: name, showing: nil, cause: BrowserEventCause(origin: .plugin(id: plugin.rawValue)), applying: true) ?? false
+    /// Renames a tab of the Persona for `document`, or for the document it shows now when that is nil, with the plugin as the cause of the change.
+    fileprivate func renameTab(_ id: UUID, to name: String?, showing document: URL?, by plugin: PluginID) -> Bool {
+        browserHost?.renameTab(id, to: name, showing: document, cause: BrowserEventCause(origin: .plugin(id: plugin.rawValue)), applying: true) ?? false
     }
 
     /// `<plugin id>/storage.json` in the Persona's folder.
@@ -1414,27 +1451,27 @@ final class ScopedPluginContext: PluginContext {
     let grant: PluginGrant
     private let scopedStorage: ScopedPluginStorage
     private let scopedSecrets: ScopedPluginSecrets
-    private let aiClient: PluginAIClient?
+    private let aiRequests: PluginAIRequests?
     private weak var manager: PluginManager?
     private var hasEnded = false
 
-    init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: ScopedPluginStorage, secrets: ScopedPluginSecrets, ai: PluginAIClient? = nil) {
+    init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: ScopedPluginStorage, secrets: ScopedPluginSecrets, ai: PluginAIRequests? = nil) {
         self.manager = manager
         self.pluginID = pluginID
         self.personaID = personaID
         self.grant = grant
         scopedStorage = storage
         scopedSecrets = secrets
-        aiClient = ai
+        aiRequests = ai
     }
 
     var storage: any PluginStorage { scopedStorage }
     var secrets: any PluginSecrets { scopedSecrets }
 
-    /// The hook step whose listener runs now, to which the AI requests started meanwhile belong.
+    /// The hook step whose listener runs now, to which the AI requests asked for meanwhile and the renames of its tab belong.
     var hookStep: PluginHookStep? {
-        get { aiClient?.step }
-        set { aiClient?.step = newValue }
+        get { aiRequests?.step }
+        set { aiRequests?.step = newValue }
     }
 
     /// Stops the context, its storage, its secrets, and its AI requests from acting for the instance.
@@ -1442,12 +1479,12 @@ final class ScopedPluginContext: PluginContext {
         hasEnded = true
         scopedStorage.end()
         scopedSecrets.end()
-        aiClient?.end()
+        aiRequests?.end()
     }
 
-    /// Stops the AI requests that belong to the step.
+    /// Stops the step and the AI requests that belong to it.
     func stop(_ step: PluginHookStep) {
-        aiClient?.stop(step)
+        if let aiRequests { aiRequests.stop(step) } else { step.stop() }
     }
 
     func setting(_ key: String) -> PluginValue? {
@@ -1468,7 +1505,8 @@ final class ScopedPluginContext: PluginContext {
 
     func tabs() throws -> [PluginTab] {
         guard !hasEnded else { throw PluginError.stopped }
-        return (manager?.personaTabs() ?? []).map { $0.redacted(for: grant) }
+        guard let manager else { return [] }
+        return manager.personaTabs().map { manager.shown($0, to: grant) }
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {
@@ -1479,15 +1517,18 @@ final class ScopedPluginContext: PluginContext {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.renameTabs)
         guard let manager, manager.personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
-        return manager.renameTab(id, to: name, by: pluginID)
+        // A rename of the running hook step's tab is for its event's document, which a stopped step no longer renames.
+        guard let step = hookStep, step.tab == id else { return manager.renameTab(id, to: name, showing: nil, by: pluginID) }
+        guard !step.isStopped else { return false }
+        return manager.renameTab(id, to: name, showing: step.document, by: pluginID)
     }
 
-    /// A manager without an AI interface, as in tests, gives no AI.
+    /// A manager without an AI interface, as in tests, gives no AI. The client belongs to the hook step that runs now, if any.
     func ai() throws -> any AIClient {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.ai)
-        guard let aiClient else { throw PluginError.permissionDenied(.ai) }
-        return aiClient
+        guard let aiRequests else { throw PluginError.permissionDenied(.ai) }
+        return aiRequests.client()
     }
 
     private func require(_ permission: PluginPermission) throws {

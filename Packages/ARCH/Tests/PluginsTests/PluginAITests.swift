@@ -1,4 +1,4 @@
-// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`, the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, the context's AI under that feature only, `arch.ai.reply` with the time it waits not counted toward the hang limit, and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler, once the feature has a model of its own, with their requests stopping when the scheduler stops the step.
+// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document.
 import AI
 import ARCHEngine
 import Events
@@ -6,7 +6,7 @@ import Foundation
 import Testing
 @testable import Plugins
 
-/// What the built-in test plugins saw.
+/// What the built-in test plugins saw and did.
 @MainActor
 private final class AIRecorder {
     static var shared = AIRecorder()
@@ -16,25 +16,51 @@ private final class AIRecorder {
     /// How many of the hook plugin's listeners run at once, and the most that ever did.
     var running = 0
     var mostRunning = 0
-    /// How long each of the hook plugin's listeners takes.
+    /// How long the hook plugin's activation and each of its listeners take.
+    var activation: Duration = .zero
     var pause: Duration = .zero
+    /// Whether the hook plugin's listener waits for `release()` after its pause, sends a request, and renames its event's tab, and what came of it.
+    var holds = false
+    var asks = false
+    var renames = false
+    var replies: [String] = []
+    var failures: [String] = []
+    var renamed: [Bool] = []
+    /// The invocations that reached the tab plugins' commands, by plugin.
+    var invocations: [PluginID: [PluginInvocation]] = [:]
     var contexts: [any PluginContext] = []
+    private var held: [CheckedContinuation<Void, Never>] = []
+
+    func hold() async {
+        await withCheckedContinuation { held.append($0) }
+    }
+
+    var isHolding: Bool { !held.isEmpty }
+
+    func release() {
+        held.forEach { $0.resume() }
+        held = []
+    }
 }
 
-/// Asks for `ai` and listens for page loads, so its listeners run as hooks.
+/// Asks for `ai` and `tabs.rename` and listens for page loads, so its listeners run as hooks.
 @MainActor
 private final class AIHookPlugin: BuiltInPlugin {
     static let id = PluginID(rawValue: "org.example.ai-hook")!
     static var manifest: PluginManifest {
-        PluginManifest(id: id, name: "AI Hook", version: "1", summary: "", permissions: [.ai], contributions: PluginContributions(), events: [.pageLoaded])
+        PluginManifest(id: id, name: "AI Hook", version: "1", summary: "", permissions: [.ai, .renameTabs], contributions: PluginContributions(), events: [.pageLoaded])
     }
 
     static var isOnByDefault: Bool { true }
 
+    private var context: (any PluginContext)?
+
     init() {}
 
     func activate(in context: any PluginContext) async throws {
+        self.context = context
         AIRecorder.shared.contexts.append(context)
+        try await Task.sleep(for: AIRecorder.shared.activation)
     }
 
     func run(_ command: String, _ invocation: PluginInvocation) async throws {}
@@ -46,6 +72,18 @@ private final class AIHookPlugin: BuiltInPlugin {
         recorder.mostRunning = max(recorder.mostRunning, recorder.running)
         defer { recorder.running -= 1 }
         try await Task.sleep(for: recorder.pause)
+        if recorder.holds { await recorder.hold() }
+        guard let context else { return }
+        if recorder.asks {
+            do {
+                recorder.replies.append(try await context.ai().reply(AIRequest(feature: .pageReader, messages: [AIMessage(role: .user, parts: [.text("Name it")])])).text)
+            } catch {
+                recorder.failures.append("\(error)")
+            }
+        }
+        if recorder.renames, case let .browser(view, _) = event, let tab = view.tab?.id {
+            recorder.renamed.append(try context.renameTab(tab, to: "Named"))
+        }
     }
 }
 
@@ -87,18 +125,19 @@ private final class PlainEventsPlugin: BuiltInPlugin {
     }
 }
 
-/// Asks for `ai` on every website and answers each page script value with the value.
+/// Answers each page script value with the value, on every website; `PageAIPlugin` also asks for `ai`.
 @MainActor
-private final class PageAIPlugin: BuiltInPlugin {
-    static let id = PluginID(rawValue: "org.example.page-ai")!
+private class PagePlugin: BuiltInPlugin {
+    class var id: PluginID { PluginID(rawValue: "org.example.page")! }
+    class var permissions: Set<PluginPermission> { [] }
     static var manifest: PluginManifest {
-        PluginManifest(id: id, name: "Page AI", version: "1", summary: "", permissions: [.ai], sites: [try! MatchPattern("http://*/*"), try! MatchPattern("https://*/*")],
+        PluginManifest(id: id, name: "Page", version: "1", summary: "", permissions: permissions, sites: [try! MatchPattern("http://*/*"), try! MatchPattern("https://*/*")],
                        contributions: PluginContributions())
     }
 
     static var isOnByDefault: Bool { true }
 
-    init() {}
+    required init() {}
 
     func activate(in context: any PluginContext) async throws {}
     func run(_ command: String, _ invocation: PluginInvocation) async throws {}
@@ -108,11 +147,52 @@ private final class PageAIPlugin: BuiltInPlugin {
     }
 }
 
-/// The tabs of the Persona, which the tests do not rename.
 @MainActor
-private final class NoTabsHost: PluginBrowserHost {
-    func tabs(in persona: PersonaID) -> [PluginTab] { [] }
-    func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool { false }
+private final class PageAIPlugin: PagePlugin {
+    override class var id: PluginID { PluginID(rawValue: "org.example.page-ai")! }
+    override class var permissions: Set<PluginPermission> { [.ai] }
+}
+
+/// Reads tabs and records its command's invocations; `TabsAIPlugin` also asks for `ai`.
+@MainActor
+private class TabsPlugin: BuiltInPlugin {
+    class var id: PluginID { PluginID(rawValue: "org.example.tabs")! }
+    class var permissions: Set<PluginPermission> { [.tabs] }
+    static var manifest: PluginManifest {
+        PluginManifest(id: id, name: "Tabs", version: "1", summary: "", permissions: permissions, contributions: PluginContributions(commands: [PluginCommand(id: "look", title: "Look")]))
+    }
+
+    static var isOnByDefault: Bool { true }
+
+    required init() {}
+
+    func activate(in context: any PluginContext) async throws {
+        AIRecorder.shared.contexts.append(context)
+    }
+
+    func run(_ command: String, _ invocation: PluginInvocation) async throws {
+        AIRecorder.shared.invocations[Self.id, default: []].append(invocation)
+    }
+}
+
+@MainActor
+private final class TabsAIPlugin: TabsPlugin {
+    override class var id: PluginID { PluginID(rawValue: "org.example.tabs-ai")! }
+    override class var permissions: Set<PluginPermission> { [.tabs, .ai] }
+}
+
+/// The Persona's tabs, which the tests set, and the renames that reached them, each with the document it was for.
+@MainActor
+private final class RecordingHost: PluginBrowserHost {
+    var tabs: [PluginTab] = []
+    var renames: [(tab: UUID, name: String?, document: URL?)] = []
+
+    func tabs(in persona: PersonaID) -> [PluginTab] { tabs }
+
+    func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool {
+        renames.append((id, name, document))
+        return true
+    }
 }
 
 @MainActor
@@ -120,18 +200,22 @@ private final class NoTabsHost: PluginBrowserHost {
     private let folder = TemporaryFolder()
     private let persona = UUID()
     private let bus = BrowserEventBus()
-    private let host = NoTabsHost()
+    private let host = RecordingHost()
 
     init() {
         AIRecorder.shared = AIRecorder()
     }
 
-    /// A command-line tool that reads the request and answers after `seconds`.
-    private static func tool(answeringAfter seconds: Double) -> AIProviderConfiguration {
-        AIProviderConfiguration(name: "Tool", kind: .commandLine(AICommandLineConfiguration(executable: URL(fileURLWithPath: "/bin/sh"),
-                                                                                           arguments: ["-c", "cat > /dev/null; sleep \(seconds); printf 'Short answer'"],
-                                                                                           environment: ["PATH": "/usr/bin:/bin"])),
-                                models: [AIModelConfiguration(name: "")], limits: .commandLine)
+    /// A command-line tool that reads the request and answers after `seconds`, or fails at once with `failing`.
+    private static func tool(_ name: String = "Tool", answeringAfter seconds: Double = 0, failing: Bool = false) -> AIProviderConfiguration {
+        let script = failing ? "cat > /dev/null; echo 'Signed out' >&2; exit 1" : "cat > /dev/null; sleep \(seconds); printf 'Short answer'"
+        return AIProviderConfiguration(name: name, kind: .commandLine(AICommandLineConfiguration(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script],
+                                                                                                 environment: ["PATH": "/usr/bin:/bin"])),
+                                       models: [AIModelConfiguration(name: "")], limits: .commandLine)
+    }
+
+    private static func model(of tool: AIProviderConfiguration) -> AIModelRef {
+        AIModelRef(provider: tool.id, model: "")
     }
 
     private func service(answeringAfter seconds: Double? = nil, for features: [AIFeatureID] = []) -> AIService {
@@ -140,7 +224,7 @@ private final class NoTabsHost: PluginBrowserHost {
             let tool = Self.tool(answeringAfter: seconds)
             service.settings.providers = [tool]
             for feature in features {
-                service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: tool.id, model: "")]), for: feature)
+                service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool)]), for: feature)
             }
         }
         return service
@@ -164,6 +248,10 @@ private final class NoTabsHost: PluginBrowserHost {
         BrowserTabRef(id: UUID(), personaID: persona, spaceID: UUID(), kind: .open, engine: .webKit, url: URL(string: "https://example.org\(path)"))
     }
 
+    private func pluginTab(_ address: String, title: String, id: UUID = UUID()) -> PluginTab {
+        PluginTab(id: id, spaceID: nil, title: title, url: URL(string: address)!, engine: .webKit, isPinned: false, isSelected: true)
+    }
+
     private let request = AIRequest(feature: .pageReader, messages: [AIMessage(role: .user, parts: [.text("Hi")])], pinnedModel: AIModelRef(provider: AIProviderID(), model: "other"))
 
     @Test func aManifestMayAskForAI() async throws {
@@ -176,20 +264,32 @@ private final class NoTabsHost: PluginBrowserHost {
         #expect(PluginError.permissionDenied(.ai).localizedDescription == "The plugin may not send text to the AI models you connected.")
     }
 
-    @Test func theContextSendsUnderThePluginsOwnFeatureOnlyWithTheGrant() async throws {
+    @Test func theContextSendsUnderThePluginsOwnFeatureAndRouteOnlyWithTheGrant() async throws {
         let service = service()
         service.register(AIFeature(id: .pageReader, name: "Page Reader", summary: "", trigger: .user, data: AIDataScope(kinds: [.page])))
         let manager = manager(builtIns: [AskingPlugin.self], ai: service)
         defer { manager.close() }
         let installed = try #require(manager.plugins.first)
-        let feature = try #require(service.features.first { $0.id == .plugin(AskingPlugin.id.rawValue) })
+        let id = AIFeatureID.plugin(AskingPlugin.id.rawValue)
+        let feature = try #require(service.features.first { $0.id == id })
         #expect(feature.trigger == .user && feature.data.kinds.isEmpty && feature.name == "Asking")
 
-        // Whatever feature, route, or model a request names, it goes out under the plugin's feature, which has no model yet.
+        // Whatever feature a request names, it goes out under the plugin's feature, which has no model yet.
         let context = manager.makeContext(for: installed)
         let client = try context.ai()
         await #expect(throws: AIError.self) { _ = try await client.reply(request) }
-        #expect(service.activity.last?.feature == .plugin(AskingPlugin.id.rawValue))
+        #expect(service.activity.last?.feature == id)
+
+        // Whatever route or model it names, it goes out on the feature's route.
+        let routed = Self.tool("Routed")
+        let named = Self.tool("Named")
+        service.settings.providers = [named, routed]
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: routed)]), for: id)
+        var elsewhere = request
+        elsewhere.pinnedModel = Self.model(of: named)
+        elsewhere.route = .models([Self.model(of: named)])
+        #expect(try await client.reply(elsewhere).text == "Short answer")
+        #expect(service.activity.last?.feature == id && service.activity.last?.model == Self.model(of: routed))
 
         var withoutAI = installed
         withoutAI.grant.permissions = []
@@ -219,18 +319,77 @@ private final class NoTabsHost: PluginBrowserHost {
         #expect(!service.features.contains { $0.id == id || $0.id == .plugin(AskingPlugin.id.rawValue) })
     }
 
+    /// One Persona's version of a plugin lists events and another's does not: the shared feature is automatic while the version with events is enabled.
+    @Test func theSharedFeatureIsAutomaticWhileOneVersionRunsHooks() async throws {
+        let service = service()
+        let id = AIFeatureID.plugin("org.example.shared")
+        func install(_ events: String, in manager: PluginManager) async throws {
+            let manifest = #"{"id": "org.example.shared", "name": "Shared", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": ["ai"]\#(events)}"#
+            let package = try await manager.stage(try writePackage(events.isEmpty ? ["plugin.json": manifest] : ["plugin.json": manifest, "b.js": ""]))
+            try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        }
+        let hooks = manager(ai: service)
+        let asks = manager(persona: UUID(), ai: service)
+        defer {
+            hooks.close()
+            asks.close()
+        }
+        try await install(#", "events": ["pageLoaded"], "background": "b.js""#, in: hooks)
+        try await install("", in: asks)
+        #expect(service.features.first { $0.id == id }?.trigger == .automatic)
+        hooks.setEnabled(false, for: try #require(PluginID(rawValue: "org.example.shared")))
+        #expect(service.features.first { $0.id == id }?.trigger == .user)
+        hooks.setEnabled(true, for: try #require(PluginID(rawValue: "org.example.shared")))
+        asks.setEnabled(false, for: try #require(PluginID(rawValue: "org.example.shared")))
+        #expect(service.features.first { $0.id == id }?.trigger == .automatic)
+    }
+
     /// A page script could read a page that AI may not see, and the plugin send it to a model as text.
     @Test func aPluginWithAIGetsNoPageValuesFromSitesExcludedFromAI() async throws {
-        let manager = manager(builtIns: [PageAIPlugin.self], ai: service())
+        let manager = manager(builtIns: [PageAIPlugin.self, PagePlugin.self], ai: service())
         defer { manager.close() }
-        func send(from address: String) async -> String? {
-            let url = URL(string: address)!
-            return await manager.receive(EnginePageScriptMessage(world: PageAIPlugin.id.pageScriptWorld, frameURL: url, isMainFrame: true, json: #""text""#),
-                                         from: PluginTab(id: UUID(), spaceID: nil, title: "Page", url: url, engine: .webKit, isPinned: false, isSelected: true))
+        func send(to id: PluginID, from frame: String, in page: String? = nil) async -> String? {
+            let url = URL(string: frame)!
+            return await manager.receive(EnginePageScriptMessage(world: id.pageScriptWorld, frameURL: url, isMainFrame: page == nil, json: #""text""#),
+                                         from: pluginTab(page ?? frame, title: "Page"))
         }
-        #expect(await send(from: "https://example.org/") == #""text""#)
-        // New settings exclude the local network.
-        #expect(await send(from: "http://localhost:8080/") == nil)
+        #expect(await send(to: PageAIPlugin.id, from: "https://example.org/") == #""text""#)
+        // New settings exclude the local network, for the frame or for the tab's page.
+        #expect(await send(to: PageAIPlugin.id, from: "http://localhost:8080/") == nil)
+        #expect(await send(to: PageAIPlugin.id, from: "https://example.org/", in: "http://localhost:8080/") == nil)
+        // A plugin without `ai` reaches no model, so it gets the values.
+        #expect(await send(to: PagePlugin.id, from: "http://localhost:8080/") == #""text""#)
+        #expect(await send(to: PagePlugin.id, from: "https://example.org/", in: "http://localhost:8080/") == #""text""#)
+    }
+
+    /// A plugin with `ai` could send a tab's title and address, or what the user clicked on, to a model as text.
+    @Test func aPluginWithAISeesNothingOfTabsAndClicksOnSitesExcludedFromAI() async throws {
+        let open = pluginTab("https://example.org/a", title: "Open")
+        let local = pluginTab("http://localhost:8080/", title: "Local")
+        // A tab that leaves a page shows the next address before that document commits, with the page's title.
+        var leaving = pluginTab("https://example.org/c", title: "Local")
+        leaving.documentURL = local.url
+        host.tabs = [open, local, leaving]
+        let manager = manager(builtIns: [TabsAIPlugin.self, TabsPlugin.self], ai: service())
+        defer { manager.close() }
+        let withAI = manager.makeContext(for: try #require(manager.plugins.first { $0.id == TabsAIPlugin.id }))
+        let withoutAI = manager.makeContext(for: try #require(manager.plugins.first { $0.id == TabsPlugin.id }))
+        #expect(try withAI.tabs().map(\.title) == ["Open", nil, nil] && withAI.tabs().map(\.url) == [open.url, nil, nil])
+        #expect(try withAI.tab(local.id)?.title == nil && withAI.tab(open.id)?.title == "Open")
+        #expect(try withoutAI.tabs().map(\.title) == ["Open", "Local", "Local"])
+
+        let localLink = URL(string: "http://localhost:8080/admin")!
+        let openLink = URL(string: "https://example.org/b")!
+        for plugin in [TabsAIPlugin.id, TabsPlugin.id] {
+            await manager.run(PluginCommandRef(plugin: plugin, command: "look"), PluginInvocation(tab: local, linkURL: openLink, imageURL: openLink, selection: "Secret"))
+            await manager.run(PluginCommandRef(plugin: plugin, command: "look"), PluginInvocation(tab: open, linkURL: localLink, imageURL: openLink, selection: "Text"))
+        }
+        let excluded = try #require(AIRecorder.shared.invocations[TabsAIPlugin.id]?.first)
+        #expect(excluded.tab?.title == nil && excluded.tab?.url == nil && excluded.linkURL == nil && excluded.imageURL == nil && excluded.selection == nil)
+        let allowed = try #require(AIRecorder.shared.invocations[TabsAIPlugin.id]?.last)
+        #expect(allowed.tab?.title == "Open" && allowed.linkURL == nil && allowed.imageURL == openLink && allowed.selection == "Text")
+        let plain = try #require(AIRecorder.shared.invocations[TabsPlugin.id])
+        #expect(plain.map(\.tab?.title) == ["Local", "Open"] && plain.map(\.linkURL) == [openLink, localLink] && plain.first?.selection == "Secret")
     }
 
     @Test func anAIPluginsEventsRunAsHooksOnceItsFeatureHasAModelOfItsOwn() async throws {
@@ -244,9 +403,9 @@ private final class NoTabsHost: PluginBrowserHost {
         try await Task.sleep(for: .milliseconds(300))
         #expect(AIRecorder.shared.hookEvents.isEmpty)
 
-        let tool = Self.tool(answeringAfter: 0)
+        let tool = Self.tool()
         service.settings.providers = [tool]
-        service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: tool.id, model: "")]), for: .plugin(AIHookPlugin.id.rawValue))
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool)]), for: .plugin(AIHookPlugin.id.rawValue))
         bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: false))
         #expect(await eventually { AIRecorder.shared.hookEvents == [.pageLoaded] })
 
@@ -258,18 +417,94 @@ private final class NoTabsHost: PluginBrowserHost {
         #expect(AIRecorder.shared.mostRunning == 1)
     }
 
-    @Test func aScriptPluginsReplyWaitsBeyondTheHangLimitAndAHookStepsRequestStopsWithTheStep() async throws {
+    /// The scheduler stops the step while the plugin activates, so the event never reaches it.
+    @Test func aStepStoppedWhileThePluginStartsDeliversNothing() async throws {
+        let feature = AIFeatureID.plugin(AIHookPlugin.id.rawValue)
+        let service = service(answeringAfter: 0, for: [feature])
+        AIRecorder.shared.activation = .milliseconds(600)
+        let manager = manager(builtIns: [AIHookPlugin.self], ai: service)
+        defer { manager.close() }
+        let page = tab()
+        bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: true))
+        #expect(await eventually { !AIRecorder.shared.contexts.isEmpty })
+        service.hooks.scheduler.cancel(subject: page.id)
+        try await Task.sleep(for: .seconds(1))
+        #expect(AIRecorder.shared.hookEvents.isEmpty)
+        bus.post(.pageLoaded(tab: tab("/next"), isRestore: false, isFirstLoadAfterOpen: true))
+        #expect(await eventually { AIRecorder.shared.hookEvents == [.pageLoaded] })
+    }
+
+    /// A step's rename is for its event's document, and a stopped step renames nothing.
+    @Test func aStepsRenamesAreForItsEventsDocumentUntilItStops() async throws {
+        let feature = AIFeatureID.plugin(AIHookPlugin.id.rawValue)
+        let service = service(answeringAfter: 0, for: [feature])
+        AIRecorder.shared.renames = true
+        let manager = manager(builtIns: [AIHookPlugin.self], ai: service)
+        defer { manager.close() }
+        let page = tab("/page")
+        host.tabs = [pluginTab("https://example.org/next", title: "Next", id: page.id)]
+        bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: true))
+        #expect(await eventually { AIRecorder.shared.renamed == [true] })
+        #expect(host.renames.map(\.document) == [page.url])
+        // Outside a step, a rename is for the document the tab shows.
+        let context = try #require(AIRecorder.shared.contexts.first)
+        #expect(try context.renameTab(page.id, to: "Later"))
+        #expect(host.renames.count == 2 && host.renames.last?.document == nil)
+
+        AIRecorder.shared.holds = true
+        bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: false))
+        #expect(await eventually { AIRecorder.shared.isHolding })
+        service.hooks.scheduler.cancel(subject: page.id)
+        try await Task.sleep(for: .milliseconds(100))
+        AIRecorder.shared.release()
+        #expect(await eventually { AIRecorder.shared.renamed == [true, false] })
+        #expect(host.renames.count == 2)
+    }
+
+    /// Consecutive provider errors of a plugin's hook requests pause the plugin's hooks.
+    @Test func threeProviderErrorsInARowPauseThePluginsHooks() async throws {
+        let feature = AIFeatureID.plugin(AIHookPlugin.id.rawValue)
+        let service = service()
+        let failing = Self.tool(failing: true)
+        service.settings.providers = [failing]
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: failing)]), for: feature)
+        AIRecorder.shared.asks = true
+        let manager = manager(builtIns: [AIHookPlugin.self], ai: service)
+        defer { manager.close() }
+        for path in ["/a", "/b", "/c"] {
+            bus.post(.pageLoaded(tab: tab(path), isRestore: false, isFirstLoadAfterOpen: true))
+        }
+        #expect(await eventually { AIRecorder.shared.failures.count == 3 })
+        #expect(service.hooks.scheduler.pausedOwners == [feature.rawValue])
+        bus.post(.pageLoaded(tab: tab("/d"), isRestore: false, isFirstLoadAfterOpen: true))
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(AIRecorder.shared.hookEvents.count == 3)
+    }
+
+    @Test func aScriptPluginsReplyWaitsBeyondTheHangLimitAndAStoppedStepsRequestsEnd() async throws {
         let manifest = #"{"id": "org.example.ai-script", "name": "AI Script", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": ["ai"], "events": ["pageLoaded"], "background": "b.js", "contributes": {"commands": [{"id": "ask", "title": "Ask"}]}}"#
         let background = """
-        const ask = async () => {
+        const ask = () => arch.ai.reply({ instructions: "Be brief.", messages: [{ role: "user", text: "Hi" }], maxOutputTokens: 20 });
+        arch.commands.onRun("ask", async () => {
           try {
-            await arch.storage.set("result", await arch.ai.reply({ instructions: "Be brief.", messages: [{ role: "user", text: "Hi" }], maxOutputTokens: 20 }));
+            await arch.storage.set("result", await ask());
           } catch (error) {
             await arch.storage.set("result", error.message);
           }
-        };
-        arch.commands.onRun("ask", ask);
-        arch.events.on("pageLoaded", ask);
+        });
+        arch.events.on("pageLoaded", async () => {
+          try {
+            await arch.storage.set("result", await ask());
+          } catch (error) {
+            await arch.storage.set("result", error.message);
+            // A stopped step's later request never goes out.
+            try {
+              await arch.storage.set("again", await ask());
+            } catch (error) {
+              await arch.storage.set("again", error.message);
+            }
+          }
+        });
         """
         let feature = AIFeatureID.plugin("org.example.ai-script")
         let service = service(answeringAfter: 3, for: [feature])
@@ -285,18 +520,28 @@ private final class NoTabsHost: PluginBrowserHost {
         #expect(storage.value(forKey: "result") == .object(["text": .string("Short answer"), "finishReason": .string("completed")]))
         #expect(manager.plugins.first?.failure == nil && service.activity.last?.feature == feature)
 
-        // A tab that closes while its hook step waits for a reply stops the step's request.
+        // A tab that closes while its hook step waits for a reply stops the step's request, and the step's next request ends at once.
         service.settings.providers = [Self.tool(answeringAfter: 8)]
         let tool = try #require(service.settings.providers.first)
-        service.settings.setRoute(AIRoute(isEnabled: true, models: [AIModelRef(provider: tool.id, model: "")]), for: feature)
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool)]), for: feature)
         try storage.setValue(nil, forKey: "result")
         let page = tab()
         let started = ContinuousClock.now
         bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: true))
         try await Task.sleep(for: .seconds(1))
         service.hooks.scheduler.cancel(subject: page.id)
-        #expect(await eventually { storage.value(forKey: "result") == .string("cancelled") })
-        #expect(ContinuousClock.now - started < .seconds(6))
+        #expect(await eventually { storage.value(forKey: "again") == .string("cancelled") })
+        #expect(storage.value(forKey: "result") == .string("cancelled"))
+        #expect(ContinuousClock.now - started < .seconds(4))
+
+        // A change to the plugin's route stops its running step's request.
+        try storage.setValue(nil, forKey: "result")
+        try storage.setValue(nil, forKey: "again")
+        bus.post(.pageLoaded(tab: tab("/other"), isRestore: false, isFirstLoadAfterOpen: true))
+        try await Task.sleep(for: .seconds(1))
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool), AIModelRef(provider: tool.id, model: "other")]), for: feature)
+        #expect(await eventually { storage.value(forKey: "again") == .string("cancelled") })
+        #expect(storage.value(forKey: "result") == .string("cancelled"))
 
         // Without the grant, the call is refused.
         try storage.setValue(nil, forKey: "result")
@@ -305,6 +550,32 @@ private final class NoTabsHost: PluginBrowserHost {
         try manager.install(refused, grant: PluginGrant(requestedBy: refused.manifest), isEnabled: true)
         await manager.run(PluginCommandRef(plugin: installed.id, command: "ask"), PluginInvocation(tab: nil))
         #expect(manager.makeContext(for: try #require(manager.plugins.first)).storage.value(forKey: "result") == .string("permissionDenied"))
+    }
+
+    /// Calls that the bridge refuses or that fail at once take no time of Arch's, so a script that makes them while it leaves a call unanswered still hangs.
+    @Test func refusedAndFailedAIRequestsDoNotStretchTheHangLimit() async throws {
+        let manifest = #"{"id": "org.example.ai-hang", "name": "AI Hang", "version": "1", "apiVersion": 1, "summary": "Hangs.", "permissions": ["ai"], "background": "b.js", "contributes": {"commands": [{"id": "hang", "title": "Hang"}]}}"#
+        let background = """
+        // A promise that nothing can settle any more fails at once, so the script keeps its resolver.
+        let settle;
+        arch.commands.onRun("hang", () => {
+          (async () => {
+            for (;;) {
+              await arch.ai.reply({}).catch(() => {});
+              await arch.ai.reply({ messages: [{ role: "user", text: "Hi" }] }).catch(() => {});
+            }
+          })();
+          return new Promise((resolve) => { settle = resolve; });
+        });
+        """
+        // Without a provider, every request fails at once.
+        let manager = manager(ai: service(), hang: 1)
+        defer { manager.close() }
+        let package = try await manager.stage(try writePackage(["plugin.json": manifest, "b.js": background]))
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let started = ContinuousClock.now
+        await manager.run(PluginCommandRef(plugin: package.manifest.id, command: "hang"), PluginInvocation(tab: nil))
+        #expect(ContinuousClock.now - started < .seconds(8))
     }
 }
 

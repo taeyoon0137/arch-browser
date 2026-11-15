@@ -253,6 +253,9 @@ private struct PluginSection: View {
     @State private var isJoining = false
     /// The version whose removal the user confirms.
     @State private var removingVersion: InstalledPlugin?
+    /// The registered AI features, whose triggers the note on a plugin's models follows, and the providers, without which the note does not show.
+    @ObservedObject private var ai = AIService.shared
+    @ObservedObject private var aiSettings = AIService.shared.settings
 
     /// The pair's versions in the order of `EngineKind`, or the plugin alone.
     private var versions: [InstalledPlugin] {
@@ -331,7 +334,8 @@ private struct PluginSection: View {
                     Text(note)
                         .foregroundStyle(.secondary)
                 }
-                if let note = plugin.aiNote {
+                if !aiSettings.providers.isEmpty,
+                   let note = plugin.aiNote(isAutomatic: ai.features.first { $0.id == .plugin(plugin.id.rawValue) }?.trigger == .automatic) {
                     Text(note)
                         .foregroundStyle(.secondary)
                 }
@@ -782,11 +786,12 @@ extension PluginKind {
 }
 
 extension InstalledPlugin {
-    /// Which models a plugin with `ai` uses, for its section: those Settings ▸ AI ▸ Features gives its feature, which it needs of its own when its events run as hooks.
-    var aiNote: String? {
+    /// Which models a plugin with `ai` uses, for its section: those Settings ▸ AI ▸ Features gives its feature, which it needs of its own when its events run as hooks or when its feature is automatic, as the feature shared with the same plugin in another Persona that runs hooks is.
+    func aiNote(isAutomatic: Bool) -> String? {
         guard grant.permissions.contains(.ai) else { return nil }
-        return runsHooks ? "Its events reach it, and its AI requests go out, once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own."
-                         : "Its AI requests use the model that Settings \u{25B8} AI \u{25B8} Features gives it, or the default model."
+        if runsHooks { return "Its events reach it, and its AI requests go out, once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own." }
+        return isAutomatic ? "Its AI requests go out once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own."
+                           : "Its AI requests use the model that Settings \u{25B8} AI \u{25B8} Features gives it, or the default model."
     }
 }
 

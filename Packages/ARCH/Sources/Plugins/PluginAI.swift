@@ -18,19 +18,30 @@ extension InstalledPlugin {
     }
 }
 
-/// One run of a plugin's listener as a step of the shared hook scheduler. The scheduler counts the errors of the AI requests that the listener starts meanwhile toward its pause, and stops them with the step.
+/// One run of a plugin's listener as a step of the shared hook scheduler. The scheduler counts the errors of the AI requests that belong to the step toward its pause, and stops them with the step.
 @MainActor
 final class PluginHookStep {
+    /// The tab of the step's event, and for a page, address, or title event the address of its document: the step's renames of that tab apply to that document only.
+    let tab: UUID?
+    let document: URL?
     let requestDidEnd: @MainActor @Sendable ((any Error)?) -> Void
+    /// Set once the scheduler stops the step. Its requests have ended by then, and it starts no request and renames no tab after that.
+    private(set) var isStopped = false
 
-    init(requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) {
+    init(tab: UUID?, document: URL?, requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) {
+        self.tab = tab
+        self.document = document
         self.requestDidEnd = requestDidEnd
+    }
+
+    func stop() {
+        isStopped = true
     }
 }
 
-/// The AI interface as one plugin instance reaches it (`PluginContext.ai()`). Each request goes out under the plugin's feature and that feature's route, without a route or a model of its own. A request belongs to the hook step that runs when it starts, if any. The instance's stop ends every request.
+/// The AI requests of one plugin instance. Each `PluginContext.ai()` call gets a client whose requests go out under the plugin's feature and that feature's route, without a route or a model of their own, and belong to the hook step that runs when the call is made, if any. The instance's stop ends every request.
 @MainActor
-final class PluginAIClient: AIClient {
+final class PluginAIRequests {
     private let service: AIService
     private let feature: AIFeatureID
     /// The hook step whose listener runs now.
@@ -44,34 +55,32 @@ final class PluginAIClient: AIClient {
         self.feature = feature
     }
 
-    nonisolated func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
-        AsyncThrowingStream { continuation in
-            let forwarding = Task { @MainActor in await self.forward(request, to: continuation) }
-            continuation.onTermination = { _ in forwarding.cancel() }
-        }
+    /// A client whose requests belong to the step that runs now, if any.
+    func client() -> PluginAIClient {
+        PluginAIClient(requests: self, step: step)
     }
 
-    /// Sends the request under the plugin's feature, passes its events on, and reports its end to its step.
-    private func forward(_ request: AIRequest, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async {
+    /// Sends the request under the plugin's feature, passes its events on, and reports its end to its step. A stopped step's request never goes out.
+    fileprivate func forward(_ request: AIRequest, step: PluginHookStep?, to continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async {
         guard !hasEnded else { return continuation.finish(throwing: PluginError.stopped) }
+        guard step?.isStopped != true else { return continuation.finish(throwing: AIError.cancelled) }
         var request = request
         request.feature = feature
         request.route = nil
         request.pinnedModel = nil
         let id = UUID()
-        let step = step
         requests[id] = (continuation, step)
         defer { requests[id] = nil }
         do {
             for try await event in service.stream(request) {
                 continuation.yield(event)
             }
-            // A stream read by a canceled task ends without an error.
-            if Task.isCancelled { throw AIError.cancelled }
+            // A stream read by a canceled task ends without an error. A stopped request reports nothing, as a hook center hook's does.
+            guard !Task.isCancelled else { return continuation.finish(throwing: AIError.cancelled) }
             step?.requestDidEnd(nil)
             continuation.finish()
         } catch {
-            step?.requestDidEnd(error)
+            if !Task.isCancelled { step?.requestDidEnd(error) }
             continuation.finish(throwing: error)
         }
     }
@@ -84,10 +93,24 @@ final class PluginAIClient: AIClient {
         }
     }
 
-    /// Ends the requests that belong to the step with `AIError.cancelled`, as the scheduler stops it.
+    /// Stops the step and ends its requests with `AIError.cancelled`, as the scheduler stops it.
     func stop(_ step: PluginHookStep) {
+        step.stop()
         for request in requests.values where request.step === step {
             request.continuation.finish(throwing: AIError.cancelled)
+        }
+    }
+}
+
+/// The AI interface as one `PluginContext.ai()` call gives it: its requests go through the instance's `PluginAIRequests` and belong to the hook step that ran at that call.
+struct PluginAIClient: AIClient {
+    let requests: PluginAIRequests
+    let step: PluginHookStep?
+
+    func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
+        AsyncThrowingStream { continuation in
+            let forwarding = Task { @MainActor in await requests.forward(request, step: step, to: continuation) }
+            continuation.onTermination = { _ in forwarding.cancel() }
         }
     }
 }

@@ -715,8 +715,9 @@ public final class HookRegistry: ObservableObject {
             steps.append(step(for: hook, at: index, event: event, closedTab: closedTab))
         }
         guard !steps.isEmpty else { return }
-        // The effect of a running hook's own run, such as its rename's title change, joins that run's chain rather than stopping the run.
-        let causes = Set((event.cause?.hookChain ?? []).map(Hook.owner(of:)))
+        // The effect of a running hook's own run, such as its rename's title change, joins that run's chain rather than stopping the run, and so does the effect of a plugin's call, such as a plugin hook's rename, for the plugin's running step.
+        var causes = Set((event.cause?.hookChain ?? []).map(Hook.owner(of:)))
+        if case .plugin(let id)? = event.cause?.origin { causes.insert(AIFeatureID.plugin(id).rawValue) }
         scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: event.id, document: Self.document(of: event), documentID: event.tab?.documentID, urls: event.urls, causes: causes)
     }
 

@@ -56,13 +56,13 @@ public protocol PluginContext: AnyObject {
     func setBadge(_ text: String?, onSidebarItem id: String)
     /// Needs `clipboard`.
     func copyToClipboard(_ text: String) throws
-    /// The tabs the plugin reaches, in sidebar order, each without what the grant does not cover: its Persona's open tabs, never agent tabs. Needs no permission.
+    /// The tabs the plugin reaches, in sidebar order, each without what the grant does not cover: its Persona's open tabs, never agent tabs. A plugin with `ai` gets no title or address of a tab on a site excluded from AI. Needs no permission.
     func tabs() throws -> [PluginTab]
     /// One of the tabs the plugin reaches, or nil for any other tab.
     func tab(_ id: PluginTab.ID) throws -> PluginTab?
-    /// Needs `tabs.rename`. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
+    /// Needs `tabs.rename`. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives; while a hook step of the plugin runs, a rename of its event's tab is for its event's document, and once the scheduler has stopped the step, the tab does not take it. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
-    /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. While one of the plugin's hook steps runs, the requests it starts count toward the scheduler's pause and stop with the step. Every request stops when the instance stops.
+    /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. Every request stops when the instance stops.
     func ai() throws -> any AIClient
 }
 
@@ -95,7 +95,7 @@ public struct PluginInvocation: Sendable {
     public var tab: PluginTab?
     /// The space whose menu holds the item, for a space menu item.
     public var spaceID: UUID?
-    /// For a page context menu item, the link, image, and selected text the user clicked on. The user chose the item there, so the plugin receives them whatever its grant.
+    /// For a page context menu item, the link, image, and selected text the user clicked on. The user chose the item there, so the plugin receives them whatever its grant, except that a plugin with `ai` receives none of them on a page on a site excluded from AI, and no link or image address on such a site.
     public var linkURL: URL?
     public var imageURL: URL?
     public var selection: String?
@@ -138,8 +138,11 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
     public var kind: BrowserTabKind
     /// Arch uses this token to bind a hook to its document. Script values omit it.
     public var documentID: UUID?
+    /// The address of the document the tab shows, which the engine committed, while `url` can already be a navigation's that has not. A tab that leaves a page keeps that page's title until the next document commits, so the check for sites excluded from AI reads both. nil where `title` and `url` are; script values omit it.
+    public var documentURL: URL?
 
-    public init(id: UUID, spaceID: UUID?, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool, kind: BrowserTabKind = .open, documentID: UUID? = nil) {
+    public init(id: UUID, spaceID: UUID?, title: String?, url: URL?, engine: EngineKind, isPinned: Bool, isSelected: Bool, kind: BrowserTabKind = .open, documentID: UUID? = nil,
+                documentURL: URL? = nil) {
         self.id = id
         self.spaceID = spaceID
         self.title = title
@@ -149,6 +152,7 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
         self.isSelected = isSelected
         self.kind = kind
         self.documentID = documentID
+        self.documentURL = documentURL
     }
 
     /// The name that code gives a tab from `text`: its first line, trimmed and cut to `maximumNameLength` characters, or nil when nothing is left.
@@ -164,6 +168,7 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
         var tab = self
         tab.title = nil
         tab.url = nil
+        tab.documentURL = nil
         return tab
     }
 }

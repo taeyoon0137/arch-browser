@@ -97,14 +97,14 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let context: any PluginContext
     /// The latest secret call, which the next one waits for, so that the script's secret calls take effect in the order it made them.
     private var secretCalls: Task<Void, Never>?
-    /// Told true as a call starts that waits for Arch's own answer, an AI request's reply, and false as it ends, so that the instance does not count that wait toward its hang limit.
+    /// Told true as a call that the plugin's context and the bridge accepted starts to wait for Arch's own answer, an AI request's reply, and false as it ends, so that the instance does not count that wait toward its hang limit.
     var waitsForArch: ((Bool) -> Void)?
 
     init(context: any PluginContext) {
         self.context = context
     }
 
-    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, and an AI call once its reply has come. The other calls reply before the handler returns.
+    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, and an AI call that the context and the bridge accept once its reply has come. The other calls reply before the handler returns.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         let call: Call
@@ -124,10 +124,19 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return
         }
         if call.call == "ai.reply" {
+            // The client belongs to the hook step that runs as the call arrives. A call refused here does not wait for Arch.
+            let client: any AIClient
+            let request: AIRequest
+            do {
+                client = try context.ai()
+                request = try aiRequest(of: call)
+            } catch {
+                return Self.reply(.failure(error), to: replyHandler)
+            }
             waitsForArch?(true)
             Task {
                 defer { waitsForArch?(false) }
-                do { Self.reply(.success(try await aiReply(call)), to: replyHandler) }
+                do { Self.reply(.success(Self.value(of: try await client.reply(request))), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
             }
             return
@@ -158,9 +167,8 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
-    /// `arch.ai.reply(request)`: sends `{instructions, messages, schema, maxOutputTokens}`, where each message is `{role, text}` with the role `user` or `assistant`, `schema` a JSON Schema object for a JSON reply, and only `messages` required, and resolves with `{text, finishReason}`, the reason `completed` or `lengthLimit`. The plugin's context checks the grant first.
-    private func aiReply(_ call: Call) async throws -> PluginValue {
-        let client = try context.ai()
+    /// The request of `arch.ai.reply(request)`, which sends `{instructions, messages, schema, maxOutputTokens}`, where each message is `{role, text}` with the role `user` or `assistant`, `schema` a JSON Schema object for a JSON reply, and only `messages` required. The plugin's context checks the grant first.
+    private func aiRequest(of call: Call) throws -> AIRequest {
         guard call.args.count == 1, case .object(var fields)? = call.value(0) else { throw BridgeFailure.invalidCall }
         var instructions: String?
         if let value = fields.removeValue(forKey: "instructions"), value != .null {
@@ -185,9 +193,12 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         // A key the bridge does not read, such as a model, would go without effect.
         guard fields.isEmpty else { throw BridgeFailure.invalidCall }
-        let reply = try await client.reply(AIRequest(feature: .plugin(context.pluginID.rawValue), instructions: instructions, messages: messages,
-                                                     output: output, maxOutputTokens: maxOutputTokens))
-        return .object(["text": .string(reply.text), "finishReason": .string(reply.finishReason == .lengthLimit ? "lengthLimit" : "completed")])
+        return AIRequest(feature: .plugin(context.pluginID.rawValue), instructions: instructions, messages: messages, output: output, maxOutputTokens: maxOutputTokens)
+    }
+
+    /// What `arch.ai.reply` resolves with: `{text, finishReason}`, the reason `completed` or `lengthLimit`.
+    private static func value(of reply: AIReply) -> PluginValue {
+        .object(["text": .string(reply.text), "finishReason": .string(reply.finishReason == .lengthLimit ? "lengthLimit" : "completed")])
     }
 
     /// The call's result, or nil for none.
