@@ -120,6 +120,7 @@ public final class AgentRunner: ObservableObject {
         let execution = Execution(request: request, personaID: personaID, tabs: selected, closed: closed, rename: rename)
         let cli = usesCLI == true
         let task = Task { await self.perform(execution, models: models, cli: cli) }
+        execution.task = task
         running[id] = (execution, task)
         isRunning = true
         let remaining = options.limits.timeout - (ContinuousClock.now - waitStarted)
@@ -185,6 +186,11 @@ public final class AgentRunner: ObservableObject {
         var active = true
         var messages: [AIMessage] = []
         var timedOut = false
+        /// The run's work, whose cancel takes effect before the task next runs.
+        var task: Task<AgentRunResult, Never>?
+
+        /// Whether a call may still act for the run: neither Stop All Agents nor the time limit ended it, its caller has not cancelled it, and the calling task is not cancelled. A request queued on the main actor before the run's task takes its cancel sees it here.
+        var isLive: Bool { active && task?.isCancelled != true && !Task.isCancelled }
 
         init(request: AgentRunRequest, personaID: UUID, tabs: [AgentTabInfo], closed: AgentRunClosedTab?, rename: @escaping Rename) {
             self.request = request
@@ -229,8 +235,8 @@ public final class AgentRunner: ObservableObject {
             let tools = grantedTools.map { handler(for: $0, run: run) }
             do {
                 for try await event in client.run(modelRequest, tools: tools, maxRounds: request.options.limits.rounds, performsFinalCalls: true, maximumToolCalls: request.options.limits.toolCalls,
-                                                  unavailableTool: { await self.record(.refused, tool: nil, in: run) },
-                                                  conversationDidChange: { messages in if keepsSession { await MainActor.run { run.messages = messages } } }) {
+                                                  conversationDidChange: { messages in if keepsSession { await MainActor.run { run.messages = messages } } },
+                                                  unavailableTool: { await self.record(.refused, tool: nil, in: run) }) {
                     try Task.checkCancellation()
                     switch event {
                     case .started(let model): result.model = model; reply = ""
@@ -366,7 +372,7 @@ public final class AgentRunner: ObservableObject {
             AgentToolResult(status: error ? .refused : .ok, code: error ? message : nil, text: message)
         }
         let args = call.arguments
-        guard run.active, !Task.isCancelled else { return response("cancelled", error: true) }
+        guard run.isLive else { return response("cancelled", error: true) }
         guard AgentToolHost.problem(with: args, for: tool) == nil,
               let handle = args["tab"]?.stringValue, let index = Int(handle.dropFirst()), index > 0, index <= run.tabs.count, handle == "t\(index)" else {
             return response("invalidArguments", error: true)
@@ -380,11 +386,15 @@ public final class AgentRunner: ObservableObject {
             let host = self.host
             let toolHost = AgentToolHost(host: host, allowsAI: allowsAI)
             func mayRead(_ current: AgentTabInfo) -> Bool {
-                run.active && !Task.isCancelled && current.agentOwnerID == nil && current.documentID == tab.documentID && Self.sameDocument(current.url, document)
+                run.isLive && current.agentOwnerID == nil && current.documentID == tab.documentID && Self.sameDocument(current.url, document)
                     && host.userTabs(in: run.personaID).contains { $0.id == id }
             }
             if tool.name == "snapshot" {
-                return await toolHost.snapshot(args, tab: tab, handle: handle, access: .shared, store: run.snapshots, pages: 0, mayRead: mayRead).result
+                // A full outline holds the page's text, which only `read_text` grants.
+                if args["mode"]?.stringValue == "full", !run.request.options.tools.contains("read_text") {
+                    return AgentToolResult(status: .refused, code: "notGranted", text: "A full outline includes page text, which this hook may not read. Use interactive mode.")
+                }
+                return await toolHost.snapshot(args, tab: tab, handle: handle, access: .run, store: run.snapshots, pages: 0, mayRead: mayRead).result
             }
             return await toolHost.readText(args, tab: tab, handle: handle, mayReadTab: mayRead).result
         }

@@ -352,8 +352,10 @@ struct ScriptHookSheet: View {
                 TextField("Instructions", text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language."), axis: .vertical)
                 Toggle(draft.kind == .tabClosed ? "Read Text of the Tabs Left" : "Read Page Text", isOn: $draft.readsPageText)
                 Toggle(draft.kind == .tabClosed ? "Read Outlines of the Tabs Left" : "Read Page Outline", isOn: $draft.readsPageOutline)
-                if draft.readsPageOutline { Text("Outlines include page labels and links. Form values are hidden.").font(.caption) }
-                if draft.readsPageText || draft.readsPageOutline {
+                if draft.readsPageOutline { Text("Outlines include headings, labels, and links, not the page\u{2019}s text. Form values are hidden.").font(.caption) }
+                if draft.readsPageText {
+                    Text("The model may read page text on the allowed tabs. Sites excluded from AI are skipped.").font(.caption)
+                } else if draft.readsPageOutline {
                     Text("Sites excluded from AI are skipped.").font(.caption)
                 } else {
                     Text("The model receives titles and reduced addresses on the allowed tabs.").font(.caption)

@@ -86,6 +86,26 @@ import Testing
         #expect(!text.contains("Alex Kim") && !text.contains("session=secret"))
     }
 
+    /// A full outline holds the page's text, so a hook granted only `snapshot` gets interactive outlines.
+    @Test func aFullOutlineNeedsThePageTextGrant() async throws {
+        let page = try await FixturePage("form")
+        let req = outlineRequest(page)
+        let client = ScriptedClient { index in
+            index == 0 ? [.event(.toolCall(AIToolCall(id: "full", name: "snapshot", arguments: Data(#"{"tab":"t1","mode":"full"}"#.utf8)))),
+                          .event(.toolCall(AIToolCall(id: "outline", name: "snapshot", arguments: Data(#"{"tab":"t1"}"#.utf8)))), .event(.finished(.toolUse))]
+                : [.event(.finished(.completed))]
+        }
+        _ = await runner(client).run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
+        let answers = (client.requests.last?.messages.last?.parts ?? []).compactMap { part -> AIToolResult? in
+            if case .toolResult(let result) = part { return result }
+            return nil
+        }
+        try #require(answers.count == 2)
+        let texts = answers.map { $0.parts.compactMap { part -> String? in if case .page(let page) = part { return page.text }; if case .text(let text) = part { return text }; return nil }.joined() }
+        #expect(answers[0].isError && texts[0].contains("may not read"))
+        #expect(!answers[1].isError && texts[1].contains("Place order") && !texts[1].contains("asks the user"))
+    }
+
     @Test func pageAccessAndAnExplicitOutlineGrantAreBothRequired() async {
         var req = request()
         req.options.tools = ["snapshot"]
@@ -368,6 +388,36 @@ import Testing
         #expect(runner.keptRuns.isEmpty && service.sessions.isEmpty)
     }
 
+    /// A rename request already queued on the main actor when the caller cancels the run finds it ended, before the run's task takes the cancel.
+    @Test func aQueuedRenameAfterTheCallerCancelsTheRunChangesNothing() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try harness.makeService()
+        try await harness.settled(service)
+        let preset = AIAgentKind.codex.preset(executable: URL(fileURLWithPath: "/fixture/codex"))
+        let model = AIModelRef(provider: preset.id, model: "chosen")
+        var req = request()
+        req.knownProviders = [preset.id: preset.hookDestination]
+        req.options.dryRun = false
+        let runner = AgentRunner(host: host, client: ScriptedClient { _ in [] }, resolve: { _, _ in [model] }, provider: { _ in preset }, allowsAI: { _ in true }, reserve: { _, _ in true })
+        var binding: AgentHookCLIRun?
+        runner.startCLI = {
+            binding = $0
+            return try service.startHookCLI($0, feature: $1, models: $2, turns: $3, instructions: $4)
+        }
+        runner.finishCLI = { service.finishHookCLI($0) }
+        let renames = RenameLog()
+        let task = Task { await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, name, _, _ in renames.names.append(name); return true } }
+        try await waitUntil { !harness.runners.isEmpty }
+        try #require(harness.runners.first).emit(.ready(model))
+        let call = try #require(binding)
+        let late = Task { await call.dispatch(AgentToolCall(name: "rename_tab", arguments: ["tab": "t1", "name": "Late"])) }
+        task.cancel()
+        #expect(await late.value.code == "cancelled")
+        #expect(await task.value.status == .cancelled)
+        #expect(renames.names.isEmpty)
+    }
+
     @Test(arguments: [AgentRunRecord.none, .activity])
     func aCLIRunUsesItsOwnBoundConnectionAndLeavesNoTask(level: AgentRunRecord) async throws {
         let harness = try Harness()
@@ -444,4 +494,10 @@ import Testing
         }
         #expect(client.requests.count == 3)
     }
+}
+
+/// The names a run's renames gave, in order.
+@MainActor
+private final class RenameLog {
+    var names: [String?] = []
 }

@@ -298,16 +298,10 @@ public struct AIToolHandler: Sendable {
 extension AIClient {
     /// Sends the request with the handlers' tools, performs each tool call the model makes, sends the results back, and repeats until the model finishes without a tool call or `maxRounds` rounds have run. Calls run one at a time in the order the model made them; a call to a tool not offered, or one whose handler throws, becomes an error result for the model. Every round's events are passed on except its `finished(.toolUse)`. One-shot callers can perform the last round's calls and set a total call limit. Reaching either limit ends the run without another model request.
     ///
-    /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, and `AIService` sends older results as notes while a request is over its model's input limit, so a long conversation stays within it. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it.
+    /// The model that served the first round serves every later one (`pinnedModel`). Before each round the conversation is prepared as `AIToolHistory` describes, and `AIService` sends older results as notes while a request is over its model's input limit, so a long conversation stays within it. `conversationDidChange` gets the conversation after each round whose calls all ran, and after the final reply or the round limit, before the stream goes on: the request's messages as last sent, the replies, and the results, with no tool call left without its result. A caller that keeps a conversation across requests, as an agent session does, continues from it; a round that fails or is cancelled is not in it. `unavailableTool` hears of each call to a tool not offered, without the model's name or arguments for it.
     public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int = 8, performsFinalCalls: Bool = false, maximumToolCalls: Int? = nil,
-                    conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error> {
-        run(request, tools: tools, maxRounds: maxRounds, performsFinalCalls: performsFinalCalls, maximumToolCalls: maximumToolCalls,
-            unavailableTool: nil, conversationDidChange: conversationDidChange)
-    }
-
-    /// The same tool loop, with notice of calls rejected before any offered handler can see them. The notice carries no model-supplied name or arguments.
-    public func run(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?,
-                    unavailableTool: (@Sendable () async -> Void)?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?) -> AsyncThrowingStream<AIEvent, any Error> {
+                    conversationDidChange: (@Sendable ([AIMessage]) async -> Void)? = nil,
+                    unavailableTool: (@Sendable () async -> Void)? = nil) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {

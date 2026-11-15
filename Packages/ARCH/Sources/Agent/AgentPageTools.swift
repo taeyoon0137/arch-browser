@@ -104,13 +104,15 @@ extension AgentToolHost {
     }
 
     enum OutlineAccess {
-        case owned, shared, research
+        /// `run` is a hook's agent run, which reads and never acts or asks.
+        case owned, shared, research, run
 
         var description: String {
             switch self {
             case .owned: return ""
             case .shared: return " \u{00B7} shared by the user: every action here asks"
             case .research: return " \u{00B7} read-only research tab"
+            case .run: return " \u{00B7} read-only for this hook run"
             }
         }
     }
@@ -260,7 +262,7 @@ extension AgentToolHost {
         if facts.isFileInput { return "(agents do not choose files)" }
         if AgentPolicy.isChallenge(facts) { return "(CAPTCHA: hand to the user)" }
         if facts.isEditable, facts.valueClass == .hidden { return "(agents do not type here)" }
-        if access == .research { return nil }
+        if access == .research || access == .run { return nil }
         if access == .shared { return "(asks the user)" }
         let asks = (facts.isEditable && facts.valueClass == .personal)
             || (facts.submitsForm && !Set(facts.formFields).isDisjoint(with: [.password, .oneTimeCode, .payment, .personal]))
