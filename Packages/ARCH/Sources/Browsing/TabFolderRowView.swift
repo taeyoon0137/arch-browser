@@ -103,7 +103,7 @@ struct TabFolderRowView: View {
             if let owner = folder.agentSessionID.flatMap({ session.agents?.session(withID: $0) }) {
                 SessionFolderMenu(owner: owner, perform: { action in
                     Task { await windowModel.perform(action, on: folder, reviewed: owner) }
-                }, delete: { deleting = owner })
+                }, rename: { windowModel.renamingFolderID = folder.id }, delete: { deleting = owner })
                 .disabled(windowModel.agentSession(of: folder) == nil)
             } else {
                 if folder.live != nil {
@@ -171,12 +171,14 @@ private struct SessionFolderState: View {
 private struct SessionFolderMenu: View {
     @ObservedObject var owner: AgentSession
     let perform: (BrowserWindowModel.AgentFolderAction) -> Void
+    let rename: () -> Void
     let delete: () -> Void
 
     var body: some View {
         Button("Show Session") { perform(.show) }
         Button("Stop") { perform(.stop) }.disabled(!owner.isTurnRunning)
         Button("Keep Tabs") { perform(.keepTabs) }
+        Button("Rename Folder", action: rename)
         Divider()
         Button("Delete Session…", role: .destructive, action: delete)
     }

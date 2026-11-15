@@ -61,7 +61,7 @@ public protocol EngineWebContents: AnyObject {
     var restorableState: Data? { get }
     /// Whether a media element in the page plays sound that is not muted. Sound from Web Audio, or from media elements outside the document or inside shadow roots, does not count.
     var isAudible: Bool { get }
-    /// Whether the page uses the camera or the microphone, also while the page has muted it. `webContentsDidChangeMediaCapture` reports each change.
+    /// Whether the page uses the camera or the microphone, also while the page has muted it. Read when needed; no delegate call reports changes.
     var isCapturingMedia: Bool { get }
     /// Whether a video of the page plays in the system's picture-in-picture window, whose window closes with the page, also while the video is paused or muted. Read when needed; no delegate call reports changes.
     var isInPictureInPicture: Bool { get }

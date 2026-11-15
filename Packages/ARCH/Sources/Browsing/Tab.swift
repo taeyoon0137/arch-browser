@@ -61,8 +61,6 @@ import LiveFolders
     @Published public private(set) var favicon: NSImage?
     /// Whether the page plays sound, for a speaker badge on its row.
     @Published public private(set) var isAudible = false
-    /// Whether the page uses the camera or the microphone, which keeps the tab loaded (bookmark rule 5).
-    @Published public private(set) var isCapturingMedia = false
     /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). A main document's commit clears it, and another web contents starts without.
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
@@ -121,7 +119,7 @@ import LiveFolders
     var recordedURL: URL?
     /// The session sets this callback to record a visit to a page, with its title, in its history store.
     var recordVisit: ((URL, String) -> Void)?
-    /// The session sets this for tabs it restores from the saved session and for the pinned tabs a browser import opens. Closing a pinned tab clears it (`unloadToSavedPage()`).
+    /// The session sets this for tabs it restores from the saved session, and for the pinned tabs a browser import adds only while they join the list. Closing a pinned tab clears it (`unloadToSavedPage()`).
     var isRestored = false
     /// The cause of a navigation or new tab that code started, which the event source attaches to the tab's next `addressChanged` events and `pageLoaded`, which uses it up (`docs/hooks.md`, Causes). A load that ends without a `pageLoaded` drops it, and so does a navigation the user starts in the tab from the app.
     var pendingCause: BrowserEventCause?
@@ -217,13 +215,11 @@ import LiveFolders
         self.folderID = folderID
     }
 
-    /// Takes what a pinned tab that browser import opens keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2). It opens as a restored tab does: the hooks post it as no new tab, its first load is no visit, and an address that turns out to be a file downloads nothing.
+    /// Takes what a pinned tab that browser import adds keeps besides its page and place: its folder, the name the user gave it in the other browser, and its imported address and title as its saved page (bookmark rule 2).
     func takeImport(_ pinned: SidebarImport.Plan.PinnedTab) {
         folderID = pinned.folderID
         customTitle = pinned.customTitle
         savedPage = SavedPage(url: pinned.url, title: pinned.title)
-        isRestored = true
-        recordedURL = pinned.url
     }
 
     /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
@@ -318,7 +314,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
-    public func webContentsDidChangeMediaCapture(_ webContents: any EngineWebContents) { isCapturingMedia = webContents.isCapturingMedia }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
     public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {
         if agentOwnerID == nil || researchLoad == nil { requestActivation?() }
@@ -422,7 +417,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         canGoBack = replacement.canGoBack
         canGoForward = replacement.canGoForward
         isAudible = replacement.isAudible
-        isCapturingMedia = replacement.isCapturingMedia
         hasTypedInput = false
         answersBeforeUnloadWithStay = false
         hasCrashed = false

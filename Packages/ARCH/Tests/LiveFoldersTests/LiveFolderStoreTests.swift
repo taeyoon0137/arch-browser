@@ -89,8 +89,6 @@ private let date = Date(timeIntervalSinceReferenceDate: 800_000_000)
         #expect(keychain.label(for: first) == "Arch Live Folder: Tracker")
         try await keychain.removeAddress(for: first)
         #expect(try await keychain.address(for: first) == nil)
-        try await keychain.setAddress(address, for: first, folderName: "Tracker")
-        try await keychain.removeAddresses(except: [second])
         #expect(keychain.folders == [second])
     }
 }

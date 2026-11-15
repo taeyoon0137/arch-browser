@@ -150,7 +150,7 @@ public struct AgentSessionPanel: View {
                     }
                 }
             }.frame(maxHeight: shared.isEmpty ? 0 : min(160, CGFloat(shared.count) * 32))
-            Menu("Share a Tab…") {
+            Menu("Share Tab") {
                 ForEach(available) { tab in
                     Button(labels[tab.id] ?? tab.attachmentLabel) {
                         sharingProblem = service.share(tab, with: session) ? nil : "This tab changed or is no longer available."
@@ -482,10 +482,10 @@ private struct AgentTranscriptRow: View {
                                 if let current = readTab(row.page) { actions.showReadTab(current.id) }
                             }
                             .buttonStyle(.link)
-                            .font(.caption)
+                            .font(.system(size: 11))
                         }
                     }
-                    .font(.caption)
+                    .font(.system(size: 11))
                 }
             }
         }

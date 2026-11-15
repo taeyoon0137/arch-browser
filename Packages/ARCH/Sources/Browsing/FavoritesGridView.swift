@@ -3,7 +3,7 @@ import AppKit
 import ARCHEngine
 import SwiftUI
 
-/// The number of shortcuts in a full row. The last row shares its available width among the remaining shortcuts.
+/// The favorites grid's row capacities, which Settings ▸ Sidebar sets for each listed row and for the rows after them, and its tile metrics. A row that is not full shares its width among its favorites.
 public enum FavoriteTileLayout {
     public static let columnsKey = "ARCHFavoriteColumns"
     public static let rowSizesKey = "ARCHFavoriteRowSizes"
@@ -98,14 +98,14 @@ struct FavoritesGridView: View {
             .accessibilityAction { windowModel.openFavorite(favorite) }
             .contextMenu {
                 // The favorite's address and title are its saved page (bookmark rule 2); the commands act on its open tab.
-                if let tab = session.openTab(ofFavorite: favorite) {
+                if let tab = session.favoriteTabs[favorite.id] {
                     FavoriteTabSavedPageItems(tab: tab, session: session)
                     SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
                 } else {
                     Button("Use Current Page as Saved Page") {}.disabled(true)
                 }
                 Button("Edit Favorite\u{2026}") { windowModel.promptToEditFavorite(favorite) }
-                Button("Copy Address") { BrowserSession.copyAddress(favorite.url) }
+                Button("Copy Address") { Tab.copyToPasteboard(favorite.url) }
                 Divider()
                 Button("Close Tab") { session.closeFavorite(favorite) }
                     .disabled(!session.hasTab(favorite))

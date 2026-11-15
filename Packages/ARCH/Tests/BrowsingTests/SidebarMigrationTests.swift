@@ -57,7 +57,8 @@ import Testing
             try #require(folders.map(\.name) == ["Reference", "Reference ▸ Notes"])
             func path(_ tab: Tab) -> String? { tab.savedPage?.url.lastPathComponent }
             let pins = session.tabs.filter { $0.personaID == owner.id }
-            #expect(pins.allSatisfy { $0.isPinned && !$0.isLoaded })
+            // The first open is the user's: a visit, and a file downloads.
+            #expect(pins.allSatisfy { $0.isPinned && !$0.isLoaded && !$0.isRestored && $0.recordedURL == nil })
             #expect(pins.filter { $0.folderID == nil && $0.spaceID == spaces[0].id }.compactMap(path) == ["one", "five"])
             #expect(pins.filter { $0.folderID == folders[0].id }.compactMap(path) == ["two"])
             #expect(pins.filter { $0.folderID == folders[1].id }.compactMap(path) == ["three"])

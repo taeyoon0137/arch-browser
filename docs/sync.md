@@ -159,7 +159,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
   - A changed saved page moves the stand-in of a tab without its page to the new address, as Edit Saved Address… does. A tab with its page keeps it, and its row offers Go Back to Saved Page while it is off the saved site (bookmark rule 3).
   - A changed engine applies at once to a tab without its page or one that no window shows. A tab that a window shows switches once no window shows it.
   - A changed tab name, order, folder, or space applies at once.
-  - A deleted pinned tab closes into this Mac's closed list, so ⌘Z and Reopen Closed Tab can bring it back.
+  - A deleted pinned tab closes into this Mac's closed list, so ⌘Z and Reopen Last Closed Tab can bring it back.
   - A deleted folder's remaining folders and tabs move up a level, as Delete Folder does.
   - A deleted space moves this Mac's open tabs and open folders to its neighbor, as `deleteSpace` does.
   - A deleted Persona is removed as Delete Persona does (decision 8).

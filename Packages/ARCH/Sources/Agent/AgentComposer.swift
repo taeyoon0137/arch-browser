@@ -132,7 +132,7 @@ public struct AgentComposer: View {
         self.didStart = didStart
     }
 
-    var selectedPermissionNote: String? { context.usesAgentsPersona ? nil : permissionNote }
+    private var selectedPermissionNote: String? { context.usesAgentsPersona ? nil : permissionNote }
 
     private var models: [AIModelRef] { service.agentModels() }
 

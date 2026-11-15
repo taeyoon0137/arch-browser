@@ -97,57 +97,62 @@ private struct AgentPanelFrame: View {
     }
 }
 
-/// A connected program's current access and its panel. Disconnect keeps its grant and cancels its work.
+/// A connected program's current access and its panel. Disconnect keeps its grant and cancels its work. The sidebar's list scrolls the rows and gives them its inset.
 struct ConnectedAgentRows: View {
     @ObservedObject var agents: AgentService
-    @EnvironmentObject private var windowModel: BrowserWindowModel
 
     var body: some View {
         let connected = agents.connectedGrants
         if !connected.isEmpty {
-            ViewThatFits(in: .vertical) {
-                rows(connected)
-                ScrollView { rows(connected) }
+            VStack(spacing: 2) {
+                ForEach(connected) { ConnectedAgentRow(agents: agents, grant: $0) }
             }
-            .frame(maxHeight: min(CGFloat(connected.count) * 40, 120))
-            .padding(.horizontal, SidebarView.inset)
         }
     }
+}
 
-    private func rows(_ grants: [AgentGrant]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(grants) { grant in
-                let name = grant.client.displayName
-                let persona = agents.host.personas.first { $0.id == grant.personaID }?.name ?? "Deleted Persona"
-                let access = "\(grant.level.title) · \(persona)"
+/// Drawn as a plugin's sidebar row, with the access and "Persona / Space" on a second line.
+private struct ConnectedAgentRow: View {
+    let agents: AgentService
+    let grant: AgentGrant
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+
+    var body: some View {
+        let name = grant.client.displayName
+        let access = "\(grant.level.title) \u{00B7} \(agents.place(of: grant))"
+        HStack(spacing: 8) {
+            Button { windowModel.showClientPanel(grant.id) } label: {
                 HStack(spacing: 8) {
-                    Button { windowModel.showClientPanel(grant.id) } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "terminal").frame(width: 18)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(name).lineLimit(1)
-                                Text(access).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .contentShape(Rectangle())
+                    Image(systemName: "terminal")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name).font(.system(size: 14)).lineLimit(1)
+                        Text(access).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                    .help("\(name)\n\(access)")
-                    .accessibilityLabel("Show \(name)")
-                    .accessibilityValue(access)
-                    Button { agents.stopClient(grant.id) } label: {
-                        Image(systemName: "xmark.circle")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Disconnect \(name)")
-                    .accessibilityLabel("Disconnect \(name)")
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 8)
-                .frame(height: 40)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("\(name)\n\(access)")
+            .accessibilityLabel("Show \(name)")
+            .accessibilityValue(access)
+            Button { agents.stopClient(grant.id) } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Disconnect \(name)")
+            .accessibilityLabel("Disconnect \(name)")
         }
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .frame(height: 40)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+        .onHover { isHovering = $0 }
     }
 }
 

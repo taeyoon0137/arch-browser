@@ -122,7 +122,7 @@ public enum LiveFolderError: Error, Equatable, Sendable, LocalizedError {
         case .notAFeed: return "This address is not an RSS or Atom feed."
         case .unreadableFeed(let detail): return "The feed could not be read: \(detail)"
         case .httpStatus(let status, _): return "The server answered \(status) (\(HTTPURLResponse.localizedString(forStatusCode: status)))."
-        case .tooLarge(let bytes): return "The response is larger than \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))."
+        case .tooLarge(let bytes): return "The response is larger than \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory))."
         case .timedOut: return "The source did not answer within 30 seconds."
         case .offline: return "The Mac is offline."
         case .network(let detail): return detail

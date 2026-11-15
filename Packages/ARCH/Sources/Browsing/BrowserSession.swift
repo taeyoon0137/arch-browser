@@ -977,7 +977,7 @@ final class EngineRuntime {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.personas.count > 1, ask: { makeContent, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.remembersAnswersInSeveralPersonas(self.personas), ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
@@ -1049,7 +1049,7 @@ final class EngineRuntime {
         window.selectTab(tab.id)
     }
 
-    /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start, or for a tab without its page: only a tab that no window has shown since launch lacks one, and the site settings popover offers the switch for a shown tab only.
+    /// Moves a tab to another engine: a web contents from the Persona's runtime for `kind` loads the tab's address and takes the old one's place, and the tab keeps its place, pin, space, and selection. Nothing changes when `kind` cannot start, or for a tab without its page: a tab that no window has shown since launch or whose page unloaded lacks one, and the site settings popover offers the switch for a shown tab only.
     public func switchEngine(of tab: Tab, to kind: EngineKind) {
         tab.pendingSyncEngine = nil
         guard tab.isLoaded, allTabs.contains(where: { $0 === tab }) else { return }
@@ -1317,15 +1317,15 @@ final class EngineRuntime {
     }
 
     /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona, in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), or in an agent folder that does not already hold the tab, since a tab reaches an agent only when the agent opens it, leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
-    @discardableResult public func moveTab(_ id: UUID, to target: Tab, after: Bool? = nil) -> Bool {
+    public func moveTab(_ id: UUID, to target: Tab, after: Bool? = nil) {
         guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID), !folders.contains(where: { $0.id == target.folderID && $0.live != nil }),
-              let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return false }
+              let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
         let tab = tabs[from]
-        if target.agentOwnerID != nil, tab.folderID != target.folderID { return false }
+        if target.agentOwnerID != nil, tab.folderID != target.folderID { return }
         let isSameList = tab.spaceID == target.spaceID && tab.isPinned == target.isPinned && tab.folderID == target.folderID
         var reordered = tabs
         reordered.remove(at: from)
-        guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return false }
+        guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return }
         movingItemTabs {
             tab.spaceID = spaceID
             tab.isPinned = target.isPinned
@@ -1333,7 +1333,6 @@ final class EngineRuntime {
             reordered.insert(tab, at: (after ?? (isSameList && from < to)) ? targetIndex + 1 : targetIndex)
             tabs = reordered
         }
-        return true
     }
 
     /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned. It then removes each agent folder that the change emptied.
@@ -1510,6 +1509,11 @@ final class EngineRuntime {
         set { permissionAnswers.agentOnlyPersonaID = Self.agentOnly(newValue) }
     }
 
+    /// Whether remembered permission answers reach more than one of `personas`: the Agents Persona takes none.
+    public func remembersAnswersInSeveralPersonas(_ personas: [Persona]) -> Bool {
+        personas.filter { $0.id != agentOnlyPersonaID }.count > 1
+    }
+
     /// The rule of `agentOnlyPersonaID`: the default Persona is never agent-only.
     private static func agentOnly(_ id: Persona.ID?) -> Persona.ID? {
         id == Persona.defaultID ? nil : id
@@ -1642,9 +1646,9 @@ final class EngineRuntime {
     }
 
     /// Moves a dragged tab after its space's pinned or open tabs outside folders, so that a drag can take a tab out of a folder even when no other tab sits outside folders in that list.
-    @discardableResult public func moveTabToListEnd(_ id: UUID, pinned: Bool) -> Bool {
+    public func moveTabToListEnd(_ id: UUID, pinned: Bool) {
         guard let index = tabs.firstIndex(where: { $0.id == id }), let spaceID = tabs[index].spaceID,
-              tabsOutsideFolders(in: spaceID, pinned: pinned).last?.id != id else { return false }
+              tabsOutsideFolders(in: spaceID, pinned: pinned).last?.id != id else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
         movingItemTabs {
@@ -1653,7 +1657,6 @@ final class EngineRuntime {
             reordered.append(tab)
             tabs = reordered
         }
-        return true
     }
 
     // MARK: Folders
@@ -1849,7 +1852,7 @@ final class EngineRuntime {
 
     // MARK: Browser import
 
-    /// Adds what a profile of another browser brings to `destination`, leaving out what is there already (see `SidebarImport.Plan`): the Persona when it is new, the spaces, pinned folders, and favorites, and the pinned tabs, each opened in the default engine without being selected and saved at its imported address (bookmark rule 2). `record` then holds what the row brought in place of the profile's earlier entry, and no longer the IDs of items that are gone; the caller writes it once every row is in. Returns what the row added.
+    /// Adds what a profile of another browser brings to `destination`, leaving out what is there already (see `SidebarImport.Plan`): the Persona when it is new, the spaces, pinned folders, and favorites, and the pinned tabs, each in the default engine without its page until the user opens it, and saved at its imported address (bookmark rule 2). `record` then holds what the row brought in place of the profile's earlier entry, and no longer the IDs of items that are gone; the caller writes it once every row is in. Returns what the row added.
     public func addImport(_ row: SidebarImport, to destination: SidebarImport.Destination, record: inout SidebarImport.Record) -> SidebarImport.Counts {
         let plan = SidebarImport.Plan(row, to: destination, entry: record.entry(for: row.profile), in: importSidebar)
         if let persona = plan.newPersona {
@@ -1866,7 +1869,12 @@ final class EngineRuntime {
             tab.takeImport(pinned)
             return tab
         }
-        if !importedTabs.isEmpty { tabs.append(contentsOf: importedTabs) }
+        if !importedTabs.isEmpty {
+            // The hooks post no new tab for them: the event source passes over restored tabs as they join, which `tabs` reports before it changes. Their first load is then the user's, as a closed pinned tab's is: a visit, and a file downloads.
+            importedTabs.forEach { $0.isRestored = true }
+            tabs.append(contentsOf: importedTabs)
+            importedTabs.forEach { $0.isRestored = false }
+        }
         record.update(plan.entry)
         record.removeGoneItems(in: importSidebar)
         return plan.counts
@@ -2238,7 +2246,7 @@ extension BrowserSession {
         if tab.agentOwnerID != nil { exclusions.insert(.agent) }
         if tab.hasPlayingMedia { exclusions.insert(.media) }
         if page.isInPictureInPicture { exclusions.insert(.pictureInPicture) }
-        if tab.isCapturingMedia { exclusions.insert(.capture) }
+        if tab.webContents.isCapturingMedia { exclusions.insert(.capture) }
         if tab.hasTypedInput { exclusions.insert(.typedInput) }
         if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin) == .allow {
             exclusions.insert(.notifications)

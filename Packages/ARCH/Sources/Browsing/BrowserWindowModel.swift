@@ -434,8 +434,8 @@ public enum BrowserWindowKind {
         selectTab(copy.id)
     }
 
-    /// Asks in a sheet on the window with one text field for each of `fields`, which starts with its value, and passes the fields' text to `use` when the user chooses `button`. Nothing shows while the window shows another sheet.
-    private func askForText(title: String, message: String?, fields: [(placeholder: String, value: String)], button: String, then use: @escaping ([String]) -> Void) {
+    /// Asks in a sheet on the window with one labeled text field for each of `fields`, which starts with its value, and passes the fields' text to `use` when the user chooses `button`. Nothing shows while the window shows another sheet.
+    private func askForText(title: String, message: String?, fields: [(label: String, value: String)], button: String, then use: @escaping ([String]) -> Void) {
         guard let nsWindow, nsWindow.attachedSheet == nil, !fields.isEmpty else { return }
         let alert = NSAlert()
         alert.messageText = title
@@ -444,16 +444,20 @@ public enum BrowserWindowKind {
         alert.addButton(withTitle: "Cancel")
         let textFields = fields.map { field in
             let textField = NSTextField(string: field.value)
-            textField.placeholderString = field.placeholder
-            textField.widthAnchor.constraint(equalToConstant: 280).isActive = true
+            textField.setAccessibilityLabel(field.label)
+            textField.widthAnchor.constraint(equalToConstant: 240).isActive = true
             return textField
         }
-        let stack = NSStackView(views: textFields)
-        stack.orientation = .vertical
-        stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 280, height: CGFloat(24 * textFields.count + 8 * (textFields.count - 1)))
+        let grid = NSGridView(views: zip(fields, textFields).map { field, textField in
+            [NSTextField(labelWithString: "\(field.label):"), textField]
+        })
+        grid.rowSpacing = 8
+        grid.columnSpacing = 8
+        grid.rowAlignment = .firstBaseline
+        grid.column(at: 0).xPlacement = .trailing
+        grid.frame.size = grid.fittingSize
         zip(textFields, textFields.dropFirst()).forEach { $0.nextKeyView = $1 }
-        alert.accessoryView = stack
+        alert.accessoryView = grid
         alert.window.initialFirstResponder = textFields[0]
         alert.beginSheetModal(for: nsWindow) { response in
             if response == .alertFirstButtonReturn { use(textFields.map(\.stringValue)) }
@@ -804,8 +808,12 @@ public enum BrowserWindowKind {
 
     func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext, settings: AISettingsStore? = nil) {
         guard let context = sidebarAgentDraft(for: tab, settings: settings), context.spaceID == reviewed.spaceID, context.personaID == reviewed.personaID,
-              let document = context.tab, let original = reviewed.tab, document.id == original.id,
-              document.documentID == original.documentID, document.url == original.url else { return }
+              let document = context.tab, let original = reviewed.tab, document.id == original.id else { return }
+        // A page the user did not see while the menu showed is never attached, as with askAgent.
+        if document.documentID != original.documentID || document.url != original.url {
+            context.tab = nil
+            context.problem = "The page changed. Review the task before starting."
+        }
         showAgentPanel(.composer(context))
     }
 

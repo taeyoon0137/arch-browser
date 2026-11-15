@@ -13,7 +13,6 @@ struct PluginSidebarItemsView: View {
             VStack(spacing: 2) {
                 ForEach(items, id: \.id) { PluginSidebarItemRow(plugins: plugins, item: $0) }
             }
-            .padding(.horizontal, SidebarView.inset)
         }
     }
 }

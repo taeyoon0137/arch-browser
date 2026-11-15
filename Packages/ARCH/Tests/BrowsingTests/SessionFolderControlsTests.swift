@@ -190,6 +190,22 @@ import Testing
         #expect(!native.isVisible && window.agentPanel == nil && service.sessions.isEmpty)
     }
 
+    @Test func aSidebarTabWhosePageChangedOpensItsDraftWithoutThePage() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (browser, _, service) = try fixture(in: directory, client: WaitingFolderClient())
+        defer { service.stop() }
+        let space = try #require(browser.spaces.first)
+        let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let tab = browser.openTab(url: URL(string: "https://fixture.invalid/page"), in: space.id, select: false)
+        let reviewed = try #require(window.sidebarAgentDraft(for: tab))
+        // The page commits another document while the menu shows.
+        tab.webContents(tab.webContents, didCommitDocumentAt: tab.url)
+        window.askAgentAboutSidebarTab(tab, reviewed: reviewed)
+        guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a draft without the page"); return }
+        #expect(draft.tab == nil && draft.problem != nil && service.sessions.isEmpty)
+    }
+
     @Test func renamingTheDestinationWhileItsDraftIsOpenOrHiddenKeepsTheReviewedTask() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -236,7 +252,7 @@ import Testing
         let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let favorite = Favorite(url: URL(string: "https://fixture.invalid/favorite")!, title: "Notes", personaID: home.resolvedPersonaID)
         browser.addFavorites([favorite], in: home.resolvedPersonaID)
-        #expect(browser.openTab(ofFavorite: favorite) == nil)
+        #expect(browser.favoriteTabs[favorite.id] == nil)
         let page = browser.openTab(for: favorite)
         let selected = browser.openTab(url: URL(string: "https://fixture.invalid/selected"), in: home.id, select: false)
         window.selectTab(selected.id)
@@ -255,7 +271,7 @@ import Testing
         window.hideAgentPanel()
         browser.closeFavorite(favorite)
         window.askAgentAboutSidebarTab(page, reviewed: reviewed, settings: settings)
-        #expect(window.agentPanel == nil && browser.openTab(ofFavorite: favorite) == nil)
+        #expect(window.agentPanel == nil && browser.favoriteTabs[favorite.id] == nil)
     }
 
     @Test func reopeningThePanelKeepsItsUnsentDraftAndReviewedTabInTheSameWindow() throws {
