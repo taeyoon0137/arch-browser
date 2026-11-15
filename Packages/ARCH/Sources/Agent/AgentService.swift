@@ -734,8 +734,9 @@ import Foundation
     }
 
     /// A read source remains local to its session. Choosing it can only select the same live document.
-    func currentReadPage(_ page: AgentReadPage, in session: AgentSession) -> AgentTabInfo? {
-        guard canEditAttachments(of: session), !session.isTakenOver, session.takeoverGeneration == page.takeoverGeneration,
+    /// The tab a read came from while the session may still read it. A `retained` result, one an HTTP model's conversation already holds, outlives Take Over and Hand Back, which only refuse a read in progress.
+    func currentReadPage(_ page: AgentReadPage, in session: AgentSession, retained: Bool = false) -> AgentTabInfo? {
+        guard canEditAttachments(of: session), retained || (!session.isTakenOver && session.takeoverGeneration == page.takeoverGeneration),
               session.handles.tabs.id(for: page.handle) == page.tabID,
               let tab = host.tabs(withIDs: [page.tabID]).first, tab.documentID == page.documentID,
               tab.url == page.url, tab.isLoaded, tab.agentOwnerID == page.ownerID,
@@ -955,7 +956,7 @@ import Foundation
         }
     }
 
-    /// Retry after a session failed before any model held it, as after a refused start check: a new runner, then the last message again. A conversation a model held has no Retry, since a new runner would not carry it.
+    /// Retry of the current failed message: a failed turn resends it on the same runner; a session that failed before any model held it gets a new runner first.
     public func retry(_ session: AgentSession, errorID: UUID? = nil) async {
         guard let currentError = session.transcript.retryableErrorID, errorID == nil || errorID == currentError else { return }
         guard !session.hasEnded, !restartingSessions.contains(session.id) else { return }
@@ -1271,7 +1272,7 @@ import Foundation
             return { [weak service, weak session] result in
                 @MainActor func permits(_ handle: String) -> Bool {
                     guard let service, let session, let source = sources[handle] else { return false }
-                    return service.currentReadPage(source, in: session) != nil
+                    return service.currentReadPage(source, in: session, retained: true) != nil
                 }
                 if call.name == "list_tabs" {
                     return Self.checkedList(result, permits: permits)

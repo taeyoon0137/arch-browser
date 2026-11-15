@@ -395,7 +395,9 @@ extension AgentAPISession: AgentSessionRunning {
 
     /// An error that is not the runner's, such as a skill folder that could not be written for a retry.
     func noteError(_ error: Error) {
-        transcript.append(.error(error.localizedDescription, .retry))
+        // Retry fits only an error that another try can get past; Agent Tasks switched off or a removed model offers AI Settings.
+        let (sentence, action) = describe(Self.aiError(error))
+        transcript.append(.error(sentence, action))
     }
 
     // MARK: Mode and take-over

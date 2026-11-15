@@ -78,10 +78,12 @@ import Foundation
         }
         while true {
             if await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome { return outcome }
-            // A caller that was cancelled stops the call too.
+            // A caller that was cancelled stops the call too; a card it waited on records a denial.
             if Task.isCancelled {
+                var ended = Self.ended
+                if box.approvalID != nil { ended.decision = .denied }
                 box.task?.cancel()
-                return Self.ended
+                return ended
             }
             guard let approvalID = box.approvalID, approvals.isPending(approvalID) else { continue }
             let handle = state.handles.approvals.handle(for: approvalID)
@@ -104,7 +106,7 @@ import Foundation
 
     /// The answer of a call that the client's work ending cancelled: Stop, Deny and Stop, Stop All Agents, a revocation, expiry, or its connection's close. Such a call runs no further step and opens no card.
     static var ended: Outcome {
-        Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."), decision: .denied)
+        Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."))
     }
 
     /// The answer of a call that waits for the user, which names its approval as the protocol carries it, for `arch-mcp`, which tells the agent to call `approval_wait`, and in `structured` for `arch-cli --json`.

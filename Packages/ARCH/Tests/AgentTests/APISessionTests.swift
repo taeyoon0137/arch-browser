@@ -654,10 +654,12 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         try session.send("Continue from the second tab.")
         try await waitUntil { client.requests.count == 3 && session.state == .done }
         let after = client.requests[2]
-        #expect(pages(in: after, from: "read1").isEmpty)
-        #expect(pages(in: after, from: "excerpt").isEmpty)
-        #expect(pages(in: after, from: "read2") == (change == .takeOver ? [] : ["Synthetic body."]))
-        #expect(pages(in: after, from: "list") == (change == .takeOver ? [] : [second.title]))
+        // Take Over and Hand Back withdraw nothing the conversation already holds; the other changes withdraw the first tab's results.
+        let kept = change == .takeOver
+        #expect(pages(in: after, from: "read1") == (kept ? ["Synthetic body."] : []))
+        #expect(pages(in: after, from: "excerpt") == (kept ? ["Private selection", "Private reader reply"] : []))
+        #expect(pages(in: after, from: "read2") == ["Synthetic body."])
+        #expect(pages(in: after, from: "list") == (kept ? [first.title, second.title] : [second.title]))
         #expect(after.messages.contains { $0.role == .assistant && $0.parts.contains { if case .text("My earlier reply quotes the first page.") = $0 { return true }; return false } })
         await service.deleteSession(session.id)
     }
