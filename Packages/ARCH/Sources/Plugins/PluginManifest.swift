@@ -200,6 +200,11 @@ public struct PluginGrant: Hashable, Sendable {
                   siteAccess: manifest.siteAccess == .whenInvoked ? .whenInvoked : installed.grant.siteAccess)
     }
 
+    /// Whether the review, starting from this grant, offers the switch for `whenInvoked` to a plugin of `kind` with `manifest`: a script plugin with sites whose manifest asks for its sites as listed and has commands, without which the switch would leave it no page to reach, or whose grant starts with the switch on, as in an update of a plugin that the user limited and whose new version has no commands, so that the user can switch it off.
+    public func offersSiteAccessSwitch(for manifest: PluginManifest, kind: PluginKind) -> Bool {
+        kind == .script && !manifest.sites.isEmpty && manifest.siteAccess == .listedSites && (!manifest.contributions.commands.isEmpty || siteAccess == .whenInvoked)
+    }
+
     /// The grant without what the manifest of a plugin of `kind` does not ask for, so that a grant never exceeds the request: a manifest that asks for `whenInvoked` gets no more, and a plugin of a runtime's kind, such as a web extension, whose engines keep its site access, reaches its sites as listed.
     func limited(to manifest: PluginManifest, kind: PluginKind) -> PluginGrant {
         PluginGrant(permissions: permissions.intersection(manifest.permissions), sites: sites.filter(manifest.sites.contains),

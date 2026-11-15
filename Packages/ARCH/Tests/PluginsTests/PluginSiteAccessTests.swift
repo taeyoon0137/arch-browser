@@ -333,6 +333,17 @@ private final class ListedPlugin: BuiltInPlugin {
         let installed = InstalledPlugin(kind: .script, manifest: narrow, grant: invokedGrant, isEnabled: true)
         #expect(PluginGrant(updating: installed, to: narrow).siteAccess == .whenInvoked)
         #expect(PluginGrant(updating: InstalledPlugin(kind: .script, manifest: narrow, grant: listedGrant, isEnabled: true), to: asking).siteAccess == .whenInvoked)
+
+        // The switch shows for a script plugin with sites and commands, and without commands only where it starts on, so the user can switch it off; never for a manifest that asks for `whenInvoked`, nor for a web extension.
+        #expect(listedGrant.offersSiteAccessSwitch(for: narrow, kind: .script) && !listedGrant.offersSiteAccessSwitch(for: narrow, kind: .webExtension))
+        var narrowWithoutCommands = narrow
+        narrowWithoutCommands.contributions = PluginContributions()
+        #expect(!PluginGrant(offeredBy: narrowWithoutCommands, kind: .script).offersSiteAccessSwitch(for: narrowWithoutCommands, kind: .script))
+        #expect(PluginGrant(updating: installed, to: narrowWithoutCommands).offersSiteAccessSwitch(for: narrowWithoutCommands, kind: .script))
+        #expect(!invokedGrant.offersSiteAccessSwitch(for: asking, kind: .script))
+        var withoutSites = narrow
+        withoutSites.sites = []
+        #expect(!PluginGrant(offeredBy: withoutSites, kind: .script).offersSiteAccessSwitch(for: withoutSites, kind: .script))
     }
 
     @Test func theGrantStatesItsSiteAccessAndAsksNoConfirmationForEveryWebsiteOneTabAtATime() throws {

@@ -271,7 +271,7 @@ private struct PluginReviewView: View {
                     if package.kind == .script, !manifest.sites.isEmpty, let summary = SiteAccess.whenInvoked.summary {
                         if manifest.siteAccess == .whenInvoked {
                             Text(summary)
-                        } else {
+                        } else if Self.offeredGrant(review: review, choice: choice, target: updateTarget, in: plugins).offersSiteAccessSwitch(for: manifest, kind: package.kind) {
                             Toggle(summary, isOn: Binding(get: { siteAccess == .whenInvoked }, set: { siteAccess = $0 ? .whenInvoked : .listedSites }))
                         }
                     }
