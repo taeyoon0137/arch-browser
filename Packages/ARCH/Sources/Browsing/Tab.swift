@@ -29,6 +29,8 @@ import LiveFolders
         didSet {
             guard isPinned != oldValue else { return }
             savedPage = isPinned ? currentPage : nil
+            // Pinning or unpinning is the user's own act on the tab, so the archive and unload timers count from it; otherwise a pin left alone for days, once unpinned, would be archived at the next check.
+            lastActivatedAt = Date()
         }
     }
     /// A synced engine choice waits while a window shows this page.
