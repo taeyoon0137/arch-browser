@@ -3,7 +3,7 @@ import AppKit
 import ARCHEngine
 import SwiftUI
 
-/// The number of shortcuts in a full row. The last row shares its available width among the remaining shortcuts.
+/// The favorites grid's row capacities, which Settings ▸ Sidebar sets for each listed row and for the rows after them, and its tile metrics. A row that is not full shares its width among its favorites.
 public enum FavoriteTileLayout {
     public static let columnsKey = "ARCHFavoriteColumns"
     public static let rowSizesKey = "ARCHFavoriteRowSizes"

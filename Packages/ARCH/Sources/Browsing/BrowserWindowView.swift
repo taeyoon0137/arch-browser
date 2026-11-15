@@ -55,19 +55,20 @@ public struct BrowserWindowView: View {
                     .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
                 PageAreaView(session: session, sidebarDrag: sidebarDrag, margins: pageMargins)
+                    // In the page's own corner, so an agent panel or page reader beside the page keeps its controls.
+                    .overlay(alignment: .bottomTrailing) {
+                        if !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
+                            LibraryButton(session: session, activityOnly: true)
+                                .background(.regularMaterial, in: Capsule())
+                                .padding(2 * Self.pageMargin)
+                        }
+                    }
                 if !windowModel.isPageFullscreen {
                     if windowModel.agentPanel != nil {
                         AgentPanelColumn(session: session)
                     } else {
                         PageReaderColumn(session: session)
                     }
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
-                    LibraryButton(session: session, activityOnly: true)
-                        .background(.regularMaterial, in: Capsule())
-                        .padding(2 * Self.pageMargin)
                 }
             }
             if !windowModel.isSidebarVisible || isSidebarPeeking, !windowModel.isPageFullscreen {

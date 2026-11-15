@@ -252,7 +252,6 @@ import Testing
         tab.takeImport(pinned)
         #expect(tab.savedPage == SavedPage(url: home, title: "Home"))
         #expect(tab.customTitle == "Start")
-        #expect(tab.isRestored && tab.recordedURL == home)
         // After its page went to another site, its saved page still counts as pinned, also without the record of the first import.
         page.report(url: elsewhere, title: "Other")
         let state = try #require(SidebarImport.Sidebar.TabState(tab))

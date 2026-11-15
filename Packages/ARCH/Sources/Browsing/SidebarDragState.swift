@@ -53,7 +53,7 @@ struct SidebarReorderHover {
     }
 }
 
-/// The dimmed slot follows the pointer without moving a real tab. A shortcut drop discards
+/// The dimmed slot follows the pointer without moving a real tab. A drop on the favorites discards
 /// this slot. An ordinary drop resolves it against the current tabs and folders.
 @MainActor enum SidebarTabSlot: Equatable {
     case beside(UUID, folder: UUID?, pinned: Bool, after: Bool)
@@ -124,7 +124,7 @@ final class SidebarDragState: ObservableObject {
     @Published var targetFolderID: UUID?
     /// Set while a row released over a space's symbol or a folder's row shrinks into it.
     @Published var isEntering = false
-    /// The current space's top shortcuts can accept a tab from this same page of the sidebar.
+    /// Each space page's favorites grid, or its header while there are none, which accepts a tab from the same page.
     var favoriteBarFrames: [UUID: CGRect] = [:]
     @Published var targetFavoriteSpaceID: UUID?
 

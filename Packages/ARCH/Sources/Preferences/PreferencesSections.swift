@@ -117,10 +117,7 @@ struct SidebarSection: View {
 
     var body: some View {
         Form {
-            Section("Favorites per row") {
-                favoriteCountPicker("Default for other rows", selection: Binding(
-                    get: { FavoriteTileLayout.columnCount(favoriteColumns) },
-                    set: { favoriteColumns = $0 }))
+            Section {
                 ForEach(favoriteRows.indices, id: \.self) { index in
                     HStack {
                         favoriteCountPicker("Row \(index + 1)", selection: Binding(
@@ -143,9 +140,17 @@ struct SidebarSection: View {
                         .accessibilityLabel("Remove row \(index + 1)")
                     }
                 }
+                // The default follows the rows it sets, as the grid lays them out.
+                favoriteCountPicker(favoriteRows.isEmpty ? "All rows" : "Other rows", selection: Binding(
+                    get: { FavoriteTileLayout.columnCount(favoriteColumns) },
+                    set: { favoriteColumns = $0 }))
                 Button("Add Row") {
                     favoriteRowData = FavoriteTileLayout.encode(rowSizes: favoriteRows + [favoriteColumns])
                 }
+            } header: {
+                Text("Favorites per row")
+            } footer: {
+                if !favoriteRows.isEmpty { formFootnote("Rows after these use this number.") }
             }
 
             Section {
