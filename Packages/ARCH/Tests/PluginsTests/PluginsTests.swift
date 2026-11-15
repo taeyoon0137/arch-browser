@@ -1,9 +1,10 @@
-// Plugin identifiers, match patterns, the grant an update's review offers and the grants the user confirms, shortcuts, the contribution index, values and storage, page scripts, and the manager: which plugins it registers and keeps switched on or off, also for the run while `plugins.json` cannot be written, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
+// Plugin identifiers, match patterns, the grant an update's review offers and the grants the user confirms, shortcuts, the contribution index, values and storage, page scripts with their styles in a WebKit page, and the manager: which plugins it registers and keeps switched on or off, also for the run while `plugins.json` cannot be written, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
 import AppKit
 import ARCHEngine
 import Foundation
 import JavaScriptCore
 import Testing
+import WebKit
 @testable import Plugins
 
 @Suite struct PluginIDTests {
@@ -791,6 +792,8 @@ import Testing
 @Suite struct PluginPageScriptTests {
     private let folder = TemporaryFolder()
     private let world = PluginID(rawValue: "org.example.page-script")!.pageScriptWorld
+    /// The style sheet of the page that `loadedWebView(at:userScript:)` loads, which gives its paragraph a color.
+    private let pageStyle = "p { color: rgb(0, 0, 255); }"
 
     private func manager() -> PluginManager {
         PluginManager(persona: UUID(), directory: folder.url, builtIns: [PageScriptPlugin.self, DisabledPageScriptPlugin.self], secretStore: MemorySecretStore())
@@ -857,6 +860,90 @@ import Testing
         for source in ["", "return;", "ran = arch; // A final comment", #"const brace = "}"; /* } */"#] {
             #expect(PluginPageScript(matches: sites, source: source).engineScript(world: world, sites: sites) != nil, "\(source)")
         }
+    }
+
+    /// A script's styles go into the document in `<style>` elements, in their order, so that a later sheet wins over an earlier one, with their text as given, and before its source runs: a document-start script's at the start of the document's root element, before the page's own styles, which then win, also when a command runs it at once in a loaded document, and a document-end script's at the root's end, after them. A document without a root element yet, as Chromium's helper may run a document-start script in one, gets them at the root's start once the root appears, after the source has run, also when the root comes with the page's styles, as the parser may add them before the observer hears of the root. Their text never runs as script, in the page's world or in the script's, also where it would close the JSON string that carries it, and a script that runs once in a document adds them once.
+    @Test func addsItsStylesToTheDocument() async throws {
+        let sites = [try MatchPattern("https://example.org/*")]
+        let styles = ["p { color: rgb(0, 128, 0); margin-left: 3px; }",
+                      "/* \"]); globalThis.ran = true; ([\" \\ </style><script>globalThis.ran = true;</script> \u{2028} */ p { margin-left: 7px; }"]
+        let address = URL(string: "https://example.org/a")!
+        let contentWorld = WKContentWorld.world(name: "PluginPageScriptTests")
+        let counted = "globalThis.stylesAtRun = document.querySelectorAll(\"style\").length;"
+        let state = """
+        const paragraph = getComputedStyle(document.querySelector("p"));
+        return [paragraph.color, paragraph.marginLeft, String(globalThis.stylesAtRun), typeof globalThis.ran, ...Array.from(document.querySelectorAll("style"), (style) => style.textContent)];
+        """
+        /// What `state` returns where the paragraph has `color`, the source counted `atRun` style elements, and the document has `sheets`: the second sheet's margin, from the plugin's later sheet, and no `ran` in the script's world.
+        func shown(_ color: String, _ atRun: String, _ sheets: [String]) -> [String] {
+            [color, "7px", atRun, "undefined"] + sheets
+        }
+        let expected: [EnginePageScriptInjectionTime: [String]] = [.documentStart: shown("rgb(0, 0, 255)", "2", styles + [pageStyle]),
+                                                                   .documentEnd: shown("rgb(0, 128, 0)", "3", [pageStyle] + styles)]
+        for runAt in [EnginePageScriptInjectionTime.documentStart, .documentEnd] {
+            let script = try #require(PluginPageScript(matches: sites, source: counted, styles: styles, runAt: runAt).engineScript(world: world, sites: sites))
+            let webView = try await loadedWebView(at: address, userScript: WKUserScript(source: "(\(script.source))({});", injectionTime: runAt == .documentStart ? .atDocumentStart : .atDocumentEnd,
+                                                                                         forMainFrameOnly: true, in: contentWorld))
+            #expect(try await webView.callAsyncJavaScript(state, arguments: [:], in: nil, contentWorld: contentWorld) as? [String] == expected[runAt], "\(runAt)")
+            #expect(try await webView.evaluateJavaScript("typeof ran") as? String == "undefined", "\(runAt)")
+        }
+        let atOnce = try #require(PluginPageScript(matches: sites, source: counted, styles: styles, runAt: .documentStart).engineScript(world: world, sites: sites))
+        let loaded = try await loadedWebView(at: address)
+        _ = try await loaded.callAsyncJavaScript("(\(atOnce.source))({});", arguments: [:], in: nil, contentWorld: contentWorld)
+        #expect(try await loaded.callAsyncJavaScript(state, arguments: [:], in: nil, contentWorld: contentWorld) as? [String] == shown("rgb(0, 0, 255)", "3", styles + [pageStyle]))
+        let once = try #require(PluginPageScript(matches: sites, source: counted, styles: styles, runAt: .documentStart).engineScript(world: world, sites: sites, once: "\(world)#0"))
+        let webView = try await loadedWebView(at: address)
+        let rootless = """
+        const root = document.documentElement;
+        root.remove();
+        const run = \(once.source);
+        run({});
+        const before = root.querySelectorAll("style").length;
+        document.appendChild(root);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        root.remove();
+        document.appendChild(root);
+        run({});
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return String(before);
+        """
+        #expect(try await webView.callAsyncJavaScript(rootless, arguments: [:], in: nil, contentWorld: contentWorld) as? String == "1")
+        #expect(try await webView.callAsyncJavaScript(state, arguments: [:], in: nil, contentWorld: contentWorld) as? [String] == shown("rgb(0, 0, 255)", "0", styles + [pageStyle]))
+    }
+
+    /// A script that its guard stops adds no styles: one whose excludes cover the document, whose matches do not, whose granted sites do not, or, as a `whenInvoked` access's, whose host is another.
+    @Test func addsNoStylesWhereItsGuardStopsIt() async throws {
+        let sites = [try MatchPattern("https://example.org/*")]
+        let other = [try MatchPattern("https://example.com/*")]
+        let styles = ["p { color: rgb(0, 128, 0); }"]
+        let marked = "globalThis.bodyRan = true;"
+        let scripts = try [
+            PluginPageScript(matches: sites, excludes: [try MatchPattern("https://example.org/a")], source: marked, styles: styles).engineScript(world: world, sites: sites),
+            PluginPageScript(matches: other, source: marked, styles: styles).engineScript(world: world, sites: sites),
+            PluginPageScript(matches: sites, source: marked, styles: styles).engineScript(world: world, sites: other),
+            PluginPageScript(matches: sites, source: marked, styles: styles, runAt: .documentStart).engineScript(world: world, sites: sites, within: other, once: "\(world)#0"),
+        ].map { try #require($0) }
+        let webView = try await loadedWebView(at: URL(string: "https://example.org/a")!)
+        let run = """
+        for (const script of [\(scripts.map(\.source).joined(separator: ", "))]) script({});
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return [typeof globalThis.bodyRan, getComputedStyle(document.querySelector("p")).color, ...Array.from(document.querySelectorAll("style"), (style) => style.textContent)];
+        """
+        #expect(try await webView.callAsyncJavaScript(run, arguments: [:], in: nil, contentWorld: .world(name: "PluginPageScriptTests")) as? [String] == ["undefined", "rgb(0, 0, 255)", pageStyle])
+    }
+
+    /// A web view without a window over a store that keeps nothing, with `userScript`, that has loaded a page at `address` with `pageStyle` in its head and a paragraph, from which no request leaves the test.
+    private func loadedWebView(at address: URL, userScript: WKUserScript? = nil) async throws -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        if let userScript { configuration.userContentController.addUserScript(userScript) }
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), configuration: configuration)
+        webView.loadHTMLString("<!doctype html><html><head><title>Page</title><style>\(pageStyle)</style></head><body><p>Text</p></body></html>", baseURL: address)
+        for _ in 0 ..< 100 where webView.isLoading || webView.url != address {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(!webView.isLoading && webView.url == address)
+        return webView
     }
 
     @Test func pageMatcherAgreesWithMatchPatterns() throws {

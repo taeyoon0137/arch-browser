@@ -27,14 +27,18 @@ public struct PluginPageScript: Hashable, Sendable {
     public var excludes: [MatchPattern]
     /// JavaScript, run as the body of a function. A source that does not parse as a function body on its own never runs. A script plugin's comes from a file of its package.
     public var source: String
+    /// Style sheets, as text, that the script adds to the document in `<style>` elements, in their order, before its source runs: for `documentStart` at the start of the document's root element, before the page's own styles, and for `documentEnd` at its end. A document without a root element yet gets them once the root appears, after the source has run. Their text never runs as script. A script plugin's come from the files of its package that a page script's `css` lists.
+    public var styles: [String]
     public var runAt: EnginePageScriptInjectionTime
     /// Whether the script also runs in the frames inside a page.
     public var allFrames: Bool
 
-    public init(matches: [MatchPattern], excludes: [MatchPattern] = [], source: String, runAt: EnginePageScriptInjectionTime = .documentEnd, allFrames: Bool = false) {
+    public init(matches: [MatchPattern], excludes: [MatchPattern] = [], source: String, styles: [String] = [], runAt: EnginePageScriptInjectionTime = .documentEnd,
+                allFrames: Bool = false) {
         self.matches = matches
         self.excludes = excludes
         self.source = source
+        self.styles = styles
         self.runAt = runAt
         self.allFrames = allFrames
     }
