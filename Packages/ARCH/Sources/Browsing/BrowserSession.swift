@@ -2007,9 +2007,11 @@ final class EngineRuntime {
         if case .failure = saveNow() { needsFullSidebarSync = true }
     }
 
-    /// The app saves the session before confirming quit. Stop live folders and flush each Persona's cookie record only once the app actually terminates.
+    /// Stops live folders, writes the session again now that the quit is going ahead, and flushes each Persona's cookie record.
     public func finishWritesAtQuit() {
         liveFolderService.stop()
+        // A failure is logged, and the previous file stays.
+        saveNow()
         personaEngines.values.forEach { $0.cookieSync.saveAtQuit() }
         CookieSync.finishWrites()
     }
