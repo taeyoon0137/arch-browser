@@ -750,7 +750,6 @@ extension PluginAITests {
         #expect(service.activity.count == 1 && service.activity.last?.feature == feature && ContinuousClock.now - closed < .seconds(3))
     }
 
-    /// `arch.ai.stream` reads a reply by the rules of `AIClient.reply(_:)`, which `arch.ai.reply` follows: the same events end it with the same reason or error and hand on the same text.
     /// The `ai` permission can list the data kinds beyond text that the plugin's requests carry: `page` and `selection`, whose content a plugin reaches.
     @Test func theAIPermissionMayListDataKinds() async throws {
         let manager = manager(ai: nil)
@@ -789,6 +788,26 @@ extension PluginAITests {
         for (permissions, reason) in refusals {
             await #expect(throws: PluginError.invalidPackage(reason), "\(permissions)") { _ = try await stage(permissions) }
         }
+    }
+
+    /// An update that lists other data kinds changes the kinds that the plugin's feature declares, with neither its name nor its trigger changing.
+    @Test func anUpdateChangesTheKindsTheFeatureDeclares() async throws {
+        let service = service()
+        let manager = manager(ai: service)
+        defer { manager.close() }
+        let id = AIFeatureID.plugin("org.example.ai-kinds")
+        func install(_ permissions: String) async throws -> Set<AIDataKind>? {
+            let package = try await manager.stage(try writePackage([
+                "plugin.json": #"{"id": "org.example.ai-kinds", "name": "AI Kinds", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": \#(permissions)}"#,
+            ]))
+            _ = try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+            return service.features.first { $0.id == id }?.data.kinds
+        }
+        #expect(try await install(#"["ai"]"#) == [])
+        #expect(try await install(#"[{"ai": ["page", "selection"]}]"#) == [.page, .selection])
+        #expect(try await install(#"[{"ai": ["page"]}]"#) == [.page])
+        #expect(try await install(#"["ai"]"#) == [])
+        #expect(service.features.first { $0.id == id }?.name == "AI Kinds" && manager.plugins.count == 1)
     }
 
     /// Plugins with one identifier in several Personas share the feature, which declares the kinds that any of them lists, while each one's requests carry only its own.
@@ -877,6 +896,7 @@ extension PluginAITests {
         }
     }
 
+    /// `arch.ai.stream` reads a reply by the rules of `AIClient.reply(_:)`, which `arch.ai.reply` follows: the same events end it with the same reason or error and hand on the same text.
     @Test func aStreamEndsAsAReplyDoes() async {
         let model = AIModelRef(provider: AIProviderID(), model: "")
         let json = AIOutputFormat.json(schema: Data(#"{"type": "object"}"#.utf8))
