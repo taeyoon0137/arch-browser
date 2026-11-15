@@ -29,8 +29,14 @@ extension PluginPageScript {
     }
 }
 
-/// A script that a plugin runs once in a tab's page (`PluginContext.runPageScript(_:in:)`), as `executeJavaScript(_:inWorld:completion:)` calls it, and what it returns.
+/// A script that a plugin runs once in a tab's page (`PluginContext.runPageScript(_:in:)`), as `executeJavaScriptWithoutUserGesture(_:inWorld:completion:)` calls it, and what it returns.
 enum PluginPageRun {
+    /// Where the script's text comes from: given, as a built-in plugin's, or a file of a script plugin's package, by package path.
+    enum Source: Sendable {
+        case text(String)
+        case file(String, of: PluginPackage)
+    }
+
     /// What the run came to.
     enum Outcome {
         /// What the script's body returned, null for `undefined`, a function, or a symbol.
@@ -41,11 +47,25 @@ enum PluginPageRun {
         case outside
     }
 
-    /// The function that the engine calls with the world's channel, or nil when `source` is not a function body on its own. Like a page script's guard, it checks the document's `location` against the granted sites first and runs nothing outside them. It returns JSON text: `{"value": …}`, `{"error": text}` with what the body threw, as the bridge describes a listener's, or `{"outside": true}`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it.
-    @MainActor
-    static func function(running source: String, sites: [MatchPattern]) -> String? {
-        guard FunctionBodyCheck.shared.accepts(source) else { return nil }
-        return """
+    /// The function that the engine calls with the world's channel, made off the main actor, which neither reading a large package file nor parsing it then holds up. Throws `PluginError.invalidPageScript` for a path that names no text file of the package and for a source that is not a function body on its own.
+    static func function(running source: Source, sites: [MatchPattern]) async throws -> String {
+        try await Task.detached {
+            let text: String
+            switch source {
+            case let .text(given):
+                text = given
+            case let .file(path, package):
+                guard let read = package.text(of: path) else { throw PluginError.invalidPageScript("\u{201C}\(path)\u{201D} is not a text file of the plugin\u{2019}s package.") }
+                text = read
+            }
+            guard FunctionBodyCheck().accepts(text) else { throw PluginError.invalidPageScript("The script does not parse as the body of a function, as a page script must.") }
+            return function(running: text, sites: sites)
+        }.value
+    }
+
+    /// The function for a source that is a function body on its own. Like a page script's guard, it checks the document's `location` against the granted sites first and runs nothing outside them. It returns JSON text: `{"value": …}`, `{"error": text}` with what the body threw, as the bridge describes a listener's, or `{"outside": true}`. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it.
+    private static func function(running source: String, sites: [MatchPattern]) -> String {
+        """
         (channel) => {
           const covers = \(MatchPattern.javaScriptMatcher);
           if (!covers(location, \(MatchPattern.javaScriptLiteral(sites)))) return '{"outside":true}';

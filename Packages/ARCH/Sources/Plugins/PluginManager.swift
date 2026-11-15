@@ -1254,17 +1254,17 @@ public final class PluginManager: ObservableObject {
         .seconds(scriptLimits.hang)
     }
 
-    /// The source of a script that the plugin runs in a page: a text file of its package, or script text from a built-in plugin. Throws `PluginError.invalidPageScript` for anything else.
-    fileprivate func source(of script: PluginScript, for id: PluginID) throws -> String {
+    /// Where the script that the plugin runs in a page comes from: script text from a built-in plugin, or a file of a script plugin's package, which `PluginPageRun.function(running:sites:)` reads off the main actor. Throws `PluginError.invalidPageScript` for anything else.
+    fileprivate func source(of script: PluginScript, for id: PluginID) throws -> PluginPageRun.Source {
         switch script {
         case let .source(text):
             guard builtIns[id] != nil else { throw PluginError.invalidPageScript("Only plugins built into Arch run script text in pages.") }
-            return text
+            return .text(text)
         case let .file(path):
-            guard let package = packages[id], package.kind == .script, let text = package.text(of: path) else {
+            guard let package = packages[id], package.kind == .script else {
                 throw PluginError.invalidPageScript("\u{201C}\(path)\u{201D} is not a text file of the plugin\u{2019}s package.")
             }
-            return text
+            return .file(path, of: package)
         }
     }
 
@@ -1589,10 +1589,8 @@ final class ScopedPluginContext: PluginPanelContext {
     func runPageScript(_ script: PluginScript, in id: PluginTab.ID) async throws -> PluginValue {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { throw PluginError.notGranted(id) }
-        let source = try manager.source(of: script, for: pluginID)
-        guard let function = PluginPageRun.function(running: source, sites: grant.sites) else {
-            throw PluginError.invalidPageScript("The script does not parse as the body of a function, as a page script must.")
-        }
+        let function = try await PluginPageRun.function(running: manager.source(of: script, for: pluginID), sites: grant.sites)
+        guard !hasEnded else { throw PluginError.stopped }
         let page = try manager.page(of: id, for: grant)
         let reply = try await run(function, in: page.contents, waitingAtMost: manager.pageRunLimit)
         guard !hasEnded else { throw PluginError.stopped }
