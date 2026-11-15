@@ -234,7 +234,8 @@ private final class RunnerBox {
         if missing { req.documentIDs = [:] } else { host.tabs[0].documentID = UUID() }
         let client = ScriptedClient { _ in [] }
         let result = await runner(client).run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
-        #expect(result.status == .refused && client.requests.isEmpty)
+        // The tab shows another page than the event's, which `stale` says, not an excluded site.
+        #expect(result.status == .refused && result.code == "stale" && client.requests.isEmpty)
     }
 
     @Test func aModelCannotRenameAReloadAtTheSameAddress() async {

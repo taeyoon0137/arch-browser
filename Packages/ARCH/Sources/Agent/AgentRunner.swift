@@ -110,13 +110,21 @@ public final class AgentRunner: ObservableObject {
         let requested = Set(request.tabs)
         let open = request.tabs.compactMap { currentTab($0, of: request, personaID: personaID) }
         guard Set(open.map(\.id)) == requested else { return Self.refused("notGranted", "A requested tab is no longer one this run may use.") }
+        // A tab that shows another document than the run's, as while it loads another address, is left out, as a tab on an excluded site is. A run left with no tab says which: `stale`, which a later run can pass once the page has loaded, as `rename_tab` answers, or P16.
+        var showsAnotherDocument = false
         let selected = open.filter { tab in
             guard request.documentIDs[tab.id] == tab.documentID, let document = request.documents[tab.id],
-                  Self.sameDocument(tab.url, document) else { return false }
+                  Self.sameDocument(tab.url, document) else {
+                showsAnotherDocument = true
+                return false
+            }
             return AgentPolicy.showsTitle(of: document, allowsAI: allowsAI)
         }
         let closed = request.closedTab.flatMap { AgentPolicy.showsTitle(of: $0.url, allowsAI: allowsAI) ? $0 : nil }
-        guard !selected.isEmpty || closed != nil else { return Self.refused("P16", "No eligible tab remains for this run.") }
+        guard !selected.isEmpty || closed != nil else {
+            if showsAnotherDocument { return Self.refused("stale", "A run tab is loading another page, or shows another page than the run's. Run again once it has loaded.") }
+            return Self.refused("P16", "No eligible tab remains for this run.")
+        }
         let models: [AIModelRef]
         do { models = try resolve(request.feature, options.model) }
         catch { return AgentRunResult(status: .failed, code: "routeUnavailable", message: error.localizedDescription) }
