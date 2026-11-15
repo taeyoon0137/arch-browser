@@ -92,7 +92,6 @@ Scope filters, Persona checks, and a hook script's Persona treat `spaceSwitched`
 
 - A post gets its identifier, sequence, date, and the cause of the enclosing `withCause` block when it has none, and reaches every subscriber whose filter matches, in subscription order, before `post` returns. A post from a handler is delivered once the current event has reached every subscriber.
 - In a filter, an empty set or list matches every kind, site, or engine, and every tab kind but `agent`, which only a filter that names it matches. An event without an address never matches a site list, and events without a tab ignore engines and tab kinds. A scope is `"everywhere"` or a list of places, each `{"persona": "<id>"}` or `{"space": "<id>"}`, which the interface shows as "Persona" and "Persona / Space".
-
 - Handlers run immediately on the main actor and must not wait: each consumer queues its own work. Every consumer sees events in sequence order.
 - `BrowserSession` creates the bus (`BrowserSession.events`) and passes it to the consumers the app shell creates: `BrowserHooks`, each `PluginManager`, `AgentService`, and `HookRegistry`.
 
