@@ -129,7 +129,7 @@ public enum TabUnloading {
     /// The world of `inputScript`, apart from every plugin's (`ARCHPlugin.<id>`).
     static let inputWorld = "arch.unloading"
 
-    /// Runs at the start of every frame's document and tells the tab when the user types there (`Tab.hasTypedInput`): the main frame's new document sends `start`, and each document sends `typed` at the first `input` event the user causes, which reaches the window before the page's own listeners. The outgoing main frame clears the tab's flag at pagehide, so edited frames returning from the back-forward cache can set it in any order. On Chromium the page can see the script and send `typed` itself, which only keeps its own page loaded.
+    /// Runs at the start of every frame's document and tells the tab when the user types there (`Tab.hasTypedInput`): the main frame's new document sends `start`, and each document sends `typed` at the first `input` event the user causes, which reaches the window before the page's own listeners, and again when it returns from the back-forward cache. The tab clears its flag when a main document commits, which both engines report before a restored document's frames can send `typed`. On Chromium the page shares the script's world, so a page could at most keep its own tab loaded and out of automatic archiving.
     static let inputScript = EnginePageScript(world: inputWorld, source: """
     (channel) => {
       const isMainFrame = window.top === window;
@@ -140,9 +140,6 @@ public enum TabUnloading {
         hasTyped = true;
         channel.send("typed");
       }, true);
-      if (isMainFrame) addEventListener("pagehide", (event) => {
-        if (event.isTrusted) channel.send("start");
-      });
       addEventListener("pageshow", (event) => {
         if (event.isTrusted && event.persisted && hasTyped) channel.send("typed");
       });
@@ -156,7 +153,7 @@ public enum TabUnloading {
 
     /// What `inputScript` reports.
     enum InputEvent: Equatable {
-        /// The main frame is leaving its document or has started a new one.
+        /// The main frame started a new document. The tab also clears its flag when a main document commits.
         case start
         /// The user typed into a document of the page.
         case typed

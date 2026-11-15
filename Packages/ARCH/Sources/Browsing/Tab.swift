@@ -61,7 +61,7 @@ import LiveFolders
     @Published public private(set) var isAudible = false
     /// Whether the page uses the camera or the microphone, which keeps the tab loaded (bookmark rule 5).
     @Published public private(set) var isCapturingMedia = false
-    /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). Another web contents starts without.
+    /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). A main document's commit clears it, and another web contents starts without.
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
     var answersBeforeUnloadWithStay = false
@@ -344,6 +344,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
         guard webContents === self.webContents else { return }
         documentID = UUID()
+        hasTypedInput = false
         engineCommittedURL = url
         pageDownloads.documentDidCommit(site: Self.site(of: url))
         didCommitDocument?()
