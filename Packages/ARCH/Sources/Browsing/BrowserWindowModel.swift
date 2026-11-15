@@ -238,11 +238,11 @@ public enum BrowserWindowKind {
         renamingSpaceID = nil
     }
 
-    /// The name the tab shows already changes nothing. An empty name or the page's own title restores the page's title, which hooks then leave until the tab moves to another address. The session saves the name, as it saves every change to a tab.
+    /// The name the tab's row shows already (`Tab.shownTitle`), which its rename field starts with, changes nothing. An empty name or the page's own title as the row names the page (`Tab.shownPageTitle`), the extension's name for an extension's page without a title, restores the page's title, which hooks then leave until the tab moves to another address. The session saves the name, as it saves every change to a tab.
     public func renameTab(_ id: UUID, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let tab = session.tabs.first(where: { $0.id == id }), trimmed != tab.displayTitle {
-            if trimmed.isEmpty || trimmed == tab.pageTitle {
+        if let tab = session.tabs.first(where: { $0.id == id }), trimmed != tab.shownTitle {
+            if trimmed.isEmpty || trimmed == tab.shownPageTitle {
                 tab.customTitle = nil
                 tab.suggestedTitle = tab.url.map { SuggestedTitle(title: nil, url: $0) }
             } else {

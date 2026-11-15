@@ -249,8 +249,17 @@ import LiveFolders
 
     /// `displayTitle`, with the name of the web extension whose own page the tab shows (`extensionName`), as its options page in a tab, in place of a page title that only repeats the address (`titleRepeatsAddress(_:of:)`), which would show the extension's identifier. A user's name, a hook's name, a live folder item's title, and a page's own title stay. The sidebar's rows, the window's title, the tab switcher, the palette's tab rows, the pane of a tab shown in another window, the Bookmarks menu, and floating developer tools show it; plugins, hooks, agents, and scripts read `displayTitle`.
     var shownTitle: String {
-        guard let url, Self.titleRepeatsAddress(title, of: url), let name = extensionName?(url) else { return displayTitle }
+        guard let name = extensionPageName else { return displayTitle }
         return Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: name, url: url, livePage: liveItemID == nil ? nil : savedPage)
+    }
+
+    /// `pageTitle` as `shownTitle` names the page: the extension's name in place of a title that only repeats the address of the extension's page. Renaming the tab to it restores the page's title, as renaming it to `pageTitle` does for any other page (`BrowserWindowModel.renameTab(_:to:)`).
+    var shownPageTitle: String { extensionPageName ?? pageTitle }
+
+    /// The name of the web extension whose own page the tab shows (`extensionName`), while the page's title only repeats its address; nil otherwise.
+    private var extensionPageName: String? {
+        guard let url, Self.titleRepeatsAddress(title, of: url) else { return nil }
+        return extensionName?(url)
     }
 
     /// Whether `title` names the page at `url` by nothing but its address: empty, as WebKit reports a page without a title and `pageTitle` then shows the host, the host itself, or the address, as Chromium reports a page without a title (`NavigationEntryImpl::GetTitleForDisplay`), compared without percent escapes and a trailing `/`.

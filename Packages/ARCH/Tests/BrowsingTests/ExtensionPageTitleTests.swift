@@ -50,4 +50,25 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
         #expect(unwired.shownTitle == unwired.displayTitle)
         #expect(!Tab.titleRepeatsAddress("Options", of: options) && !Tab.titleRepeatsAddress("webkit-extension://\(identifier)/other.html", of: options))
     }
+
+    @Test func renamingToTheExtensionsNameKeepsNoName() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let window = BrowserWindowModel(session: session, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        let page = session.adopt(UnloadedWebContents(url: options, title: "", engine: .webKit, state: nil), spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false)
+        page.extensionName = { $0.host == identifier ? "Reader" : nil }
+        // The rename field starts with the extension's name, so ending it with only a space added changes nothing.
+        window.renameTab(page.id, to: "Reader ")
+        #expect(page.customTitle == nil && page.suggestedTitle == nil)
+        // The name the row shows for the page takes the user's name away, as a page's own title does, so the row follows the extension's name again.
+        window.renameTab(page.id, to: "Mine")
+        #expect(page.customTitle == "Mine")
+        window.renameTab(page.id, to: "Reader")
+        #expect(page.customTitle == nil && page.shownTitle == "Reader")
+    }
 }
