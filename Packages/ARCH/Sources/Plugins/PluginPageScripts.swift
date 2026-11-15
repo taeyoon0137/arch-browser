@@ -1,4 +1,4 @@
-// Plugin page scripts as the engines run them: a plugin's scripts share a world apart from other plugins' scripts, and each starts only in documents that its patterns and its plugin's granted sites cover.
+// Plugin page scripts as the engines run them: a plugin's scripts share a world apart from other plugins' scripts, and each starts only in documents that its patterns and its plugin's granted sites cover, where it adds its styles before it runs.
 import ARCHEngine
 import Foundation
 import JavaScriptCore
@@ -11,7 +11,7 @@ extension PluginID {
 }
 
 extension PluginPageScript {
-    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address as `covers(_:)` and the granted sites do, and, with `within`, as one of those patterns does too, as the host of a tab's `whenInvoked` access does, then runs the script's body with the world's channel as `arch`. With `once`, it runs the body only the first time it runs in a frame's world under that key, so a script that a command runs at once in a document that already ran it from the tab's list runs no second time. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
+    /// The script as the engines run it, or nil when its source is not a function body on its own. Its function checks the document's address as `covers(_:)` and the granted sites do, and, with `within`, as one of those patterns does too, as the host of a tab's `whenInvoked` access does, then adds the script's styles to the document and runs the script's body with the world's channel as `arch`. With `once`, it runs only the first time it runs in a frame's world under that key, so a script that a command runs at once in a document that already ran it from the tab's list runs no second time and adds its styles no second time. The body stands on lines of its own, so a final line comment in it cannot hide the brackets after it, and a body that parses on its own cannot close them, so it cannot run outside the check.
     @MainActor
     func engineScript(world: String, sites: [MatchPattern], within: [MatchPattern]? = nil, once key: String? = nil) -> EnginePageScript? {
         guard FunctionBodyCheck.shared.accepts(source) else { return nil }
@@ -19,7 +19,7 @@ extension PluginPageScript {
         (channel) => {
           const covers = \(MatchPattern.javaScriptMatcher);
           if (!covers(location, \(MatchPattern.javaScriptLiteral(matches))) || covers(location, \(MatchPattern.javaScriptLiteral(excludes)))
-            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(PluginPageRun.withinCheck(within))) return;\(Self.onceCheck(key))
+            || !covers(location, \(MatchPattern.javaScriptLiteral(sites)))\(PluginPageRun.withinCheck(within))) return;\(Self.onceCheck(key))\(Self.styleLines(styles))
           ((arch) => {
         \(source)
           })(channel);
@@ -33,6 +33,31 @@ extension PluginPageScript {
         guard let key else { return "" }
         let literal = String(decoding: (try? JSONEncoder().encode(key)) ?? Data("\"\"".utf8), as: UTF8.self)
         return "\n  if (globalThis[\(literal)]) return;\n  globalThis[\(literal)] = true;"
+    }
+
+    /// The lines that add `styles` to the document, each in a `<style>` element at the end of the document's root element, or none without styles. A document without a root element yet, as Chromium's helper may run a document-start script before the parser adds one, gets them once the root appears. At the document's start they come before the page's own styles, which win where both give a property with the same specificity, and at its end after the styles the page has by then. The text goes in as JSON strings through `textContent`, so it never runs as script.
+    private static func styleLines(_ styles: [String]) -> String {
+        guard !styles.isEmpty else { return "" }
+        let literal = String(decoding: (try? JSONEncoder().encode(styles)) ?? Data("[]".utf8), as: UTF8.self)
+        return """
+
+          ((styles) => {
+            const add = (root) => {
+              for (let index = 0; index < styles.length; index++) {
+                const style = document.createElementNS("http://www.w3.org/1999/xhtml", "style");
+                style.textContent = styles[index];
+                root.appendChild(style);
+              }
+            };
+            if (document.documentElement) return add(document.documentElement);
+            const observer = new MutationObserver(() => {
+              if (!document.documentElement) return;
+              observer.disconnect();
+              add(document.documentElement);
+            });
+            observer.observe(document, { childList: true });
+          })(\(literal));
+        """
     }
 }
 

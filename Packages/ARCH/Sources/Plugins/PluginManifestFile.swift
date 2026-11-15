@@ -1,4 +1,4 @@
-// `plugin.json`, the manifest of a script plugin's package, read into a `PluginManifest`. Arch refuses the keys it does not read, so that a plugin never goes without a field it relies on, and reads each page script from the package file the manifest names.
+// `plugin.json`, the manifest of a script plugin's package, read into a `PluginManifest`. Arch refuses the keys it does not read, so that a plugin never goes without a field it relies on, and reads each page script and style sheet from the package file the manifest names.
 import AI
 import ARCHEngine
 import Events
@@ -207,26 +207,35 @@ struct ScriptManifest {
         return PluginSetting(key: key, title: title, help: help, kind: kind)
     }
 
-    /// One page script for each file that `js` lists, each with the entry's patterns and timing. `runAt` is `documentStart` or `documentEnd`, the default.
+    /// One page script for each file that `js` lists, each with the entry's patterns and timing, after one that adds the style files that `css` lists, in their order, with the same patterns and timing. An entry lists `js`, `css`, or both. `runAt` is `documentStart` or `documentEnd`, the default.
     private static func pageScripts(_ object: ManifestObject, packageAt root: URL, check: FunctionBodyCheck) throws -> [PluginPageScript] {
         var object = object
         let matches = try object.strings("matches").map(MatchPattern.init)
         guard !matches.isEmpty else { throw invalidManifest("\(object.path).matches is missing") }
         let excludes = try object.strings("excludes").map(MatchPattern.init)
         let files = try object.strings("js")
-        guard !files.isEmpty else { throw invalidManifest("\(object.path).js is missing") }
+        let styleFiles = try object.strings("css")
+        guard !files.isEmpty || !styleFiles.isEmpty else { throw invalidManifest("\(object.path) needs js or css") }
         let runAt = try object.optionalString("runAt").map { name in
             guard let time = EnginePageScriptInjectionTime(rawValue: name) else { throw invalidManifest("\(object.path).runAt must be documentStart or documentEnd") }
             return time
         } ?? .documentEnd
         let allFrames = try object.bool("allFrames") ?? false
         try object.finish()
-        return try files.map { path in
-            let url = try packageFile(path, in: root, named: "\(object.path).js")
-            guard let source = try? String(contentsOf: url, encoding: .utf8) else { throw invalidManifest("\(path) is not UTF-8 text") }
+        let entry = object.path
+        func text(_ path: String, _ field: String) throws -> String {
+            let url = try packageFile(path, in: root, named: "\(entry).\(field)")
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else { throw invalidManifest("\(path) is not UTF-8 text") }
+            return text
+        }
+        let styles = try styleFiles.map { try text($0, "css") }
+        let scripts = try files.map { path in
+            let source = try text(path, "js")
             guard check.accepts(source) else { throw invalidManifest("\(path) does not parse as the body of a function, as a page script must") }
             return PluginPageScript(matches: matches, excludes: excludes, source: source, runAt: runAt, allFrames: allFrames)
         }
+        guard !styles.isEmpty else { return scripts }
+        return [PluginPageScript(matches: matches, excludes: excludes, source: "", styles: styles, runAt: runAt, allFrames: allFrames)] + scripts
     }
 
     /// The identifiers as a set. Throws for one listed twice.

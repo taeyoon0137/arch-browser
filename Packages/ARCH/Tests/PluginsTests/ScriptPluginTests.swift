@@ -1,4 +1,4 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, sidebar items that show a panel, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, a panel's page with its own `arch`, which keeps the instance while it shows, keeps to its page, and ends with its instance, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, page scripts' style files, sidebar items that show a panel, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, a panel's page with its own `arch`, which keeps the instance while it shows, keeps to its page, and ends with its instance, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -134,6 +134,37 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             let package = try writePackage("panel \(name)", files.merging(["plugin.json": manifest.replacingOccurrences(of: "ITEM", with: item)]) { $1 })
             await #expect(throws: PluginError.invalidPackage(reason), "\(name)") { try await manager.stage(package) }
         }
+    }
+
+    /// A page script entry's `css` files become one page script with their text, before the scripts of its `js`, with the entry's patterns and timing; an entry lists `js`, `css`, or both.
+    @Test func readsThePageScriptsStyleFiles() async throws {
+        let manifest = #"{"id": "org.example.styles", "name": "Styles", "version": "1", "apiVersion": 1, "summary": "Styles.", "contributes": {"pageScripts": [ENTRIES]}}"#
+        let entries = #"{"matches": ["https://example.org/*"], "excludes": ["https://example.org/private/*"], "js": ["a.js"], "css": ["a.css", "styles/b.css"], "runAt": "documentStart", "allFrames": true}, {"matches": ["https://example.org/docs/*"], "css": ["a.css"]}"#
+        let files = ["plugin.json": manifest.replacingOccurrences(of: "ENTRIES", with: entries), "a.js": "arch.send(1);", "a.css": "p { color: green; }", "styles/b.css": "/* b */"]
+        let root = try writePackage("styles", [:])
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("styles"), withIntermediateDirectories: true)
+        for (path, text) in files {
+            try Data(text.utf8).write(to: root.appendingPathComponent(path))
+        }
+        let scripts = try await manager().stage(root).manifest.contributions.pageScripts
+        #expect(scripts.map(\.source) == ["", "arch.send(1);", ""])
+        #expect(scripts.map(\.styles) == [["p { color: green; }", "/* b */"], [], ["p { color: green; }"]])
+        #expect(scripts.map(\.runAt) == [.documentStart, .documentStart, .documentEnd] && scripts.map(\.allFrames) == [true, true, false])
+        #expect(scripts.map { $0.excludes.map(\.description) } == [["https://example.org/private/*"], ["https://example.org/private/*"], []])
+        let cases: [(String, String, [String: String], String)] = [
+            ("neither", #"{"matches": ["<all_urls>"], "js": [], "css": []}"#, [:], "plugin.json: contributes.pageScripts[0] needs js or css."),
+            ("style outside", #"{"matches": ["<all_urls>"], "css": ["../outside.css"]}"#, [:],
+             "plugin.json: contributes.pageScripts[0].css names “../outside.css”, which is not a file of the package."),
+            ("styles not text", #"{"matches": ["<all_urls>"], "css": "a.css"}"#, ["a.css": ""], "plugin.json: contributes.pageScripts[0].css must be an array of text."),
+        ]
+        let manager = manager()
+        for (name, entry, files, reason) in cases {
+            let package = try writePackage("styles \(name)", files.merging(["plugin.json": manifest.replacingOccurrences(of: "ENTRIES", with: entry)]) { $1 })
+            await #expect(throws: PluginError.invalidPackage(reason), "\(name)") { try await manager.stage(package) }
+        }
+        let binary = try writePackage("styles binary", ["plugin.json": manifest.replacingOccurrences(of: "ENTRIES", with: #"{"matches": ["<all_urls>"], "css": ["a.css"]}"#)])
+        try Data([0xFF, 0xFE, 0x00, 0xC3]).write(to: binary.appendingPathComponent("a.css"))
+        await #expect(throws: PluginError.invalidPackage("plugin.json: a.css is not UTF-8 text.")) { try await manager.stage(binary) }
     }
 
     @Test func addressesAPanelsPageInThePackage() throws {
