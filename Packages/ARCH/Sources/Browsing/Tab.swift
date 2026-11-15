@@ -94,6 +94,8 @@ import LiveFolders
     var requestActivation: (() -> Void)?
     /// The session sets this callback to ask the user before a site gets a permission. Without it every request is denied.
     var requestPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
+    /// Denies an agent tab's request without asking, as the session's permission answers do.
+    var denyPermission: ((EnginePermissionRequest, @escaping (Bool) -> Void) -> Void)?
     /// The session sets this callback to show Arch's open or save panel for the page's file chooser, as a sheet that waits in the tab's prompts until a window shows the page. Without it the page gets no file.
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
@@ -267,9 +269,6 @@ import LiveFolders
         pageDownloads.userDidNavigate()
     }
 
-    /// Present only on a research tab the user explicitly opened. Releasing it to the user restores normal navigation.
-    var researchLoad: (@MainActor (URL) -> Bool)?
-
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
     public var agentOwnerID: UUID? {
         folderID.flatMap { agentOwnerOfFolder?($0) }
@@ -316,8 +315,10 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     public func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) { favicon = webContents.favicon }
     public func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) { isAudible = webContents.isAudible }
     public func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
+    /// A page's request to be shown, such as an opener's `focus()` on its popup. An agent's tab never takes focus or switches the window's space, so it asks for nothing; picture in picture's way back to the tab, which comes the same way, then does nothing either, and the user reaches the tab through its folder.
     public func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {
-        if agentOwnerID == nil || researchLoad == nil { requestActivation?() }
+        guard agentOwnerID == nil else { return }
+        requestActivation?()
     }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
@@ -361,10 +362,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if let address, let suggested = suggestedTitle, !suggested.isFor(address) { suggestedTitle = nil }
     }
 
-    public func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool {
-        agentOwnerID == nil || researchLoad == nil
-    }
-
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
         openNewTab?(newWebContents, targetURL, disposition)
     }
@@ -372,11 +369,12 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         guard webContents === self.webContents else { return }
         takeReplacement?(replacement)
     }
-    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user.
+    /// An agent's tab gets no permission and asks nobody (rule P8): the agent hears of the request and can hand the tab to the user. Its denial leaves the Persona's kept answers as they were (`denyPermission`).
     public func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
         if agentOwnerID != nil {
             reportToAgent(.permissionDenied(request.types))
-            return completion(false)
+            guard let denyPermission else { return completion(false) }
+            return denyPermission(request, completion)
         }
         guard let requestPermission else { return completion(false) }
         requestPermission(request, completion)
@@ -385,7 +383,6 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again. An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
         if let owner = agentOwnerID {
-            guard researchLoad == nil else { return false }
             guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
                 reportToAgent(.downloadAsked(url))
                 return false
@@ -648,9 +645,6 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
     /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
-        if agentOwnerID != nil, let researchLoad {
-            return action.disposition == .currentTab && researchLoad(action.url) ? .allow : .cancel
-        }
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), let openURLInNewTab {

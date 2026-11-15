@@ -98,6 +98,14 @@ public enum AgentAttention {
             if granted { center.add(request(for: ownerID)) }
         }
     }
+
+    /// Removes the owner's notification once nothing of it waits, so that a later click does not reopen an answered card.
+    static func withdraw(_ ownerID: UUID) {
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [identifier(for: ownerID)])
+        center.removePendingNotificationRequests(withIdentifiers: [identifier(for: ownerID)])
+    }
 }
 
 public struct AgentPanel: View {

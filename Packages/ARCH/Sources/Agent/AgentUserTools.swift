@@ -160,22 +160,37 @@ extension AgentToolHost {
         }
     }
 
-    /// P11: a sensitive card about a link to another app that a page in an agent tab opened, naming the app; the link opens there only after Allow. Nothing happens without an app for the link.
+    /// Whether a page's link to another app gets a card: one at a time per tab, so that a page cannot pile them up, and only when an app opens it. Otherwise the agent hears what Arch decided instead.
+    func asksAboutExternalApp(_ url: URL, in tabID: UUID, state: AgentGrantState) -> Bool {
+        let handle = state.handles.tabs.handle(for: tabID)
+        if approvals.pending.contains(where: { if case .externalApp = $0.kind { return $0.tabID == tabID } else { return false } }) {
+            state.record(.decided("A page in \(handle) tried to open another link in another app while one waits for the user, so Arch did not ask again."), tab: tabID)
+            return false
+        }
+        guard host.appName(forOpening: url) != nil else {
+            state.record(.decided("No app on this Mac opens the link that \(handle) tried to open."), tab: tabID)
+            return false
+        }
+        return true
+    }
+
+    /// P11: a sensitive card about a link to another app that a page in an agent tab opened, naming the app; the link opens there only after Allow. No call carries a reply, so the card offers none.
     func askAboutExternalApp(_ url: URL, in tabID: UUID, of ownerID: UUID, state: AgentGrantState, client: String) {
         let handle = state.handles.tabs.handle(for: tabID)
-        // One card at a time per tab, so that a page cannot pile them up.
-        if approvals.pending.contains(where: { if case .externalApp = $0.kind { return $0.tabID == tabID } else { return false } }) { return }
-        guard let app = host.appName(forOpening: url) else {
-            state.record(.decided("No app on this Mac opens the link that \(handle) tried to open."), tab: tabID)
-            return
-        }
+        guard let app = host.appName(forOpening: url) else { return }
         let site = host.tabs(withIDs: [tabID]).first?.url?.host?.lowercased()
         let card = AgentApproval(ownerID: ownerID, clientName: client, isOutsideClient: clientKind == .outside, kind: .externalApp(app), rules: [.p11], isSensitive: true,
-                                 offers: AgentApproval.offers(for: AgentAsk(rules: [.p11], isSensitive: true)), action: "Open a link in \(app) from \(handle)\(site.map { " on \($0)" } ?? "")",
+                                 offers: [.allowOnce, .deny, .denyAndStop, .takeOver], action: "Open a link in \(app) from \(handle)\(site.map { " on \($0)" } ?? "")",
                                  tabID: tabID, tabHandle: handle, site: site, exactText: url.absoluteString, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
         let host = host
+        let stopClient = stopClient
         approvals.open(card) { answer in
-            if answer.allows { host.openExternally(url) }
+            switch answer {
+            case .allowOnce: host.openExternally(url)
+            case .denyAndStop: stopClient?(ownerID)
+            case .takeOver: host.showTab(tabID)
+            default: break
+            }
             state.record(.decided("The user \(answer.allows ? "opened" : "did not open") the link from \(handle) in \(app)."), tab: tabID)
         }
     }

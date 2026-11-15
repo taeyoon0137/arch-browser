@@ -144,8 +144,11 @@ public final class PageAssistant: ObservableObject {
             tab.askAboutSelection = { [weak self, weak tab] text, sourceURL in
                 let sourceDocument = tab?.documentID
                 Task { @MainActor [weak self, weak tab] in
-                    guard let self, let tab, tab.url == sourceURL, let selection = try? await self.pages.selection(ofTab: tab.id),
-                          tab.documentID == sourceDocument, selection.pageURL == sourceURL, Self.matchesMenuSelection(selection.text, text) else { return }
+                    guard let self, let tab, tab.url == sourceURL else { return }
+                    let selection = try? await self.pages.selection(ofTab: tab.id)
+                    // A tab that moved on asks nothing; a selection that cannot be read again, as one that reaches an editable region, beeps, as other refused actions do.
+                    guard tab.url == sourceURL, tab.documentID == sourceDocument else { return }
+                    guard let selection, selection.pageURL == sourceURL, Self.matchesMenuSelection(selection.text, text) else { return NSSound.beep() }
                     self.session?.window(showing: tab)?.askAboutSelection(selection, in: tab)
                 }
             }

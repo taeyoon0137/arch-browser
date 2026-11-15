@@ -99,6 +99,22 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(plain["DISABLE_DOCTOR_COMMAND"] == nil && plain["CLAUDE_CODE_DISABLE_FAST_MODE"] == nil)
     }
 
+    @Test func thePresetsTakeTheToolsFolderFromTheLoginShellAndNoKey() async {
+        let shell: @Sendable () async -> [String: String]? = { ["PATH": "/shell/bin", "CODEX_HOME": "/shell/codex", "CLAUDE_CONFIG_DIR": "/shell/claude"] }
+        let keys = ["ANTHROPIC_API_KEY": "never", "ANTHROPIC_AUTH_TOKEN": "never", "OPENAI_API_KEY": "never", "CODEX_API_KEY": "never"]
+        let codex = await AICommandLineConfiguration(executable: URL(fileURLWithPath: "/opt/codex/codex"), environment: keys, agent: .codex).runEnvironment(loginShell: shell)
+        #expect(codex["CODEX_HOME"] == "/shell/codex")
+        #expect(codex["CLAUDE_CONFIG_DIR"] == nil)
+        #expect(codex["PATH"] == "/opt/codex:/shell/bin")
+        #expect(keys.keys.allSatisfy { codex[$0] == nil })
+        // A configured folder wins over the login shell's.
+        let claude = await AICommandLineConfiguration(executable: URL(fileURLWithPath: "/opt/claude"), environment: keys.merging(["CLAUDE_CONFIG_DIR": "/custom"]) { $1 }, agent: .claudeCode)
+            .runEnvironment(loginShell: shell)
+        #expect(claude["CLAUDE_CONFIG_DIR"] == "/custom")
+        #expect(claude["CODEX_HOME"] == nil)
+        #expect(keys.keys.allSatisfy { claude[$0] == nil })
+    }
+
     @Test func codexFirstAndResumedTurnArgumentsAndEnvironment() async throws {
         let cli = try FakeCLI.codex()
         let fixture = try AgentFixture(cli: cli, kind: .codex, model: "gpt-6-luna", environment: ["OPENAI_API_KEY": "sk-never"])
@@ -462,6 +478,42 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let input = cli.text("stdin.log").split(separator: "\n")
         #expect(input.count == 4)
         #expect(input.allSatisfy { $0.contains(#""type":"user""#) })
+        await session.end()
+    }
+
+    /// A message on a provider in a cool-down, here an hour, says so instead of waiting silently, and Stop ends it before any process starts.
+    @Test func aMessageWaitingOnAUsageLimitSaysSoAndStopEndsIt() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        let fixture = try AgentFixture(cli: cli, model: "haiku")
+        let limiter = fixture.service.limiter(for: fixture.provider.id)
+        try await limiter.acquire(isUser: true) { _ in }
+        _ = await limiter.release(after: .rateLimited(retryAfter: Date() + 3600))
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        try session.send("Hello")
+        try await log.wait { $0.contains { $0.hasPrefix("notice:") && $0.contains("is at its usage limit until") } }
+        session.stop()
+        try await log.wait { $0.contains("finished:stopped") }
+        #expect(cli.calls().isEmpty)
+        await session.end()
+    }
+
+    /// A Stop while the sign-in is read leaves it unread, so the next message reads it again.
+    @Test func aStopDuringTheSignInReadLeavesItUnread() async throws {
+        let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
+        try cli.write("status-sleeps", "")
+        let fixture = try AgentFixture(cli: cli, model: "haiku")
+        let session = try fixture.start()
+        let log = AgentEventLog(session)
+        try session.send("First")
+        for _ in 0..<500 where !cli.calls().contains(["auth", "status", "--json"]) { try await Task.sleep(for: .milliseconds(10)) }
+        session.stop()
+        try await log.wait { $0.contains("finished:stopped") }
+        #expect(!cli.calls().contains { $0.contains("--input-format") })
+        try FileManager.default.removeItem(at: cli.folder.appendingPathComponent("status-sleeps"))
+        try session.send("Second")
+        try await log.wait { $0.contains("finished:completed") }
+        #expect(cli.calls().filter { $0 == ["auth", "status", "--json"] }.count == 2)
         await session.end()
     }
 
@@ -1145,7 +1197,7 @@ private struct FakeCLI {
         try cli.writeScript("""
         case "$*" in
           "--version") echo "2.1.323 (Claude Code)"; exit 0;;
-          "auth status --json") echo '{"loggedIn":\(signedIn),"email":"someone@example.org"}'; exit 0;;
+          "auth status --json") [ -f "$DIR/status-sleeps" ] && sleep 2; echo '{"loggedIn":\(signedIn),"email":"someone@example.org"}'; exit 0;;
           "--help") cat "$DIR/help.txt"; exit 0;;
           "--max-turns") echo "\(acceptsTurnLimit ? "option '--max-turns <turns>' argument missing" : "unknown option '--max-turns'")" >&2; exit 1;;
         esac
@@ -1219,7 +1271,7 @@ private struct FakeCLI {
     }
 
     /// A stream ends each line, its last too, as the tools do.
-    private func write(_ name: String, _ text: String) throws {
+    func write(_ name: String, _ text: String) throws {
         let ending = name.hasSuffix(".jsonl") && !text.hasSuffix("\n") ? "\n" : ""
         try Data((text + ending).utf8).write(to: folder.appendingPathComponent(name))
     }

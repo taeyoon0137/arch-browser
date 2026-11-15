@@ -142,7 +142,6 @@ enum AgentStepText {
         let done: String
         switch call.name {
         case "ask_user": done = "Asked you a question"
-        case "open_tab": done = "Requested a background research tab"
         case "request_tab": done = "Asked you to share a tab"
         case "read_text": done = "Read the page text"
         case "snapshot": done = "Read the page outline"
@@ -156,13 +155,23 @@ enum AgentStepText {
             guard let tool = AgentToolCatalog.tool(named: call.name) else { return "Unrecognized tool" }
             done = "Requested " + tool.name.replacingOccurrences(of: "_", with: " ")
         }
+        // The sentence names a known code in words and never quotes the result's text; the activity log keeps the code.
+        let reason: String? = switch result.code {
+        case "stopped", "ended": "stopped with the turn"
+        case "limitReached": "reached the call limit"
+        case "tabNotFound": "the tab is gone"
+        case "pageChanged": "the page changed"
+        case "invalidArguments", "unknownTool", "notAvailable": "not available in this session"
+        case let code? where code.first == "P" && Int(code.dropFirst()) != nil: "refused by an Arch rule"
+        default: nil
+        }
         switch result.status {
         case .ok, .approvalPending: return done
-        case .refused: return "\(done): refused by \(result.code ?? "a rule")"
-        case .denied: return "\(done): you said no"
+        case .denied where result.code == nil: return "\(done): you said no"
+        case .refused, .denied: return "\(done): \(reason ?? "refused")"
         case .timeout: return "\(done): timed out"
         case .stale: return "\(done): the page changed"
-        case .error: return "\(done): \(result.code ?? "failed")"
+        case .error: return "\(done): \(reason ?? "failed")"
         }
     }
 }

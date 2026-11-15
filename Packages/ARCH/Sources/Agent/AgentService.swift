@@ -90,9 +90,10 @@ import Foundation
         var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
         /// Called when a card opens, for the notification without content while Arch is in the background.
         var attention: (UUID) -> Void = AgentAttention.notify
+        var withdrawAttention: (UUID) -> Void = AgentAttention.withdraw
     }
 
-    /// Don't Allow remembers nothing, but the next call of the same client asks again only after this long, so that a looping client cannot flood the user.
+    /// Don't Allow remembers nothing, but Arch shows one grant sheet at a time and no new one for this long after any Don't Allow or timeout, so that a looping client, even one that changes its identity, cannot flood the user.
     static let askInterval: TimeInterval = 60
     static let settingsFileName = "agent.json"
     static let activityFileName = "agent-activity.json"
@@ -104,6 +105,8 @@ import Foundation
     /// The Persona that `agent.json` names while its seal cannot be checked, which stays agent-only: an unverified ID only restricts a Persona, never widens one.
     private var unverifiedAgentsPersonaID: UUID?
     private var declinedAt: [AgentClientIdentity.Key: Date] = [:]
+    /// The last Don't Allow or timeout of any client, after which no new sheet opens for a minute.
+    private var lastDeclinedAt: Date?
     /// The grant sheet each client waits on, so that its calls share one sheet.
     private var questions: [AgentClientIdentity.Key: Task<AgentGrant?, Never>] = [:]
     /// What the tool host keeps for each grant in force since its first call this launch.
@@ -166,8 +169,8 @@ import Foundation
         host.personasDidChange = { [weak self] in self?.personasDidChange() }
         host.userDocumentDidEnd = { [weak self] tabID, documentID in
             guard let self else { return }
-            for card in self.approvals.pending where card.tabID == tabID && card.researchDocumentID == documentID {
-                self.approvals.withdrawResearch(card.id)
+            for card in self.approvals.pending where card.tabID == tabID && card.documentID == documentID {
+                self.approvals.withdraw(card.id)
             }
             for session in self.sessions where session.handles.sharedTabIDs.contains(tabID) {
                 session.objectWillChange.send()
@@ -184,6 +187,7 @@ import Foundation
         host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.states[owner]) ?? false }
         approvals.authenticator = dependencies.authenticator
         approvals.didAdd = { [weak self] approval in self?.cardDidOpen(approval) }
+        approvals.didEnd = { [weak self] ownerID in self?.dependencies.withdrawAttention(ownerID) }
         panel.showTab = { [weak host] in host?.showTab($0) }
         panel.stop = { [weak self] in self?.stopClient($0) }
         host.agentPanel = panel
@@ -315,6 +319,8 @@ import Foundation
 
     /// Listens while outside clients may connect or a session needs the channel, and otherwise removes the socket, so that clients report that agent access is off.
     func updateListening() {
+        // A grant sheet open when outside access goes off closes without a decline.
+        if !acceptsOutsideClients { dependencies.prompt.cancelAll() }
         let isNeeded = acceptsOutsideClients || sessionsNeedChannel || !hookCLIs.isEmpty
         if isNeeded, endpoint == nil {
             guard let location = dependencies.location else {
@@ -331,9 +337,12 @@ import Foundation
                 channelProblem = (error as? AgentEndpointError)?.message ?? "\(error)"
             }
         } else if !isNeeded, let endpoint {
+            // The endpoint reports no close once it stops, so its connections' calls and cards end here.
+            for (id, connection) in connections {
+                dropConnection(id, because: connection.identity == nil ? Self.clientLeft : "Outside access was turned off in Arch.")
+            }
             endpoint.stop()
             self.endpoint = nil
-            connections = [:]
             updateConnectedGrants()
         } else if isNeeded, !acceptsOutsideClients {
             // Outside access went off while a session keeps the channel: only the sessions' own connections stay.
@@ -341,6 +350,15 @@ import Foundation
             // A session an outside client started stops with its access.
             endClientSessions(of: nil, because: "Outside access was turned off in Arch.")
         }
+    }
+
+    private static let clientLeft = "The client left before the user answered."
+
+    /// Ends a closed connection's calls and cards and forgets it.
+    private func dropConnection(_ id: UUID, because reason: String) {
+        for state in states.values { state.cancelCalls(onConnection: id) }
+        approvals.end(connection: id, because: reason)
+        connections.removeValue(forKey: id)?.cancelCalls()
     }
 
     /// Ends the sessions an outside client started, those of one grant or all of them, with their connections: a session never outlives the access that started it.
@@ -459,7 +477,7 @@ import Foundation
         }
     }
 
-    /// The grant for a call from a client without one: the sheet, at most once a minute per client, then Touch ID where the choice needs it. Replies the error itself when there is none.
+    /// The grant for a call from a client without one: the sheet, one at a time and at most once a minute after a refusal, then Touch ID where the choice needs it. Replies the error itself when there is none.
     private func grantForCall(from connection: ClientConnection, _ identity: AgentClientIdentity, requestID: AgentRPCID, call: ConnectionCall? = nil) async -> AgentGrant? {
         if let grant = grant(for: identity) { return grant }
         guard acceptsOutsideClients else {
@@ -469,6 +487,16 @@ import Foundation
         if let declined = declinedAt[identity.key], dependencies.now().timeIntervalSince(declined) < Self.askInterval {
             replyError(connection, requestID, Self.noGrantError("You did not allow \(identity.displayName) to use Arch a moment ago. Arch asks again after a minute."))
             return nil
+        }
+        if questions[identity.key] == nil {
+            if !questions.isEmpty {
+                replyError(connection, requestID, Self.noGrantError("Arch is already asking about another program. Try again once that is answered."))
+                return nil
+            }
+            if let declined = lastDeclinedAt, dependencies.now().timeIntervalSince(declined) < Self.askInterval {
+                replyError(connection, requestID, Self.noGrantError("Arch asked about another program a moment ago and was not allowed. It asks again after a minute."))
+                return nil
+            }
         }
         endpoint?.send(.notification(method: AgentControlMethod.progressNotification, params: ["call": requestID.json, "message": "Waiting for your answer in Arch\u{2026}"]), to: connection.id)
         let question: Task<AgentGrant?, Never>
@@ -495,12 +523,15 @@ import Foundation
         let personas = host.personas.filter { $0.id != agentsID }
         let request = AgentGrantRequest(client: identity, personas: personas, agentsSpaces: agentsID.map(host.spaces(in:)) ?? [],
                                         spacesByPersona: Dictionary(uniqueKeysWithValues: personas.map { ($0.id, host.spaces(in: $0.id)) }))
-        guard let choice = await dependencies.prompt.ask(request) else {
+        let answer = await dependencies.prompt.ask(request)
+        // A sheet that closed because outside access went off records no decline and asks for no Touch ID.
+        guard acceptsOutsideClients else { return nil }
+        guard let choice = answer else {
             decline(identity)
             return nil
         }
         if choice.needsAuthentication {
-            guard await dependencies.authenticator.authenticate(reason: "allow \(identity.displayName) to use Arch") else {
+            guard await dependencies.authenticator.authenticate(reason: "give \u{201C}\(identity.displayName)\u{201D} access to its agent tools") else {
                 decline(identity)
                 return nil
             }
@@ -522,6 +553,7 @@ import Foundation
 
     private func decline(_ identity: AgentClientIdentity) {
         declinedAt[identity.key] = dependencies.now()
+        lastDeclinedAt = dependencies.now()
         activity.record(AgentActivityEntry(date: dependencies.now(), event: .declined, clientName: identity.displayName))
     }
 
@@ -673,7 +705,7 @@ import Foundation
     func shareableTabs(for session: AgentSession) -> [AgentTabInfo] {
         guard canEditAttachments(of: session) else { return [] }
         return host.userTabs(in: session.personaID).filter { tab in
-            !session.handles.sharedTabIDs.contains(tab.id) && tab.canAttachToSession(allowsAI: dependencies.allowsAI)
+            !session.handles.sharedTabIDs.contains(tab.id) && tab.canShareWithAgent(allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -684,7 +716,7 @@ import Foundation
     /// The composer may offer its detached tab again only while the originally reviewed document is eligible.
     func canReattach(_ choice: AgentTabInfo, in personaID: UUID) -> Bool {
         host.userTabs(in: personaID).contains {
-            $0.showsSameDocument(as: choice) && $0.canAttachToSession(allowsAI: dependencies.allowsAI)
+            $0.showsSameDocument(as: choice) && $0.canShareWithAgent(allowsAI: dependencies.allowsAI)
         }
     }
 
@@ -698,97 +730,21 @@ import Foundation
     /// Removal works even after the tab closes or becomes ineligible for reading.
     func stopSharing(_ tabID: UUID, with session: AgentSession) {
         guard canEditAttachments(of: session) else { return }
-        let copies = session.researchPages.filter { $0.value.source.attachmentID == tabID }.keys
         session.unshare(tabID: tabID)
-        let owned = Set(host.agentTabs(of: session.id).map(\.id))
-        for id in copies where owned.contains(id) {
-            host.closeAgentTab(id)
-            session.forgetResearchTab(id)
-        }
     }
 
-    /// A read source remains local to its session. Choosing it can only select the same live document.
+    /// A read source remains local to its session. Choosing it can only select the same live document. Take Over and Hand Back change nothing here: they only refuse a read in progress, so the panel keeps listing what the session read, and a result an HTTP model's conversation already holds outlives them.
     func currentReadPage(_ page: AgentReadPage, in session: AgentSession) -> AgentTabInfo? {
         guard canEditAttachments(of: session), session.handles.tabs.id(for: page.handle) == page.tabID,
               let tab = host.tabs(withIDs: [page.tabID]).first, tab.documentID == page.documentID,
               tab.url == page.url, tab.isLoaded, tab.agentOwnerID == page.ownerID,
               AgentPolicy.mayRead(tab.url, allowsAI: dependencies.allowsAI) == .allowed else { return nil }
         if page.ownerID == session.id {
-            guard host.agentTabs(of: session.id).contains(where: { $0.id == tab.id }),
-                  session.permitsResearchTab(tab, host: host, allowsAI: dependencies.allowsAI) else { return nil }
+            guard host.agentTabs(of: session.id).contains(where: { $0.id == tab.id }) else { return nil }
         } else {
-            guard page.ownerID == nil, !tab.isLiveFolderItem, session.handles.sharedTabIDs.contains(tab.id),
+            guard page.ownerID == nil, session.handles.sharedTabIDs.contains(tab.id),
                   host.userTabs(in: session.personaID).contains(where: { $0.id == tab.id }) else { return nil }
         }
-        return tab
-    }
-
-    func researchChoices(for session: AgentSession) -> [AgentResearchPage] {
-        guard canEditAttachments(of: session), !session.isTakenOver else { return [] }
-        return session.researchChoices(host: host, allowsAI: dependencies.allowsAI)
-    }
-
-    func manualOutlineLinks(for session: AgentSession) -> [AgentResearchPage] {
-        guard canEditAttachments(of: session), !session.isTakenOver else { return [] }
-        return session.outlineLinks(host: host, allowsAI: dependencies.allowsAI)
-    }
-
-    func reviewManualResearchPage(_ choice: AgentResearchPage, in session: AgentSession) async -> AgentManualResearchResult {
-        guard !Task.isCancelled else { return .unavailable }
-        if choice.isOutlineLink {
-            let epoch = session.callEpoch, takeover = session.takeoverGeneration
-            let review = await liveOutlineLink(choice, in: session)
-            guard !Task.isCancelled, session.callEpoch == epoch, session.takeoverGeneration == takeover else { return .unavailable }
-            switch review {
-            case .failure(.unavailable): return .unavailable
-            case .failure(.stale): return .staleLink
-            case .success(let current):
-                if current != choice { return .changed(current) }
-            }
-        }
-        return openReviewedResearchTab(choice, in: session) != nil ? .opened : .unavailable
-    }
-
-    private enum OutlineFailure: Error { case unavailable, stale }
-
-    /// Resolve the exact displayed ref again. Only the manual sheet may offer a changed address.
-    private func liveOutlineLink(_ choice: AgentResearchPage, in session: AgentSession) async -> Result<AgentResearchPage, OutlineFailure> {
-        guard case .outline(let id, _, let address, _, let link) = choice.source else { return .failure(.unavailable) }
-        let original = choice.originalOutlineChoice ?? choice
-        guard manualOutlineLinks(for: session).contains(original), let tab = host.tabs(withIDs: [id]).first,
-              let target = AgentRefTarget(link.ref, fingerprint: link.fingerprint),
-              host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return .failure(.unavailable) }
-        // Read only the displayed ref. A different href needs a fresh selection and confirmation.
-        let check = await toolHost().pageScript(.snapshot(full: false, ref: target, shared: true), in: tab, as: AgentSnapshotReply.self)
-        guard !Task.isCancelled, manualOutlineLinks(for: session).contains(original), host.agentTabs(of: session.id).count < AgentLimits.agentTabs,
-              case .value(let reply) = check, URL(string: reply.url) == address else { return .failure(.unavailable) }
-        guard reply.stale != true, let current = reply.nodes.first.flatMap(AgentOutlineLink.init),
-              let reviewed = AgentResearchPage(reviewing: current, from: choice) else { return .failure(.stale) }
-        guard session.permits(reviewed, host: host, allowsAI: dependencies.allowsAI) else { return .failure(.unavailable) }
-        return .success(current == link ? choice : reviewed)
-    }
-
-    @discardableResult func openResearchPage(_ choice: AgentResearchPage, in session: AgentSession) -> Bool {
-        guard !choice.isOutlineLink else { return false }
-        return openReviewedResearchTab(choice, in: session) != nil
-    }
-
-    private func openReviewedResearchTab(_ choice: AgentResearchPage, in session: AgentSession) -> AgentTabInfo? {
-        let choices = choice.isOutlineLink ? manualOutlineLinks(for: session) : researchChoices(for: session)
-        let original = choice.originalOutlineChoice ?? choice
-        guard choices.contains(original), host.agentTabs(of: session.id).count < AgentLimits.agentTabs else { return nil }
-        let owner = AgentTabOwner(id: session.id, spaceID: session.spaceID, folderName: session.title)
-        let epoch = session.callEpoch
-        let takeover = session.takeoverGeneration
-        var mayStart = true
-        guard let tab = host.openResearchTab(at: choice.url, for: owner, mayLoad: { [weak self, weak session] url in
-            guard mayStart, let self, let session, self.canEditAttachments(of: session), !session.isTakenOver, session.takeoverGeneration == takeover, session.callEpoch == epoch,
-                  choice.matches(url), session.permits(choice, host: self.host, allowsAI: self.dependencies.allowsAI) else { return false }
-            if choice.isOutlineLink, !self.manualOutlineLinks(for: session).contains(original) { return false }
-            mayStart = false
-            return true
-        }) else { return nil }
-        session.researchPages[tab.id] = choice
         return tab
     }
 
@@ -826,12 +782,12 @@ import Foundation
             attached = []
         }
         guard host.spaces(in: personaID).contains(where: { $0.id == spaceID }) else { throw SessionError(message: "The session's space was deleted.") }
-        // While the seal is not checked, Settings' mode is not known, so the session starts in Read Only.
-        let mode = canChangeSettings ? start.mode : newSessionMode
+        // No session starts above Settings' mode, which is Read Only while the seal is not checked, whatever its caller asks.
+        let mode = start.mode.capped(at: newSessionMode)
         var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
         let attachedIDs = Set(attached)
         let tabs = host.userTabs(in: personaID).filter { tab in
-            attachedIDs.contains(tab.id) && tab.canAttachToSession(allowsAI: dependencies.allowsAI)
+            attachedIDs.contains(tab.id) && tab.canShareWithAgent(allowsAI: dependencies.allowsAI)
         }
         if let reviewed = start.reviewedDocument, !tabs.contains(where: { $0.showsSameDocument(as: reviewed) }) {
             throw SessionError(message: "The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page.")
@@ -885,9 +841,6 @@ import Foundation
         session.attachmentDidChange = { [weak approvals, id = session.id] tabID in
             guard let approvals else { return }
             for card in approvals.pending where card.ownerID == id {
-                if case .openSessionResearch = card.kind, card.tabID == tabID {
-                    approvals.withdrawResearch(card.id)
-                }
                 if case .shareSessionTab(let choices) = card.kind, choices.contains(where: { $0.id == tabID }) {
                     approvals.end(card.id, because: "The tabs available to share changed.")
                 }
@@ -928,7 +881,7 @@ import Foundation
         }
     }
 
-    /// Retry after a session failed before any model held it, as after a refused start check: a new runner, then the last message again. A conversation a model held has no Retry, since a new runner would not carry it.
+    /// Retry of the current failed message: a failed turn resends it on the same runner; a session that failed before any model held it gets a new runner first.
     public func retry(_ session: AgentSession, errorID: UUID? = nil) async {
         guard let currentError = session.transcript.retryableErrorID, errorID == nil || errorID == currentError else { return }
         guard !session.hasEnded, !restartingSessions.contains(session.id) else { return }
@@ -1127,7 +1080,7 @@ import Foundation
 
     private func listedTools(for session: AgentSession) -> [String] {
         AgentToolHost.sessionTools(for: session.mode, scopes: AgentGrantScopes(searchHistory: searchesHistory(session), startTasks: false))
-            .filter { session.origin == .app || ($0.name != "request_tab" && $0.name != "open_tab") }
+            .filter { $0.name != "request_tab" || session.origin == .app }
             .map(\.name)
     }
 
@@ -1197,9 +1150,9 @@ import Foundation
         session.record(AgentStepText.step(for: call, result: result, tabHandle: tabHandle, tabID: tabHandle.flatMap(session.handles.tabs.id(for:))))
         let decision: AgentActivityEntry.Decision
         switch (call.name, result.status) {
-        case ("ask_user", .ok), ("request_tab", .ok), ("open_tab", .ok): decision = .approved
-        case ("ask_user", .denied), ("request_tab", .denied), ("open_tab", .denied): decision = .denied
-        case ("ask_user", .timeout), ("request_tab", .timeout), ("open_tab", .timeout): decision = .timedOut
+        case ("ask_user", .ok), ("request_tab", .ok): decision = .approved
+        case ("ask_user", .denied), ("request_tab", .denied): decision = .denied
+        case ("ask_user", .timeout), ("request_tab", .timeout): decision = .timedOut
         case (_, .refused): decision = .refused
         default: decision = .auto
         }
@@ -1226,7 +1179,6 @@ import Foundation
         func historyCheck(for call: AgentToolCall) -> (@MainActor @Sendable (AIToolResult) -> AIToolResult)? {
             guard let service, let session else { return nil }
             let host = service.host
-            let generation = session.takeoverGeneration
             let tabs: [AgentTabInfo]
             switch call.name {
             case "read_text", "snapshot":
@@ -1246,10 +1198,8 @@ import Foundation
             }
             let sources = Dictionary(uniqueKeysWithValues: pages.map { ($0.handle, $0) })
             return { [weak service, weak session] result in
-                // A result from before a Take Over stays withheld after Hand Back, while the panel still lists its page.
                 @MainActor func permits(_ handle: String) -> Bool {
-                    guard let service, let session, !session.isTakenOver, session.takeoverGeneration == generation,
-                          let source = sources[handle] else { return false }
+                    guard let service, let session, let source = sources[handle] else { return false }
                     return service.currentReadPage(source, in: session) != nil
                 }
                 if call.name == "list_tabs" {
@@ -1323,8 +1273,8 @@ import Foundation
             read = nil
         }
         let result: AgentToolResult
-        if call.name == "request_tab" || call.name == "open_tab" {
-            result = await requestSessionTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
+        if call.name == "request_tab" {
+            result = await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected)
         } else {
             result = await toolHost.run(call, in: session, searchesHistory: searchesHistory(session))
         }
@@ -1342,84 +1292,30 @@ import Foundation
         return result
     }
 
-    /// A tab request waits for the user to choose the attachment or confirm the reviewed research address.
-    private func requestSessionTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
+    /// The card keeps local titles and addresses. Only the resulting read handle goes to the model.
+    private func requestSharedTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
                                   connectionID: UUID?, isConnected: () -> Bool) async -> AgentToolResult {
         guard canEditAttachments(of: session) else {
-            return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can make this request.")
+            return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can ask to share a tab here.")
         }
-        let opensResearch = call.name == "open_tab"
-        let tool = opensResearch ? AgentToolCatalog.sessionResearchRequest : AgentToolCatalog.sessionTabRequest
-        if let problem = AgentToolHost.problem(with: call.arguments, for: tool) {
+        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.sessionTabRequest) {
             return AgentToolResult(status: .error, code: "invalidArguments", text: problem)
         }
         guard session.acceptsQuestions, session.isTurnRunning else { return AgentToolHost.ended.result }
+        let choices = shareableTabs(for: session)
+        // No card asked the user, so nothing reads as their refusal.
+        guard !choices.isEmpty else { return AgentToolResult(status: .refused, code: "notAvailable", text: "No other eligible tab is open in this Persona.") }
         let now = dependencies.now()
-        let kind: AgentApprovalKind
-        let research: AgentResearchPage?
-        let action: String
-        if opensResearch {
-            let choice: AgentResearchPage?
-            switch (call.arguments["url"]?.stringValue, call.arguments["tab"]?.stringValue, call.arguments["ref"]?.stringValue) {
-            case (let url?, nil, nil):
-                choice = researchChoices(for: session).first { $0.url.absoluteString == url }
-            case (nil, let tab?, let ref?):
-                choice = manualOutlineLinks(for: session).first { page in
-                    guard case .outline(_, _, _, let handle, let link) = page.source else { return false }
-                    return handle == tab && link.ref == ref
-                }
-            default:
-                return AgentToolResult(status: .error, code: "invalidArguments", text: "Give either url alone or a shared tab and its link ref.")
-            }
-            guard let choice else {
-                return AgentToolResult(status: .refused, code: "notAvailable", text: "The address is unavailable for this session.")
-            }
-            guard host.agentTabs(of: session.id).count < AgentLimits.agentTabs else {
-                return AgentToolResult(status: .refused, code: "limitReached", text: "The session has reached its tab limit.")
-            }
-            research = choice
-            kind = .openSessionResearch(choice.url, source: choice.outlineLabel)
-            action = "Open a background research tab"
-        } else {
-            let choices = shareableTabs(for: session)
-            guard !choices.isEmpty else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
-            research = nil
-            kind = .shareSessionTab(choices)
-            action = "Choose a tab for this session to read"
-        }
-        var card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
-                                 kind: kind, isSensitive: false, offers: [.deny], action: action, tabID: research?.source.attachmentID,
-                                 agentSays: call.arguments["reason"]?.stringValue, connectionID: connectionID, createdAt: now,
-                                 deadline: now.addingTimeInterval(sessionQuestionWindow))
-        card.researchDocumentID = research?.source.documentID
+        let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
+                                 kind: .shareSessionTab(choices), isSensitive: false, offers: [.deny],
+                                 action: "Choose a tab for this session to read", agentSays: call.arguments["reason"]?.stringValue,
+                                 connectionID: connectionID, createdAt: now, deadline: now.addingTimeInterval(sessionQuestionWindow))
         let answer = await approvals.request(card)
-        func stillRequested() -> Bool {
-            !Task.isCancelled && isConnected() && session.callEpoch == epoch && session.takeoverGeneration == generation
-                && session.acceptsQuestions && !session.isTakenOver && !session.hasEnded
-        }
-        guard stillRequested() else { return AgentToolHost.ended.result }
+        guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
+              session.acceptsQuestions, !session.isTakenOver, !session.hasEnded else { return AgentToolHost.ended.result }
         if answer == .timedOut { return AgentToolResult(status: .timeout, code: "notAnswered", text: "The user did not answer the tab request in time.") }
-        if let research {
-            if answer == .withdrawn {
-                let reason = research.isOutlineLink ? "The shared document is no longer available. Read a fresh outline before requesting the link again."
-                    : "The shared document is no longer available. Review its current address before requesting it again."
-                return AgentToolResult(status: .stale, code: "stale", text: reason)
-            }
-            guard answer == .allowOnce else { return AgentToolResult(status: .denied, text: "No research tab was opened.") }
-            if research.isOutlineLink {
-                let review = await liveOutlineLink(research, in: session)
-                guard stillRequested() else { return AgentToolHost.ended.result }
-                guard case .success(let current) = review, current == research else {
-                    return AgentToolResult(status: .stale, code: "stale", text: "The reviewed link is no longer current. Read a fresh outline before requesting it again.")
-                }
-            }
-            guard let tab = openReviewedResearchTab(research, in: session) else {
-                return AgentToolResult(status: .stale, code: "stale", text: "The address is no longer available for this session.")
-            }
-            let handle = session.handles.tabs.handle(for: tab.id)
-            return AgentToolResult(status: .ok, text: "Opened background research tab \(handle).", structured: ["tab": .string(handle)])
-        }
-        guard case .shareSessionTab(let choices) = kind, case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
+        if case .ended = answer { return AgentToolResult(status: .stale, code: "stale", text: "The tabs available to share changed. No tab was shared.") }
+        guard case .tab(let id) = answer else { return AgentToolResult(status: .denied, text: "No tab was shared.") }
         guard let choice = choices.first(where: { $0.id == id }), share(choice, with: session) else {
             return AgentToolResult(status: .stale, code: "stale", text: "The reviewed tab changed. No tab was shared.")
         }
@@ -1673,7 +1569,6 @@ import Foundation
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, didReport report: AgentTabReport) {
-        if report == .closed || report == .takenOver { session(withID: ownerID)?.forgetResearchTab(tabID) }
         switch report {
         case .takenOver, .closed, .loaded, .addressChanged:
             if let session = session(withID: ownerID), session.transcript.containsRead(of: tabID) { session.objectWillChange.send() }
@@ -1792,8 +1687,9 @@ private final class ClientConnection {
 
 /// One `tools/call` on a connection, which its client may cancel.
 private final class ConnectionCall {
-    /// The request ID, when it is a number, as `tools/cancel` names calls.
+    /// The call's JSON-RPC request ID, by which the connection tracks it.
     let requestID: AgentRPCID
+    /// The request ID, when it is a number, as `tools/cancel` names calls.
     let callID: Int?
     var task: Task<Void, Never>?
     var isCancelled = false
@@ -1826,9 +1722,7 @@ extension AgentService: AgentEndpointDelegate {
 
     func endpoint(_ endpoint: AgentEndpoint, didClose connection: UUID) {
         guard endpoint === self.endpoint else { return }
-        for state in states.values { state.cancelCalls(onConnection: connection) }
-        approvals.end(connection: connection, because: "The client left before the user answered.")
-        connections.removeValue(forKey: connection)?.cancelCalls()
+        dropConnection(connection, because: Self.clientLeft)
         updateConnectedGrants()
     }
 

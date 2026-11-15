@@ -231,13 +231,16 @@ final class EngineRuntime {
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
 
-    /// Opening a notification selects its still-waiting conversation without navigating the user's page.
+    /// Opening a notification selects its still-waiting conversation without navigating the user's page: in a window that already shows it, else in a main window of the owner's Persona, one without a panel first, whose composer draft stays kept otherwise.
     func showWaitingAgent(_ ownerID: UUID) {
         guard let agents, agents.pendingAttention(for: ownerID) else { return }
-        let isSession = agents.session(withID: ownerID) != nil
-        let panel: AgentPanelContent = isSession ? .session(ownerID) : .client(ownerID)
-        let window = windows.first { $0.agentPanel == panel } ?? windows.first { $0.agentPanel == nil }
-            ?? activeWindow ?? sidebarTarget()
+        let session = agents.session(withID: ownerID)
+        let panel: AgentPanelContent = session != nil ? .session(ownerID) : .client(ownerID)
+        let personaID = session?.personaID ?? agents.grants.first { $0.id == ownerID }?.personaID
+        let ownMain = windows.filter { $0.kind == .main && $0.personaID == personaID }
+        let window = windows.first { $0.agentPanel == panel } ?? ownMain.first { $0.agentPanel == nil } ?? ownMain.first
+            ?? windows.first { $0.agentPanel == nil } ?? activeWindow ?? sidebarTarget()
+        let isSession = session != nil
         if isSession { window.showAgentSession(ownerID) } else { window.showClientPanel(ownerID) }
         window.nsWindow?.makeKeyAndOrderFront(nil)
     }
@@ -890,12 +893,11 @@ final class EngineRuntime {
 
     /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it and `folderID` the folder that holds it, both set before the tab joins the list so that its `tabOpened` event names the opening tab and, for an agent folder, carries the kind `agent`.
     func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil,
-               folderID: UUID? = nil, researchLoad: (@MainActor (URL) -> Bool)? = nil, preferredEngine: EngineKind? = nil) -> Tab {
+               folderID: UUID? = nil, preferredEngine: EngineKind? = nil) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tab.opener = opener
         tab.folderID = folderID
-        tab.researchLoad = researchLoad
         if let preferredEngine { tab.preferredEngine = preferredEngine }
         tabs.append(tab)
         if select { sidebarTarget().selectTab(tab.id) }
@@ -980,6 +982,10 @@ final class EngineRuntime {
             self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.remembersAnswersInSeveralPersonas, ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
+        }
+        tab.denyPermission = { [weak self, weak tab] request, completion in
+            guard let self, let tab else { return completion(false) }
+            self.permissionAnswers.denyWithoutAsking(request, personaID: tab.personaID, in: self.runtime(of: tab)?.context, completion: completion)
         }
         tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
         // The page fills the window that shows it. A page that no window shows leaves fullscreen; the engine is still in its callback, so that happens on the next turn of the run loop.
@@ -1820,7 +1826,7 @@ final class EngineRuntime {
     }
 
     /// Opens an agent's tab at `url` in the background, in `engine` or the default engine, in the agent folder of `owner`, which it makes named `folderName` among the open tabs of the space `spaceID` when there is none (docs/agents.md, In the browser ▸ Agent folders). It selects nothing and switches no window's space. Nil when no space has that ID.
-    func openAgentTab(url: URL, engine: EngineKind?, owner: UUID, folderName: String, in spaceID: UUID, researchLoad: (@MainActor (URL) -> Bool)? = nil) -> Tab? {
+    func openAgentTab(url: URL, engine: EngineKind?, owner: UUID, folderName: String, in spaceID: UUID) -> Tab? {
         let folder: TabFolder
         if let existing = folders.first(where: { $0.agentSessionID == owner }) {
             folder = existing
@@ -1831,13 +1837,6 @@ final class EngineRuntime {
         }
         guard let space = spaces.first(where: { $0.id == folder.spaceID }) else { return nil }
         let preferred = engine ?? defaultEngine
-        if let researchLoad {
-            guard space.id == spaceID else { return nil }
-            let page = makeWebContents(url: URL(string: "about:blank"), engine: preferred, state: nil, in: space.resolvedPersonaID)
-            let tab = adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, researchLoad: researchLoad, preferredEngine: preferred)
-            page.navigationController.load(URLRequest(url: url))
-            return tab
-        }
         let page = makeWebContents(url: url, engine: preferred, state: nil, in: space.resolvedPersonaID)
         return adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, preferredEngine: preferred)
     }

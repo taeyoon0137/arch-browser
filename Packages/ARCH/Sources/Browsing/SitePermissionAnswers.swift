@@ -40,14 +40,7 @@ final class SitePermissionAnswers {
     /// The card can wait in its tab's queue while Arch's notification permission changes, as when macOS's question for another tab's card is answered, so `ask` makes the card with the maker each time a card shows it, which reads the permission then, and again when the permission changes while a card shows it, and the answer acts on the permission the card showed last.
     func answer(_ request: EnginePermissionRequest, forTab tabID: UUID, personaID: UUID, in context: (any EngineBrowserContext)?, identity: PromptIdentity, inEveryPersona: Bool = false,
                 ask: (@escaping () -> PromptContent, @escaping (PromptResponse) -> Void) -> Void, completion: @escaping (Bool) -> Void) {
-        if personaID == agentOnlyPersonaID {
-            completion(false)
-            // Chromium keeps every answer it receives, so its profile forgets the denial again: this Persona remembers nothing.
-            if let context {
-                DispatchQueue.main.async { request.types.forEach { context.setRememberedPermission(nil, for: $0, origin: request.origin) } }
-            }
-            return
-        }
+        if personaID == agentOnlyPersonaID { return denyWithoutAsking(request, personaID: personaID, in: context, completion: completion) }
         let store = store
         let notifications = notifications
         // Chromium keeps every answer it receives, even the safe answer for a card that ended with its tab, so once it has the answer its kept answers return to the remembered ones.
@@ -88,6 +81,20 @@ final class SitePermissionAnswers {
                 notifications.request { _ in }
             } else if shownStatus == .denied, response.buttonID == "openSystemSettings" {
                 notifications.openSystemSettings()
+            }
+        }
+    }
+
+    /// Denies a request that nobody is asked about: one of the agent-only Persona, an agent's tab, or a preview. Chromium keeps every answer it receives, so on the next turn the profile's kept answers for the types return to the remembered ones, or to none in the agent-only Persona, which remembers nothing.
+    func denyWithoutAsking(_ request: EnginePermissionRequest, personaID: UUID, in context: (any EngineBrowserContext)?, completion: (Bool) -> Void) {
+        completion(false)
+        guard let context else { return }
+        let remembersNothing = personaID == agentOnlyPersonaID
+        DispatchQueue.main.async { [weak self] in
+            if remembersNothing {
+                request.types.forEach { context.setRememberedPermission(nil, for: $0, origin: request.origin) }
+            } else {
+                self?.restoreRememberedAnswers(for: request, in: context)
             }
         }
     }

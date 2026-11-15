@@ -565,7 +565,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: requested, isUserInitiated: true, opensLinkInNewTab: requested != .newWindow)) == .allow
     }
     /// Only the UI delegate adopts popups, so without one the page opens none, as on the WebKit engine.
-    public func cefBrowserCanAdoptPopup() -> Bool { uiDelegate?.webContentsMayCreatePopup(self) == true }
+    public func cefBrowserCanAdoptPopup() -> Bool { uiDelegate != nil }
     /// A popup keeps its `window.opener`, and it reaches the UI delegate as a WebKit popup does.
     public func cefBrowserDidOpenPopup(_ popup: ARCHCEFBrowser, targetURL: String, disposition: ARCHCEFPopupDisposition) {
         guard let uiDelegate else { return }

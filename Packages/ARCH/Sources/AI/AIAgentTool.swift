@@ -215,19 +215,23 @@ final class AIAgentProbeStore {
 // MARK: - Environment and output lines
 
 extension AICommandLineConfiguration {
-    /// The minimal environment and the configured variables, which take precedence. PATH is the login shell's, or this app's when the shell cannot tell, after the executable's own folder, so a script finds an interpreter installed beside it; a configured PATH replaces it. A preset's environment never carries an API key, so the tool uses its own sign-in.
-    func runEnvironment() async -> [String: String] {
+    /// The minimal environment and the configured variables, which take precedence. PATH is the login shell's, or this app's when the shell cannot tell, after the executable's own folder, so a script finds an interpreter installed beside it; a configured PATH replaces it. A preset also takes the tool's folder variable (`CLAUDE_CONFIG_DIR` or `CODEX_HOME`) from the login shell, as the built-in terminal's sign-in does, and its environment never carries an API key or token, so the tool uses its own sign-in. Tests give `loginShell`.
+    func runEnvironment(loginShell: @Sendable () async -> [String: String]? = { await LoginShell.shared.environment() }) async -> [String: String] {
         var environment = LoginShell.baseEnvironment
+        let shell = self.environment["PATH"] == nil || agent != nil ? await loginShell() : nil
         if self.environment["PATH"] == nil {
-            let searchPath = await LoginShell.shared.path() ?? environment["PATH"] ?? ""
+            let searchPath = shell?["PATH"] ?? environment["PATH"] ?? ""
             var folders = [executable.deletingLastPathComponent().path]
             for folder in searchPath.split(separator: ":").map(String.init) where !folders.contains(folder) { folders.append(folder) }
             environment["PATH"] = folders.joined(separator: ":")
         }
+        if let agent {
+            let folder = agent == .claudeCode ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"
+            environment[folder] = shell?[folder]
+        }
         environment.merge(self.environment) { _, configured in configured }
         if agent != nil {
-            environment["ANTHROPIC_API_KEY"] = nil
-            environment["OPENAI_API_KEY"] = nil
+            for key in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY"] { environment[key] = nil }
         }
         return environment
     }

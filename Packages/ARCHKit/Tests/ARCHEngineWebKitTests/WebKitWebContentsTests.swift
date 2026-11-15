@@ -41,35 +41,6 @@ import Testing
         #expect(restored.webView.backForwardList.backList.map(\.url) == [earlier])
     }
 
-    @Test func aResearchPopupRefusalPrecedesWindowCreation() async throws {
-        let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
-        let policy = PopupPolicy()
-        tab.uiDelegate = policy
-        tab.webView.configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-        tab.webView.loadHTMLString("<title>Ready</title>", baseURL: nil)
-        #expect(await eventually { tab.webView.title == "Ready" })
-        let refused = try await tab.webView.evaluateJavaScript("window.open('about:blank') === null") as? Bool
-        #expect(refused == true && policy.checks == 1 && policy.children.isEmpty)
-        policy.allows = true
-        let opened = try await tab.webView.evaluateJavaScript("window.open('about:blank') !== null") as? Bool
-        #expect(opened == true && policy.checks == 2 && policy.children.count == 1)
-    }
-
-    private final class PopupPolicy: EngineWebContentsUIDelegate {
-        var allows = false
-        var checks = 0
-        var children: [any EngineWebContents] = []
-
-        func webContentsMayCreatePopup(_ webContents: any EngineWebContents) -> Bool {
-            checks += 1
-            return allows
-        }
-
-        func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents child: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
-            children.append(child)
-        }
-    }
-
     @Test func eachWebViewKnowsItsWebContents() throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
         let popup = WebKitWebContents(parentConfiguration: tab.webView.configuration, extensionBaseURL: nil, context: context)

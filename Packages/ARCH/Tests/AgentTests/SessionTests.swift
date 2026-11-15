@@ -166,321 +166,6 @@ import UserNotifications
         #expect(otherRunner.sent.count == 1)
     }
 
-    @Test func theResearchSheetKeepsDistinctOutlineRefsAndClearsAnUnavailableSelection() async throws {
-        let url = try #require(URL(string: "https://docs.example/article?edition=two#terms"))
-        let sourceURL = try #require(URL(string: "https://docs.example/index"))
-        let tab = UUID(), document = UUID()
-        let manual = AgentResearchPage(url: url, source: .message(UUID()))
-        func outline(_ ref: String) -> AgentResearchPage {
-            let link = AgentOutlineLink(ref: ref, name: "Terms", fingerprint: "a|link||Terms", url: url)
-            return AgentResearchPage(url: url, source: .outline(tab: tab, document: document, address: sourceURL, handle: "t1", link: link))
-        }
-        let first = outline("e3"), second = outline("e7")
-        #expect(first.outlineLabel != second.outlineLabel && first.url == second.url)
-        var selected: AgentResearchPage?
-        var opens = 0
-        func sheet(_ pages: [AgentResearchPage]) -> AgentResearchSheet {
-            AgentResearchSheet(pages: pages, choice: Binding(get: { selected }, set: { selected = $0 }),
-                               open: { _ in opens += 1; return .opened }, close: {})
-        }
-        let host = NSHostingController(rootView: sheet([manual, first, second]))
-        let window = NSWindow(contentViewController: host)
-        host.view.layoutSubtreeIfNeeded()
-        #expect(selected == nil && opens == 0)
-        selected = second
-        host.rootView = sheet([manual, first, second])
-        func hasAddressViewport(_ view: NSView) -> Bool {
-            if let scroll = view as? NSScrollView, scroll.contentSize.height > 20 { return true }
-            return view.subviews.contains(where: hasAddressViewport)
-        }
-        try await waitUntil {
-            host.view.layoutSubtreeIfNeeded()
-            return hasAddressViewport(host.view)
-        }
-        #expect(opens == 0)
-        host.rootView = sheet([manual, first])
-        try await waitUntil { selected == nil }
-        #expect(opens == 0 && !window.isVisible)
-    }
-
-    @Test func researchPagesOpenOnlyTheReviewedAddressAndRefuseEverySubsequentNavigation() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try await harness.makeOpenService()
-        let host = harness.host
-        let address = URL(string: "https://research.example/doc?q=one")!
-        let other = URL(string: "https://notes.example/ref")!
-        let (session, runner) = try start(service, harness, task: "Read \(address.absoluteString) and \(other.absoluteString).", mode: .readOnly)
-        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
-        let choices = service.researchChoices(for: session)
-        #expect(Set(choices.map(\.url)) == [address, other])
-        let choice = try #require(choices.first { $0.url == address })
-        let forged = AgentResearchPage(url: URL(string: "https://research.example/other")!, source: choice.source)
-        #expect(!service.openResearchPage(forged, in: session))
-        host.redirects[address] = other
-        #expect(service.openResearchPage(choice, in: session))
-        let tab = try #require(host.agentTabs(of: session.id).first)
-        try await waitUntil { host.tabs.first { $0.id == tab.id }?.isLoading == false }
-        #expect(host.tabs.first { $0.id == tab.id }?.url == nil)
-        let check = try #require(host.researchLoads[tab.id])
-        #expect(!check(address) && !check(other) && !check(forged.url))
-        #expect(host.shownTabIDs.isEmpty)
-        host.redirects.removeAll()
-        #expect(service.openResearchPage(choice, in: session))
-        let pending = try #require(host.agentTabs(of: session.id).last)
-        session.takeOver()
-        session.handBack()
-        #expect(host.researchLoads[pending.id]?(address) == false)
-        #expect(service.openResearchPage(choice, in: session))
-        let excluded = try #require(host.agentTabs(of: session.id).last)
-        harness.excludedHosts.value.insert("research.example")
-        #expect(host.researchLoads[excluded.id]?(address) == false)
-        #expect(!service.openResearchPage(choice, in: session))
-        harness.excludedHosts.value.remove("research.example")
-        #expect(service.openResearchPage(choice, in: session))
-        let stopped = try #require(host.agentTabs(of: session.id).last)
-        session.stop()
-        #expect(host.researchLoads[stopped.id]?(address) == false)
-        #expect(session.reportedTools.contains("open_tab"))
-    }
-
-    @Test func researchCopiesRequireTheSameAttachmentDocumentAndSharingOnBothSidesOfARead() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try await harness.makeOpenService()
-        let host = harness.host
-        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
-        let address = URL(string: "https://notes.example/ref?exact=1")!
-        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Notes", url: address, isLoading: false, engine: .webKit)
-        host.tabs = [tab]
-        host.userTabIDs = [tab.id]
-        host.pages[address] = (title: "PrivateTitle", text: "PrivateText")
-        let (session, runner) = try start(service, harness, task: "Read the notes", attaching: [tab.id])
-        spawnCLI(runner, harness)
-        let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
-        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
-        let page = try #require(service.researchChoices(for: session).first)
-        #expect(service.openResearchPage(page, in: session))
-        let copy = try #require(host.agentTabs(of: session.id).first)
-        try await waitUntil { host.tabs.first { $0.id == copy.id }?.url == address }
-        #expect(try await client.callTool("list_tabs", [:]).text.contains("PrivateTitle"))
-        #expect(try await client.callTool("read_text", ["tab": "t2"]).text.contains("PrivateText"))
-        host.beforeReturningContent = { host.tabs[0].documentID = UUID() }
-        let answer = try await client.callTool("read_text", ["tab": "t2"])
-        #expect(answer.status != .ok && !answer.text.contains("PrivateText"))
-        #expect(try await !client.callTool("list_tabs", [:]).text.contains("PrivateTitle"))
-        #expect(!service.openResearchPage(page, in: session))
-        host.tabs[0] = tab
-        service.stopSharing(tab.id, with: session)
-        #expect(host.closedTabIDs.contains(copy.id))
-        #expect(session.handles.tabs.id(for: "t2") == nil && session.researchPages[copy.id] == nil)
-        #expect(service.share(tab, with: session))
-        #expect(!service.openResearchPage(page, in: session))
-        #expect(service.researchChoices(for: session).first?.source != page.source)
-    }
-
-    @Test(arguments: [false, true])
-    func keptResearchPagesReceiveFreshSharedHandlesEvenBeforeTheTakeoverNotification(shareImmediately: Bool) async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try await harness.makeOpenService()
-        let host = harness.host
-        let address = URL(string: "https://research.example/article")!
-        let (session, runner) = try start(service, harness, task: "Read " + address.absoluteString)
-        let page = try #require(service.researchChoices(for: session).first)
-        #expect(service.openResearchPage(page, in: session))
-        let id = try #require(host.agentTabs(of: session.id).first?.id)
-        try await waitUntil { host.tabs.first?.url == address }
-        host.pages[address] = ("Article", "Reviewed article body")
-        spawnCLI(runner, harness)
-        let client = try TestClient(harness.location)
-        #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
-        runner.emit(.ready(AIModelRef(provider: AIProviderID(rawValue: "test"), model: "fixture")))
-        #expect(try await client.callTool("list_tabs", [:]).text.contains("t1"))
-        #expect(try await client.callTool("read_text", ["tab": "t1"]).status == .ok)
-        session.snapshots.counts[id] = 1
-        host.tabs[0].agentOwnerID = nil
-        host.userTabIDs.insert(id)
-        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "P17")
-        host.tabs[0].documentID = UUID()
-        if shareImmediately { #expect(service.share(host.tabs[0], with: session)) }
-        host.agentTabDidReport?(session.id, id, .takenOver)
-        if !shareImmediately { #expect(service.share(host.tabs[0], with: session)) }
-        #expect(session.researchPages[id] == nil && session.snapshots.counts[id] == nil)
-        #expect(try await client.callTool("read_text", ["tab": "t1"]).code == "tabNotFound")
-        #expect(try await client.callTool("list_tabs", ["scope": "shared"]).text.contains("t2"))
-        #expect(try await client.callTool("read_text", ["tab": "t2"]).text.contains("Reviewed article body"))
-        service.stopSharing(id, with: session)
-        #expect(host.closedTabIDs.isEmpty && host.tabs.first?.id == id)
-        #expect(try await client.callTool("read_text", ["tab": "t2"]).code == "tabNotFound")
-        #expect(service.researchChoices(for: session) == [page])
-    }
-
-    @Test func aSessionDropsResearchHandlesAndOutlinesAcrossRepeatedClosesAndItsOwnEnd() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try await harness.makeOpenService()
-        let host = harness.host
-        let (session, _) = try start(service, harness, task: "Read https://research.example/article")
-        let source = try #require(service.researchChoices(for: session).first)
-        for _ in 0..<25 {
-            #expect(service.openResearchPage(source, in: session))
-            let tab = try #require(host.agentTabs(of: session.id).first)
-            let handle = session.handles.tabs.handle(for: tab.id)
-            session.snapshots.counts[tab.id] = 1
-            host.closeAgentTab(tab.id)
-            host.agentTabDidReport?(session.id, tab.id, .closed)
-            #expect(session.researchPages.isEmpty && session.snapshots.counts.isEmpty && session.handles.tabs.id(for: handle) == nil)
-        }
-        #expect(service.openResearchPage(source, in: session))
-        let remaining = try #require(host.agentTabs(of: session.id).first)
-        let handle = session.handles.tabs.handle(for: remaining.id)
-        await session.end(keepingThread: false)
-        #expect(session.researchPages.isEmpty && session.handles.tabs.id(for: handle) == nil)
-        #expect(host.agentTabs(of: session.id).isEmpty)
-    }
-
-    @Test func researchChoicesRequireAnEligibleHTTPAddressInTheCurrentPersona() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try await harness.makeOpenService()
-        let host = harness.host
-        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
-        let addresses = ["https://127.0.0.1/doc", "http://router.local", "http://router", "https://docs.internal/doc",
-                         "http://user:password@research.example/doc", "https://research.example:8000/private", "file:///tmp/doc"]
-        let tabs = addresses.map {
-            AgentTabInfo(id: UUID(), spaceID: space.id, title: "", url: URL(string: $0), isLoading: false, engine: .webKit)
-        }
-        host.tabs = tabs
-        host.userTabIDs = Set(tabs.map(\.id))
-        let (session, _) = try start(service, harness, task: "Open https://notes.example/ref", attaching: tabs.map(\.id))
-        let only = try #require(service.researchChoices(for: session).first)
-        #expect(service.researchChoices(for: session).map(\.url.absoluteString) == ["https://notes.example/ref"])
-        host.spacesByPersona[session.personaID] = []
-        #expect(service.researchChoices(for: session).isEmpty)
-        #expect(!service.openResearchPage(only, in: session))
-    }
-
-    @Test func aManualOutlineChoiceRechecksTheLiveLinkAndKeepsItsAddressOutOfModelRequests() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try harness.makeService(), host = harness.host
-        let page = try await FixturePage("form")
-        _ = try await page.evaluate("""
-            document.body.innerHTML = '<a href="/article?entry=first#top">Read more</a> <a href="/article?entry=second#top">Read more</a> <a href="https://elsewhere.example/out">Outside</a>';
-            """)
-        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
-        let source = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Source", url: page.url, isLoading: false, engine: .webKit)
-        host.tabs = [source]
-        host.userTabIDs = [source.id]
-        host.webContents[source.id] = page.contents
-        let (session, runner) = try start(service, harness, attaching: [source.id])
-        let client = try await connectQuestionClient(session, runner, harness)
-        func snapshot(_ arguments: [String: AgentJSON] = [:]) async -> AgentToolResult {
-            var arguments = arguments
-            arguments["tab"] = .string(session.handles.tabs.handle(for: source.id))
-            return await service.toolHost().run(AgentToolCall(name: "snapshot", arguments: arguments), in: session, searchesHistory: false)
-        }
-        #expect(service.manualOutlineLinks(for: session).isEmpty)
-        let partial = await snapshot(["max_chars": 1])
-        #expect(partial.status == .ok && service.manualOutlineLinks(for: session).isEmpty)
-        let outline = await snapshot()
-        #expect(outline.status == .ok && !outline.text.contains("entry=first") && !outline.text.contains("entry=second"))
-        let choices = service.manualOutlineLinks(for: session)
-        try #require(choices.count == 2)
-        let picked = choices[1]
-        #expect(choices.map(\.url.query) == ["entry=first", "entry=second"])
-        #expect(choices.map(\.outlineLabel) == ["t1 [e1] · Read more", "t1 [e2] · Read more"])
-        #expect(service.researchChoices(for: session).allSatisfy { $0.url != picked.url })
-        let proposed = try await client.callTool("open_tab", ["url": .string(picked.url.absoluteString)])
-        #expect(proposed.status == .refused && service.approvals.pending.isEmpty)
-        #expect(!service.openResearchPage(picked, in: session) && host.openedOwners.isEmpty)
-        #expect(session.scope.written(picked.url) != .opens)
-        func changeHref(to href: String) async throws {
-            _ = try await page.evaluate("document.querySelectorAll('a')[1].href = '\(href)'")
-        }
-        func replacement(for choice: AgentResearchPage) async throws -> AgentResearchPage {
-            let result = await service.reviewManualResearchPage(choice, in: session)
-            guard case .changed(let next) = result else {
-                throw NSError(domain: "Expected an updated manual link", code: 1)
-            }
-            return next
-        }
-
-        try await changeHref(to: "/article?entry=changed#top")
-        host.onPageScript = { withUnsafeCurrentTask { $0?.cancel() } }
-        let cancelled = await Task { @MainActor in await service.reviewManualResearchPage(picked, in: session) }.value
-        #expect(cancelled == .unavailable && host.openedOwners.isEmpty)
-        host.onPageScript = nil
-        let updated = try await replacement(for: picked)
-        #expect(updated.originalOutlineChoice == picked && updated.url.query == "entry=changed")
-        #expect(service.manualOutlineLinks(for: session) == choices && host.openedOwners.isEmpty)
-        #expect(session.snapshots.records[source.id]?.refs["e2"]?.href == picked.url)
-        #expect(!service.openResearchPage(updated, in: session))
-        let refused = try await client.callTool("open_tab", ["url": .string(updated.url.absoluteString)])
-        #expect(refused.status == .refused && service.approvals.pending.isEmpty && session.scope.written(updated.url) != .opens)
-
-        try await changeHref(to: "/article?entry=third#end")
-        let third = try await replacement(for: updated)
-        #expect(third.originalOutlineChoice == picked && third.url.fragment == "end")
-        try await changeHref(to: "/article?entry=second#top")
-        let reverted = try await replacement(for: third)
-        #expect(reverted.originalOutlineChoice == picked && reverted.url == picked.url && reverted != picked)
-        try await changeHref(to: "https://elsewhere.example/out")
-        #expect(await service.reviewManualResearchPage(reverted, in: session) == .unavailable)
-        try await changeHref(to: "https://name:pw@fixture.example/article")
-        #expect(await service.reviewManualResearchPage(picked, in: session) == .unavailable)
-        try await changeHref(to: "/article?entry=changed#top")
-        _ = try await page.evaluate("document.querySelectorAll('a')[1].textContent = 'Different link'")
-        #expect(await service.reviewManualResearchPage(updated, in: session) == .staleLink)
-        _ = try await page.evaluate("document.querySelectorAll('a')[1].textContent = 'Read more'")
-        #expect(host.openedOwners.isEmpty)
-        let occupied = (0..<AgentLimits.agentTabs).map { _ in
-            AgentTabInfo(id: UUID(), spaceID: space.id, title: "Occupied", url: source.url, isLoading: false, engine: .webKit, agentOwnerID: session.id)
-        }
-        host.onPageScript = { host.tabs += occupied }
-        #expect(await service.reviewManualResearchPage(updated, in: session) == .unavailable && host.openedOwners.isEmpty)
-        host.onPageScript = nil
-        host.tabs = [source]
-        #expect(await service.reviewManualResearchPage(updated, in: session) == .opened)
-        let copy = try #require(host.agentTabs(of: session.id).first)
-        let mayLoad = try #require(host.researchLoads[copy.id])
-        #expect(!mayLoad(picked.url) && mayLoad(updated.url) && !mayLoad(updated.url))
-        #expect(session.scope.written(updated.url) != .opens && service.manualOutlineLinks(for: session) == choices)
-
-        // A fresh model outline supersedes the original proof, so the sheet must use its new row.
-        let revisedOutline = await snapshot()
-        #expect(revisedOutline.status == .ok && !revisedOutline.text.contains("entry=changed"))
-        #expect(await service.reviewManualResearchPage(updated, in: session) == .unavailable)
-        #expect(service.manualOutlineLinks(for: session).contains { $0.url == updated.url && $0.originalOutlineChoice == nil })
-        service.stopSharing(source.id, with: session)
-        #expect(host.agentTabs(of: session.id).isEmpty && service.manualOutlineLinks(for: session).isEmpty)
-        #expect(service.share(source, with: session))
-        _ = await snapshot()
-        #expect(await service.reviewManualResearchPage(picked, in: session) == .unavailable)
-        let fresh = try #require(service.manualOutlineLinks(for: session).first)
-        host.onPageScript = { harness.excludedHosts.value.insert("fixture.example") }
-        #expect(await service.reviewManualResearchPage(fresh, in: session) == .unavailable)
-        harness.excludedHosts.value.remove("fixture.example")
-        host.onPageScript = {
-            session.takeOver()
-            session.handBack()
-        }
-        #expect(await service.reviewManualResearchPage(fresh, in: session) == .unavailable)
-        host.onPageScript = nil
-        _ = await snapshot()
-        let beforeStop = try #require(service.manualOutlineLinks(for: session).first)
-        host.onPageScript = { session.stop() }
-        #expect(await service.reviewManualResearchPage(beforeStop, in: session) == .unavailable)
-        host.onPageScript = nil
-        _ = await snapshot()
-        let beforeReload = try #require(service.manualOutlineLinks(for: session).first)
-        host.onPageScript = { host.tabs[0].documentID = UUID() }
-        #expect(await service.reviewManualResearchPage(beforeReload, in: session) == .unavailable)
-        #expect(host.agentTabs(of: session.id).isEmpty)
-    }
-
     // MARK: Tickets
 
     @Test func cancellingOneGatedCallReleasesOnlyItsWaitAndCannotRunItAfterHandBack() async throws {
@@ -611,11 +296,10 @@ import UserNotifications
         #expect(harness.attentionOwners == [first.id, other.id])
         #expect(service.pendingAttention(for: first.id) && service.pendingAttention(for: other.id))
         #expect(!service.pendingAttention(for: UUID()))
-        let deliveredOwner = try #require(AgentAttention.ownerID(in: AgentAttention.request(for: first.id).identifier))
         #expect(await service.approvals.answer(firstQuestion.id, with: .answer("First answer")))
-        #expect(service.pendingAttention(for: deliveredOwner))
+        #expect(service.pendingAttention(for: first.id))
         #expect(await service.approvals.answer(secondQuestion.id, with: .cancel("")))
-        #expect(!service.pendingAttention(for: deliveredOwner) && service.pendingAttention(for: other.id))
+        #expect(!service.pendingAttention(for: first.id) && service.pendingAttention(for: other.id))
         other.stop()
         #expect(!service.pendingAttention(for: other.id))
         #expect(await !service.approvals.answer(otherQuestion.id, with: .answer("late")))
@@ -697,200 +381,7 @@ import UserNotifications
         #expect(service.approvals.pending.isEmpty && session.callsThisSession == 3)
     }
 
-    enum ResearchConsentChange: CaseIterable {
-        case approve, deny, reload, unload, query, path, close, exclude, removeSpace, stopSharingAndReattach, takeOverAndHandBack, stop, cancelCall
-    }
-
-    @Test(arguments: ResearchConsentChange.allCases)
-    func ticketOpensOnlyTheExactResearchPageStillUnderReview(_ change: ResearchConsentChange) async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let host = harness.host
-        let service = try harness.makeService()
-        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
-        let address = URL(string: "https://review.example/reports/one?version=a#detail")!
-        let source = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Source title sentinel", url: address, isLoading: false, engine: .webKit)
-        host.tabs = [source]
-        host.userTabIDs = [source.id]
-        let (session, runner) = try start(service, harness, task: "Check the shared reference", attaching: [source.id], mode: .readOnly)
-        let client = try await connectQuestionClient(session, runner, harness)
-        let call = AgentToolCall(name: "open_tab", arguments: ["url": .string(address.absoluteString)])
-        try client.connection.send(.request(id: .number(81), method: AgentControlMethod.toolsCall, params: call.params))
-        try await waitUntil { !service.approvals.pending.isEmpty }
-        let card = try #require(service.approvals.pending.first)
-        #expect(card.ownerID == session.id && card.kind == .openSessionResearch(address) && card.connectionID != nil)
-        #expect(session.state == .waitingForUser && host.openedOwners.isEmpty && host.shownTabIDs.isEmpty)
-        #expect(!service.activity.entries.contains { $0.tool == "open_tab" })
-        switch change {
-        case .approve, .deny: break
-        case .reload: host.tabs[0].documentID = UUID()
-        case .unload: host.tabs[0].isLoaded = false
-        case .query: host.tabs[0].url = URL(string: "https://review.example/reports/one?version=b#detail")
-        case .path: host.tabs[0].url = URL(string: "https://review.example/reports/two?version=a#detail")
-        case .close: host.tabs.removeAll()
-        case .exclude: harness.excludedHosts.value.insert("review.example")
-        case .removeSpace: host.spacesByPersona[session.personaID]?.removeAll { $0.id == space.id }
-        case .stopSharingAndReattach:
-            service.stopSharing(source.id, with: session)
-            try #require(service.share(source, with: session))
-        case .takeOverAndHandBack:
-            session.takeOver()
-            session.handBack()
-        case .stop: session.stop()
-        case .cancelCall:
-            try client.connection.send(.notification(method: AgentControlMethod.toolsCancelNotification, params: AgentToolCancel(call: 81).params))
-            try await waitUntil { !service.approvals.isPending(card.id) }
-        }
-        let counted = await service.approvals.answer(card.id, with: change == .deny ? .deny : .allowOnce)
-        let response: AgentToolResult
-        while true {
-            if case .result(.number(81), let payload) = try await client.receive() {
-                response = try payload.decode(as: AgentToolResult.self)
-                break
-            }
-        }
-        #expect(host.shownTabIDs.isEmpty && host.shownPanels.isEmpty && service.approvals.pending.isEmpty)
-        if change == .approve {
-            let copies = host.agentTabs(of: session.id)
-            try #require(copies.count == 1)
-            let copy = try #require(copies.first)
-            let handle = try #require(response.structured?["tab"]?.stringValue)
-            #expect(counted && copy.spaceID == space.id && response.status == .ok)
-            #expect(response.structured == ["tab": .string(handle)] && session.handles.tabs.id(for: handle) == copy.id)
-            #expect(response.text.contains(handle) && !response.text.contains(address.absoluteString) && !response.text.contains(source.title))
-            let entries = service.activity.entries.filter { $0.sessionID == session.id && $0.tool == "open_tab" }
-            #expect(entries.map(\.decision) == [.approved])
-            #expect(!String(decoding: try JSONEncoder().encode(entries), as: UTF8.self).contains("version=a"))
-            let step = session.items.compactMap { if case .step(let item) = $0.kind { return item }; return nil }.last
-            #expect(step?.tabID == copy.id && step?.tabHandle == handle)
-            try await waitUntil { host.agentTabs(of: session.id).first?.url == address }
-            #expect(host.researchLoads[copy.id]?(address) == false)
-        } else {
-            #expect(response.status != .ok && response.structured?["tab"] == nil)
-            #expect(host.openedOwners.isEmpty && host.researchLoads.isEmpty)
-            #expect(!service.activity.entries.contains { $0.tool == "open_tab" && $0.outcome == "ok" })
-        }
-    }
-
-    enum OutlineConsentChange: CaseIterable { case deny, href, document, exclude, takeOver, reattach, reload, unload, close }
-
-    @Test(arguments: OutlineConsentChange.allCases)
-    func ticketCannotOpenAChangedOrDeclinedOutlineLink(_ change: OutlineConsentChange) async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try harness.makeService(), host = harness.host
-        let page = try await FixturePage("form")
-        _ = try await page.evaluate("document.body.innerHTML = '<a href=\"/report?version=one\">Report</a>'")
-        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
-        let source = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Report", url: page.url, isLoading: false, engine: .webKit)
-        host.tabs = [source]
-        host.userTabIDs = [source.id]
-        host.webContents[source.id] = page.contents
-        let (session, runner) = try start(service, harness, attaching: [source.id])
-        let client = try await connectQuestionClient(session, runner, harness)
-        let arguments: [String: AgentJSON] = ["tab": "t1", "ref": "e1"]
-        let unseen = try await client.callTool("open_tab", arguments)
-        try #require(unseen.status == .refused && harness.attentionOwners.isEmpty)
-        let snapshot = try await client.callTool("snapshot", ["tab": "t1"])
-        try #require(snapshot.status == .ok && snapshot.text.contains("[e1]"))
-        let proposal = Task { try await client.callTool("open_tab", arguments) }
-        try await waitUntil { !service.approvals.pending.isEmpty }
-        let card = try #require(service.approvals.pending.first)
-        let address = URL(string: "https://fixture.example/report?version=one")!
-        try #require(card.kind == .openSessionResearch(address, source: "t1 [e1] · Report") && host.openedOwners.isEmpty)
-        host.userDocumentDidEnd?(UUID(), source.documentID)
-        host.userDocumentDidEnd?(source.id, UUID())
-        #expect(service.approvals.isPending(card.id))
-        switch change {
-        case .reload, .unload, .close:
-            switch change {
-            case .reload: host.tabs[0].documentID = UUID()
-            case .unload: host.tabs[0].isLoaded = false
-            default: host.tabs.removeAll()
-            }
-            host.userDocumentDidEnd?(source.id, source.documentID)
-            #expect(!service.approvals.isPending(card.id))
-        case .deny: break
-        case .href: _ = try await page.evaluate("document.querySelector('a').href = '/report?version=two'")
-        case .document: host.onPageScript = { host.tabs[0].documentID = UUID() }
-        case .exclude: host.onPageScript = { harness.excludedHosts.value.insert("fixture.example") }
-        case .takeOver:
-            host.onPageScript = {
-                session.takeOver()
-                session.handBack()
-            }
-        case .reattach:
-            service.stopSharing(source.id, with: session)
-            try #require(service.share(source, with: session))
-        }
-        _ = await service.approvals.answer(card.id, with: change == .deny ? .deny : .allowOnce)
-        let result = try await proposal.value
-        switch change {
-        case .deny: #expect(result.status == .denied)
-        case .reload, .unload, .close, .reattach:
-            #expect(result.status == .stale && result.text.contains("fresh outline"))
-        case .href, .document, .exclude: #expect(result.status == .stale)
-        case .takeOver: #expect(result.status == .refused)
-        }
-        #expect(result.structured?["tab"] == nil && !result.text.contains("version="))
-        #expect(host.openedOwners.isEmpty && host.researchLoads.isEmpty && service.approvals.pending.isEmpty)
-    }
-
-    @Test func ticketRefusesUnreviewableResearchAddressesWithoutShowingACard() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try harness.makeService()
-        let url = "https://review.example/report?edition=public#summary"
-        let (session, runner) = try start(service, harness, task: "Review " + url)
-        let client = try await connectQuestionClient(session, runner, harness)
-        // A mistaken card must finish promptly and be detectable even after its deadline.
-        service.sessionQuestionWindow = 0.1
-        let refused: [[String: AgentJSON]] = [
-            [:], ["url": 17], ["url": .string(url), "engine": "webkit"], ["ref": "e1", "tab": "t1"],
-            ["tab": "t1"], ["ref": "e1"], ["url": .string(url), "tab": "t1"],
-            ["url": .string(url), "ref": "e1", "tab": "t1"],
-            ["url": "https://review.example/other?edition=public#summary"],
-            ["url": "https://review.example/report?edition=private#summary"],
-            ["url": "https://review.example/report?edition=public#other"], ["url": "file:///fixture"],
-        ]
-        for arguments in refused {
-            let response = try await client.callTool("open_tab", arguments)
-            #expect(response.status != .ok && response.status != .timeout && response.structured?["tab"] == nil)
-        }
-        #expect(session.state == .running && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
-        #expect(harness.host.shownTabIDs.isEmpty && harness.attentionOwners.isEmpty)
-    }
-
-    @Test(arguments: [false, true])
-    func ineligibleSharedSourceCannotSupplyAFreshResearchRequest(unloaded: Bool) async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        harness.now = Date()
-        let service = try harness.makeService()
-        let host = harness.host
-        let space = try #require(host.spaces(in: FakeHost.defaultPersona.id).first)
-        let address = URL(string: "https://review.example/pinned?version=one")!
-        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Pinned", url: address, isLoading: false, engine: .webKit)
-        host.tabs = [tab]
-        host.userTabIDs = [tab.id]
-        let (session, runner) = try start(service, harness, task: "Check the attached page", attaching: [tab.id])
-        let client = try await connectQuestionClient(session, runner, harness)
-        let previous = try #require(service.researchChoices(for: session).first)
-        if unloaded {
-            // A pinned tab's placeholder keeps the URL when the browser replaces its live web contents.
-            host.tabs[0].isLoaded = false
-            host.tabs[0].documentID = UUID()
-        } else {
-            host.tabs[0].isLiveFolderItem = true
-        }
-        #expect(!session.permits(previous, host: host, allowsAI: { _ in true }))
-        service.sessionQuestionWindow = 0.05
-        let result = try await client.callTool("open_tab", ["url": .string(address.absoluteString)])
-        #expect(result.status == .refused)
-        #expect(harness.attentionOwners.isEmpty && host.openedOwners.isEmpty && service.researchChoices(for: session).isEmpty)
-    }
-
-    enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, liveFolderItem, exclude, revoke, takeOver, stop, decline }
+    enum ChangeBeforeTabConsent: CaseIterable { case reload, navigate, close, unload, exclude, revoke, takeOver, stop, decline }
 
     @Test(arguments: ChangeBeforeTabConsent.allCases)
     func aTabRequestCannotShareAfterItsReviewedChoiceChanges(_ change: ChangeBeforeTabConsent) async throws {
@@ -911,12 +402,6 @@ import UserNotifications
         case .navigate: harness.host.tabs[0].url = URL(string: "https://fixture.invalid/new")
         case .close: harness.host.tabs.removeAll()
         case .unload: harness.host.tabs[0].isLoaded = false
-        case .liveFolderItem:
-            harness.host.tabs[0].isLiveFolderItem = true
-            #expect(!service.canReattach(tab, in: session.personaID))
-            let context = AgentComposerContext(personaID: session.personaID, spaceID: session.spaceID, place: "Home", tab: tab)
-            let reviewed = context.sessionStart(task: "Read", mode: .readOnly, allowsAI: { _ in true })
-            #expect(throws: AgentService.SessionError.self) { try service.startSession(reviewed) }
         case .exclude: harness.excludedHosts.value.insert("fixture.invalid")
         case .revoke:
             #expect(service.share(tab, with: session))
@@ -932,6 +417,15 @@ import UserNotifications
         #expect(reply.status != .ok && service.approvals.pending.isEmpty && session.handles.sharedTabIDs.isEmpty)
         #expect(!reply.text.contains(tab.title) && !reply.text.contains("fixture.invalid"))
         #expect(reply.structured?["tab"] == nil)
+    }
+
+    @Test func aSessionStartsAtMostInSettingsMode() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        service.setNewSessionMode(.readOnly)
+        let (session, _) = try start(service, harness, mode: .actInAgentTabs)
+        #expect(session.mode == .readOnly)
     }
 
     @Test func theModelCannotExpandAReadRequestOrReuseARevokedHandle() async throws {
@@ -953,7 +447,7 @@ import UserNotifications
         #expect(session.handles.tabs.id(for: "t1") == tab.id)
         let existing = try await client.callTool("request_tab", arguments)
         #expect(service.approvals.pending.isEmpty && session.handles.sharedTabIDs == [tab.id])
-        #expect(existing.status == .denied && existing.structured?["tab"] == nil)
+        #expect(existing.status == .refused && existing.code == "notAvailable" && existing.structured?["tab"] == nil)
         service.stopSharing(tab.id, with: session)
         let secondClient = try TestClient(harness.location)
         _ = try await secondClient.hello(ticket: session.ticket?.text)
@@ -1129,7 +623,7 @@ import UserNotifications
         #expect(request.instructions == AgentHarness.sessionInstructions)
         #expect(request.toolServer.arguments == ["--session"])
         #expect(request.toolServer.environment == [AgentMCPServer.ticketVariable: try #require(session.ticket).text])
-        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "snapshot", "read_text", "ask_user", "guide"])
+        #expect(request.toolServer.tools == ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"])
         #expect(request.skills?.plugin == "arch")
         #expect(request.skills?.names == AgentHarness.sessionSkills.map(\.name))
         let skills = try #require(request.skills)
@@ -1248,7 +742,8 @@ import UserNotifications
         #expect(session.handles.sharedTabIDs == [tabs[0].id])
         host.tabs[1].documentID = UUID()
         #expect(!service.share(choices[1], with: session))
-        host.tabs[2].title = addresses[0]
+        // Chromium titles a page without a title by its address in display form: no scheme or credentials, but the query and fragment.
+        host.tabs[2].title = "docs.example/projects?team=first#one"
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
         #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
@@ -1373,7 +868,7 @@ import UserNotifications
         spawnCLI(runner, harness)
         let client = try TestClient(harness.location)
         #expect(try await client.hello(ticket: session.ticket?.text).status == .bound)
-        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "snapshot", "read_text", "ask_user", "guide"]])
+        #expect(try await client.call(AgentControlMethod.toolsList) == ["tools": ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"]])
         // Before `ready`, a call waits and is then refused, so no page data flows before the start check passed.
         let early = try await client.callTool("list_tabs")
         #expect(early.status == .refused && early.code == "notReady")
@@ -1391,7 +886,7 @@ import UserNotifications
         let guide = try await client.callTool("guide")
         #expect(guide.text == AgentHarness.sessionInstructions)
         let research = try await client.callTool("guide", ["topic": "research"])
-        #expect(research.text.contains("Open in Research Tab") && research.text.contains("tab handle, ref and name") && research.text.contains("open_tab"))
+        #expect(research.text.contains("Shared Tabs") && !research.text.contains("open_tab"))
         // Raising the mode tells the session's connection. This build serves reading tools only, so the next list is the same and the runner hears of no change; a list that differs from the last one reported reaches it once.
         session.setMode(.askBeforeActing)
         #expect(try await client.receive() == .notification(method: AgentControlMethod.toolsChangedNotification, params: nil))
@@ -1400,7 +895,7 @@ import UserNotifications
         session.reportedTools = ["session_info"]
         _ = try await client.call(AgentControlMethod.toolsList)
         _ = try await client.call(AgentControlMethod.toolsList)
-        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "snapshot", "read_text", "ask_user", "guide"]])
+        #expect(runner.reportedTools == [["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"]])
         // While the user has taken the session over, calls wait until Hand Back.
         session.takeOver()
         let waiting = Task { try await client.callTool("list_spaces") }
@@ -1724,6 +1219,14 @@ import UserNotifications
         let error = AgentToolResult(status: .error, code: "unknownTool", text: "Synthetic error contents")
         let unknown = AgentToolCall(name: "unrecognized fixture wording")
         #expect(AgentStepText.sentence(for: unknown, result: error) == "Unrecognized tool")
+        // Codes read as words, and only a denial without a code says the user said no.
+        let read = AgentToolCall(name: "read_text")
+        #expect(AgentStepText.sentence(for: read, result: AgentToolResult(status: .refused, code: "stopped", text: "x")) == "Read the page text: stopped with the turn")
+        #expect(AgentStepText.sentence(for: read, result: AgentToolResult(status: .refused, code: "P17", text: "x")) == "Read the page text: refused by an Arch rule")
+        #expect(AgentStepText.sentence(for: read, result: AgentToolResult(status: .error, code: "limitReached", text: "x")) == "Read the page text: reached the call limit")
+        let ask = AgentToolCall(name: "ask_user")
+        #expect(AgentStepText.sentence(for: ask, result: AgentToolResult(status: .denied, code: "notAvailable", text: "x")) == "Asked you a question: not available in this session")
+        #expect(AgentStepText.sentence(for: ask, result: AgentToolResult(status: .denied, text: "x")) == "Asked you a question: you said no")
     }
 
     // MARK: Tasks from outside clients
@@ -1755,10 +1258,6 @@ import UserNotifications
         #expect(denied.status == .denied && service.approvals.pending.isEmpty)
         let tools = try await bound.call(AgentControlMethod.toolsList).decode(as: AgentToolList.self)
         #expect(!tools.tools.contains("request_tab") && !tools.tools.contains("open_tab"))
-        let outsideOpen = try await bound.callTool("open_tab", ["url": "https://research.example/report"])
-        #expect(outsideOpen.status == .refused && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
-        let outsideLink = try await bound.callTool("open_tab", ["tab": "t1", "ref": "e1"])
-        #expect(outsideLink.status == .refused && service.approvals.pending.isEmpty && harness.host.openedOwners.isEmpty)
         let outsidePick = try await bound.callTool("request_tab", ["access": "read", "reason": "Pick any tab"])
         #expect(outsidePick.status == .refused && service.approvals.pending.isEmpty && session.handles.sharedTabIDs.isEmpty)
         // A space of another Persona is not the grant's.

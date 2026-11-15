@@ -20,7 +20,7 @@ import Testing
     /// Waits until the Keychain records the generation of the file on disk.
     private func recorded(_ harness: Harness) async throws {
         let key = try #require(harness.keys.key)
-        let generation = try #require(AgentSettingsFile.open(try Data(contentsOf: harness.settingsURL), with: key)?.generation)
+        let generation = try #require(SealedSettingsFile<AgentSettings>.open(try Data(contentsOf: harness.settingsURL), with: key)?.generation)
         try await waitUntil { harness.keys.generation == generation }
     }
 
@@ -180,7 +180,7 @@ import Testing
         try await reading.settled(service)
         #expect(service.state == .ready)
         #expect(service.settings.allowsOutsideClients)
-        #expect(AgentSettingsFile.open(try Data(contentsOf: reading.settingsURL), with: SymmetricKey(size: .bits256)) == nil)
+        #expect(SealedSettingsFile<AgentSettings>.open(try Data(contentsOf: reading.settingsURL), with: SymmetricKey(size: .bits256)) == nil)
     }
 
     @Test func noFileStartsWithTheDefaultsAndNeedsNoKey() async throws {

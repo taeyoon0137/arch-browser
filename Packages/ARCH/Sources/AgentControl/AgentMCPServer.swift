@@ -15,8 +15,6 @@ public enum AgentMCPVersion {
     /// Tool annotations and a progress notification's `message` came with 2025-03-26.
     static let annotations = "2025-03-26"
     static let progressMessage = "2025-03-26"
-    /// A tool result's `structuredContent` came with 2025-06-18.
-    static let structuredContent = "2025-06-18"
 }
 
 /// Splits standard input into MCP's stdio messages, one per line, and refuses a line longer than a control frame can carry.
@@ -354,22 +352,14 @@ public struct AgentMCPServer {
         })]
     }
 
-    /// MCP's `tools/call` result for Arch's: the content, `isError` unless the call succeeded or waits for the user, and the structured facts with the status, the error code or rule, and the approval.
+    /// MCP's `tools/call` result for Arch's: the content and `isError` unless the call succeeded or waits for the user. It carries no `structuredContent`, which no tool's schema asks for: Codex 0.164.0 gives its model only `structuredContent` when a result has it, and the model would lose the text, the image, and the sentences of a refusal.
     private func callResult(_ result: AgentToolResult) -> AgentJSON {
         var content = result.content.map(\.mcpContent)
         if result.status == .approvalPending {
             guard let approval = result.approval else { return errorResult("Arch's answer could not be read: it waits for an approval it does not name.") }
             content.insert(["type": "text", "text": .string("Waiting for the user in Arch; call approval_wait with this ID: \(approval)")], at: 0)
         }
-        var object: [String: AgentJSON] = ["content": .array(content), "isError": .bool(result.status != .ok && result.status != .approvalPending)]
-        if supports(AgentMCPVersion.structuredContent) {
-            var structured = result.structured?.objectValue ?? [:]
-            structured["status"] = .string(result.status.rawValue)
-            if let code = result.code { structured["code"] = .string(code) }
-            if let approval = result.approval { structured["approval"] = .string(approval) }
-            object["structuredContent"] = .object(structured)
-        }
-        return .object(object)
+        return ["content": .array(content), "isError": .bool(result.status != .ok && result.status != .approvalPending)]
     }
 
     private func errorResult(_ message: String) -> AgentJSON {

@@ -44,12 +44,7 @@ struct AgentApprovalCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .accessibilityLabel("The page, with the element marked")
             }
-            if case .openSessionResearch(_, let source?) = approval.kind {
-                Text(verbatim: "Shared outline · " + source)
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let exactText {
+            if let exactText = approval.exactText {
                 Text(verbatim: exactText)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
@@ -57,6 +52,12 @@ struct AgentApprovalCard: View {
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+            }
+            if let note = approval.exactTextNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let says = approval.agentSays, !says.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -80,10 +81,6 @@ struct AgentApprovalCard: View {
         Binding(get: { approvals.draftAnswer(to: approval.id) }, set: { approvals.setDraftAnswer($0, to: approval.id) })
     }
 
-    private var exactText: String? {
-        if case .openSessionResearch(let url, _) = approval.kind { return url.absoluteString }
-        return approval.exactText
-    }
 
     @ViewBuilder private var inputs: some View {
         switch approval.kind {
@@ -112,8 +109,15 @@ struct AgentApprovalCard: View {
                         Text(verbatim: labels[tab.id] ?? tab.attachmentLabel).tag(Optional(tab.id))
                     }
                 }
+                // The chosen tab's full address, which the user reviews before Share.
                 if let selected = tabs.first(where: { $0.id == chosenTab }) {
-                    AgentAttachmentLabel(tab: selected)
+                    Text(verbatim: selected.attachmentAddress ?? selected.attachmentLabel)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
                 }
             }
         default:
@@ -136,15 +140,8 @@ struct AgentApprovalCard: View {
             case .handToUser:
                 AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
                 AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
-            case .openSessionResearch:
-                AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.deny) }
-                AgentPointerButton(title: "Open in Research Tab", requiresPointer: true) { answer(.allowOnce) }
             case .shareSessionTab, .requestTab:
-                if case .shareSessionTab = approval.kind {
-                    Button("Don\u{2019}t Share") { answer(.deny) }
-                } else {
-                    AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
-                }
+                AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
                 AgentPointerButton(title: "Share", requiresPointer: true) { if let chosenTab { answer(.tab(chosenTab)) } }
                     .disabled(chosenTab == nil)
             default:

@@ -105,20 +105,19 @@ extension AgentToolHost {
 
     enum OutlineAccess {
         /// `run` is a hook's agent run, which reads and never acts or asks.
-        case owned, shared, research, run
+        case owned, shared, run
 
         var description: String {
             switch self {
             case .owned: return ""
             case .shared: return " \u{00B7} shared by the user: every action here asks"
-            case .research: return " \u{00B7} read-only research tab"
             case .run: return " \u{00B7} read-only for this hook run"
             }
         }
     }
 
     func snapshot(_ arguments: [String: AgentJSON], tab: AgentTabInfo, handle: String, access: OutlineAccess, store: AgentSnapshotStore, pages: Int,
-                  recordsSharedLinks: Bool = false, mayRead: (AgentTabInfo) -> Bool) async -> Outcome {
+                  mayRead: (AgentTabInfo) -> Bool) async -> Outcome {
         guard !Task.isCancelled else { return Self.ended }
         guard mayRead(tab) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle)) }
         if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
@@ -144,8 +143,7 @@ extension AgentToolHost {
         if let refusal = stillReadable(tab, handle: handle, reportedURL: reply.url, mayRead: mayRead) { return refusal }
         if reply.stale == true { return Self.stale(handle) }
         guard let url = URL(string: reply.url) else { return Self.error("unreadable", "\(handle) has no document Arch can read.") }
-        let rows = outline(reply.nodes, full: full, access: access, pageURL: url)
-        let lines = rows.map(\.text)
+        let lines = outline(reply.nodes, full: full, access: access, pageURL: url)
         // A new page's snapshot starts the record again; a subtree's adds its refs to the record of the same page.
         let prior = store.current(tab, pages: pages)
         var record = prior ?? AgentSnapshotRecord(url: url, documentID: tab.documentID, ownerID: tab.agentOwnerID, document: pages, refs: [:], lines: [])
@@ -168,39 +166,23 @@ extension AgentToolHost {
                     + difference.insertions.map { if case .insert(_, let line, _) = $0 { return "+ " + line } else { return "" } }
                 if shown.isEmpty { note = "Nothing changed since the last snapshot of \(handle)." }
             } else {
-                note = "This is the first snapshot of \(handle), so it shows the whole outline."
+                note = "This is the first snapshot of the current document in \(handle), so it shows the whole outline."
             }
         }
         let limit = arguments["max_chars"].flatMap(Self.integer) ?? AgentLimits.snapshotDefaultCharacters
+        // The page's title is cut as other page names are, and the header counts toward the result's bytes.
+        let title = reply.title.count > AgentLimits.pageNameCharacters ? String(reply.title.prefix(AgentLimits.pageNameCharacters)) + "\u{2026}" : reply.title
+        let header = "page \u{201C}\(Self.quoted(title))\u{201D} \(Self.shortAddress(url))"
         var kept: [String] = []
         var characters = 0
-        var bytes = 0
+        var bytes = header.utf8.count
         for line in shown {
             guard characters + line.count + 1 <= limit, bytes + line.utf8.count + 1 <= AgentLimits.resultTextBytes - Self.resultRoom - 400 else { break }
             kept.append(line)
             characters += line.count + 1
             bytes += line.utf8.count + 1
         }
-        if recordsSharedLinks {
-            let displayed = Set(kept.map { $0.hasPrefix("+ ") ? String($0.dropFirst(2)) : $0 })
-            // Diffs may omit previously shown unchanged links. Only original refs with the same full address count.
-            let known = Set(record.displayedLinks)
-            let links = rows.compactMap { row -> AgentOutlineLink? in
-                guard let link = AgentOutlineLink(row.node), displayed.contains(row.text) || known.contains(link) else { return nil }
-                return link
-            }
-            if target == nil {
-                record.displayedLinks = links
-            } else {
-                let replaced = Set(rows.compactMap { $0.node.ref })
-                let byRef = Dictionary(links.map { ($0.ref, $0) }, uniquingKeysWith: { first, _ in first })
-                let previousRefs = Set(record.displayedLinks.map(\.ref))
-                record.displayedLinks = record.displayedLinks.compactMap { replaced.contains($0.ref) ? byRef[$0.ref] : $0 }
-                record.displayedLinks += links.filter { !previousRefs.contains($0.ref) }
-            }
-        }
         store.records[tab.id] = record
-        let header = "page \u{201C}\(Self.quoted(reply.title))\u{201D} \(Self.shortAddress(url))"
         let block = AgentUntrusted.wrap(([header] + kept).joined(separator: "\n"), url: url)
         var text = ["\(handle) \u{00B7} \(tab.engine.rawValue) \u{00B7} snapshot \(number)\(full ? " \u{00B7} full" : "")\(target.map { " \u{00B7} \($0.ref)" } ?? "")\(access.description)", block]
         var structured: [String: AgentJSON] = ["tab": .string(handle), "url": .string(AgentAddress.reduced(url).absoluteString), "snapshot": .number(Double(number)),
@@ -217,16 +199,16 @@ extension AgentToolHost {
     }
 
     /// The outline's lines from the script's nodes, with the policy's annotations. Interactive mode leaves out landmarks that hold nothing; a subtree starts at depth 0.
-    private func outline(_ nodes: [AgentOutlineNode], full: Bool, access: OutlineAccess, pageURL: URL) -> [(text: String, node: AgentOutlineNode)] {
+    private func outline(_ nodes: [AgentOutlineNode], full: Bool, access: OutlineAccess, pageURL: URL) -> [String] {
         let base = nodes.first?.depth ?? 0
-        var lines: [(text: String, node: AgentOutlineNode)] = []
+        var lines: [String] = []
         for (index, node) in nodes.enumerated() {
             let isContainer = node.ref == nil && node.role != "text" && node.role != "heading" && node.role != "img" && node.role != "frame"
             if isContainer, !full {
                 let next = nodes.dropFirst(index + 1).first
                 if next == nil || next!.depth <= node.depth { continue }
             }
-            lines.append((String(repeating: "  ", count: max(0, node.depth - base)) + "- " + line(for: node, access: access, pageURL: pageURL), node))
+            lines.append(String(repeating: "  ", count: max(0, node.depth - base)) + "- " + line(for: node, access: access, pageURL: pageURL))
         }
         return lines
     }
@@ -262,7 +244,7 @@ extension AgentToolHost {
         if facts.isFileInput { return "(agents do not choose files)" }
         if AgentPolicy.isChallenge(facts) { return "(CAPTCHA: hand to the user)" }
         if facts.isEditable, facts.valueClass == .hidden { return "(agents do not type here)" }
-        if access == .research || access == .run { return nil }
+        if access == .run { return nil }
         if access == .shared { return "(asks the user)" }
         let asks = (facts.isEditable && facts.valueClass == .personal)
             || (facts.submitsForm && !Set(facts.formFields).isDisjoint(with: [.password, .oneTimeCode, .payment, .personal]))
@@ -418,6 +400,8 @@ extension AgentToolHost {
         let allowances = AgentAllowances(page: state.pageAllowances[tab.id] == pages, site: site.map(state.siteAllowances.contains) ?? false)
         let sentence = Self.actionSentence(tool, arguments: arguments, facts: facts, site: site, submits: submits && tool != "click")
         var decision: AgentActivityEntry.Decision = .auto
+        // The document the policy decides for, which a reload at the same address replaces.
+        let document = tab.documentID
         switch AgentPolicy.decide(.interaction(step), client: clientKind, mode: grant.level, allowances: allowances) {
         case .allow: break
         case .refuse(let rule, let sentence):
@@ -445,7 +429,7 @@ extension AgentToolHost {
             // The page may have moved on, or the user taken the tab over, while the card waited: the step runs only on the page the user allowed it on.
             guard case .value(let current) = pageTab(handle, grant, state: state) else { return Outcome(result: Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle), site: site) }
             tab = current.0
-            if state.activity(of: tab.id).pages != pages || tab.url != address { return Self.stale(handle) }
+            if state.activity(of: tab.id).pages != pages || tab.url != address || tab.documentID != document { return Self.stale(handle) }
         }
         let action = AgentPageAction(kind: tool == "select_option" ? "select" : tool, ref: target, text: arguments["text"]?.stringValue, replace: arguments["replace"] == .bool(true) ? true : nil,
                                      submit: arguments["submit"] == .bool(true) ? true : nil, keys: arguments["keys"]?.stringValue,
@@ -555,14 +539,15 @@ extension AgentToolHost {
     func stepCard(_ sentence: String, ask: AgentAsk, tab: AgentTabInfo, handle: String, grant: AgentGrant, state: AgentGrantState, element: AgentBox?, exactText: String?, typing: Bool,
                   agentSays: String? = nil, kind: AgentApprovalKind = .step) async -> AgentApproval {
         let site = tab.url.flatMap(AgentActivityEntry.site(of:))
-        var exact = exactText
-        if typing, !ask.isSensitive, let text = exactText { exact = text + "\n\nAllow on This Page or Allow on \(site ?? "this site") lets the site receive whatever the agent types there without asking again." }
         // The page the card is about, as before the capture, so that a page that moves on meanwhile withdraws it.
         let pages = state.activity(of: tab.id).pages
         let capture = await markedCapture(of: tab, element: element)
-        return AgentApproval(ownerID: grant.id, clientName: grant.client.displayName, isOutsideClient: clientKind == .outside, kind: kind, rules: ask.rules, isSensitive: ask.isSensitive,
-                             offers: AgentApproval.offers(for: ask), action: sentence, tabID: tab.id, tabHandle: handle, site: site, exactText: exact, agentSays: agentSays,
-                             capture: capture, connectionID: connectionID, document: pages, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
+        var card = AgentApproval(ownerID: grant.id, clientName: grant.client.displayName, isOutsideClient: clientKind == .outside, kind: kind, rules: ask.rules, isSensitive: ask.isSensitive,
+                                 offers: AgentApproval.offers(for: ask), action: sentence, tabID: tab.id, tabHandle: handle, site: site, exactText: exactText, agentSays: agentSays,
+                                 capture: capture, connectionID: connectionID, document: pages, createdAt: now(), deadline: now().addingTimeInterval(approvalWindow))
+        card.documentID = tab.documentID
+        if typing, !ask.isSensitive { card.exactTextNote = "Allow on This Page or Allow on \(site ?? "this site") lets the site receive whatever the agent types there without asking again." }
+        return card
     }
 
     /// The viewport with the element's box marked, for the user's card only, so nothing is painted over; nil when the tab cannot be captured or does not answer in time, and the card then opens without one.

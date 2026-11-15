@@ -14,24 +14,6 @@ import Testing
                             model: nil, effort: nil, scope: scope, attachedTabIDs: [fixture.tabID], tools: [])
     }
 
-    @Test func aResearchCopyKeepsFormValuesOutOfTheSessionOutline() async throws {
-        let fixture = try await PageFixture(shared: true)
-        let session = session(sharing: fixture)
-        let source = try #require(session.researchChoices(host: fixture.host, allowsAI: { _ in true }).first)
-        var copy = try #require(fixture.host.tabs.first)
-        copy.id = UUID()
-        copy.agentOwnerID = session.id
-        fixture.host.tabs.append(copy)
-        fixture.host.webContents[copy.id] = fixture.page.contents
-        session.researchPages[copy.id] = source
-        let handle = session.handles.tabs.handle(for: copy.id)
-        let call = AgentToolCall(name: "snapshot", arguments: ["tab": .string(handle)])
-        let result = await fixture.toolHost.run(call, in: session, searchesHistory: false)
-        #expect(result.status == .ok && result.text.contains("Place order"))
-        #expect(result.text.contains("read-only research tab") && !result.text.contains("shared by the user") && !result.text.contains("(asks the user)"))
-        for value in ["Alex Kim", "Leave at the door", "SAVE10", "Standard"] { #expect(!result.text.contains(value)) }
-    }
-
     @Test func aSharedSessionOutlineRedactsValuesAndScopesRefsAndDiffsToItsDocument() async throws {
         let fixture = try await PageFixture(shared: true)
         let session = session(sharing: fixture)
@@ -72,13 +54,6 @@ import Testing
         let fixture = try await PageFixture(shared: true)
         let session = session(sharing: fixture)
         var call = AgentToolCall(name: "snapshot", arguments: ["tab": "t1", "diff": true])
-        var validations: [UUID?] = []
-        let excluded = AgentToolHost(host: fixture.host, allowsAI: { _ in
-            validations.append(session.latestActiveTab)
-            return false
-        })
-        let denied = await excluded.run(call, in: session, searchesHistory: false)
-        #expect(denied.code == "P16" && validations.count == 1 && validations[0] == nil)
         let original = await fixture.toolHost.run(call, in: session, searchesHistory: false)
         #expect(original.status == .ok && session.snapshots.records[fixture.tabID] != nil)
         let oldStore = session.snapshots
@@ -254,7 +229,7 @@ import Testing
     @Test func theDiffAndTheCut() async throws {
         let fixture = try await PageFixture()
         let first = await fixture.call("snapshot", ["tab": "t1", "diff": true])
-        #expect(first.text.contains("This is the first snapshot of t1, so it shows the whole outline."))
+        #expect(first.text.contains("This is the first snapshot of the current document in t1, so it shows the whole outline."))
         let unchanged = await fixture.call("snapshot", ["tab": "t1", "diff": true])
         #expect(unchanged.text.contains("Nothing changed since the last snapshot of t1."))
         _ = try await fixture.page.evaluate("document.querySelector('#under').textContent = 'Still covered'; 0")
@@ -445,6 +420,38 @@ import Testing
         let sharedCard = try await shared.answerNextCard(.takeOver)
         #expect(sharedCard.rules == [.p12])
         #expect(await inShared.status == .denied && shared.host.shownTabIDs == [shared.tabID])
+    }
+
+    /// A shared tab that reloads at the same address while its card waits has another document, in which the approved step does not run.
+    @Test func aStepAllowedForASharedTabsDocumentDoesNotRunInTheNext() async throws {
+        let shared = try await PageFixture(shared: true)
+        shared.toolHost.approvals.authenticator = FakeAuthenticator()
+        _ = await shared.outline()
+        async let click = shared.call("click", ["tab": "t1", "ref": "e12"])
+        try await waitUntil { !shared.toolHost.approvals.pending.isEmpty }
+        let index = try #require(shared.host.tabs.firstIndex { $0.id == shared.tabID })
+        #expect(shared.toolHost.approvals.pending.first?.documentID == shared.host.tabs[index].documentID)
+        shared.host.tabs[index].documentID = UUID()
+        _ = try await shared.answerNextCard(.allowOnce)
+        #expect(await click.status == .stale)
+    }
+
+    /// A field named "action" shadows `form.action`, which the script reads through the prototype, so P5 still sees the other site; and Enter submits nothing while the form's first submit button is disabled, as in a browser.
+    @Test func namedFieldsDoNotHideAFormsActionAndADisabledDefaultButtonBlocksEnter() async throws {
+        let fixture = try await PageFixture()
+        _ = try await fixture.page.evaluate("""
+            document.body.insertAdjacentHTML("beforeend", '<form id="named" action="https://collect.other.example/post"><input name="alias" aria-label="Zed alias"><input type="hidden" name="action" value="subscribe"><button type="submit">Go</button></form>'
+              + '<form id="blocked" onsubmit="document.body.dataset.blocked = \\'sent\\'; return false"><input name="promo" aria-label="Zed promo"><button type="submit" disabled>Next</button><button type="submit">Later</button></form>'); 0
+            """)
+        let lines = await fixture.outline()
+        let alias = try #require(fixture.ref("Zed alias", in: lines))
+        async let typed = fixture.call("type", ["tab": "t1", "ref": .string(alias), "text": "Alex", "submit": true])
+        let card = try await fixture.answerNextCard(.deny)
+        #expect(card.rules.contains(.p5), "\(card.rules)")
+        #expect(await typed.status == .denied)
+        let promo = try #require(fixture.ref("Zed promo", in: lines))
+        #expect(await fixture.call("press", ["tab": "t1", "ref": .string(promo), "keys": "Enter"]).status == .ok)
+        #expect(try await fixture.page.evaluate("document.body.dataset.blocked || 'none'") as? String == "none")
     }
 
     @Test func screenshotsPaintFieldsAndFramesInsideAriaHiddenAndInertSubtrees() async throws {

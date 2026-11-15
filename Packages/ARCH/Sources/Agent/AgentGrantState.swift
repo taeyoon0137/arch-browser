@@ -12,23 +12,6 @@ struct AgentGrantHandles {
     var actingSharedTabIDs: Set<UUID> = []
 }
 
-/// A link shown in a shared tab's outline. The exact address stays local to the session.
-struct AgentOutlineLink: Hashable {
-    let ref: String
-    let name: String
-    let fingerprint: String
-    let url: URL
-
-}
-
-extension AgentOutlineLink {
-    init?(_ node: AgentOutlineNode) {
-        guard node.role == "link", let ref = node.ref, let fingerprint = node.fingerprint,
-              let href = node.href, let url = URL(string: href) else { return nil }
-        self.init(ref: ref, name: node.name ?? "", fingerprint: fingerprint, url: url)
-    }
-}
-
 /// A tab's latest snapshot: the page it read, by address and by the tab's count of pages (`AgentTabActivity.pages`), its refs with their fingerprints and, for links, their full addresses, and its lines, which the next snapshot's diff compares.
 struct AgentSnapshotRecord {
     struct Ref: Equatable {
@@ -42,7 +25,6 @@ struct AgentSnapshotRecord {
     var document: Int
     var refs: [String: Ref]
     var lines: [String]
-    var displayedLinks: [AgentOutlineLink] = []
 }
 
 /// Snapshot memory for one grant or session. Ref fingerprints and diff lines belong to the captured document.

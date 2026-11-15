@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session the session details, lists, guide, and readable text. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session the session details, lists, guide, outline, readable text, and questions, with the tab request of a task started in Arch. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -78,10 +78,12 @@ import Foundation
         }
         while true {
             if await Self.poll(for: answerWait, until: { box.outcome != nil }), let outcome = box.outcome { return outcome }
-            // A caller that was cancelled stops the call too.
+            // A caller that was cancelled stops the call too; a card it waited on records a denial.
             if Task.isCancelled {
+                var ended = Self.ended
+                if box.approvalID != nil { ended.decision = .denied }
                 box.task?.cancel()
-                return Self.ended
+                return ended
             }
             guard let approvalID = box.approvalID, approvals.isPending(approvalID) else { continue }
             let handle = state.handles.approvals.handle(for: approvalID)
@@ -104,10 +106,10 @@ import Foundation
 
     /// The answer of a call that the client's work ending cancelled: Stop, Deny and Stop, Stop All Agents, a revocation, expiry, or its connection's close. Such a call runs no further step and opens no card.
     static var ended: Outcome {
-        Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."), decision: .denied)
+        Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."))
     }
 
-    /// The answer of a call that waits for the user, which names its approval as the protocol carries it, for `arch-mcp` and API-key sessions, which tell the agent to call `approval_wait`, and in `structured` for `arch-cli --json`.
+    /// The answer of a call that waits for the user, which names its approval as the protocol carries it, for `arch-mcp`, which tells the agent to call `approval_wait`, and in `structured` for `arch-cli --json`.
     static func pending(_ handle: String, tool: String) -> Outcome {
         Outcome(result: AgentToolResult(status: .approvalPending, content: [.text("\(tool) waits for the user in Arch; call approval_wait with approval \(handle).")],
                                         structured: ["approval": .string(handle)], approval: handle), step: nil)
@@ -753,6 +755,7 @@ import Foundation
             state.record(.decided("A page in \(state.handles.tabs.handle(for: tabID)) started another download while one waits for the user, so Arch did not start it."), tab: tabID)
             return
         }
+        if case .externalAppAsked(let url) = report, let state, !asksAboutExternalApp(url, in: tabID, state: state) { return }
         state?.record(.report(report), tab: tabID)
         switch report {
         case .addressChanged, .loaded: approvals.withdraw(tab: tabID, owner: ownerID, document: state?.activity(of: tabID).pages ?? Int.max)
@@ -909,7 +912,7 @@ import Foundation
 
     /// Some documents use their own address as the title. Reduce it wherever the browser reports that page name.
     private static func reducedName(_ name: String, url: URL?) -> String {
-        guard let url, name == url.absoluteString else { return name }
+        guard let url, AgentAddress.isOwnAddress(name, of: url) else { return name }
         return AgentAddress.reduced(url).absoluteString
     }
 
@@ -973,7 +976,6 @@ struct AgentToolClient {
     struct Session {
         var siteScope: [String]
         var hasSearchResults: Bool
-        var sharedTabCount: Int
         var callsLeftThisTurn: Int
         var callsLeftThisSession: Int
         var readerExcerpt: AgentReaderExcerpt?
@@ -1004,7 +1006,7 @@ struct AgentToolClient {
         spaceID = session.spaceID
         level = session.mode
         scopes = AgentGrantScopes(searchHistory: searchesHistory, startTasks: false)
-        self.session = Session(siteScope: session.scope.sites, hasSearchResults: session.scope.searchResults != nil, sharedTabCount: session.handles.sharedTabIDs.count,
+        self.session = Session(siteScope: session.scope.sites, hasSearchResults: session.scope.searchResults != nil,
                                callsLeftThisTurn: session.callsLeftThisTurn, callsLeftThisSession: session.callsLeftThisSession, readerExcerpt: session.readerExcerpt)
     }
 }
@@ -1014,7 +1016,7 @@ struct AgentToolClient {
 /// An in-app session's calls (docs/agents.md, In-app sessions), which run the tools that need no agent tab until plan task VII.17.1 runs them on the grant's path with the session as the agent folder's owner, its site scope (P13), and the cards in its panel.
 extension AgentToolHost {
     /// The tools an in-app session runs in this build; its `tools/list` lists only these, and the others answer that they are not available yet.
-    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "snapshot", "read_text", "ask_user", "guide"]
+    static let sessionServedTools = ["session_info", "list_spaces", "list_tabs", "request_tab", "snapshot", "read_text", "ask_user", "guide"]
 
     /// The tools an in-app session in `mode` with `scopes` can call, in catalog order, for its `tools/list`.
     static func sessionTools(for mode: AgentAccessLevel, scopes: AgentGrantScopes) -> [AgentTool] {
@@ -1037,14 +1039,12 @@ extension AgentToolHost {
                 return AgentToolResult(status: .refused, code: "stopped", text: "This session is not accepting questions for this turn.")
             }
             if case .outsideClient(_, _, true) = session.origin {
-                return AgentToolResult(status: .denied, text: "This task was started with user prompts disabled.")
+                return AgentToolResult(status: .denied, code: "notAvailable", text: "This task was started with user prompts disabled.")
             }
             return await askUser(call.arguments, ownerID: session.id, name: session.title).result
         case "session_info": return sessionInfo(ofSession: client, handles: &session.handles)
         case "list_spaces": return listSpaces(ofSession: client, handles: &session.handles)
-        case "list_tabs":
-            let hidden = Set(host.agentTabs(of: session.id).filter { !session.permitsResearchTab($0, host: host, allowsAI: allowsAI) }.map(\.id))
-            return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &session.handles, hidden: hidden)
+        case "list_tabs": return listTabs(shared: call.arguments["scope"]?.stringValue == "shared", ofSession: client, handles: &session.handles)
         case "read_text", "snapshot":
             let handle = call.arguments["tab"]?.stringValue ?? ""
             guard let id = session.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else {
@@ -1055,34 +1055,23 @@ extension AgentToolHost {
             func mayRead(_ current: AgentTabInfo) -> Bool {
                 guard !session.hasEnded, !session.isTakenOver, session.callEpoch == epoch, session.takeoverGeneration == generation,
                       current.agentOwnerID == tab.agentOwnerID, session.handles.tabs.id(for: handle) == id else { return false }
-                if current.agentOwnerID == session.id {
-                    return host.agentTabs(of: session.id).contains { $0.id == id } && session.permitsResearchTab(current, host: host, allowsAI: allowsAI)
-                }
+                if current.agentOwnerID == session.id { return host.agentTabs(of: session.id).contains { $0.id == id } }
                 return current.agentOwnerID == nil && session.handles.sharedTabIDs.contains(id) && host.userTabs(in: session.personaID).contains { $0.id == id }
-            }
-            guard !Task.isCancelled else { return Self.ended.result }
-            guard mayRead(tab) else { return Self.refusal(.p17, AgentPolicy.notTheClientsSentence(handle), handle: handle) }
-            if case .refused(let rule, let sentence) = AgentPolicy.mayRead(tab.url, allowsAI: allowsAI) {
-                return Self.refusal(rule, "Arch does not let agents read \(handle). \(sentence)", handle: handle)
             }
             let reading = session.beganReading(id)
             defer { session.finishedReading(reading) }
             if call.name == "read_text" { return await readText(call.arguments, tab: tab, handle: handle, mayReadTab: mayRead).result }
             let snapshots = session.snapshots
-            let access: OutlineAccess = session.researchPages[tab.id] != nil ? .research : (tab.agentOwnerID == nil ? .shared : .owned)
-            let outline = await snapshot(call.arguments, tab: tab, handle: handle, access: access, store: snapshots, pages: 0,
-                                         recordsSharedLinks: access == .shared && session.origin == .app) { current in
+            return await snapshot(call.arguments, tab: tab, handle: handle, access: tab.agentOwnerID == nil ? .shared : .owned, store: snapshots, pages: 0) { current in
                 session.snapshots === snapshots && mayRead(current)
-            }
-            if access == .shared, outline.result.status == .ok { session.objectWillChange.send() }
-            return outline.result
+            }.result
         default: return AgentToolResult(status: .error, code: "notAvailable", text: "In-app sessions do not run \(tool.name) in this build of Arch yet.")
         }
     }
 
     /// An in-app session's details (docs/agents.md, Tools ▸ Catalog): its mode, its Persona and space, its site scope, its tabs, what is left of its limits, and what asks. The Persona and space read as "Persona / Space".
     private func sessionInfo(ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
-        let session = client.session ?? AgentToolClient.Session(siteScope: [], hasSearchResults: false, sharedTabCount: 0, callsLeftThisTurn: 0, callsLeftThisSession: 0)
+        let session = client.session ?? AgentToolClient.Session(siteScope: [], hasSearchResults: false, callsLeftThisTurn: 0, callsLeftThisSession: 0)
         let persona = host.personas.first { $0.id == client.personaID }?.name ?? "deleted"
         let space = space(of: client)
         let spaceHandle = space.map { handles.spaces.handle(for: $0.id) }
@@ -1133,14 +1122,14 @@ extension AgentToolHost {
     }
 
     /// The session's agent tabs, or the tabs the user shared, in sidebar order. A tab on a site excluded from AI, or on a page agents do not read, is listed without its title or address (rule P16).
-    private func listTabs(shared: Bool, ofSession client: AgentToolClient, handles: inout AgentGrantHandles, hidden: Set<UUID>) -> AgentToolResult {
+    private func listTabs(shared: Bool, ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
         let sharedIDs = Set(handles.sharedTabIDs)
         let tabs = shared ? host.userTabs(in: client.personaID).filter { sharedIDs.contains($0.id) } : host.agentTabs(of: client.id)
         var rows: [AgentJSON] = []
         var lines: [String] = []
         for tab in tabs {
             let handle = handles.tabs.handle(for: tab.id)
-            let excluded = hidden.contains(tab.id) || !AgentPolicy.showsTitle(of: tab.url, allowsAI: allowsAI)
+            let excluded = !AgentPolicy.showsTitle(of: tab.url, allowsAI: allowsAI)
             var row: [String: AgentJSON] = ["handle": .string(handle), "excluded": .bool(excluded)]
             var line = handle
             if excluded {

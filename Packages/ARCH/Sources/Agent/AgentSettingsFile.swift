@@ -302,9 +302,4 @@ public enum SealedSettingsFileError: LocalizedError {
     func write(_ settings: AgentSettings) throws -> Task<Void, any Error> {
         try sealed.write(settings)
     }
-
-    /// The settings and generation of a file whose seal matches `key`, or nil.
-    static func open(_ data: Data, with key: SymmetricKey) -> (settings: AgentSettings, generation: Int)? {
-        SealedSettingsFile<AgentSettings>.open(data, with: key)
-    }
 }

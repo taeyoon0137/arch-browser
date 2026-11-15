@@ -163,6 +163,8 @@ import Testing
         // A line break of its own would submit the field's form.
         #expect(throws: EngineInputError.unsupported) { try input.insertText("a\nb") }
         #expect(throws: EngineInputError.unsupported) { try input.insertText("\r") }
+        #expect(throws: EngineInputError.unsupported) { try input.insertText("a\u{3}") }
+        #expect(throws: EngineInputError.unsupported) { try input.insertText("a\tb") }
     }
 
     /// Whether WebKit delivers the turn is checked from the bundle; here the adapter only builds and sends it.
