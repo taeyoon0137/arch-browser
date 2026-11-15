@@ -18,6 +18,8 @@ private final class ScriptedPage: EngineWebContents {
     var fails = false
     /// Whether the engine answers runs at all; WebKit does not while a script loops.
     var answers = true
+    /// Whether the engine could run a script only with the user's gesture, as WebKit while the flags switch plugins' page runs off.
+    var needsGesture = false
     /// How long the engine takes to answer each run.
     var delay: TimeInterval = 0
     private(set) var worlds: [String] = []
@@ -29,7 +31,14 @@ private final class ScriptedPage: EngineWebContents {
         context.evaluateScript("var sent = []; const channel = { send: (value) => { sent.push(value); return Promise.resolve(); }, onMessage: () => {} };")
     }
 
+    /// Plugins' page calls never run a script with the user's gesture.
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
+        Issue.record("A page call ran a script with the user's gesture.")
+        completion(.failure(CocoaError(.featureUnsupported)))
+    }
+
+    func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
+        guard !needsGesture else { return completion(.failure(EngineUserGestureError())) }
         worlds.append(world)
         onRun?()
         guard answers else { return }
@@ -256,6 +265,17 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         await #expect(throws: PluginError.stopped) { _ = try await run.value }
         #expect(ContinuousClock.now - stop < .seconds(5))
         withExtendedLifetime(unlimited) {}
+    }
+
+    /// A run with the user's gesture would give the page's handlers user activation, so an engine that cannot run the script without it runs nothing, as WebKit while the flags switch plugins' page runs off.
+    @Test func runsNothingWhereTheEngineWouldGiveTheUsersGesture() async throws {
+        let manager = manager()
+        let context = try context(PageCallsPlugin.self, in: manager)
+        let tab = host.show("https://example.org/a")
+        let page = try #require(host.pages[tab.id])
+        page.needsGesture = true
+        await #expect(throws: PluginError.pageRunUnavailable) { _ = try await context.runPageScript(.source("ran = true; return 1;"), in: tab.id) }
+        #expect(page.worlds.isEmpty && page.context.evaluateScript("typeof ran")?.toString() == "undefined")
     }
 
     @Test func reportsWhatTheScriptThrew() async throws {

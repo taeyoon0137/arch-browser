@@ -1606,15 +1606,18 @@ final class ScopedPluginContext: PluginPanelContext {
         }
     }
 
-    /// Runs the function in the page's main frame and waits for its reply at most for `limit`: WebKit waits as long as the page runs, also while a script loops in it. A run still unanswered then, or one that the engine fails that late, as Chromium's does once it has waited as long, throws `PluginError.timedOut`; one that the engine fails sooner, as when the tab's page has no document to run in, as a tab that no window has shown yet, throws `noPage`. The wait ends with `stopped` as the context ends.
+    /// Runs the function in the page's main frame without the user's gesture, or throws `PluginError.pageRunUnavailable` where the engine would give it one, and waits for its reply at most for `limit`: WebKit waits as long as the page runs, also while a script loops in it. A run still unanswered then, or one that the engine fails that late, as Chromium's does once it has waited as long, throws `PluginError.timedOut`; one that the engine fails sooner, as when the tab's page has no document to run in, as a tab that no window has shown yet, throws `noPage`. The wait ends with `stopped` as the context ends.
     private func run(_ function: String, in contents: any EngineWebContents, waitingAtMost limit: Duration) async throws -> String? {
         let number = nextPageRun
         nextPageRun += 1
         let started = ContinuousClock.now
         return try await withCheckedThrowingContinuation { continuation in
             pageRuns[number] = continuation
-            contents.executeJavaScript(function, inWorld: pluginID.pageScriptWorld) { result in
-                let settled = result.mapError { _ in ContinuousClock.now - started < limit ? PluginError.noPage : PluginError.timedOut }
+            contents.executeJavaScriptWithoutUserGesture(function, inWorld: pluginID.pageScriptWorld) { result in
+                let settled = result.mapError { error -> PluginError in
+                    if error is EngineUserGestureError { return .pageRunUnavailable }
+                    return ContinuousClock.now - started < limit ? .noPage : .timedOut
+                }
                 Task { @MainActor [weak self] in self?.pageRuns.removeValue(forKey: number)?.resume(with: settled) }
             }
             Task { [weak self] in

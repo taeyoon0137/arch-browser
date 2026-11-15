@@ -1,4 +1,4 @@
-// A page's file chooser on WebKit: a file input's click reaches the UI delegate as a request with the input's mode and, while the private API flags allow it, its accepted types; the page receives the files the delegate answers with, only the first for an input that takes one, a folder's files for a folder input, and a cancel for nil, also from a delegate that lets the completion go or from no delegate at all. A script's `click()` opens the chooser because WebKit's public `evaluateJavaScript` runs with a user gesture, in the page's world and in a world of the app's own, while `executeJavaScript(_:inWorld:completion:)`, which runs the agents' page script, runs without one as long as the private API flags allow it, so its `click()` opens none. The request names the frame that asks and the page its main frame committed, also while the page loads another address and while a page with a frame goes back to one. The adapter's favicon lookup runs no code of the page with its gesture. The window is never ordered in. Every wait ends with a failure after a few seconds. The tests use a private profile and load no page from the network; two keep a navigation loading on 127.0.0.1, from a port that never answers or from a server that answers only its first request.
+// A page's file chooser on WebKit: a file input's click reaches the UI delegate as a request with the input's mode and, while the private API flags allow it, its accepted types; the page receives the files the delegate answers with, only the first for an input that takes one, a folder's files for a folder input, and a cancel for nil, also from a delegate that lets the completion go or from no delegate at all. A script's `click()` opens the chooser because WebKit's public `evaluateJavaScript` runs with a user gesture, in the page's world and in a world of the app's own, while `executeJavaScript(_:inWorld:completion:)`, which runs the agents' page script, runs without one as long as the private API flags allow it, so its `click()` opens none, and `executeJavaScriptWithoutUserGesture(_:inWorld:completion:)`, which runs plugins' page runs, runs only without one and otherwise not at all. The request names the frame that asks and the page its main frame committed, also while the page loads another address and while a page with a frame goes back to one. The adapter's favicon lookup runs no code of the page with its gesture. The window is never ordered in. Every wait ends with a failure after a few seconds. The tests use a private profile and load no page from the network; two keep a navigation loading on 127.0.0.1, from a port that never answers or from a server that answers only its first request.
 import AppKit
 import ARCHEngine
 @testable import ARCHEngineWebKit
@@ -113,6 +113,26 @@ import WebKit
         tab.webView.evaluateJavaScript("document.getElementById('one').click()", in: nil, in: WKContentWorld.world(name: "arch.test")) { _ in }
         #expect(try await logEntry(startingWith: "one:", in: tab) == "one:a.txt")
         #expect(recorder.requests.map(\.mode) == [.openFile])
+    }
+
+    /// A plugin's page run goes only through the evaluation without a user gesture, so its `click()` opens no chooser, and while the private API flags switch plugins' page runs off, it runs nothing at all.
+    @Test func aPluginsRunOpensNoChooserAndRunsNothingWithoutItsFlags() async throws {
+        let tab = try await loadedTab()
+        let recorder = ChooserRecorder(answer: [file("a.txt")])
+        tab.uiDelegate = recorder
+        let click = "(channel) => { document.documentElement.dataset.ran = 'yes'; document.getElementById('one').click(); return 'clicked'; }"
+        let ran = await withCheckedContinuation { (continuation: CheckedContinuation<Result<String?, any Error>, Never>) in
+            tab.executeJavaScriptWithoutUserGesture(click, inWorld: "arch.test") { continuation.resume(returning: $0) }
+        }
+        if WebKitUserGestureAPI.allowsPluginRuns {
+            #expect(try ran.get() == "clicked")
+            // A chooser would reach the delegate within the turn of the click; give it a second.
+            try await Task.sleep(for: .seconds(1))
+        } else {
+            #expect(throws: EngineUserGestureError.self) { try ran.get() }
+            #expect(try await evaluate("document.documentElement.dataset.ran ?? 'no'", in: tab) as? String == "no")
+        }
+        #expect(recorder.requests.isEmpty)
     }
 
     /// The adapter's favicon lookup runs with the gesture `evaluateJavaScript` carries, so it runs in a world of the app's own, where a DOM method that the page replaced is the original. The page's own timer, which clicks the input all along, opens no chooser after it.

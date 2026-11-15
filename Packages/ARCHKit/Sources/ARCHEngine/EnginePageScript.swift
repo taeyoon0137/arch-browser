@@ -71,3 +71,8 @@ public final class EnginePageScriptReply {
         deliver?(nil)
     }
 }
+
+/// Why `executeJavaScriptWithoutUserGesture(_:inWorld:completion:)` ran nothing: the engine could have run the function only with the user's gesture.
+public struct EngineUserGestureError: Error, Equatable, Sendable {
+    public init() {}
+}

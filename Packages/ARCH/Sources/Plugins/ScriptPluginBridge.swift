@@ -519,6 +519,7 @@ private extension PluginError {
         case .siteNotGranted: return "siteNotGranted"
         case .invalidPageScript: return "invalidPageScript"
         case .pageScriptFailed: return "pageScriptFailed"
+        case .pageRunUnavailable: return "pageRunUnavailable"
         }
     }
 }

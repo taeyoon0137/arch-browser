@@ -90,6 +90,10 @@ final class UnloadedWebContents: EngineWebContents {
         completion(.failure(UnloadedPageError()))
     }
 
+    func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
+        completion(.failure(UnloadedPageError()))
+    }
+
     func postPageScriptMessage(_ json: String, toWorld world: String) {}
 
     func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void) {

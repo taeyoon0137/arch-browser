@@ -416,6 +416,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
             completion(succeeded ? .success(result) : .failure(ScriptError.failed))
         }
     }
+    /// The helper's renderer calls the function as for `executeJavaScript(_:inWorld:completion:)`, not from the user's input, so it should give the page no user activation, which check 76 of `docs/agents.md` is to confirm.
+    public func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
+        executeJavaScript(script, inWorld: world, completion: completion)
+    }
     public func postPageScriptMessage(_ json: String, toWorld world: String) {
         browser?.postPageScriptMessage(json, toWorld: world)
     }

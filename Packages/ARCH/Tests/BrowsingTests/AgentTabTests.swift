@@ -520,6 +520,7 @@ final class PageDouble: EngineWebContents {
     func stopFind() {}
     func setPageScripts(_ scripts: [EnginePageScript]) { pageScripts = scripts }
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {}
+    func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {}
     func postPageScriptMessage(_ json: String, toWorld world: String) {}
     func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void) {}
     func captureViewport(completion: @escaping (NSImage?) -> Void) {}
