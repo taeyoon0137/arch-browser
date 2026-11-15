@@ -420,72 +420,70 @@ import Testing
         #expect(try #require(folder.store.load()).tabs.isEmpty)
     }
 
-    /// The version of the file that `load()` reads, nil for a file without one, the versions of the copies beside it, and whether the live folders' service then keeps the entries and Keychain items of folders that the file does not have as live folders.
-    @Test(arguments: [
-        // A newer build's file, which leaves its copy as it loads.
-        (SessionSnapshot.currentVersion + 1, [], true),
-        // This build's file beside a newer build's copy, as once this build has saved over the newer file.
-        (SessionSnapshot.currentVersion, [SessionSnapshot.currentVersion + 1], true),
-        // An older build's file beside a copy of this build's version, as when this build returns after the older one saved.
-        (SessionSnapshot.currentVersion - 1, [SessionSnapshot.currentVersion], true),
-        // A file without a version is version 1.
-        (nil, [2], true),
-        (nil, [1], false),
-        // Copies of an equal or older version.
-        (SessionSnapshot.currentVersion, [SessionSnapshot.currentVersion, SessionSnapshot.currentVersion - 1], false),
-        (SessionSnapshot.currentVersion - 1, [SessionSnapshot.currentVersion - 1], false),
-    ] as [(Int?, [Int], Bool)])
-    func aNewerCopyKeepsTheLiveFoldersThatTheFileLacks(file version: Int?, copies: [Int], keeps: Bool) throws {
+    /// The live folders' service keeps the entries and Keychain items of the folders that the copies beside the file have as live folders, also with a configuration that this build cannot decode, whatever the versions of the copies and the file, a file without a version included; a copy without folders adds none, and names that are no copies count for nothing.
+    @Test(arguments: [SessionSnapshot.currentVersion - 1, SessionSnapshot.currentVersion, nil] as [Int?])
+    func theCopiesKeepTheFoldersTheyHaveAsLiveFolders(file version: Int?) throws {
         let folder = try SessionFolder()
-        for copy in copies { try folder.write("a copy", to: "session-v\(copy).json") }
-        // Names that are no copies count for nothing.
+        let later = UUID(), current = UUID()
+        try folder.write(copyFile(version: 99, folders: [(later, #"{"source": {"laterSource": {}}}"#), (UUID(), "null"), (UUID(), nil)]), to: "session-v99.json")
+        try folder.write(copyFile(version: SessionSnapshot.currentVersion, folders: [(current, liveConfiguration)]), to: "session-v\(SessionSnapshot.currentVersion).json")
+        try folder.write(#"{"version": 5}"#, to: "session-v5.json")
         for name in ["session-v.json", "session-v+99.json", "session-v99x.json", "session-vlater.json"] { try folder.write("not a copy", to: name) }
         try folder.write(version.map { version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#($0),"#) } ?? version1File)
         let store = folder.store
         _ = try #require(store.load())
-        #expect(store.keepsUnknownLiveFolders == keeps)
+        #expect(store.keptLiveFolders == [later, current])
     }
 
-    /// A copy keeps the live folders until a build at least as new as the copy has saved: this build over an older file, never over a newer one.
-    @Test(arguments: [(SessionSnapshot.currentVersion - 1, false), (SessionSnapshot.currentVersion + 1, true)])
-    func aCopyKeepsTheLiveFoldersUntilABuildAsNewHasSaved(file version: Int, keepsAfterSaving: Bool) throws {
+    /// An older build read this build's file, left its copy, and saved over the file without the live folders: the copy keeps them through this build's saves for as long as it is there.
+    @Test func aCopyKeepsItsLiveFoldersThroughThisBuildsSaves() throws {
         let folder = try SessionFolder()
-        if version < SessionSnapshot.currentVersion { try folder.write("a copy", to: "session-v\(SessionSnapshot.currentVersion).json") }
-        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(version),"#))
+        let live = UUID()
+        let copyName = "session-v\(SessionSnapshot.currentVersion).json"
+        try folder.write(copyFile(version: SessionSnapshot.currentVersion, folders: [(live, liveConfiguration)]), to: copyName)
+        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(SessionSnapshot.currentVersion - 1),"#))
         let store = folder.store
         var snapshot = try #require(store.load())
-        #expect(store.keepsUnknownLiveFolders)
+        #expect(store.keptLiveFolders == [live])
         // As the session's snapshots are.
         snapshot.version = SessionSnapshot.currentVersion
         try store.saveNow(snapshot).get()
         let next = folder.store
         _ = try #require(next.load())
-        #expect(next.keepsUnknownLiveFolders == keepsAfterSaving)
+        #expect(next.keptLiveFolders == [live])
+        try FileManager.default.removeItem(at: folder.url.appendingPathComponent(copyName))
+        #expect(next.keptLiveFolders == [])
     }
 
-    @Test func withoutAFileOnlyACopyNewerThanThisBuildKeepsTheLiveFolders() throws {
+    /// Without a file, a copy's live folders still count, and without the data folder nothing does.
+    @Test func withoutAFileTheCopiesStillKeepTheirLiveFolders() throws {
         let folder = try SessionFolder()
-        try folder.write("a copy", to: "session-v\(SessionSnapshot.currentVersion).json")
-        var store = folder.store
+        let live = UUID()
+        try folder.write(copyFile(version: 99, folders: [(live, liveConfiguration)]), to: "session-v99.json")
+        let store = folder.store
         #expect(store.load() == nil)
-        #expect(!store.keepsUnknownLiveFolders)
-        try folder.write("a copy", to: "session-v\(SessionSnapshot.currentVersion + 1).json")
-        store = folder.store
-        #expect(store.load() == nil)
-        #expect(store.keepsUnknownLiveFolders)
+        #expect(store.keptLiveFolders == [live])
+        try FileManager.default.removeItem(at: folder.url)
+        #expect(store.keptLiveFolders == [])
     }
 
-    /// Search permission without read permission: the file reads, but the folder's names do not, so a copy may be there.
-    @Test func aFolderWhoseNamesCannotBeReadKeepsTheLiveFolders() throws {
+    /// Every folder keeps its entry and Keychain item while a copy does not decode, since it may have any folder as a live folder, while a file is set aside, and while the data folder's names cannot be read, as with search permission without read permission.
+    @Test func whatCannotBeReadKeepsEveryLiveFolder() throws {
         let folder = try SessionFolder()
         try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(SessionSnapshot.currentVersion),"#))
-        try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.url.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.url.path) }
         let store = folder.store
         _ = try #require(store.load())
-        #expect(store.keepsUnknownLiveFolders)
+        #expect(store.keptLiveFolders == [])
+        for name in ["session-v99.json", "session.unreadable.json"] {
+            try folder.write("unreadable", to: name)
+            #expect(store.keptLiveFolders == nil)
+            try FileManager.default.removeItem(at: folder.url.appendingPathComponent(name))
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.url.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.url.path) }
+        #expect(store.keptLiveFolders == nil)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.url.path)
-        #expect(!store.keepsUnknownLiveFolders)
+        #expect(store.keptLiveFolders == [])
     }
 
     @Test func unreadableFilesMoveAside() throws {
@@ -690,6 +688,17 @@ private let workFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F51"
 private let docsFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F52")!
 private let looseFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F53")!
 private let mixedFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F54")!
+
+/// A live folder's configuration as `session.json` keeps it.
+private let liveConfiguration = #"{"source": {"feed": {"address": "https://blog.example.org/feed.xml", "isPrivate": true}}, "itemLimit": 25, "refreshMinutes": 30}"#
+
+/// A copy of a newer build's file, holding only its version and folders, each with the JSON of its `live` value or without one.
+private func copyFile(version: Int, folders: [(id: UUID, live: String?)]) -> String {
+    let folders = folders.map { folder in
+        #"{"id": "\#(folder.id)", "spaceID": "\#(spaceA)", "name": "Folder", "isPinned": true, "isCollapsed": false"# + (folder.live.map { #", "live": \#($0)"# } ?? "") + "}"
+    }
+    return #"{"version": \#(version), "folders": [\#(folders.joined(separator: ", "))]}"#
+}
 
 /// The files without tab IDs, by version.
 private let olderFiles = [1: version1File, 4: version4File, 7: version7File]
