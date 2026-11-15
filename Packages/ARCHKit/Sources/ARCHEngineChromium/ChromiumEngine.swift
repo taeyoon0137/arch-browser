@@ -420,6 +420,7 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {
         executeJavaScript(script, inWorld: world, completion: completion)
     }
+    /// The helper's renderer delivers the value from a process message, not from the user's input, so it should give the page no user activation, as for `executeJavaScriptWithoutUserGesture(_:inWorld:completion:)`.
     public func postPageScriptMessage(_ json: String, toWorld world: String) {
         browser?.postPageScriptMessage(json, toWorld: world)
     }

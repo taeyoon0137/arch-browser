@@ -1634,7 +1634,11 @@ final class ScopedPluginContext: PluginPanelContext {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { throw PluginError.notGranted(id) }
         let page = try manager.page(of: id, for: grant)
-        page.contents.postPageScriptMessage(String(decoding: try JSONEncoder().encode(message), as: UTF8.self), toWorld: pluginID.pageScriptWorld)
+        do {
+            try page.contents.postPageScriptMessage(String(decoding: try JSONEncoder().encode(message), as: UTF8.self), toWorld: pluginID.pageScriptWorld)
+        } catch is EngineUserGestureError {
+            throw PluginError.pageRunUnavailable
+        }
     }
 
     private func aiRequestsInReach() throws -> PluginAIRequests {

@@ -72,7 +72,7 @@ public protocol PluginContext: AnyObject {
     func ai() throws -> any AIClient
     /// Runs the script once in the main frame of the tab's page, in the world of the plugin's page scripts, as the body of a function with the world's channel as `arch`, and returns what the body returns at once as JSON: null for `undefined`, a function, or a symbol. A script that has to wait sends its result with `arch.send`. The tab must be one the plugin reaches, its document one the granted sites cover, and for a plugin with `ai` neither the document nor the address the tab shows on a site excluded from AI; the script runs only while the granted sites cover the document, and its value comes back only while the tab still shows that document. Throws `PluginError.notGranted` for another tab, `siteNotGranted` for a page outside the sites, `noPage` for a tab without a page to run in or whose page changed meanwhile, `invalidPageScript` for a script the plugin may not run, `pageScriptFailed` with what the script threw, `pageRunUnavailable` where the tab's engine could run the script only with the user's gesture, as a WebKit tab while the flags switch plugins' page runs off, `timedOut` for a run that the page leaves unanswered for the hang limit, 10 seconds, as while a script loops, and `stopped` for one that the instance's stop ends.
     func runPageScript(_ script: PluginScript, in tab: PluginTab.ID) async throws -> PluginValue
-    /// Delivers the value to the `arch.onMessage` listeners of the plugin's page scripts in the main frame of the tab's page, under the rules of `runPageScript(_:in:)` for the tab and its page. Nothing happens where no page script listens.
+    /// Delivers the value to the `arch.onMessage` listeners of the plugin's page scripts in the main frame of the tab's page, under the rules of `runPageScript(_:in:)` for the tab and its page, without the user's gesture: where the tab's engine could deliver it only with the gesture, as a WebKit tab while the flags switch plugins' page runs off, it throws `PluginError.pageRunUnavailable`. Nothing happens where no page script listens.
     func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws
 }
 
@@ -311,7 +311,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidPageScript(String)
     /// The script that the plugin ran in a page threw, with what it threw as text, or returned a value that JSON cannot hold.
     case pageScriptFailed(String)
-    /// The tab's engine could run a page call's script only with the user's gesture, which would give the page's handlers for the events it dispatches user activation, so it ran nothing: on WebKit while the flags on `flags://` switch off plugins' page runs, or the private member they use is gone.
+    /// The tab's engine could run a page call's script, or deliver its message, only with the user's gesture, which would give the page's handlers for the events it dispatches user activation, so it ran nothing: on WebKit while the flags on `flags://` switch off plugins' page runs and messages, or the private member they use is gone.
     case pageRunUnavailable
 }
 
@@ -336,7 +336,7 @@ extension PluginError: LocalizedError {
         case .siteNotGranted: return "The page is not on a website this plugin may reach."
         case let .invalidPageScript(reason): return reason
         case let .pageScriptFailed(message): return message
-        case .pageRunUnavailable: return "Arch cannot run the plugin\u{2019}s script in this tab\u{2019}s page without your gesture now."
+        case .pageRunUnavailable: return "Arch cannot reach this tab\u{2019}s page for the plugin without your gesture now."
         }
     }
 }
