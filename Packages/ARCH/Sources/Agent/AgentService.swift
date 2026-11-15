@@ -2183,7 +2183,7 @@ extension AgentService {
         }
     }
 
-    /// The run of an outside client's options: its tabs by the client's handles, or else every agent tab of the client and tab shared with it, the Standard tier, Keep Activity Only, tab access `title` with `rename_tab` or `page` with the read tools too, and the program's label. The shared tabs the user let the client rename on P19's card rename in the run too.
+    /// The run of an outside client's options: its tabs by the client's handles, or else every agent tab of the client and tab shared with it, the Standard tier, Keep Activity Only, tab access `title` with `rename_tab` or `page` with the read tools too, and the program's label. Each run tab's document is the address it has committed, as for `rename_tab`, so a tab that loads another address joins no run until the load commits; the shared tabs the user let the client rename on P19's card rename in the run too.
     private func outsideRun(_ given: [String: AgentJSON], for grant: AgentGrant, identity: AgentClientIdentity, run: UUID) async -> AgentRunResult {
         func refused(_ code: String, _ message: String) -> AgentRunResult { AgentRunResult(status: .refused, code: code, message: message) }
         var fields = given
@@ -2210,10 +2210,12 @@ extension AgentService {
         guard let options = try? AgentJSON.object(fields).decode(as: AgentRunOptions.self) else {
             return refused("invalidArguments", "agent/run takes prompt, and optionally model, tabAccess, tools, record, limits, tabs, and dryRun, as arch.agent.run does.")
         }
+        let naming = host as? AgentTabNaming
         var documents: [UUID: URL] = [:]
         var documentIDs: [UUID: UUID] = [:]
         for tab in reachable where ids.contains(tab.id) {
-            guard let url = tab.url else { continue }
+            // A name belongs to the document the tab has committed; the runner leaves out a tab whose shown address differs, as while it loads another address. A host that gives no names has no committed address to bind.
+            guard let url = naming.map({ $0.committedAddress(ofTab: tab.id) }) ?? tab.url else { continue }
             documents[tab.id] = url
             documentIDs[tab.id] = tab.documentID
         }
@@ -2221,7 +2223,6 @@ extension AgentService {
                                       origin: .outsideClient(grant: grant.id, run: run), promptSource: .program(name: identity.displayName), feature: .agentRun, grant: .forClient(grant))
         request.sharedTabs = Set(shared.map(\.id)).intersection(ids)
         request.renamingSharedTabs = state.handles.renamingSharedTabIDs.intersection(request.sharedTabs)
-        let naming = host as? AgentTabNaming
         return await runs.run(request, personaID: grant.personaID) { id, name, document, applying in
             naming?.suggestName(name, forTab: id, showing: document, byGrant: grant.id, applying: applying) ?? false
         }

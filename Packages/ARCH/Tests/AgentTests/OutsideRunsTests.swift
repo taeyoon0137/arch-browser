@@ -1,4 +1,4 @@
-// Outside clients' agent runs and renames (`docs/hooks.md`, arch-cli agent run and rename; Tools): `AgentRunGrant.forClient(_:)` from the client's grant; a run on the client's agent tabs and the tabs shared with it under `agentRun`, renaming its own agent tab, refusing a shared tab's rename with `wouldAsk` until the user allowed the tab on P19's card, logging each tool call under the grant with its tab's site and the run's ID, a dry run's rename as previewed, and counting toward the grant's runs a day but not its 2,000 calls; `rename_tab` from the client under P19, refusing a tab that is no longer the client's, a site excluded from AI, and a tab loading another address, and asking once on P19's card, without Touch ID, before it renames a tab the user shared, a card that the tab's next document withdraws; and `agent/run`, which needs Start Agent Tasks and a tab, renames a shared tab the user allowed, and names renamed tabs by the client's handles.
+// Outside clients' agent runs and renames (`docs/hooks.md`, arch-cli agent run and rename; Tools): `AgentRunGrant.forClient(_:)` from the client's grant; a run on the client's agent tabs and the tabs shared with it under `agentRun`, renaming its own agent tab, refusing a shared tab's rename with `wouldAsk` until the user allowed the tab on P19's card, logging each tool call under the grant with its tab's site and the run's ID, a dry run's rename as previewed, and counting toward the grant's runs a day but not its 2,000 calls; `rename_tab` from the client under P19, refusing a tab that is no longer the client's, a site excluded from AI, and a tab loading another address, and asking once on P19's card, without Touch ID, before it renames a tab the user shared, a card that the tab's next document withdraws; and `agent/run`, which needs Start Agent Tasks and a tab, binds each tab's committed address, so that a tab loading another address joins no run, renames a shared tab the user allowed, and names renamed tabs by the client's handles.
 import AgentControl
 import AI
 import ARCHEngine
@@ -233,6 +233,30 @@ extension FakeHost: AgentTabNaming {
         let allowed = try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": [.string(shared)]])
         #expect(allowed["status"] == "completed" && allowed["actions"] == [["renamedTab": ["tab": .string(shared), "name": "Named"]]])
         #expect(suggestedNames[userTab.id] == .some("Named"))
+    }
+
+    @Test func agentRunBindsEachTabsCommittedAddress() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let (service, client) = try await connected(harness, scopes: AgentGrantScopes(startTasks: true))
+        let model = scriptedRuns(service, harness)
+        harness.host.pages[URL(string: "https://docs.example/start")!] = (title: "Docs", text: "Docs")
+        let opened = try await client.callTool("open_tab", ["url": "https://docs.example/start"])
+        let own = try #require(opened.structured?["tab"]?.stringValue)
+        let grant = try #require(service.grants.first)
+        let tab = try #require(harness.host.tabs.first { $0.agentOwnerID == grant.id })
+        let index = try #require(harness.host.tabs.firstIndex { $0.id == tab.id })
+        // While the tab loads another address, the run binds the page it committed, which the tab is leaving, so the tab joins no run.
+        harness.host.tabs[index].url = URL(string: "https://docs.example/next")
+        committedAddresses[tab.id] = URL(string: "https://docs.example/start")
+        let loading = try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": [.string(own)]])
+        #expect(loading["status"] == "refused" && loading["code"] == "P16")
+        #expect(model.requests.isEmpty && suggestedNames[tab.id] == nil)
+        // Once the load commits, the run names the page the tab shows.
+        committedAddresses[tab.id] = nil
+        let committed = try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": [.string(own)]])
+        #expect(committed["status"] == "completed" && committed["actions"] == [["renamedTab": ["tab": .string(own), "name": "Named"]]])
+        #expect(suggestedNames[tab.id] == .some("Named"))
     }
 
     @Test func agentRunNamesRenamedTabsByTheClientsHandles() async throws {
