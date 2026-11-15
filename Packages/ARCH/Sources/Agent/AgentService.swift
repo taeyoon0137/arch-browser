@@ -853,8 +853,8 @@ import Foundation
             attached = []
         }
         guard host.spaces(in: personaID).contains(where: { $0.id == spaceID }) else { throw SessionError(message: "The session's space was deleted.") }
-        // While the seal is not checked, Settings' mode is not known, so the session starts in Read Only.
-        let mode = canChangeSettings ? start.mode : newSessionMode
+        // No session starts above Settings' mode, which is Read Only while the seal is not checked, whatever its caller asks.
+        let mode = start.mode.capped(at: newSessionMode)
         var scope = AgentSiteScope(searchResults: host.searchResultsAddress)
         let attachedIDs = Set(attached)
         let tabs = host.userTabs(in: personaID).filter { tab in

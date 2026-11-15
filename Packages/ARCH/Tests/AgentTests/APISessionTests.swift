@@ -184,14 +184,6 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
             return
         }
         #expect(refused.note == "Earlier read_text on t2: refused (P16), 51 characters, left out to save space.")
-        var waiting = AgentToolResult(status: .approvalPending, text: "The user has not answered yet.")
-        waiting.approval = "a1"
-        let pending = AgentAPISession.result(waiting, of: AgentToolCall(name: "request_approval"), callID: "c3")
-        #expect(!pending.isError)
-        guard case .text("Waiting for the user in Arch; call approval_wait with this ID: a1") = pending.parts.first else {
-            Issue.record("Unexpected parts: \(pending.parts)")
-            return
-        }
         // A tab argument that is not a handle stays out of the note.
         let odd = AgentAPISession.result(AgentToolResult(status: .ok, text: "x"), of: AgentToolCall(name: "read_text", arguments: ["tab": "<page text>"]), callID: "c4")
         #expect(odd.note == "Earlier read_text: ok, 1 character, left out to save space.")

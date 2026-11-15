@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session the session details, lists, guide, and readable text. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; and for an in-app session the session details, lists, guide, outline, readable text, and questions, with the tab request and research tab of a task started in Arch. A call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -107,7 +107,7 @@ import Foundation
         Outcome(result: AgentToolResult(status: .denied, code: "ended", text: "The client's work in Arch ended, so the step did not run."), decision: .denied)
     }
 
-    /// The answer of a call that waits for the user, which names its approval as the protocol carries it, for `arch-mcp` and API-key sessions, which tell the agent to call `approval_wait`, and in `structured` for `arch-cli --json`.
+    /// The answer of a call that waits for the user, which names its approval as the protocol carries it, for `arch-mcp`, which tells the agent to call `approval_wait`, and in `structured` for `arch-cli --json`.
     static func pending(_ handle: String, tool: String) -> Outcome {
         Outcome(result: AgentToolResult(status: .approvalPending, content: [.text("\(tool) waits for the user in Arch; call approval_wait with approval \(handle).")],
                                         structured: ["approval": .string(handle)], approval: handle), step: nil)
@@ -973,7 +973,6 @@ struct AgentToolClient {
     struct Session {
         var siteScope: [String]
         var hasSearchResults: Bool
-        var sharedTabCount: Int
         var callsLeftThisTurn: Int
         var callsLeftThisSession: Int
         var readerExcerpt: AgentReaderExcerpt?
@@ -1004,7 +1003,7 @@ struct AgentToolClient {
         spaceID = session.spaceID
         level = session.mode
         scopes = AgentGrantScopes(searchHistory: searchesHistory, startTasks: false)
-        self.session = Session(siteScope: session.scope.sites, hasSearchResults: session.scope.searchResults != nil, sharedTabCount: session.handles.sharedTabIDs.count,
+        self.session = Session(siteScope: session.scope.sites, hasSearchResults: session.scope.searchResults != nil,
                                callsLeftThisTurn: session.callsLeftThisTurn, callsLeftThisSession: session.callsLeftThisSession, readerExcerpt: session.readerExcerpt)
     }
 }
@@ -1037,7 +1036,7 @@ extension AgentToolHost {
                 return AgentToolResult(status: .refused, code: "stopped", text: "This session is not accepting questions for this turn.")
             }
             if case .outsideClient(_, _, true) = session.origin {
-                return AgentToolResult(status: .denied, text: "This task was started with user prompts disabled.")
+                return AgentToolResult(status: .denied, code: "notAvailable", text: "This task was started with user prompts disabled.")
             }
             return await askUser(call.arguments, ownerID: session.id, name: session.title).result
         case "session_info": return sessionInfo(ofSession: client, handles: &session.handles)
@@ -1082,7 +1081,7 @@ extension AgentToolHost {
 
     /// An in-app session's details (docs/agents.md, Tools ▸ Catalog): its mode, its Persona and space, its site scope, its tabs, what is left of its limits, and what asks. The Persona and space read as "Persona / Space".
     private func sessionInfo(ofSession client: AgentToolClient, handles: inout AgentGrantHandles) -> AgentToolResult {
-        let session = client.session ?? AgentToolClient.Session(siteScope: [], hasSearchResults: false, sharedTabCount: 0, callsLeftThisTurn: 0, callsLeftThisSession: 0)
+        let session = client.session ?? AgentToolClient.Session(siteScope: [], hasSearchResults: false, callsLeftThisTurn: 0, callsLeftThisSession: 0)
         let persona = host.personas.first { $0.id == client.personaID }?.name ?? "deleted"
         let space = space(of: client)
         let spaceHandle = space.map { handles.spaces.handle(for: $0.id) }

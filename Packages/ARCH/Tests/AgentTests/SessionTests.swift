@@ -976,6 +976,15 @@ import UserNotifications
         #expect(reply.structured?["tab"] == nil)
     }
 
+    @Test func aSessionStartsAtMostInSettingsMode() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        service.setNewSessionMode(.readOnly)
+        let (session, _) = try start(service, harness, mode: .actInAgentTabs)
+        #expect(session.mode == .readOnly)
+    }
+
     @Test func theModelCannotExpandAReadRequestOrReuseARevokedHandle() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -1766,6 +1775,14 @@ import UserNotifications
         let error = AgentToolResult(status: .error, code: "unknownTool", text: "Synthetic error contents")
         let unknown = AgentToolCall(name: "unrecognized fixture wording")
         #expect(AgentStepText.sentence(for: unknown, result: error) == "Unrecognized tool")
+        // Codes read as words, and only a denial without a code says the user said no.
+        let read = AgentToolCall(name: "read_text")
+        #expect(AgentStepText.sentence(for: read, result: AgentToolResult(status: .refused, code: "stopped", text: "x")) == "Read the page text: stopped with the turn")
+        #expect(AgentStepText.sentence(for: read, result: AgentToolResult(status: .refused, code: "P17", text: "x")) == "Read the page text: refused by an Arch rule")
+        #expect(AgentStepText.sentence(for: read, result: AgentToolResult(status: .error, code: "limitReached", text: "x")) == "Read the page text: reached the call limit")
+        let ask = AgentToolCall(name: "ask_user")
+        #expect(AgentStepText.sentence(for: ask, result: AgentToolResult(status: .denied, code: "notAvailable", text: "x")) == "Asked you a question: not available in this session")
+        #expect(AgentStepText.sentence(for: ask, result: AgentToolResult(status: .denied, text: "x")) == "Asked you a question: you said no")
     }
 
     // MARK: Tasks from outside clients
