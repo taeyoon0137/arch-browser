@@ -1106,7 +1106,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime, EngineE
     @discardableResult public func performAction(of id: PluginID, for tab: any EngineWebContents) -> Bool
     /// Allows that version on the tab's site, where its engine kept it from running.
     public func grantSiteAccess(of id: PluginID, for tab: any EngineWebContents)
-    /// The name of the installed extension, on or off, whose page is at `url`, a pair's from its version installed first, for an address outside the web schemes whose host is the identifier the engines know the extension by, which the address pill, a small window's top row, and the tab switcher show in place of that identifier. Nil for another address.
+    /// The name of the installed extension, on or off, whose page is at `url`, a pair's from its version installed first, without spaces at either end, for an address outside the web schemes whose host is the identifier the engines know the extension by, which the address pill, a small window's top row, the tab switcher, the palette's Go to row, and the tab's prompts show in place of that identifier, after the extension symbol. Nil for another address and for a name that is empty without its spaces.
     public func name(ofPageAt url: URL) -> String?
 }
 

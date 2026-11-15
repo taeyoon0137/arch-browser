@@ -15,16 +15,27 @@ struct AddressPillView: View {
 
     private var url: URL? { tab?.url }
 
-    /// The internal page's address, the page's site, or the placeholder with no tab open.
-    private var host: String {
-        if let page = windowModel.internalPage { return page.address }
-        guard let tab, let url else { return "Search or enter address" }
-        return Self.siteName(of: url, in: tab, session: session)
+    /// The name of the web extension whose page the tab shows (`extensionName(ofPageAt:in:session:)`), unless an internal page covers it.
+    private var extensionName: String? {
+        guard windowModel.internalPage == nil, let tab, let url else { return nil }
+        return Self.extensionName(ofPageAt: url, in: tab, session: session)
     }
 
-    /// The page's site as the address pill, the small window, and the tab switcher show it: for a web extension's page, the name of the extension in the tab's Persona instead of the identifier that its address has as the host; otherwise `siteName(of:)`. The pill's help and the palette keep the whole address.
-    static func siteName(of url: URL, in tab: Tab, session: BrowserSession) -> String {
-        session.extensionName(ofPageAt: url, in: tab.personaID) ?? siteName(of: url)
+    /// The internal page's address, the page's site, the name of the extension whose page it is, or the placeholder with no tab open.
+    private func host(extensionName: String?) -> String {
+        if let page = windowModel.internalPage { return page.address }
+        guard let url else { return "Search or enter address" }
+        return extensionName ?? Self.siteName(of: url)
+    }
+
+    /// The name of the web extension in the tab's Persona whose page is at `url` (`BrowserSession.extensionName(ofPageAt:in:)`), which the address pill, the small window, and the tab switcher show in place of the identifier that the page's address has as its host; nil for another page. The pill and the small window put the extension symbol before it in place of the globe (`symbol(for:internalPage:isExtensionPage:)`), and VoiceOver reads it as an extension's page (`accessibilityLabel(ofExtensionPage:)`), so that an extension cannot pass its page off as a website by the name it gives itself. The pill's help and the palette keep the whole address.
+    static func extensionName(ofPageAt url: URL, in tab: Tab, session: BrowserSession) -> String? {
+        session.extensionName(ofPageAt: url, in: tab.personaID)
+    }
+
+    /// What VoiceOver reads for the site of an extension's page.
+    static func accessibilityLabel(ofExtensionPage name: String) -> String {
+        "\(name), extension page"
     }
 
     /// The page's site as the address pill and the small window show it: its host without `www.`, a local file's name, or the whole address of a page without a host, such as `about:blank`.
@@ -34,20 +45,23 @@ struct AddressPillView: View {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
-    /// The symbol before a page's site, in the address pill and the small window: the internal page's, a search with no page, a file, or the connection, secure or not.
-    static func symbol(for url: URL?, internalPage: InternalPage?) -> String {
+    /// The symbol before a page's site, in the address pill and the small window: the internal page's, a search with no page, a file, a web extension's page, whose site is the extension's name (`extensionName(ofPageAt:in:session:)`), or the connection, secure or not.
+    static func symbol(for url: URL?, internalPage: InternalPage?, isExtensionPage: Bool = false) -> String {
         if internalPage != nil { return "flag" }
         guard let url else { return "magnifyingglass" }
         if url.isFileURL { return "doc" }
+        if isExtensionPage { return "puzzlepiece.extension" }
         return url.scheme == "https" ? "lock.fill" : "globe"
     }
 
     var body: some View {
+        let extensionName = self.extensionName
+        let host = self.host(extensionName: extensionName)
         HStack(spacing: 0) {
             Button(action: { windowModel.focusCommandBar(from: .addressPill) }) {
                 // The symbol takes the tab rows' icon column, so the host starts where their titles do, whichever symbol shows.
                 HStack(spacing: 8) {
-                    Image(systemName: Self.symbol(for: url, internalPage: windowModel.internalPage))
+                    Image(systemName: Self.symbol(for: url, internalPage: windowModel.internalPage, isExtensionPage: extensionName != nil))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 18)
@@ -63,7 +77,7 @@ struct AddressPillView: View {
             }
             .buttonStyle(.plain)
             .help(windowModel.internalPage?.address ?? url?.absoluteString ?? "")
-            .accessibilityLabel(host)
+            .accessibilityLabel(extensionName.map(Self.accessibilityLabel(ofExtensionPage:)) ?? host)
             if let tab, !windowModel.isSelectedPageCovered {
                 TemporaryEngineLabel(tab: tab)
             }

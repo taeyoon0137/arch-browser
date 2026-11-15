@@ -60,8 +60,8 @@ struct CommandPaletteView: View {
         if let search = session.siteSearch.match(text), search.shortcut.resultsURL(for: search.query) != nil {
             return search.query.isEmpty ? "Search \(search.shortcut.name)" : "Search \(search.shortcut.name) for \u{201C}\(search.query)\u{201D}"
         }
-        // The site as the address pill names it, so the current address that ⌘L starts with reads as the pill does.
-        if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(AddressPillView.siteName(of: url))" }
+        // The site as the address pill names it, an extension's page by the extension's name in the window's Persona, so the current address that ⌘L starts with reads as the pill does.
+        if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(extensionName(ofPageAt: url) ?? AddressPillView.siteName(of: url))" }
         return "Search for \u{201C}\(trimmed)\u{201D}"
     }
 
@@ -70,8 +70,13 @@ struct CommandPaletteView: View {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if let page = InternalPage(address: trimmed) { return AddressPillView.symbol(for: nil, internalPage: page) }
         if let search = session.siteSearch.match(text), search.shortcut.resultsURL(for: search.query) != nil { return "magnifyingglass" }
-        if let url = BrowserSession.url(forInput: trimmed) { return AddressPillView.symbol(for: url, internalPage: nil) }
+        if let url = BrowserSession.url(forInput: trimmed) { return AddressPillView.symbol(for: url, internalPage: nil, isExtensionPage: extensionName(ofPageAt: url) != nil) }
         return "magnifyingglass"
+    }
+
+    /// The name of the web extension in the window's Persona whose page is at `url`, which the primary row names as the address pill does (`AddressPillView.extensionName(ofPageAt:in:session:)`).
+    private func extensionName(ofPageAt url: URL) -> String? {
+        session.extensionName(ofPageAt: url, in: windowModel.personaID)
     }
 
     /// Ask About This Page appears once the typed words begin its name, while the selected tab's page can be asked about.

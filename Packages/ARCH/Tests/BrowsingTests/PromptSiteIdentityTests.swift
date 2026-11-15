@@ -1,4 +1,4 @@
-// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a file page by its file, a page without a host, the lock for https, also for a login, and a proxy with its tag and without the lock; and the frame of a page dialog when it is not the page's.
+// Who a tab's prompt comes from: the tab's own site with its icon, another site with a globe and where it is, a file page by its file, a page without a host, an extension's page by the extension, the lock for https, also for a login, and a proxy with its tag and without the lock; and the frame of a page dialog when it is not the page's.
 import AppKit
 import Foundation
 import Testing
@@ -38,6 +38,19 @@ import Testing
         #expect(PromptSiteIdentity.make(for: URL(string: "file:///"), tabURL: file, favicon: nil).name == "page.html")
         #expect(PromptSiteIdentity.make(for: URL(string: "about:blank"), tabURL: nil, favicon: nil).name == "This page")
         #expect(PromptSiteIdentity.make(for: nil, tabURL: Self.tabURL, favicon: nil).name == "This page")
+    }
+
+    /// An extension's page is the extension's name with its symbol and tag, never the tab's icon or the lock, and a frame of another site in it is "in" that name.
+    @Test func anExtensionsPageIsTheExtension() {
+        let page = URL(string: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html")!
+        let name = { (url: URL) in url.scheme == "chrome-extension" ? "Reader" : nil }
+        #expect(PromptSiteIdentity.make(for: page, tabURL: page, favicon: NSImage(), extensionName: name)
+            == PromptIdentity(icon: .symbol("puzzlepiece.extension"), name: "Reader", isSecure: false, tag: "Extension"))
+        #expect(PromptSiteIdentity.make(for: page, tabURL: Self.tabURL, favicon: nil, extensionName: name).context == "in example.com")
+        #expect(PromptSiteIdentity.make(for: URL(string: "https://maps.example/embed"), tabURL: page, favicon: nil, extensionName: name)
+            == PromptIdentity(icon: .symbol("globe"), name: "maps.example", isSecure: true, context: "in Reader"))
+        // Without a name, as for an extension that is not installed, the identifier shows.
+        #expect(PromptSiteIdentity.make(for: page, tabURL: page, favicon: nil).name == "abcdefghijklmnopabcdefghijklmnop")
     }
 
     @Test func aLoginShowsTheLockOnlyForASiteOverHTTPS() {

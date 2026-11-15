@@ -56,18 +56,31 @@ private struct TabSwitcherRow: View {
     @ObservedObject var tab: Tab
     let isHighlighted: Bool
 
+    /// The name of the web extension whose page the tab shows (`AddressPillView.extensionName(ofPageAt:in:session:)`).
+    private var extensionName: String? {
+        tab.url.flatMap { AddressPillView.extensionName(ofPageAt: $0, in: tab, session: session) }
+    }
+
+    /// The tab's title, or for an extension's page whose title is its address's host, as for a page without a title, the extension's name in place of that identifier.
+    private func title(extensionName: String?) -> String {
+        guard let extensionName, tab.displayTitle == tab.url?.host else { return tab.displayTitle }
+        return extensionName
+    }
+
     /// The site after the title, as the address pill names it, or nil without a host or when the title already is the site, as for a page without a title.
-    private var site: String? {
+    private func site(extensionName: String?) -> String? {
         guard let url = tab.url, let host = url.host, !host.isEmpty, tab.displayTitle != host else { return nil }
-        let site = AddressPillView.siteName(of: url, in: tab, session: session)
+        let site = extensionName ?? AddressPillView.siteName(of: url)
         return site == tab.displayTitle ? nil : site
     }
 
     var body: some View {
+        let extensionName = self.extensionName
+        let site = self.site(extensionName: extensionName)
         HStack(spacing: 10) {
             TabIconView(tab: tab)
                 .frame(width: 18, height: 18)
-            Text(tab.displayTitle)
+            Text(title(extensionName: extensionName))
                 .font(.system(size: 14))
                 .lineLimit(1)
             Spacer(minLength: 8)

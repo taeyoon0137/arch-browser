@@ -99,6 +99,8 @@ import LiveFolders
     var chooseFiles: ((EngineFileChooserRequest, @escaping ([URL]?) -> Void) -> Void)?
     /// The session sets this callback to show a prompt as a card over the tab's pane, which waits until a window shows the tab (`TabPromptQueue`). Without it the prompt ends at once without the user, which gives the page the safe answer.
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
+    /// The session sets this callback to name the web extension of the tab's Persona whose page is at an address (`BrowserSession.extensionName(ofPageAt:in:)`), which the tab's prompts name in place of the identifier that the address has as its host (`PromptSiteIdentity`). Without it they name the identifier.
+    var extensionName: ((URL) -> String?)?
     /// Opens a link in a new tab, optionally selecting it in the source window.
     var openURLInNewTab: ((URL, Bool) -> Void)?
     /// The session sets this callback to show the search engine's results for text selected in the page in a new tab, for the context menu's Search with.
@@ -616,7 +618,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// The page of a dialog as its asker.
     private func dialogIdentity(_ frameOrigin: URL?) -> PromptIdentity {
         let page = dialogPage(of: frameOrigin)
-        return PromptSiteIdentity.make(for: page, tabURL: page, favicon: favicon)
+        return PromptSiteIdentity.make(for: page, tabURL: page, favicon: favicon) { self.extensionName?($0) }
     }
 
     /// The frame that shows a page dialog when it is not the page's own (`PromptSiteIdentity.embeddedFrame`).

@@ -1,13 +1,13 @@
-// Who a tab's prompt comes from, as its identity row shows it: the site from the address that asks, with the tab's icon when it is the tab's own site, and where it is when it is not.
+// Who a tab's prompt comes from, as its identity row shows it: the site from the address that asks, with the tab's icon when it is the tab's own site, and where it is when it is not; a web extension's page by the extension.
 import AppKit
 
 enum PromptSiteIdentity {
     @MainActor static func make(for url: URL?, in tab: Tab) -> PromptIdentity {
-        make(for: url, tabURL: tab.url, favicon: tab.favicon)
+        make(for: url, tabURL: tab.url, favicon: tab.favicon) { tab.extensionName?($0) }
     }
 
-    /// The asker at `url` in a tab at `tabURL`: its host with the tab's icon when it is the tab's host, or with a globe and "in <the tab's host>" when it is another, as for a frame from another site. A file's page is its file name, as the address pill shows it, and another address without a host, such as `about:blank` or a `data:` address, is "This page". An https address gets the lock.
-    static func make(for url: URL?, tabURL: URL?, favicon: NSImage?) -> PromptIdentity {
+    /// The asker at `url` in a tab at `tabURL`: its host with the tab's icon when it is the tab's host, or with a globe and "in <the tab's host>" when it is another, as for a frame from another site. A file's page is its file name, as the address pill shows it, and another address without a host, such as `about:blank` or a `data:` address, is "This page". An https address gets the lock. An address of a web extension's page that `extensionName` names, whose host is the extension's identifier, is the extension's name with the extension symbol and the Extension tag, as the address pill marks it, so that an extension cannot pass its page off as a website by the name it gives itself; such a tab is "in" the extension's name.
+    static func make(for url: URL?, tabURL: URL?, favicon: NSImage?, extensionName: (URL) -> String? = { _ in nil }) -> PromptIdentity {
         guard let url, let host = url.host, !host.isEmpty else {
             // A file origin, `file://` from WebKit or `file:///` from Chromium for a file page's permission request, names no file, so the tab's file names it.
             if let url, url.isFileURL, let file = ([url] + (tabURL.map { [$0] } ?? [])).first(where: { $0.isFileURL && !$0.path.isEmpty && $0.path != "/" }) {
@@ -16,11 +16,15 @@ enum PromptSiteIdentity {
             return PromptIdentity(icon: .symbol("doc"), name: "This page", isSecure: false)
         }
         let isSecure = url.scheme?.lowercased() == "https"
-        let tabHost = tabURL?.host
-        guard let tabHost, !tabHost.isEmpty, tabHost.lowercased() != host.lowercased() else {
+        let tabHost = tabURL?.host.flatMap { $0.isEmpty ? nil : $0 }
+        let context = tabHost.flatMap { $0.lowercased() == host.lowercased() ? nil : "in \(tabURL.flatMap(extensionName) ?? $0)" }
+        if let name = extensionName(url) {
+            return PromptIdentity(icon: .symbol("puzzlepiece.extension"), name: name, isSecure: false, tag: "Extension", context: context)
+        }
+        guard let context else {
             return PromptIdentity(icon: favicon.map(PromptIcon.image) ?? .symbol("globe"), name: host, isSecure: isSecure)
         }
-        return PromptIdentity(icon: .symbol("globe"), name: host, isSecure: isSecure, context: "in \(tabHost)")
+        return PromptIdentity(icon: .symbol("globe"), name: host, isSecure: isSecure, context: context)
     }
 
     /// A frame inside the page that shows a page's `alert`, `confirm`, or `prompt`.
