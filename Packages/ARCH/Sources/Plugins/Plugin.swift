@@ -46,7 +46,7 @@ public protocol BuiltInPlugin: Plugin {
     init()
 }
 
-/// The plugin's handle on the browser, scoped to one plugin instance in one Persona. Each call checks the plugin's grant and throws `PluginError.permissionDenied` when the grant does not cover it. Once the instance stops, the storage and secrets only read, the other calls that act throw `PluginError.stopped`, and badges do nothing.
+/// The plugin's handle on the browser, scoped to one plugin instance in one Persona. Each call checks the plugin's grant and throws `PluginError.permissionDenied` when the grant does not cover it, and a page call `PluginError.siteNotGranted` for a page outside its sites. Once the instance stops, the storage and secrets only read, the other calls that act throw `PluginError.stopped`, and badges do nothing.
 @MainActor
 public protocol PluginContext: AnyObject {
     var pluginID: PluginID { get }
@@ -70,6 +70,10 @@ public protocol PluginContext: AnyObject {
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
     /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any, and a script plugin's panel's to none: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. Every request stops when the instance stops.
     func ai() throws -> any AIClient
+    /// Runs the script once in the main frame of the tab's page, in the world of the plugin's page scripts, as the body of a function with the world's channel as `arch`, and returns what the body returns at once as JSON: null for `undefined`, a function, or a symbol. A script that has to wait sends its result with `arch.send`. The tab must be one the plugin reaches, its document one the granted sites cover, and for a plugin with `ai` neither the document nor the address the tab shows on a site excluded from AI; the script runs only while the granted sites cover the document, and its value comes back only while the tab still shows that document. Throws `PluginError.notGranted` for another tab, `siteNotGranted` for a page outside the sites, `noPage` for a tab without a page to run in or whose page changed meanwhile, `invalidPageScript` for a script the plugin may not run, `pageScriptFailed` with what the script threw, `pageRunUnavailable` where the tab's engine could run the script only with the user's gesture, as a WebKit tab while the flags switch plugins' page runs off, `timedOut` for a run that the page leaves unanswered for the hang limit, 10 seconds, as while a script loops, and `stopped` for one that the instance's stop ends.
+    func runPageScript(_ script: PluginScript, in tab: PluginTab.ID) async throws -> PluginValue
+    /// Delivers the value to the `arch.onMessage` listeners of the plugin's page scripts in the main frame of the tab's page, under the rules of `runPageScript(_:in:)` for the tab and its page. Nothing happens where no page script listens.
+    func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws
 }
 
 extension PluginContext {
@@ -77,6 +81,23 @@ extension PluginContext {
     public func ai() throws -> any AIClient {
         throw PluginError.permissionDenied(.ai)
     }
+
+    /// A context that reaches no page, such as a hook script's, refuses page calls as for a tab it does not reach.
+    public func runPageScript(_ script: PluginScript, in tab: PluginTab.ID) async throws -> PluginValue {
+        throw PluginError.notGranted(tab)
+    }
+
+    public func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws {
+        throw PluginError.notGranted(tab)
+    }
+}
+
+/// A script that a plugin runs in a page with `PluginContext.runPageScript(_:in:)`. It must parse as the body of a function on its own, as a page script must.
+public enum PluginScript: Hashable, Sendable {
+    /// A UTF-8 text file of the plugin's package, by package path, such as `scripts/read.js`.
+    case file(String)
+    /// Script text, which only plugins built into Arch may run.
+    case source(String)
 }
 
 /// A sandbox that may hand a script's agent options to a user-authorized browser hook.
@@ -93,6 +114,8 @@ public protocol PluginBrowserHost: AnyObject {
     func tabs(in persona: PersonaID) -> [PluginTab]
     /// Sets the tab's suggested name under the AI hooks' rules (`docs/hooks.md`, hook decision 13): the name's first line, trimmed and cut to `PluginTab.maximumNameLength` characters, while the tab still shows `document`, ignoring the fragment, the user has not named it, and the user has not turned down a suggested name for that document. Nil removes a suggested name for the document. A nil `document` stands for the tab's committed address now. The change's events carry `cause`. With `applying` false, nothing changes and the answer says whether the tab would take it. False for a favorite's tab, which goes by its favorite's name, for an agent tab, and for a tab that is gone.
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
+    /// The page of a tab that `tabs(in:)` lists, through which plugins run scripts in it and post to its page scripts; nil for an agent tab and for a tab that is gone.
+    func webContents(forTab id: UUID) -> (any EngineWebContents)?
 }
 
 /// What a command runs on.
@@ -256,7 +279,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case permissionDenied(PluginPermission)
     /// The plugin instance whose context the call went through has stopped.
     case stopped
-    /// The command acts on a page, and the invocation has none.
+    /// The command acts on a page, and the invocation has none, or a page call's tab has no page to run in, or its page changed while the call ran.
     case noPage
     /// The text is not a match pattern.
     case invalidMatchPattern(String)
@@ -270,7 +293,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidPackage(String)
     /// The package targets a plugin API newer than `PluginManifest.apiVersion`.
     case unsupportedAPIVersion(Int)
-    /// A script plugin's background script left its start, a command, or a page script value unanswered past the hang limit.
+    /// A script plugin's background script left its start, a command, or a page script value unanswered past the hang limit, or a page left a page call's run unanswered for as long.
     case timedOut
     /// Two plugins cannot become, or stop being, versions of one plugin, for the reason the text gives as a sentence.
     case invalidVersions(String)
@@ -282,6 +305,14 @@ public enum PluginError: Error, Hashable, Sendable {
     case noListener
     /// A listener of the event threw, or its promise rejected, with what it threw as text, such as an error's message.
     case listenerFailed(String)
+    /// A page call's page is outside the plugin's granted sites, or for a plugin with `ai` on a site excluded from AI. It names no address, since the grant may keep the page's from the plugin.
+    case siteNotGranted
+    /// The script is not one the plugin may run in a page, for the reason the text gives as a sentence: a path that names no text file of its package, a source that does not parse as the body of a function, or script text from a plugin that is not built in.
+    case invalidPageScript(String)
+    /// The script that the plugin ran in a page threw, with what it threw as text, or returned a value that JSON cannot hold.
+    case pageScriptFailed(String)
+    /// The tab's engine could run a page call's script only with the user's gesture, which would give the page's handlers for the events it dispatches user activation, so it ran nothing: on WebKit while the flags on `flags://` switch off plugins' page runs, or the private member they use is gone.
+    case pageRunUnavailable
 }
 
 extension PluginError: LocalizedError {
@@ -302,6 +333,10 @@ extension PluginError: LocalizedError {
         case .notGranted: return "The tab is not one this plugin or hook may reach."
         case .noListener: return "The plugin\u{2019}s script set no listener for the event."
         case let .listenerFailed(message): return message
+        case .siteNotGranted: return "The page is not on a website this plugin may reach."
+        case let .invalidPageScript(reason): return reason
+        case let .pageScriptFailed(message): return message
+        case .pageRunUnavailable: return "Arch cannot run the plugin\u{2019}s script in this tab\u{2019}s page without your gesture now."
         }
     }
 }

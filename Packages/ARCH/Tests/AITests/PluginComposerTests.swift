@@ -62,6 +62,7 @@ import Testing
             (reply(["contributes": ["pageScripts": [["matches": ["<all_urls>"], "js": ["page.js"]]]]]),
              "plugin.json: contributes.pageScripts is not offered to plugins that AI writes."),
             (reply(["permissions": ["tabs", "ai"]]), "plugin.json: permissions lists “ai”, which is not offered to plugins that AI writes."),
+            (reply(["permissions": [["ai": ["page"]]]]), "plugin.json: permissions lists “ai”, which is not offered to plugins that AI writes."),
             (reply(files: ["lib/background.js": ""]), "files names “lib/background.js”, which is not a plain file name that ends in .js."),
             (reply(files: ["notes.txt": ""]), "files names “notes.txt”, which is not a plain file name that ends in .js."),
             (reply(files: ["background.js": "", "format.js": ""]),

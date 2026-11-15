@@ -71,18 +71,28 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         versionEngines(among: running).first { engineChecks[$0] != nil && !engines.contains($0) && !dismissedVersionNotes.contains($0) }
     }
 
-    /// What the plugin may do, one sentence each, as Settings states it: its grant, then the API permissions that come with a web extension.
+    /// What the plugin may do, one sentence each, as Settings states it in the install sheet's order: the grant's permissions, the data kinds that come with `ai` and the API permissions that come with a web extension, then the grant's sites.
     public var accessSummaries: [String] {
-        grant.summaries + [manifest.extensionPermissionsSummary].compactMap { $0 }
+        permissionSummaries + includedSummaries + grant.sites.map(\.accessSummary)
+    }
+
+    /// The sentence of each permission of the grant, in a fixed order.
+    private var permissionSummaries: [String] {
+        PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary)
+    }
+
+    /// The sentences of what comes with the grant: the data kinds that its AI requests carry and a web extension's other API permissions.
+    private var includedSummaries: [String] {
+        [grant.permissions.contains(.ai) ? manifest.aiDataSummary : nil, manifest.extensionPermissionsSummary].compactMap { $0 }
     }
 
     /// The most sites whose sentences Settings lists among `accessSummaries`; with more, it states them in one (`accessBrief`).
     public static let listedSiteLimit = 3
 
-    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
+    /// `accessSummaries` as Settings states them while the grant has more than `listedSiteLimit` sites, with every site's sentence behind a disclosure, or nil with fewer: each permission's sentence and those that come with the grant, which are few and stay in view, such as the one for exchanging messages with apps on this Mac, and in place of the sites' sentences one that names them by the broadest (`MatchPattern.briefAccessSummary(of:)`), such as "Run scripts on pages from every .com website and 3 more".
     public var accessBrief: [String]? {
         guard grant.sites.count > Self.listedSiteLimit, let sites = MatchPattern.briefAccessSummary(of: grant.sites) else { return nil }
-        return PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary) + [sites, manifest.extensionPermissionsSummary].compactMap { $0 }
+        return permissionSummaries + includedSummaries + [sites]
     }
 }
 
@@ -988,7 +998,7 @@ public final class PluginManager: ObservableObject {
     }
 
     /// Whether a plugin with the grant reaches AI and the tab's address or its document's is on a site excluded from AI.
-    private func excludesAI(_ tab: PluginTab, for grant: PluginGrant) -> Bool {
+    fileprivate func excludesAI(_ tab: PluginTab, for grant: PluginGrant) -> Bool {
         excludesAI(tab.url, for: grant) || excludesAI(tab.documentURL, for: grant)
     }
 
@@ -1110,7 +1120,7 @@ public final class PluginManager: ObservableObject {
 
     // MARK: AI features
 
-    /// Registers the feature of each enabled plugin with `ai` and unregisters those that no plugin has any more. The managers of several Personas can hold plugins with one identifier, which share the feature `plugin.<id>` and its route: it stays registered while one of them has it, and is automatic while one of them runs hooks.
+    /// Registers the feature of each enabled plugin with `ai` and unregisters those that no plugin has any more. The managers of several Personas can hold plugins with one identifier, which share the feature `plugin.<id>` and its route: it stays registered while one of them has it, is automatic while one of them runs hooks, and declares the data kinds that any of them lists, while each instance holds its requests to its own plugin's kinds (`PluginAIRequests`).
     private func registerAIFeatures() {
         guard let ai else { return }
         let enabled = isClosed ? [] : plugins.filter { $0.isEnabled && $0.unavailability == nil && $0.grant.permissions.contains(.ai) }
@@ -1118,11 +1128,14 @@ public final class PluginManager: ObservableObject {
         let previous = aiFeatures
         aiFeatures = wanted
         // A feature's summary follows its trigger.
-        let changed = Set(previous.keys).union(wanted.keys).filter { previous[$0]?.name != wanted[$0]?.name || previous[$0]?.trigger != wanted[$0]?.trigger }
+        let changed = Set(previous.keys).union(wanted.keys).filter {
+            previous[$0]?.name != wanted[$0]?.name || previous[$0]?.trigger != wanted[$0]?.trigger || previous[$0]?.data.kinds != wanted[$0]?.data.kinds
+        }
         let managers = Self.liveManagers.allObjects.filter { $0.ai === ai }
         for id in changed {
             let holders = managers.compactMap { $0.aiFeatures[id] }
-            if let feature = holders.first(where: { $0.trigger == .automatic }) ?? holders.first {
+            if var feature = holders.first(where: { $0.trigger == .automatic }) ?? holders.first {
+                feature.data.kinds = holders.reduce(into: []) { $0.formUnion($1.data.kinds) }
                 ai.register(feature)
             } else {
                 ai.unregister(id)
@@ -1224,12 +1237,40 @@ public final class PluginManager: ObservableObject {
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
         ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant,
                             storage: ScopedPluginStorage(file: storage(for: installed.id)), secrets: secrets(for: installed.id),
-                            ai: installed.grant.permissions.contains(.ai) ? ai.map { PluginAIRequests(service: $0, feature: .plugin(installed.id.rawValue)) } : nil)
+                            ai: installed.grant.permissions.contains(.ai) ? ai.map { PluginAIRequests(service: $0, feature: .plugin(installed.id.rawValue), dataKinds: installed.aiDataKinds) } : nil)
     }
 
     /// The Persona's tabs before the grant applies.
     fileprivate func personaTabs() -> [PluginTab] {
         browserHost?.tabs(in: persona) ?? []
+    }
+
+    /// The tab of the Persona that a page call of a plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document outside the granted sites, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
+    fileprivate func page(of id: UUID, for grant: PluginGrant) throws -> (tab: PluginTab, contents: any EngineWebContents) {
+        guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        guard let document = tab.documentURL else { throw PluginError.noPage }
+        guard grant.covers(document), !excludesAI(tab, for: grant) else { throw PluginError.siteNotGranted }
+        guard let contents = browserHost?.webContents(forTab: id) else { throw PluginError.noPage }
+        return (tab, contents)
+    }
+
+    /// How long a page call's run waits for the page's reply: the hang limit, 10 seconds by default, as long as Chromium's engine waits for one.
+    fileprivate var pageRunLimit: Duration {
+        .seconds(scriptLimits.hang)
+    }
+
+    /// Where the script that the plugin runs in a page comes from: script text from a built-in plugin, or a file of a script plugin's package, which `PluginPageRun.function(running:sites:)` reads off the main actor. Throws `PluginError.invalidPageScript` for anything else.
+    fileprivate func source(of script: PluginScript, for id: PluginID) throws -> PluginPageRun.Source {
+        switch script {
+        case let .source(text):
+            guard builtIns[id] != nil else { throw PluginError.invalidPageScript("Only plugins built into Arch run script text in pages.") }
+            return .text(text)
+        case let .file(path):
+            guard let package = packages[id], package.kind == .script else {
+                throw PluginError.invalidPageScript("\u{201C}\(path)\u{201D} is not a text file of the plugin\u{2019}s package.")
+            }
+            return .file(path, of: package)
+        }
     }
 
     /// Renames a tab of the Persona for `document`, or for the document it shows now when that is nil, with the plugin as the cause of the change.
@@ -1454,6 +1495,9 @@ final class ScopedPluginContext: PluginPanelContext {
     private let aiRequests: PluginAIRequests?
     private weak var manager: PluginManager?
     private var hasEnded = false
+    /// The page calls' runs that wait for the page's reply, by number, which `end()` ends.
+    private var pageRuns: [Int: CheckedContinuation<String?, any Error>] = [:]
+    private var nextPageRun = 0
 
     init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: ScopedPluginStorage, secrets: ScopedPluginSecrets, ai: PluginAIRequests? = nil) {
         self.manager = manager
@@ -1474,12 +1518,17 @@ final class ScopedPluginContext: PluginPanelContext {
         set { aiRequests?.step = newValue }
     }
 
-    /// Stops the context, its storage, its secrets, and its AI requests from acting for the instance.
+    /// Stops the context, its storage, its secrets, and its AI requests from acting for the instance, and ends the waits of its page runs with `PluginError.stopped`.
     func end() {
         hasEnded = true
         scopedStorage.end()
         scopedSecrets.end()
         aiRequests?.end()
+        let runs = pageRuns.values
+        pageRuns = [:]
+        for run in runs {
+            run.resume(throwing: PluginError.stopped)
+        }
     }
 
     /// Stops the step and the AI requests that belong to it.
@@ -1539,6 +1588,53 @@ final class ScopedPluginContext: PluginPanelContext {
 
     func panelAI() throws -> any AIClient {
         try aiRequestsInReach().client(inStep: false)
+    }
+
+    /// The script runs in the plugin's world through the tab's page, and its value or what it threw comes back only while the tab shows the document that the call checked, and for a plugin with `ai` only while the address it shows is not on a site excluded from AI, as a single-page site can move to one within its document.
+    func runPageScript(_ script: PluginScript, in id: PluginTab.ID) async throws -> PluginValue {
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let manager else { throw PluginError.notGranted(id) }
+        let function = try await PluginPageRun.function(running: manager.source(of: script, for: pluginID), sites: grant.sites)
+        guard !hasEnded else { throw PluginError.stopped }
+        let page = try manager.page(of: id, for: grant)
+        let reply = try await run(function, in: page.contents, waitingAtMost: manager.pageRunLimit)
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let shown = manager.personaTabs().first(where: { $0.id == id }), shown.documentID == page.tab.documentID else { throw PluginError.noPage }
+        // What the script returned or threw can hold the page's text.
+        guard !manager.excludesAI(shown, for: grant) else { throw PluginError.siteNotGranted }
+        switch try PluginPageRun.outcome(of: reply) {
+        case .outside: throw PluginError.siteNotGranted
+        case let .failed(text): throw PluginError.pageScriptFailed(text)
+        case let .value(value): return value
+        }
+    }
+
+    /// Runs the function in the page's main frame without the user's gesture, or throws `PluginError.pageRunUnavailable` where the engine would give it one, and waits for its reply at most for `limit`: WebKit waits as long as the page runs, also while a script loops in it. A run still unanswered then, or one that the engine fails that late, as Chromium's does once it has waited as long, throws `PluginError.timedOut`; one that the engine fails sooner, as when the tab's page has no document to run in, as a tab that no window has shown yet, throws `noPage`. The wait ends with `stopped` as the context ends.
+    private func run(_ function: String, in contents: any EngineWebContents, waitingAtMost limit: Duration) async throws -> String? {
+        let number = nextPageRun
+        nextPageRun += 1
+        let started = ContinuousClock.now
+        return try await withCheckedThrowingContinuation { continuation in
+            pageRuns[number] = continuation
+            contents.executeJavaScriptWithoutUserGesture(function, inWorld: pluginID.pageScriptWorld) { result in
+                let settled = result.mapError { error -> PluginError in
+                    if error is EngineUserGestureError { return .pageRunUnavailable }
+                    return ContinuousClock.now - started < limit ? .noPage : .timedOut
+                }
+                Task { @MainActor [weak self] in self?.pageRuns.removeValue(forKey: number)?.resume(with: settled) }
+            }
+            Task { [weak self] in
+                try? await Task.sleep(until: started + limit, clock: .continuous)
+                self?.pageRuns.removeValue(forKey: number)?.resume(throwing: PluginError.timedOut)
+            }
+        }
+    }
+
+    func postMessage(_ message: PluginValue, toTab id: PluginTab.ID) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let manager else { throw PluginError.notGranted(id) }
+        let page = try manager.page(of: id, for: grant)
+        page.contents.postPageScriptMessage(String(decoding: try JSONEncoder().encode(message), as: UTF8.self), toWorld: pluginID.pageScriptWorld)
     }
 
     private func aiRequestsInReach() throws -> PluginAIRequests {

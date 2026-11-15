@@ -1,4 +1,4 @@
-// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says. A panel's document gets the same `arch` without the listeners, since the app hands commands, page script values, and events to the background script only.
+// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says. A panel's document gets the same `arch` without the listeners, since the app hands commands, page script values, and events to the background script only, and without page calls, which only the background script makes for now.
 import AI
 import WebKit
 
@@ -93,7 +93,11 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
                 eventListeners.set(kind, [...(eventListeners.get(kind) ?? []), listener]);
               },
             }),
-            pages: Object.freeze({ onMessage: (listener) => { messageListener = listener; } }),
+            pages: Object.freeze({
+              run: (tabId, file) => call("pages.run", [tabId, file]),
+              post: (tabId, message) => call("pages.post", [tabId, message === undefined ? null : message]),
+              onMessage: (listener) => { messageListener = listener; },
+            }),
           } : {}),
           tabs: Object.freeze({
             list: () => call("tabs.list", []),
@@ -127,7 +131,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let role: Role
     /// The latest secret call, which the next one waits for, so that the script's secret calls take effect in the order it made them.
     private var secretCalls: Task<Void, Never>?
-    /// Told true as a call that the plugin's context and the bridge accepted starts to wait for Arch's own answer, an AI request's reply or its next text, and false as it ends, so that the instance does not count that wait toward its hang limit.
+    /// Told true as a call that the plugin's context and the bridge accepted starts to wait for Arch's own answer, an AI request's reply or its next text, or a page call's run in the tab's page, and false as it ends, so that the instance does not count that wait toward its hang limit.
     var waitsForArch: ((Bool) -> Void)?
     /// The `arch.ai.reply` requests that have not ended and the `arch.ai.stream` replies that the script has not read to their end, by number, which `end()` stops.
     private var replies: [Int: Task<Void, Never>] = [:]
@@ -157,7 +161,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
-    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, an AI reply's call once its reply has come, and a stream's `ai.next` call once text arrives or the reply ends. The other calls reply before the handler returns.
+    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, an AI reply's call once its reply has come, a stream's `ai.next` call once text arrives or the reply ends, and `pages.run` once the page has run the script. The other calls reply before the handler returns.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard !hasEnded else { return replyHandler(nil, PluginError.stopped.bridgeName) }
@@ -196,6 +200,16 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
                     replies[number] = nil
                 }
                 do { Self.reply(.success(Self.value(of: try await client.reply(request))), to: replyHandler) }
+                catch { Self.reply(.failure(error), to: replyHandler) }
+            }
+        case "pages.run":
+            // A panel's `arch` has no `pages`, so a panel's document cannot make the call by posting to the handler itself either.
+            guard role == .background, call.args.count == 2, let tabID = try? call.text(0), let id = UUID(uuidString: tabID),
+                  let file = try? call.text(1) else { return replyHandler(nil, BridgeFailure.invalidCall.rawValue) }
+            waitsForArch?(true)
+            Task {
+                defer { waitsForArch?(false) }
+                do { Self.reply(.success(try await context.runPageScript(.file(file), in: id)), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
             }
         case "ai.next":
@@ -321,7 +335,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
-    /// The request of `arch.ai.reply(request)`, which sends `{instructions, messages, schema, maxOutputTokens}`, where each message is `{role, text}` with the role `user` or `assistant`, `schema` a JSON Schema object for a JSON reply, and only `messages` required. The plugin's context checks the grant first.
+    /// The request of `arch.ai.reply(request)`, which sends `{instructions, messages, schema, maxOutputTokens}`, where each message is `{role, text}` or `{role, parts}` with the role `user` or `assistant`, `schema` a JSON Schema object for a JSON reply, and only `messages` required. The plugin's context checks the grant first, and its AI client the parts' kinds.
     private func aiRequest(of call: Call) throws -> AIRequest {
         guard call.args.count == 1, case .object(var fields)? = call.value(0) else { throw BridgeFailure.invalidCall }
         var instructions: String?
@@ -331,9 +345,14 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         guard case let .array(items)? = fields.removeValue(forKey: "messages"), !items.isEmpty else { throw BridgeFailure.invalidCall }
         let messages = try items.map { item -> AIMessage in
-            guard case let .object(message) = item, message.count == 2, case let .string(text)? = message["text"],
-                  case let .string(name)? = message["role"], let role = AIMessage.Role(rawValue: name) else { throw BridgeFailure.invalidCall }
-            return AIMessage(role: role, parts: [.text(text)])
+            guard case let .object(message) = item, message.count == 2, case let .string(name)? = message["role"], let role = AIMessage.Role(rawValue: name) else {
+                throw BridgeFailure.invalidCall
+            }
+            switch (message["text"], message["parts"]) {
+            case let (.string(text)?, nil): return AIMessage(role: role, parts: [.text(text)])
+            case let (nil, .array(parts)?) where !parts.isEmpty: return AIMessage(role: role, parts: try parts.map(Self.part))
+            default: throw BridgeFailure.invalidCall
+            }
         }
         var output = AIOutputFormat.text
         if let schema = fields.removeValue(forKey: "schema"), schema != .null {
@@ -348,6 +367,15 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         // A key the bridge does not read, such as a model, would go without effect.
         guard fields.isEmpty else { throw BridgeFailure.invalidCall }
         return AIRequest(feature: .plugin(context.pluginID.rawValue), instructions: instructions, messages: messages, output: output, maxOutputTokens: maxOutputTokens)
+    }
+
+    /// A message's part: `{type: "text", text}`, or `{type: "page", url, title, text}` and `{type: "selection", url, title, text}` with the page's address and title, which the plugin's `ai` permission must list.
+    private static func part(_ value: PluginValue) throws -> AIPart {
+        guard case let .object(fields) = value, case let .string(type)? = fields["type"], case let .string(text)? = fields["text"] else { throw BridgeFailure.invalidCall }
+        if type == "text", fields.count == 2 { return .text(text) }
+        guard type == "page" || type == "selection", fields.count == 4, case let .string(address)? = fields["url"], let url = URL(string: address), url.scheme != nil,
+              case let .string(title)? = fields["title"] else { throw BridgeFailure.invalidCall }
+        return type == "page" ? .page(AIPageContent(url: url, title: title, text: text)) : .selection(AISelection(pageURL: url, pageTitle: title, text: text))
     }
 
     /// What `arch.ai.reply` resolves with: `{text, finishReason}`.
@@ -383,6 +411,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try renameTab(id, to: try call.optionalText(1)))
+        case "pages.post":
+            guard role == .background, call.args.count == 2, let id = UUID(uuidString: try call.text(0)), let message = call.value(1) else { throw BridgeFailure.invalidCall }
+            try context.postMessage(message, toTab: id)
         default:
             throw BridgeFailure.invalidCall
         }
@@ -485,6 +516,10 @@ private extension PluginError {
         case .notGranted: return "notGranted"
         case .noListener: return "noListener"
         case .listenerFailed: return "listenerFailed"
+        case .siteNotGranted: return "siteNotGranted"
+        case .invalidPageScript: return "invalidPageScript"
+        case .pageScriptFailed: return "pageScriptFailed"
+        case .pageRunUnavailable: return "pageRunUnavailable"
         }
     }
 }

@@ -1,4 +1,5 @@
-// The session's side of the tab calls of plugins and hook scripts (`docs/plugins.md`, Manager, runtimes, and the browser host): every Persona's open tabs as plugins see them, never agent tabs, and suggested names under the AI hooks' rules (`docs/hooks.md`, hook decision 13), whose events carry the caller's cause. One host serves every Persona's plugin manager and the JavaScript hook runner.
+// The session's side of the tab calls of plugins and hook scripts (`docs/plugins.md`, Manager, runtimes, and the browser host): every Persona's open tabs as plugins see them, never agent tabs, suggested names under the AI hooks' rules (`docs/hooks.md`, hook decision 13), whose events carry the caller's cause, and the tabs' pages for plugins' page calls. One host serves every Persona's plugin manager and the JavaScript hook runner.
+import ARCHEngine
 import Events
 import Foundation
 import Plugins
@@ -24,5 +25,11 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         guard let session, let tab = session.tabs.first(where: { $0.id == id }), BrowserEventSource.kind(of: tab) != .agent,
               let document = document ?? tab.committedURL else { return false }
         return session.events.withCause(cause) { BrowserHooks.suggest(name, for: document, to: tab, applying: applying) }
+    }
+
+    /// The page of an open tab, a favorite's among them; the manager has checked that the tab is its Persona's.
+    public func webContents(forTab id: UUID) -> (any EngineWebContents)? {
+        guard let tab = session?.allTabs.first(where: { $0.id == id }), BrowserEventSource.kind(of: tab) != .agent else { return nil }
+        return tab.webContents
     }
 }

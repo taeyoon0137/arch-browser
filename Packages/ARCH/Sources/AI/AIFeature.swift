@@ -54,6 +54,16 @@ public enum AIDataKind: String, Codable, Sendable, CaseIterable {
     case selection
     case file
     case download
+
+    /// The kind as the sentences that say what requests send name it, such as "the text of pages": Settings ▸ AI's for each feature, and the install sheet's and Settings ▸ Plugins' for a plugin's `ai`.
+    public var sentenceName: String {
+        switch self {
+        case .page: return "the text of pages"
+        case .selection: return "selected text"
+        case .file: return "files"
+        case .download: return "download details"
+        }
+    }
 }
 
 /// The kinds of data a feature's requests may carry besides text.

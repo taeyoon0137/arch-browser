@@ -194,6 +194,8 @@ private final class RecordingHost: PluginBrowserHost {
         renames.append((id, name, document))
         return true
     }
+
+    func webContents(forTab id: UUID) -> (any EngineWebContents)? { nil }
 }
 
 @MainActor
@@ -746,6 +748,152 @@ extension PluginAITests {
             return false
         })
         #expect(service.activity.count == 1 && service.activity.last?.feature == feature && ContinuousClock.now - closed < .seconds(3))
+    }
+
+    /// The `ai` permission can list the data kinds beyond text that the plugin's requests carry: `page` and `selection`, whose content a plugin reaches.
+    @Test func theAIPermissionMayListDataKinds() async throws {
+        let manager = manager(ai: nil)
+        func stage(_ permissions: String) async throws -> PluginPackage {
+            try await manager.stage(try writePackage([
+                "plugin.json": #"{"id": "org.example.ai-data", "name": "AI Data", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": \#(permissions), "sites": ["https://example.org/*"]}"#,
+            ]))
+        }
+        let package = try await stage(#"["tabs", {"ai": ["page", "selection"]}]"#)
+        #expect(package.manifest.permissions == [.tabs, .ai] && package.manifest.aiDataKinds == [.page, .selection])
+        // The list joins as the locale joins lists, "the text of pages and selected text" in English.
+        let sentence = "Send \(ListFormatter.localizedString(byJoining: ["the text of pages", "selected text"])) to the AI models you connected"
+        #expect(package.manifest.aiDataSummary == sentence)
+        let id = try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: false)
+        let installed = try #require(manager.plugins.first { $0.id == id })
+        #expect(installed.aiDataKinds == [.page, .selection])
+        // Settings states the kinds right after the permissions and before the sites, as the install sheet does.
+        let site = "Run scripts on pages from example.org"
+        #expect(installed.accessSummaries == ["Read the titles and addresses of your tabs", "Send text to the AI models you connected", sentence, site])
+        // Without `ai` in the grant, the kinds do not come with it.
+        var withoutAI = installed
+        withoutAI.grant.permissions = [.tabs]
+        #expect(withoutAI.aiDataKinds.isEmpty && withoutAI.accessSummaries == ["Read the titles and addresses of your tabs", site])
+        let textOnly = try await stage(#"["ai"]"#)
+        #expect(textOnly.manifest.aiDataKinds.isEmpty && textOnly.manifest.aiDataSummary == nil)
+
+        let malformed = #"plugin.json: permissions must be an array of permission names, with ai also as an object such as {"ai": ["page"]}."#
+        let refusals = [
+            (#"[{"ai": ["file"]}]"#, "plugin.json: permissions lists ai with \u{201C}file\u{201D}, which is not page or selection."),
+            (#"[{"tabs": ["page"]}]"#, malformed),
+            (#"[{"ai": "page"}]"#, malformed),
+            (#"[{"ai": [1]}]"#, malformed),
+            (#"[{"ai": ["page"], "tabs": []}]"#, malformed),
+            (#""ai""#, malformed),
+        ]
+        for (permissions, reason) in refusals {
+            await #expect(throws: PluginError.invalidPackage(reason), "\(permissions)") { _ = try await stage(permissions) }
+        }
+    }
+
+    /// An update that lists other data kinds changes the kinds that the plugin's feature declares, with neither its name nor its trigger changing.
+    @Test func anUpdateChangesTheKindsTheFeatureDeclares() async throws {
+        let service = service()
+        let manager = manager(ai: service)
+        defer { manager.close() }
+        let id = AIFeatureID.plugin("org.example.ai-kinds")
+        func install(_ permissions: String) async throws -> Set<AIDataKind>? {
+            let package = try await manager.stage(try writePackage([
+                "plugin.json": #"{"id": "org.example.ai-kinds", "name": "AI Kinds", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": \#(permissions)}"#,
+            ]))
+            _ = try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+            return service.features.first { $0.id == id }?.data.kinds
+        }
+        #expect(try await install(#"["ai"]"#) == [])
+        #expect(try await install(#"[{"ai": ["page", "selection"]}]"#) == [.page, .selection])
+        #expect(try await install(#"[{"ai": ["page"]}]"#) == [.page])
+        #expect(try await install(#"["ai"]"#) == [])
+        #expect(service.features.first { $0.id == id }?.name == "AI Kinds" && manager.plugins.count == 1)
+    }
+
+    /// Plugins with one identifier in several Personas share the feature, which declares the kinds that any of them lists, while each one's requests carry only its own.
+    @Test func theFeatureDeclaresTheListedKindsAndEachPluginSendsOnlyItsOwn() async throws {
+        let service = service()
+        let id = AIFeatureID.plugin("org.example.ai-data")
+        let tool = AIProviderConfiguration(name: "Echo", kind: .commandLine(AICommandLineConfiguration(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "cat"],
+                                                                                                       environment: ["PATH": "/usr/bin:/bin"], runsWithoutTools: true)),
+                                           models: [AIModelConfiguration(name: "")], limits: .commandLine)
+        service.settings.providers = [tool]
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool)]), for: id)
+        func install(_ permissions: String, in manager: PluginManager) async throws -> ScopedPluginContext {
+            let package = try await manager.stage(try writePackage([
+                "plugin.json": #"{"id": "org.example.ai-data", "name": "AI Data", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": \#(permissions)}"#,
+            ]))
+            try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+            return manager.makeContext(for: try #require(manager.plugins.first))
+        }
+        let pages = manager(ai: service)
+        let text = manager(persona: UUID(), ai: service)
+        defer {
+            pages.close()
+            text.close()
+        }
+        let withPages = try await install(#"[{"ai": ["page"]}]"#, in: pages)
+        let textOnly = try await install(#"["ai"]"#, in: text)
+        #expect(service.features.first { $0.id == id }?.data.kinds == [.page])
+
+        let page = AIPart.page(AIPageContent(url: URL(string: "https://example.org/a")!, title: "A", text: "The page's body"))
+        let request = AIRequest(feature: id, messages: [AIMessage(role: .user, parts: [page, .text("Sum it up")])])
+        let reply = try await withPages.ai().reply(request).text
+        #expect(reply.contains(#"<page url="https://example.org/a""#) && reply.contains("The page's body"))
+        func refusesUndeclared(_ kind: AIDataKind) -> (any Error) -> Bool {
+            { error in
+                guard case .blockedByPolicy(.dataNotDeclared(let refused))? = error as? AIError else { return false }
+                return refused == kind
+            }
+        }
+        await #expect { _ = try await textOnly.ai().reply(request) } throws: { refusesUndeclared(.page)($0) }
+        let selection = AIRequest(feature: id, messages: [AIMessage(role: .user, parts: [.selection(AISelection(pageURL: URL(string: "https://example.org/a")!, pageTitle: "A", text: "Picked"))])])
+        await #expect { _ = try await withPages.ai().reply(selection) } throws: { refusesUndeclared(.selection)($0) }
+
+        // Once no plugin lists a kind, the feature declares none.
+        pages.setEnabled(false, for: try #require(pages.plugins.first?.id))
+        #expect(service.features.first { $0.id == id }?.data.kinds == [])
+    }
+
+    /// A script's request can carry page and selection parts of the kinds its `ai` permission lists.
+    @Test func aScriptPluginSendsTheDataKindsItLists() async throws {
+        let manifest = #"{"id": "org.example.ai-parts", "name": "AI Parts", "version": "1", "apiVersion": 1, "summary": "Sends.", "permissions": [{"ai": ["page"]}], "background": "b.js", "contributes": {"commands": [{"id": "send", "title": "Send"}]}}"#
+        let background = """
+        const outcome = (request) => arch.ai.reply(request).then((reply) => reply.text, (error) => error.message);
+        const ask = (parts) => outcome({ messages: [{ role: "user", parts }] });
+        arch.commands.onRun("send", async () => {
+          await arch.storage.set("sent", {
+            page: await ask([{ type: "page", url: "https://example.org/a", title: "A", text: "The page's body" }, { type: "text", text: "Sum it up" }]),
+            selection: await ask([{ type: "selection", url: "https://example.org/a", title: "A", text: "Picked" }]),
+            unknown: await ask([{ type: "file", text: "x" }]),
+            extra: await ask([{ type: "text", text: "x", url: "https://example.org/" }]),
+            empty: await ask([]),
+            both: await outcome({ messages: [{ role: "user", text: "x", parts: [{ type: "text", text: "x" }] }] }),
+          });
+        });
+        """
+        let feature = AIFeatureID.plugin("org.example.ai-parts")
+        let service = service()
+        let tool = AIProviderConfiguration(name: "Echo", kind: .commandLine(AICommandLineConfiguration(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "cat"],
+                                                                                                       environment: ["PATH": "/usr/bin:/bin"], runsWithoutTools: true)),
+                                           models: [AIModelConfiguration(name: "")], limits: .commandLine)
+        service.settings.providers = [tool]
+        service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool)]), for: feature)
+        let manager = manager(ai: service)
+        defer { manager.close() }
+        let package = try await manager.stage(try writePackage(["plugin.json": manifest, "b.js": background]))
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        await manager.run(PluginCommandRef(plugin: package.manifest.id, command: "send"), PluginInvocation(tab: nil))
+        guard case let .object(sent)? = manager.makeContext(for: try #require(manager.plugins.first)).storage.value(forKey: "sent"),
+              case let .string(page)? = sent["page"] else {
+            Issue.record("The command stored nothing.")
+            return
+        }
+        #expect(page.contains(#"<page url="https://example.org/a""#) && page.contains("The page's body") && page.contains("Sum it up"))
+        #expect(sent["selection"] == .string("blockedByPolicy"))
+        for key in ["unknown", "extra", "empty", "both"] {
+            #expect(sent[key] == .string("invalidCall"), "\(key)")
+        }
     }
 
     /// `arch.ai.stream` reads a reply by the rules of `AIClient.reply(_:)`, which `arch.ai.reply` follows: the same events end it with the same reason or error and hand on the same text.

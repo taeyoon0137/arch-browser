@@ -1,6 +1,7 @@
 // The JavaScript hook runner (`docs/hooks.md`, JavaScript scripts and The script API): the fixture scripts in `Fixtures` run in the plugin sandbox through the registry and receive their events; `arch.tabs.get` without `tabs` lacks titles and addresses; `arch.tabs.list` and `get` reach only the tabs the hook's filter covers in the event's Persona, never agent tabs, and for a hook with `agent` show no title or address of a tab whose address or committed document, which the registry gives the run, is on a site excluded from AI; a rename of a tab outside the filter is refused; a rename goes through the browser host under the suggested name rules with the run's cause, is only reported in a test, belongs to the run's document, and resolves false once the tab shows another one; a timed-out or canceled run ends its instance, a held instance does not stop for being idle, and a run releases its instance after it; what a listener throws, as the run's message; and the syntax check.
 import Agent
 import AI
+import ARCHEngine
 import Events
 import Foundation
 import Plugins
@@ -55,6 +56,8 @@ final class FakePluginHost: PluginBrowserHost {
         if applying { suggested[id] = name.flatMap(PluginTab.name(from:)) }
         return true
     }
+
+    func webContents(forTab id: UUID) -> (any EngineWebContents)? { nil }
 }
 
 /// The real runner, recording each invocation and outcome, since the registry keeps only a failed run's first 200 characters.
@@ -586,9 +589,9 @@ extension PluginValue {
         let other = await runner.run(invocation(of: hook, script: #"arch.events.on("tabOpened", () => {});"#, loading: tab))
         #expect(other.code == "noListener")
         #expect(other.failure == "The script set no listener for pageLoaded with arch.events.on.")
-        // A script has no storage, secrets, or clipboard.
-        let probe = #"arch.events.on("pageLoaded", async () => { const results = []; for (const attempt of [() => arch.storage.set("a", 1), () => arch.ui.copy("a")]) { try { await attempt(); results.push("allowed"); } catch (error) { results.push(error.message); } } throw new Error(results.join()); });"#
-        #expect(await runner.run(invocation(of: hook, script: probe, loading: tab)).failure == "quotaExceeded,permissionDenied")
+        // A script has no storage, secrets, clipboard, or page, not even its event's tab's.
+        let probe = #"arch.events.on("pageLoaded", async (event) => { const results = []; for (const attempt of [() => arch.storage.set("a", 1), () => arch.ui.copy("a"), () => arch.pages.run(event.tab.id, "script.js"), () => arch.pages.post(event.tab.id, 1)]) { try { await attempt(); results.push("allowed"); } catch (error) { results.push(error.message); } } throw new Error(results.join()); });"#
+        #expect(await runner.run(invocation(of: hook, script: probe, loading: tab)).failure == "quotaExceeded,permissionDenied,notGranted,notGranted")
     }
 }
 

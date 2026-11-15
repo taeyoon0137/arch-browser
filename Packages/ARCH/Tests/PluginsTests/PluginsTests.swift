@@ -137,7 +137,7 @@ import Testing
         #expect(try brief(["https://example.com/*", "http://example.com/docs/*", "https://*.example.com/*", "https://www.example.com/*"]) == ["Run scripts on pages from example.com and its subdomains"])
         #expect(try brief(["https://example.com/*", "https://*.example.com/*", "https://a.example/*", "https://b.example/*"]) == ["Run scripts on pages from 3 websites"])
         #expect(try brief(["https://a.example/*", "<all_urls>", "https://b.example/*", "https://c.example/*"], permissions: [.nativeMessaging, .tabs], apis: ["storage"])
-            == ["Read the titles and addresses of your tabs", "Exchange messages with apps on this Mac", "Run scripts on pages from every website", "Use the extension APIs storage"])
+            == ["Read the titles and addresses of your tabs", "Exchange messages with apps on this Mac", "Use the extension APIs storage", "Run scripts on pages from every website"])
         #expect(try brief(["https://a.example/*", "*://*.com/*", "https://b.example/*", "https://shop.com/*"]) == ["Run scripts on pages from every .com website and 2 more"])
     }
 }

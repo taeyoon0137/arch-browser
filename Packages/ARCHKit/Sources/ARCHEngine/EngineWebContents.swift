@@ -80,6 +80,8 @@ public protocol EngineWebContents: AnyObject {
     func setPageScripts(_ scripts: [EnginePageScript])
     /// Calls a JavaScript function expression, such as `(channel) => …`, with the channel of `world` in the main frame's current document, opening one there if the world has none, and passes the string the function returns, or nil for any other value. Fails when the function throws or the main frame has no document to run it in.
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
+    /// As `executeJavaScript(_:inWorld:completion:)`, for a function that must run without the user's gesture, which would give the page's handlers for the events it dispatches user activation, as a script that a plugin runs once: an engine that cannot run it so runs nothing and fails with `EngineUserGestureError`. WebKit runs it through its evaluation without a user gesture, a private member, only while the private API flags allow plugins' page runs.
+    func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
     /// Delivers a value, as JSON text, to the listeners of a world's channel in the main frame's current document. Nothing happens without them.
     func postPageScriptMessage(_ json: String, toWorld world: String)
     /// Reads the main frame's visible text, up to `limit` characters, with its address, title, language, and selection. Fields and editable areas are never read. Fails with `EngineReadableContentError.unreadable` when the page has no document a script can read.
