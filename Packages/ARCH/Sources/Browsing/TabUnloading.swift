@@ -3,7 +3,7 @@ import AppKit
 import ARCHEngine
 import Foundation
 
-/// What closing a tab does, decided for every path that closes one (bookmark rule 4). Every close goes through `BrowserSession.closeTab(_:reason:)` or asks the page first through `requestCloseTab(_:)`; only Delete Tab chooses `close(remember: true)` itself.
+/// What closing a tab does, decided for every path that closes one (bookmark rule 4). Every close goes through `BrowserSession.closeTab(_:reason:)` or asks the page first through `requestCloseTab(_:)`, apart from `closeAgentTab(_:reason:)`, which forgets an agent's own tab, as `forget` does, and posts the `agent` reason; only Delete Tab chooses `close(remember: true)` itself.
 enum TabCloseAction: Equatable {
     /// The page closes, and the tab keeps its place, folder, and ID with a stand-in at its saved page, without page state. Nothing joins the closed list or the tab close log.
     case unload

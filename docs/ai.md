@@ -818,7 +818,7 @@ public enum AIHookAction: Sendable {
 The first hooks (`BuiltInHooks` in `Browsing`):
 
 - `hook.tabName` (Tab Names), on `pageLoaded`, waits 1.5 seconds for titles set by scripts to settle. It skips the first load of a restored tab and of a pinned tab that a browser import opened, so that launching and importing send no requests, and a page that has a suggested title or a refusal already. It reads the tab's page with a 2,000-character limit, skips a page it cannot read or that is no longer the event's, and sends the page's title, address, and text. It asks for a name of at most four words in the page's language.
-- `hook.downloadName` (Download Names), on `downloadFinished`. It skips a file whose name the user chose, sends the download part only, not the file's contents, and asks for a descriptive file name without an extension.
+- `hook.downloadName` (Download Names), on `downloadFinished`. It skips a file whose name the user chose and a download that started in an agent tab, sends the download part only, not the file's contents, and asks for a descriptive file name without an extension.
 - Both ask for at most 256 output tokens and take the reply's first line without the quotes, emphasis, or final period a model may add.
 
 ## Features that AI adds at run time
