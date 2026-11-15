@@ -1035,7 +1035,7 @@ final class EngineRuntime {
             guard let self, let tab else { return completion(.dismissed) }
             self.enqueuePrompt(content, for: tab, completion: completion)
         }
-        // The tab's prompts name an extension's page by the extension, as the address pill does.
+        // The tab's prompts, its title where its row shows it (`Tab.shownTitle`), and Now Playing name an extension's page by the extension, as the address pill does.
         tab.extensionName = { [weak self] url in self?.extensionName(ofPageAt: url, in: personaID) }
         // A page's file chooser opens Arch's panel on both engines, after the tab's prompts before it, as a sheet on the window that shows the tab (`PanePromptLayer`), naming who asks from the engine's report rather than from the tab's address; Cancel, the tab leaving the screen, a closed tab, or quitting gives the page no file. An agent tab's chooser asks on the tool host's card first (P7).
         tab.chooseFiles = { [weak self, weak tab] request, completion in
