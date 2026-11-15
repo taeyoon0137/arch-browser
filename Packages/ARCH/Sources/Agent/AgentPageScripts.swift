@@ -1,5 +1,6 @@
-// The agents' page script (docs/agents.md, Page snapshots and refs): one JavaScript function written for Arch, which the host runs with an operation object through `executeJavaScript(_:inWorld:completion:)` in the world `arch.agent` and which answers with JSON text. WebKit runs it in a content world of its own; Chromium runs every world in the page's main world, where a page can replace the built-ins it calls (Risks 2). It keeps nothing in the page between calls (agent decision 13): a ref is an element's index in the script's walk, and the host keeps each ref's fingerprint with the document's address, so that an action walks again and fails as stale when the element at that index differs. The walk follows open shadow roots and same-origin frames, lists other sites' frames without reading them, and leaves out extension frames, hidden elements, `aria-hidden` and `inert` subtrees, and scripts; the boxes that screenshots paint over come from every subtree that shows on the screen. A field whose value is secret (P1's class) or personal never gives its value, nor any field of a tab the user shared, where screenshots paint every field over.
+// The agents' page script (docs/agents.md, Page snapshots and refs): one JavaScript function written for Arch, which the host runs with an operation object through `executeJavaScript(_:inWorld:completion:)` in the world `arch.agent` and which answers with JSON text. WebKit runs it in a content world of its own; Chromium runs every world in the page's main world, where a page can replace the built-ins it calls (Risks 2). It keeps nothing in the page between calls (agent decision 13): a ref is an element's index in the script's walk, and the host keeps each ref's fingerprint with the document's address, so that an action walks again and fails as stale when the element at that index differs. Only the target check of trusted input (`targetCheck`) holds state, one action's check from `prepare` until the action's events have come. The walk follows open shadow roots and same-origin frames, lists other sites' frames without reading them, and leaves out extension frames, hidden elements, `aria-hidden` and `inert` subtrees, and scripts; the boxes that screenshots paint over come from every subtree that shows on the screen. A field whose value is secret (P1's class) or personal never gives its value, nor any field of a tab the user shared, where screenshots paint every field over.
 import AgentControl
+import ARCHEngine
 import Foundation
 
 /// The class of a field's value: a hidden value never leaves the page; a personal one shows as `<personal>`.
@@ -106,8 +107,12 @@ enum AgentPageOperation: Encodable {
     /// The boxes a screenshot paints over, file inputs that hold files among them, and the viewport and page sizes; in a tab the user shared, every field's box too.
     case boxes(shared: Bool)
     case act(AgentPageAction)
+    /// Before trusted input (VII.21): the element as `act` checks it, a field focused with its selection placed for `type`, the point to act at with the visual viewport, and the target check armed for the input's events.
+    case prepare(AgentInputPreparation)
+    /// What the target check saw of the input's events, with the page's scroll position; `need` replaces the counts that mark the input's end, `cancelRest` cancels the input's events still to come, and `disarm` ends the check. A check whose counts are reached ends by itself.
+    case inputState(need: AgentInputNeed?, cancelRest: Bool, disarm: Bool)
 
-    private enum Keys: String, CodingKey { case op, full, ref, shared, scroll, action, words }
+    private enum Keys: String, CodingKey { case op, full, ref, shared, scroll, action, words, need, cancelRest, disarm }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: Keys.self)
@@ -128,8 +133,93 @@ enum AgentPageOperation: Encodable {
         case .act(let action):
             try container.encode("act", forKey: .op)
             try container.encode(action, forKey: .action)
+        case .prepare(let preparation):
+            try container.encode("prepare", forKey: .op)
+            try container.encode(preparation, forKey: .action)
+        case .inputState(let need, let cancelRest, let disarm):
+            try container.encode("inputState", forKey: .op)
+            try container.encodeIfPresent(need, forKey: .need)
+            try container.encode(cancelRest, forKey: .cancelRest)
+            try container.encode(disarm, forKey: .disarm)
         }
     }
+}
+
+/// What `prepare` readies for trusted input.
+struct AgentInputPreparation: Encodable, Equatable {
+    /// `click`, `hover`, `type`, `press`, or `scroll`; a `scroll` without a ref arms no check.
+    var kind: String
+    var ref: AgentRefTarget?
+    /// For `type`: select the field's text, which the input replaces, instead of placing the caret at its end.
+    var replace: Bool?
+    /// For `press` without a ref: the focused element the policy classified the step by, which must still have focus; nil when no element had focus.
+    var focus: AgentFocusedElement?
+    /// The events whose target the check checks, and `keyup`, which it only counts, since a key's own default action, such as Tab's, moves focus before it.
+    var kinds: [String]
+    var need: AgentInputNeed
+    /// How long the check stays armed, in milliseconds.
+    var holdMs: Int
+}
+
+/// The focused element as the policy read it.
+struct AgentFocusedElement: Encodable, Equatable {
+    var tag: String
+    var role: String
+    var name: String
+
+    init(_ facts: AgentElementFacts) {
+        tag = facts.tag
+        role = facts.role
+        name = facts.name
+    }
+}
+
+/// The counts of the target check after which an input's events have all come: clicks, key ups, moves, and the length of the text that `beforeinput` events carry.
+struct AgentInputNeed: Codable, Equatable {
+    var clicks: Int?
+    var keyups: Int?
+    var moves: Int?
+    var text: Int?
+}
+
+/// The page's visual viewport in CSS pixels of the layout viewport, with its pinch zoom.
+struct AgentVisualViewport: Decodable, Equatable {
+    var left: Double
+    var top: Double
+    var scale: Double
+    var w: Double
+    var h: Double
+}
+
+struct AgentPoint: Decodable, Equatable {
+    var x: Double
+    var y: Double
+}
+
+/// What `prepare` reports.
+struct AgentInputReply: Decodable {
+    var url: String
+    /// Why the input cannot go: `act`'s problems; `stale` when focus is on another element than the one the step is for; and `noCheck` (no target check in the document), `inFrame` (focus inside a frame), `noFocus` (the element takes no focus), `noSelection` (a field without a selection to place), and `readOnly` (a read-only field), for which the action uses DOM events.
+    var problem: String?
+    var cover: String?
+    var hit: String?
+    /// The element's center in CSS pixels of the layout viewport.
+    var point: AgentPoint?
+    var viewport: AgentVisualViewport
+    /// Whether the element that receives keys takes text.
+    var editable: Bool?
+}
+
+/// What the target check saw.
+struct AgentInputState: Decodable {
+    var url: String
+    /// False once the check ended, timed out, or was never armed in this document, as after the input loaded another.
+    var armed: Bool
+    var seen: Int
+    var cancelled: Bool
+    var complete: Bool
+    var scrollX: Double
+    var scrollY: Double
 }
 
 /// An action as the script performs it through DOM events (agent decision 7).
@@ -228,9 +318,89 @@ struct AgentActionReply: Decodable {
     var missing: String?
 }
 
-enum AgentPageScripts {
+public enum AgentPageScripts {
     /// The script world of the agents' page script.
     static let world = "arch.agent"
+
+    /// The global through which `prepare` arms the target check and `inputState` reads it.
+    static let targetCheckName = "__archAgentInput"
+
+    /// The target check of trusted input (docs/agents.md, Actions), which `Browsing` gives agent tabs' main frames at document start in the world `arch.agent`, so that its capture-phase listeners on the window come before any of the page's. While `prepare` has it armed, it cancels with `preventDefault()` and `stopImmediatePropagation()` each trusted event of the action's kinds whose target is not the element, or inside it, or a label of it, and every later one of the action, and counts what came. A `keyup` it only counts and cancels after an earlier cancel, since the key's own default action, such as Tab's, moves focus before it. It holds the built-ins it calls from document start. On WebKit the page cannot see its world; on Chromium it shares the page's main world, where the page can find and change the check (Risks 19).
+    public static let targetCheck = EnginePageScript(world: world, source: targetCheckSource, injectionTime: .documentStart, mainFrameOnly: true)
+
+    static let targetCheckSource = #"""
+    (channel) => {
+      "use strict";
+      if (Object.getOwnPropertyDescriptor(globalThis, "\#(targetCheckName)")) return;
+      const apply = Reflect.apply, describe = Object.getOwnPropertyDescriptor, define = Object.defineProperty, freeze = Object.freeze, create = Object.create;
+      const listen = EventTarget.prototype.addEventListener, now = Performance.prototype.now, clock = performance;
+      const pathOf = Event.prototype.composedPath, cancel = Event.prototype.preventDefault, stop = Event.prototype.stopImmediatePropagation;
+      const typeOf = describe(Event.prototype, "type").get, dataOf = describe(InputEvent.prototype, "data").get;
+      const parentOf = describe(Node.prototype, "parentNode").get, hostOf = describe(ShadowRoot.prototype, "host").get;
+      const localNameOf = describe(Element.prototype, "localName").get, controlOf = describe(HTMLLabelElement.prototype, "control").get;
+      const rootOf = describe(Document.prototype, "documentElement").get;
+      const KINDS = ["pointerover", "mouseover", "pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "pointermove", "mousemove",
+        "keydown", "keypress", "keyup", "beforeinput"];
+      const doc = document;
+      let state = null;
+      const call = (getter, node) => { try { return apply(getter, node, []); } catch (error) { return null; } };
+      const up = (node) => call(parentOf, node) || call(hostOf, node);
+      const within = (target, element) => {
+        for (let node = target; node; node = up(node)) {
+          if (node === element) return true;
+          if (call(localNameOf, node) === "label" && call(controlOf, node) === element) return true;
+        }
+        return false;
+      };
+      const accepts = (current, target) => current.exact ? target === current.element || target === doc || target === call(rootOf, doc) : within(target, current.element);
+      const listener = (event) => {
+        const current = state;
+        if (!current || current.done || !event.isTrusted) return;
+        if (apply(now, clock, []) > current.until) { current.done = true; return; }
+        const type = apply(typeOf, event, []);
+        if (!current.kinds[type]) return;
+        current.seen += 1;
+        if (!current.cancelled && type !== "keyup" && !accepts(current, apply(pathOf, event, [])[0])) current.cancelled = true;
+        if (current.cancelled) {
+          apply(cancel, event, []);
+          apply(stop, event, []);
+        }
+        if (type === "click") current.clicks += 1;
+        else if (type === "keyup") current.keyups += 1;
+        else if (type === "keypress") current.keypresses += 1;
+        else if (type === "mousemove") current.moves += 1;
+        else if (type === "beforeinput") {
+          const data = apply(dataOf, event, []);
+          if (typeof data === "string") current.text += data.length;
+        }
+      };
+      for (let index = 0; index < KINDS.length; index += 1) apply(listen, window, [KINDS[index], listener, true]);
+      const complete = (current) => {
+        const need = current.need;
+        // Text comes as one `beforeinput`, or on Chromium as a keypress per UTF-16 unit, whose `beforeinput` the same task dispatches.
+        return (!need.clicks || current.clicks >= need.clicks) && (!need.keyups || current.keyups >= need.keyups) && (!need.moves || current.moves >= need.moves)
+          && (!need.text || current.text >= need.text || current.keypresses >= need.text);
+      };
+      define(globalThis, "\#(targetCheckName)", { value: freeze({
+        arm(element, exact, kinds, need, holdMs) {
+          const set = create(null);
+          for (let index = 0; index < kinds.length; index += 1) set[kinds[index]] = true;
+          state = { element, exact, kinds: set, need: { clicks: need.clicks, keyups: need.keyups, moves: need.moves, text: need.text }, until: apply(now, clock, []) + holdMs,
+            done: false, seen: 0, cancelled: false, clicks: 0, keyups: 0, keypresses: 0, moves: 0, text: 0 };
+        },
+        read(need, cancelRest, disarm) {
+          const current = state;
+          if (!current) return { armed: false, seen: 0, cancelled: false, complete: false };
+          if (need) current.need = { clicks: need.clicks, keyups: need.keyups, moves: need.moves, text: need.text };
+          if (cancelRest) current.cancelled = true;
+          if (apply(now, clock, []) > current.until) current.done = true;
+          const reply = { armed: !current.done, seen: current.seen, cancelled: current.cancelled, complete: complete(current) };
+          if (disarm || reply.complete) state = null;
+          return reply;
+        },
+      }) });
+    }
+    """#
 
     /// The lists the script reads, from the policy, so that one copy of each exists.
     struct Words: Encodable {
@@ -250,7 +420,7 @@ enum AgentPageScripts {
         return "(channel) => {\nconst op = \(json);\n\(body)\n}"
     }
 
-    /// The script's body, which ends by returning the reply as JSON text. Keep it free of state kept in the page, which on Chromium the page could reach.
+    /// The script's body, which ends by returning the reply as JSON text. Keep it free of state kept in the page, which on Chromium the page could reach; the target check alone keeps an action's check.
     static let body = #"""
     "use strict";
     const MAX_NAME = 80, MAX_VALUE = 200, MAX_TEXT = 200;
@@ -812,7 +982,94 @@ enum AgentPageScripts {
       return reply;
     }
 
-    const operations = { snapshot, element, boxes, act };
+    /// The main frame's focused element, through open shadow roots; focus in a frame stays the frame's element.
+    function focusedElement() {
+      let el = document.activeElement;
+      while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+      return el;
+    }
+
+    /// The visual viewport in CSS pixels of the layout viewport, which `getBoundingClientRect()` measures in, with its pinch zoom.
+    function visual() {
+      const vv = window.visualViewport;
+      return vv ? { left: vv.offsetLeft, top: vv.offsetTop, scale: vv.scale, w: vv.width, h: vv.height } : { left: 0, top: 0, scale: 1, w: innerWidth, h: innerHeight };
+    }
+
+    /// Places the selection where trusted text goes: over the field's text, which the text replaces, or at its end, as `act` adds after it. False for a field without a selection to place, such as an email or number field that holds text.
+    function placeSelection(el, replace) {
+      const tag = tagOf(el);
+      if (tag === "input" || tag === "textarea") {
+        let start = null;
+        try { start = el.selectionStart; } catch (error) { start = null; }
+        if (start === null) return !el.value;
+        if (replace) el.select();
+        else el.setSelectionRange(el.value.length, el.value.length);
+        return true;
+      }
+      const doc = el.ownerDocument, selection = doc.getSelection(), range = doc.createRange();
+      range.selectNodeContents(el);
+      if (!replace) range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+
+    /// Readies trusted input (docs/agents.md, Actions): the element passes `act`'s checks; for `type`, and `press` with a ref, it takes focus; for `press` without a ref, the element the policy read still has focus. Then the target check is armed in the same task, so no page script runs between the checks and the arming.
+    function prepare() {
+      const action = op.action;
+      const reply = { url: location.href, viewport: visual() };
+      if (action.kind === "scroll" && !action.ref) return reply;
+      const check = globalThis.\#(AgentPageScripts.targetCheckName);
+      if (!check) return Object.assign(reply, { problem: "noCheck" });
+      let el = null, exact = false;
+      if (action.ref) {
+        const resolved = resolve(action.ref);
+        if (!resolved.found) return Object.assign(reply, { problem: resolved.problem });
+        if (resolved.found.frame !== 0) return Object.assign(reply, { problem: "inFrame" });
+        el = resolved.found.el;
+        // A key goes to the focused element whatever lies over it, as after typed text that shows the page's suggestions.
+        const reason = action.kind === "press" ? unusable(el) : blocked(el);
+        if (reason) return Object.assign(reply, reason);
+      } else {
+        el = focusedElement();
+        if (el && (tagOf(el) === "iframe" || tagOf(el) === "frame")) return Object.assign(reply, { problem: "inFrame" });
+        const none = !el || el === document.body || el === document.documentElement;
+        if (!action.focus !== none) return Object.assign(reply, { problem: "stale" });
+        if (none) {
+          el = document.body || document.documentElement;
+          exact = true;
+        } else {
+          const role = roleOf(el) || tagOf(el);
+          if (tagOf(el) !== action.focus.tag || role !== action.focus.role || nameOf(el, role) !== action.focus.name) return Object.assign(reply, { problem: "stale" });
+        }
+      }
+      reply.hit = describe(el);
+      if (action.kind === "type" || (action.kind === "press" && action.ref)) {
+        if (action.kind === "type" && !isEditable(el)) return Object.assign(reply, { problem: "notEditable" });
+        // A read-only field takes no text, so trusted text would send no event the check could see.
+        if (action.kind === "type" && (tagOf(el) === "input" || tagOf(el) === "textarea") && el.readOnly) return Object.assign(reply, { problem: "readOnly" });
+        const before = focusedElement();
+        if (!before || !contains(el, before)) el.focus();
+        const after = focusedElement();
+        // A page whose focus handler moved focus on is stale; an element that takes no focus gets DOM events.
+        if (!after || !contains(el, after)) return Object.assign(reply, { problem: after === before ? "noFocus" : "stale" });
+        if (action.kind === "type" && !placeSelection(el, !!action.replace)) return Object.assign(reply, { problem: "noSelection" });
+      }
+      const keyTarget = exact ? null : focusedElement();
+      reply.editable = !!keyTarget && isEditable(keyTarget);
+      const rect = el.getBoundingClientRect();
+      reply.point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      check.arm(el, exact, action.kinds, action.need, action.holdMs);
+      return reply;
+    }
+
+    function inputState() {
+      const check = globalThis.\#(AgentPageScripts.targetCheckName);
+      const state = check ? check.read(op.need || null, !!op.cancelRest, !!op.disarm) : { armed: false, seen: 0, cancelled: false, complete: false };
+      return Object.assign({ url: location.href, scrollX, scrollY }, state);
+    }
+
+    const operations = { snapshot, element, boxes, act, prepare, inputState };
     return JSON.stringify(operations[op.op]());
     """#
 }

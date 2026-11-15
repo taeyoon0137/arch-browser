@@ -878,9 +878,9 @@ final class EngineRuntime {
         return adopt(makeWebContents(url: url, engine: preferred, state: state, in: personaID), spaceID: spaceID, personaID: personaID, pinned: pinned, select: select, preferredEngine: preferred)
     }
 
-    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:)`), which Chromium receives only with the browser it creates.
-    func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID) -> any EngineWebContents {
-        let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts)
+    /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts, with the agents' target check for an agent tab, and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:inAgentTab:)`), which Chromium receives only with the browser it creates.
+    func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID, agentTab: Bool = false) -> any EngineWebContents {
+        let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts, inAgentTab: agentTab)
         let requested = engine ?? defaultEngine
         let runtime = runtime(for: requested, in: personaID)
         return runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: runtime.kind == requested ? state : nil, pageScripts: pageScripts))
@@ -1055,7 +1055,7 @@ final class EngineRuntime {
 
     /// Creates the page of a tab that has none, as a window does before it first shows the tab: a web contents of the tab's Persona at the address, in the engine, and with the page state that its stand-in keeps (`UnloadedWebContents`). A tab that has its page keeps it.
     func loadPage(of tab: Tab) {
-        tab.loadPage { makeWebContents(url: $0, engine: $1, state: $2, in: tab.personaID) }
+        tab.loadPage { makeWebContents(url: $0, engine: $1, state: $2, in: tab.personaID, agentTab: tab.agentOwnerID != nil) }
     }
 
     /// Selects a tab that no window shows. A space's tab goes to the front main window on its space, or else to the front main window of its Persona, which then shows the tab's space, so that a window of another Persona keeps its Persona / Space while one of the tab's Persona is open; only without either does it go to the sidebar target. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
@@ -1088,7 +1088,7 @@ final class EngineRuntime {
             if tab.pendingSyncEngine == kind { tab.pendingSyncEngine = nil }
             if tab.requestedEngineSwitch == kind { tab.requestedEngineSwitch = nil }
             let state = tab.preferredEngine == kind ? tab.restorableStateForPreferredEngine : nil
-            let replacement = self.makeWebContents(url: tab.url, engine: kind, state: state, in: tab.personaID)
+            let replacement = self.makeWebContents(url: tab.url, engine: kind, state: state, in: tab.personaID, agentTab: tab.agentOwnerID != nil)
             self.replaceWebContents(of: tab, with: replacement)
             tab.preferredEngine = kind
         }
@@ -1884,7 +1884,7 @@ final class EngineRuntime {
         }
         guard let space = spaces.first(where: { $0.id == folder.spaceID }) else { return nil }
         let preferred = engine ?? defaultEngine
-        let page = makeWebContents(url: url, engine: preferred, state: nil, in: space.resolvedPersonaID)
+        let page = makeWebContents(url: url, engine: preferred, state: nil, in: space.resolvedPersonaID, agentTab: true)
         return adopt(page, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: false, select: false, folderID: folder.id, preferredEngine: preferred)
     }
 

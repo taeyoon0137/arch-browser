@@ -1,4 +1,4 @@
-// The tools that run the agents' page script (docs/agents.md, Page snapshots and refs): `snapshot` with the host's diff, `screenshot` with its limits and the boxes painted over, and the actions `click`, `type`, `press`, `select_option`, `scroll`, and `hover`, each classified by the policy from the element's facts and asked about on a card when a rule or the mode says so. Each script call and capture has `scriptWait`; a page that does not answer gets `timeout`, and a card whose capture does not answer opens without one. Actions use DOM events and say so (`inputKind: dom`).
+// The tools that run the agents' page script (docs/agents.md, Page snapshots and refs): `snapshot` with the host's diff, `screenshot` with its limits and the boxes painted over, and the actions `click`, `type`, `press`, `select_option`, `scroll`, and `hover`, each classified by the policy from the element's facts and asked about on a card when a rule or the mode says so. Each script call and capture has `scriptWait`; a page that does not answer gets `timeout`, and a card whose capture does not answer opens without one. Actions go as trusted input where the agent tab offers it (`AgentTrustedInput.swift`) and through DOM events otherwise, and say which (`inputKind`).
 import AgentControl
 import AppKit
 import Foundation
@@ -439,26 +439,41 @@ extension AgentToolHost {
         }
         // A session whose turn ended or that the user took over meanwhile acts on nothing.
         guard !Task.isCancelled, client.isCurrent else { return Self.ended }
-        let action = AgentPageAction(kind: tool == "select_option" ? "select" : tool, ref: target, text: arguments["text"]?.stringValue, replace: arguments["replace"] == .bool(true) ? true : nil,
-                                     submit: arguments["submit"] == .bool(true) ? true : nil, keys: arguments["keys"]?.stringValue,
-                                     values: Self.strings(arguments["values"]), count: arguments["count"].flatMap(Self.integer),
-                                     modifiers: Self.strings(arguments["modifiers"]), direction: arguments["direction"]?.stringValue,
-                                     amount: arguments["amount"].flatMap(Self.integer))
-        let reply: AgentActionReply
-        switch await pageScript(.act(action), in: tab, as: AgentActionReply.self, handle: handle) {
-        case .value(let value): reply = value
-        case .outcome(var failure):
+        var reply: AgentActionReply
+        var trusted = false
+        switch await trustedAction(tool, arguments, tab: tab, handle: handle, access: access, target: target, facts: facts, state: state) {
+        case .ended(var failure):
             failure.site = site
             return failure
-        }
-        if let problem = reply.problem {
-            var outcome = Self.unreachable(problem, cover: reply.cover, ref: target?.ref ?? "", handle: handle, tool: tool, missing: reply.missing) ?? Self.error("notInteractable", "\(handle) could not \(tool) there.")
-            outcome.site = site
-            return outcome
+        case .done(let value, let isTrusted):
+            reply = value
+            trusted = isTrusted
+        case .useDOM:
+            let action = AgentPageAction(kind: tool == "select_option" ? "select" : tool, ref: target, text: arguments["text"]?.stringValue, replace: arguments["replace"] == .bool(true) ? true : nil,
+                                         submit: arguments["submit"] == .bool(true) ? true : nil, keys: arguments["keys"]?.stringValue,
+                                         values: Self.strings(arguments["values"]), count: arguments["count"].flatMap(Self.integer),
+                                         modifiers: Self.strings(arguments["modifiers"]), direction: arguments["direction"]?.stringValue,
+                                         amount: arguments["amount"].flatMap(Self.integer))
+            switch await pageScript(.act(action), in: tab, as: AgentActionReply.self, handle: handle) {
+            case .value(let value): reply = value
+            case .outcome(var failure):
+                failure.site = site
+                return failure
+            }
+            if let problem = reply.problem {
+                var outcome = Self.unreachable(problem, cover: reply.cover, ref: target?.ref ?? "", handle: handle, tool: tool, missing: reply.missing) ?? Self.error("notInteractable", "\(handle) could not \(tool) there.")
+                outcome.site = site
+                return outcome
+            }
         }
         if tool == "type", let key = facts?.formKey { state.typedForms[tab.id] = (pages, typed.union([key])) }
         await settle(tab.id)
-        return actionOutcome(tool, reply: reply, handle: handle, ref: target?.ref, tab: tab, site: site, step: sentence, decision: decision)
+        // A wheel turn scrolls as the page lets it, so the position comes once the page settled.
+        if trusted, tool == "scroll", case .value(let position) = await pageScript(.inputState(need: nil, cancelRest: false, disarm: false), in: tab, as: AgentInputState.self, handle: handle) {
+            reply.scrollX = position.scrollX
+            reply.scrollY = position.scrollY
+        }
+        return actionOutcome(tool, reply: reply, handle: handle, ref: target?.ref, tab: tab, site: site, step: sentence, decision: decision, trusted: trusted)
     }
 
     /// At most `AgentLimits.actionsPerSecond` actions a second: a faster one waits for its turn.
@@ -511,9 +526,10 @@ extension AgentToolHost {
         }
     }
 
-    private func actionOutcome(_ tool: String, reply: AgentActionReply, handle: String, ref: String?, tab: AgentTabInfo, site: String?, step: String, decision: AgentActivityEntry.Decision) -> Outcome {
+    private func actionOutcome(_ tool: String, reply: AgentActionReply, handle: String, ref: String?, tab: AgentTabInfo, site: String?, step: String, decision: AgentActivityEntry.Decision,
+                               trusted: Bool) -> Outcome {
         let hit = reply.hit.map { AgentUntrusted.wrap($0, url: tab.url) } ?? "the page"
-        var structured: [String: AgentJSON] = ["tab": .string(handle), "inputKind": "dom"]
+        var structured: [String: AgentJSON] = ["tab": .string(handle), "inputKind": trusted ? "trusted" : "dom"]
         if let ref { structured["ref"] = .string(ref) }
         if reply.hit != nil { structured["hit"] = .string(hit) }
         let done: String
@@ -531,7 +547,7 @@ extension AgentToolHost {
             done = "Scrolled \(handle) to \(Self.number(Int(reply.scrollX ?? 0))), \(Self.number(Int(reply.scrollY ?? 0)))."
         default: done = "Moved the pointer over \(hit) in \(handle)."
         }
-        let text = done + " Arch sent DOM events (inputKind dom), which some sites ignore."
+        let text = done + (trusted ? " Arch sent it as the user's own input (inputKind trusted)." : " Arch sent DOM events (inputKind dom), which some sites ignore.")
         return Outcome(result: AgentToolResult(status: .ok, text: text, structured: .object(structured)), site: site, reportedTabID: nil, step: step, decision: decision)
     }
 

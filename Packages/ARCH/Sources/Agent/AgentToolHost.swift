@@ -1,4 +1,4 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; an in-app session's calls run on the same path with its site scope (P13), its own agent folder, and its cards in its panel. An outside client's call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result. A session's call waits on its card instead.
+// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, with the actions' trusted input in `AgentTrustedInput.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; an in-app session's calls run on the same path with its site scope (P13), its own agent folder, and its cards in its panel. An outside client's call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result. A session's call waits on its card instead.
 import AgentControl
 import ARCHEngine
 import Foundation
@@ -26,6 +26,8 @@ import Foundation
     /// After an action, how long the host waits for a load it started, and the pause after it.
     var settleWait: TimeInterval = 3
     var settlePause: TimeInterval = 0.3
+    /// How long trusted input's first event may take to reach the target check before the action is `stale` and the tab acts through DOM events (docs/agents.md, Actions).
+    var inputCheckWait: TimeInterval = 2
     /// The connection the call came on, which its cards name so that they end when the client leaves.
     var connectionID: UUID?
     /// The call's request ID on its connection, which a client's `tools/cancel` names.

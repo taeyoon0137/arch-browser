@@ -25,13 +25,13 @@ final class PluginPages {
             }
     }
 
-    /// Gives the Persona's tabs the plugins' page scripts whenever they change, from each page's next document on, after the app's own (`TabUnloading.pageScripts(withPluginScripts:)`). A web contents the session creates starts with the scripts of that moment.
+    /// Gives the Persona's tabs the plugins' page scripts whenever they change, from each page's next document on, after the app's own (`TabUnloading.pageScripts(withPluginScripts:inAgentTab:)`). A web contents the session creates starts with the scripts of that moment.
     func follow(_ plugins: PluginManager, of personaID: Persona.ID) {
         pageScriptSubscriptions[personaID] = plugins.$contributions.map(\.pageScripts).removeDuplicates().dropFirst()
             .sink { [weak self] scripts in
                 MainActor.assumeIsolated {
                     for tab in self?.session?.allTabs ?? [] where tab.personaID == personaID {
-                        tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: scripts))
+                        tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: scripts, inAgentTab: tab.agentOwnerID != nil))
                     }
                 }
             }
@@ -48,7 +48,7 @@ final class PluginPages {
         followedTabIDs.formIntersection(tabs.map(\.id))
         for tab in tabs where followedTabIDs.insert(tab.id).inserted {
             let plugins = session.plugins(in: tab.personaID)
-            tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: plugins.contributions.pageScripts))
+            tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: plugins.contributions.pageScripts, inAgentTab: tab.agentOwnerID != nil))
             tab.receivePageScriptMessage = { [weak session, weak tab] message, reply in
                 MainActor.assumeIsolated {
                     guard let tab, let pluginTab = session?.pluginTab(tab) else { return reply(nil) }

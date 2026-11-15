@@ -26,6 +26,8 @@ import Testing
     var agentPanel: AgentPanelModel?
     /// Real web contents behind some tabs, which the page script and captures reach, as in the page script tests.
     var webContents: [UUID: any EngineWebContents] = [:]
+    /// The trusted input of some agent tabs, as `BrowserAgentHost` gives it.
+    var inputs: [UUID: AgentTabInput] = [:]
     /// What the fake engine captures for a tab in place of its web contents' capture; a tab with neither captures nothing, as Chromium may for a tab no window shows.
     var captures: [UUID: NSImage] = [:]
     var onCapture: (() -> Void)?
@@ -126,6 +128,8 @@ import Testing
         guard let contents = webContents[tabID] else { return completion(nil) }
         if fullPage { contents.captureFullPage(completion: completion) } else { contents.captureViewport(completion: completion) }
     }
+
+    func trustedInput(of tabID: UUID) -> AgentTabInput? { inputs[tabID] }
 
     func userTabs(in personaID: UUID) -> [AgentTabInfo] { tabs.filter { userTabIDs.contains($0.id) && $0.agentOwnerID == nil } }
 

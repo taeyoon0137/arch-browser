@@ -1,4 +1,4 @@
-// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, passes on what happens in them, asks the service about each of their navigations and downloads, and hands it their file choosers. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
+// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, gives the tool host their trusted input, passes on what happens in them, asks the service about each of their navigations and downloads, and hands it their file choosers. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
 import Agent
 import AppKit
 import ARCHEngine
@@ -118,6 +118,12 @@ import Foundation
         guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(nil) }
         giveViewport(to: tab)
         if fullPage { tab.webContents.captureFullPage(completion: completion) } else { tab.webContents.captureViewport(completion: completion) }
+    }
+
+    /// Only agent tabs, whose pages run the target check (`AgentPageScripts.targetCheck`), act through trusted input.
+    public func trustedInput(of tabID: UUID) -> AgentTabInput? {
+        guard let tab = agentTab(tabID), let input = tab.webContents.input else { return nil }
+        return AgentTabInput(input: input, zoomFactor: tab.webContents.zoomFactor)
     }
 
     /// A page whose view no window shows and has never been sized lays out in a viewport of nothing, where no element is visible or reachable, so it gets the size of the front window's content first.

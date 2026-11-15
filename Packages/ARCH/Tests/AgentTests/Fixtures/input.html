@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Input fixture</title>
+<!-- The page of the trusted input tests and of regression check 84 (docs/agents.md, Actions): it logs each event's type, isTrusted, and target; "Continue (over)" and "Continue (move)" move the "Order" button over themselves on mouseover and mousemove, and with "Move Order on a timer" checked a timer moves it over "Continue (timer)" and back; the coupon field's focus handler moves focus to the gift note; "Attach a receipt" calls the file input's click(). -->
+<style>
+  body { margin: 0; padding: 16px; font: 14px -apple-system, sans-serif; }
+  section, form { margin-bottom: 16px; }
+  textarea { width: 240px; height: 48px; }
+  #list { width: 200px; height: 80px; overflow-y: auto; border: 1px solid #888; }
+  #list p { height: 24px; margin: 0; }
+  #order { position: absolute; left: 600px; top: 16px; width: 120px; height: 32px; z-index: 10; }
+  #log { position: absolute; left: 600px; top: 64px; margin: 0; font: 11px ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<form id="form" action="/saved" method="post">
+  <label>Name <input id="name" name="name"></label>
+  <label>Notes <textarea id="notes" name="notes"></textarea></label>
+  <button id="save">Save</button>
+</form>
+<section>
+  <button id="go" type="button">Go</button>
+  <label>Size <select id="size"><option value="s">Small</option><option value="l">Large</option></select></label>
+  <label>Color <input id="color" type="color"></label>
+  <label>Day <input id="day" type="date"></label>
+  <label>Receipt <input id="receipt" type="file"></label>
+  <button id="attach" type="button">Attach a receipt</button>
+</section>
+<div id="list" tabindex="0"><p>One</p><p>Two</p><p>Three</p><p>Four</p><p>Five</p><p>Six</p><p>Seven</p><p>Eight</p></div>
+<section>
+  <button id="over" type="button">Continue (over)</button>
+  <button id="move" type="button">Continue (move)</button>
+  <button id="timer" type="button">Continue (timer)</button>
+  <label><input id="timed" type="checkbox"> Move Order on a timer</label>
+</section>
+<section>
+  <label>Coupon <input id="coupon"></label>
+  <label>Gift note <input id="gift"></label>
+</section>
+<button id="order" type="button">Order</button>
+<pre id="log"></pre>
+<script>
+  const log = [];
+  window.inputLog = log;
+  const out = document.getElementById("log");
+  const order = document.getElementById("order");
+  for (const kind of ["pointerover", "mouseover", "pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "pointermove", "mousemove", "keydown", "keypress",
+                      "keyup", "beforeinput", "input", "wheel", "scroll", "submit"]) {
+    document.addEventListener(kind, (event) => {
+      const target = event.target;
+      log.push({ type: kind, trusted: event.isTrusted, target: target.id || (target.nodeName || "document").toLowerCase() });
+      out.textContent = log.slice(-16).map((entry) => entry.type + " " + entry.trusted + " " + entry.target).join("\n");
+    }, true);
+  }
+  function moveOrderOver(button) {
+    const box = button.getBoundingClientRect();
+    Object.assign(order.style, { left: box.left + scrollX + "px", top: box.top + scrollY + "px", width: box.width + "px", height: box.height + "px" });
+  }
+  function restoreOrder() {
+    Object.assign(order.style, { left: "", top: "", width: "", height: "" });
+  }
+  document.getElementById("over").addEventListener("mouseover", (event) => moveOrderOver(event.currentTarget));
+  document.getElementById("move").addEventListener("mousemove", (event) => moveOrderOver(event.currentTarget));
+  let covering = false;
+  setInterval(() => {
+    if (!document.getElementById("timed").checked) return;
+    covering = !covering;
+    if (covering) moveOrderOver(document.getElementById("timer")); else restoreOrder();
+  }, 10);
+  order.addEventListener("click", () => { document.body.dataset.ordered = "true"; });
+  document.getElementById("coupon").addEventListener("focus", () => document.getElementById("gift").focus());
+  document.getElementById("attach").addEventListener("click", () => document.getElementById("receipt").click());
+  document.getElementById("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    document.body.dataset.saved = document.getElementById("name").value;
+  });
+</script>
+</body>
+</html>

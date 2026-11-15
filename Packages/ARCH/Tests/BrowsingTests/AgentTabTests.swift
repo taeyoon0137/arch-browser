@@ -177,6 +177,30 @@ import Testing
     }
 
     /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts and reaches the agents' service first through `BrowserAgentHost`, with who asks as Arch's panel names it. The service's denial, a new document, quitting, a change of engine, the tab's close, and a session without the service's callback give the page no file, and the user's own tab still queues Arch's panel.
+    /// Only agent tabs run the agents' target check and give the tool host their trusted input, at the page's zoom (docs/agents.md, Actions).
+    @Test func onlyAgentTabsRunTheTargetCheckAndGiveTheirTrustedInput() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentInputTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let host = BrowserAgentHost(session: session)
+        let space = try #require(session.spaces.first)
+        let info = try #require(host.openAgentTab(at: URL(string: "https://example.org/form")!, engine: .webKit, for: AgentTabOwner(id: owner, spaceID: space.id, folderName: "Task")))
+        let agentPage = try #require(session.tabs.first { $0.id == info.id }?.webContents as? PageDouble)
+        #expect(agentPage.pageScripts == [TabUnloading.inputScript, AgentPageScripts.targetCheck])
+        #expect(host.trustedInput(of: info.id) == nil)
+        agentPage.input = InputDouble()
+        agentPage.zoomFactor = 1.5
+        let input = try #require(host.trustedInput(of: info.id))
+        #expect(input.input === agentPage.input && input.zoomFactor == 1.5)
+        let userTab = session.openTab(url: URL(string: "https://example.org/mine"), in: space.id, select: false)
+        let userPage = try #require(userTab.webContents as? PageDouble)
+        userPage.input = InputDouble()
+        #expect(userPage.pageScripts == [TabUnloading.inputScript] && host.trustedInput(of: userTab.id) == nil)
+    }
+
     @Test func anAgentTabsFileChooserReachesTheServiceBeforeAnyPanelAndEndsWithItsPage() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentChooserTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -469,10 +493,14 @@ final class PageDouble: EngineWebContents {
     let isInPictureInPicture = false
     let closingStopsDownloads = false
     let devTools: (any EngineDevTools)? = nil
+    var input: (any EngineInput)?
+    /// The page scripts the page got with its configuration, and from `setPageScripts(_:)` since.
+    private(set) var pageScripts: [EnginePageScript]
 
-    init(url: URL?, engine: EngineKind = .webKit) {
+    init(url: URL?, engine: EngineKind = .webKit, pageScripts: [EnginePageScript] = []) {
         self.engineKind = engine
         self.url = url
+        self.pageScripts = pageScripts
     }
 
     /// Starts and finishes a load of `address`, as the engine reports one.
@@ -487,7 +515,7 @@ final class PageDouble: EngineWebContents {
 
     func find(_ text: String, forward: Bool, matchCase: Bool, completion: @escaping (EngineFindResult) -> Void) {}
     func stopFind() {}
-    func setPageScripts(_ scripts: [EnginePageScript]) {}
+    func setPageScripts(_ scripts: [EnginePageScript]) { pageScripts = scripts }
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void) {}
     func postPageScriptMessage(_ json: String, toWorld world: String) {}
     func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void) {}
@@ -496,6 +524,15 @@ final class PageDouble: EngineWebContents {
     func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {}
     func exitFullscreen() {}
     func tryToClose(completion: @escaping (Bool) -> Void) { completion(true) }
+}
+
+/// Trusted input that sends nothing.
+private final class InputDouble: EngineInput {
+    func movePointer(to point: CGPoint, modifiers: EngineInputModifiers) throws {}
+    func click(at point: CGPoint, count: Int, modifiers: EngineInputModifiers) throws {}
+    func scroll(at point: CGPoint, deltaX: Double, deltaY: Double, modifiers: EngineInputModifiers) throws {}
+    func press(_ key: EngineKey, modifiers: EngineInputModifiers) throws {}
+    func insertText(_ text: String) throws {}
 }
 
 private final class MediaDouble: EngineMediaSession {
@@ -563,7 +600,9 @@ final class SessionTestEngine: Engine, EngineApplication {
             self.readCookies = readCookies
         }
         var cookiesDidChange: (() -> Void)?
-        func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents { PageDouble(url: configuration.initialURL, engine: kind) }
+        func createWebContents(_ configuration: EngineWebContentsConfiguration) -> any EngineWebContents {
+            PageDouble(url: configuration.initialURL, engine: kind, pageScripts: configuration.pageScripts)
+        }
         func takeOwnership(of webContents: any EngineWebContents) {}
         func closeWebContents(_ webContents: any EngineWebContents) {}
         func closeAllWebContents() {}

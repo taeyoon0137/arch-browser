@@ -190,6 +190,8 @@ import Testing
         #expect(Expected(AgentPolicy.decide(.interaction(allowed), client: .outside, mode: .askBeforeActing, allowances: AgentAllowances(page: true, site: true))) == .asksSensitive([.p4]))
         // Other keys are no click.
         for keys in ["a", "Tab", "ArrowDown", "Escape"] { #expect(press(keys, on: order) == .allow, "\(keys)") }
+        // A focused button, as trusted input presses it on its own (VII.21).
+        for keys in ["Enter", "Space"] { #expect(press(keys, on: Self.button("Place order")) == .asksSensitive([.p4]), "\(keys)") }
         // A link, a checkbox, a radio button, and a switch, and a submit input by its value.
         for role in ["link", "checkbox", "radio", "switch"] {
             #expect(press("Space", on: AgentElementFacts(tag: "div", role: role, name: "I agree to the terms")) == .asksSensitive([.p4]), "\(role)")
@@ -214,6 +216,10 @@ import Testing
         #expect(press("Enter", on: Self.fileInput, mode: .askBeforeActing) == .asks([]))
         // A text field is no control: Enter there is P3's and P4's submission by the default button, which `submits` carries.
         #expect(press("Enter", on: Self.field(name: "Place order")) == .allow)
+        let signIn = Self.field(name: "Email", formFields: [.password])
+        let enter = AgentInteraction(tool: "press", element: signIn, text: "Enter", submits: true, pageHost: "shop.example")
+        #expect(Expected(AgentPolicy.decide(.interaction(enter), client: .outside, mode: .actInAgentTabs)) == .asksSensitive([.p3]))
+        #expect(press("Space", on: signIn) == .allow)
     }
 
     @Test func writtenAddressesAndRedirectHopsInTheScope() {

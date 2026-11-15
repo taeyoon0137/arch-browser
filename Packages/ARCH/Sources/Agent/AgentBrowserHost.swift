@@ -1,4 +1,4 @@
-// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, a window for the grant sheet, the agent tabs with what happens in them, the page script and captures that snapshots, actions, and screenshots use, the user's tabs that `request_tab` offers, the downloads and file choosers of agent tabs, and the agent panel's place in the windows. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`.
+// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, a window for the grant sheet, the agent tabs with what happens in them, the page script, captures, and trusted input that snapshots, actions, and screenshots use, the user's tabs that `request_tab` offers, the downloads and file choosers of agent tabs, and the agent panel's place in the windows. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -207,6 +207,17 @@ public struct AgentDownloadInfo: Equatable, Sendable {
     }
 }
 
+/// An agent tab's trusted input (`EngineWebContents.input`) with the page's zoom factor, which maps an element's box from the page script to a point in the view (`EngineInput`).
+@MainActor public struct AgentTabInput {
+    public let input: any EngineInput
+    public let zoomFactor: Double
+
+    public init(input: any EngineInput, zoomFactor: Double) {
+        self.input = input
+        self.zoomFactor = zoomFactor
+    }
+}
+
 /// A page of the browsing history.
 public struct AgentHistoryPage: Equatable, Sendable {
     public var url: URL
@@ -238,6 +249,8 @@ public struct AgentHistoryPage: Equatable, Sendable {
     func runPageScript(_ source: String, world: String, in tabID: UUID, completion: @escaping (Result<String?, any Error>) -> Void)
     /// The tab's viewport, or its whole page, as an image; nil when the engine gives none, as Chromium may for a tab that no window shows.
     func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void)
+    /// An agent tab's trusted input, which the action tools use where it exists (docs/agents.md, Actions); nil for a tab of the user's and for an engine that offers none.
+    func trustedInput(of tabID: UUID) -> AgentTabInput?
     /// The user's own open tabs of a Persona, without agent tabs, in sidebar order, which `request_tab` offers.
     func userTabs(in personaID: UUID) -> [AgentTabInfo]
     /// Shows the tab in a main window, without moving it out of its folder: for Take Over, `hand_to_user`, and the panel's steps.
@@ -280,6 +293,7 @@ public struct AgentHistoryPage: Equatable, Sendable {
 
 public extension AgentBrowserHost {
     var searchResultsAddress: AgentSearchResultsAddress? { nil }
+    func trustedInput(of tabID: UUID) -> AgentTabInput? { nil }
 }
 
 public extension EnginePermissionType {

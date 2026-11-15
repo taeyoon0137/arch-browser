@@ -234,7 +234,7 @@ public enum AgentHarness {
         - Typing personal data shows the user the exact text first. Type only data the user gave you for the task. Use ask_user when a field's meaning or the right value is unclear; do not guess values for the user.
         - Submitting asks the user when the form has personal, password, code, or payment fields, or sends what you typed to another site. Before a submission that cannot be undone or that others will see, call request_approval with a one-sentence summary, even when Arch would not ask on its own.
         - You never choose a file to upload. When a form needs a file, hand the tab to the user with hand_to_user.
-        - Arch acts through page events, which the result reports as inputKind dom. If a site ignores your input, say so; do not work around it through other fields or controls.
+        - Arch acts as the user's own input where the tab allows it, which the result reports as inputKind trusted, and otherwise through page events, inputKind dom. If a site ignores your input, say so; do not work around it through other fields or controls.
         """
 
     static let researchTopic = """
