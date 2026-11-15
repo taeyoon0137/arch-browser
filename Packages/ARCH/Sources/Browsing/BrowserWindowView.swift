@@ -23,6 +23,8 @@ public struct BrowserWindowView: View {
     /// The window's child windows when the card appeared or the window last changed full screen, such as the full screen toolbar's. Only child windows opened after that, like the card's popovers, keep the card visible.
     @State private var childWindowsBeforePeek: Set<ObjectIdentifier> = []
     @State private var windowReference = WindowReference()
+    /// How far a swipe that moves the docked library has pushed the page, while it does.
+    @State private var librarySwipePush: CGFloat?
     @StateObject private var sidebarDrag = SidebarDragState()
 
     public init(session: BrowserSession, window: BrowserWindowModel) {
@@ -44,6 +46,12 @@ public struct BrowserWindowView: View {
         EdgeInsets(top: Self.pageMargin, leading: windowModel.isSidebarVisible ? Self.sidebarGap - SidebarView.inset : Self.pageMargin, bottom: Self.pageMargin, trailing: Self.pageMargin)
     }
 
+    /// How far the open library pushes the page aside. The page keeps its size, so it moves rather than narrows.
+    private var libraryPush: CGFloat {
+        guard windowModel.isSidebarVisible, !windowModel.isPageFullscreen else { return 0 }
+        return librarySwipePush ?? (windowModel.isLibraryVisible ? SidebarColumn.libraryWidening : 0)
+    }
+
     public var body: some View {
         ZStack {
             HStack(spacing: 0) {
@@ -54,14 +62,30 @@ public struct BrowserWindowView: View {
                     // Docking the floating card keeps the sidebar where the card was; only the page resizes.
                     .transition(isSidebarPeeking ? .identity : .move(edge: .leading))
                 }
-                PageAreaView(session: session, sidebarDrag: sidebarDrag, margins: pageMargins)
-                if !windowModel.isPageFullscreen {
-                    if windowModel.agentPanel != nil {
-                        AgentPanelColumn(session: session)
-                    } else {
-                        PageReaderColumn(session: session)
+                // While the library is open, the page and the panel beside it move aside at their size, dimmed and still, as the sidebar's visible part is; a click on them closes the library.
+                HStack(spacing: 0) {
+                    PageAreaView(session: session, sidebarDrag: sidebarDrag, margins: pageMargins)
+                    if !windowModel.isPageFullscreen {
+                        if windowModel.agentPanel != nil {
+                            AgentPanelColumn(session: session)
+                        } else {
+                            PageReaderColumn(session: session)
+                        }
                     }
                 }
+                .offset(x: libraryPush)
+                .opacity(1 - SidebarColumn.displacedDimming * libraryPush / SidebarColumn.libraryWidening)
+                .allowsHitTesting(libraryPush == 0)
+                .overlay {
+                    if libraryPush > 0 {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .offset(x: libraryPush)
+                            .onTapGesture { withAnimation(SidebarView.pageSpring) { windowModel.isLibraryVisible = false } }
+                            .accessibilityHidden(true)
+                    }
+                }
+                .accessibilityHidden(libraryPush > 0)
             }
             .overlay(alignment: .bottomTrailing) {
                 if !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
@@ -88,6 +112,10 @@ public struct BrowserWindowView: View {
         .environmentObject(windowModel)
         .environment(\.addressPillPull, addressPillPull)
         .onPreferenceChange(AddressPillFrameKey.self) { addressPillFrame = $0 }
+        // When the fingers lift, the page settles with the library's spring.
+        .onPreferenceChange(LibrarySwipePushKey.self) { push in
+            if push == nil { withAnimation(SidebarView.pageSpring) { librarySwipePush = nil } } else { librarySwipePush = push }
+        }
         .background(GeometryReader { proxy in
             Color.clear
                 .onAppear { windowSize = proxy.size }

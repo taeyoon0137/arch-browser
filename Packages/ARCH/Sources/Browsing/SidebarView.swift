@@ -144,12 +144,16 @@ struct SidebarSwipeHandlers {
     let ended: (CGFloat, CGFloat) -> Void
 }
 
-/// The library opens to the sidebar's left and pushes it aside. When docked, the column widens by `libraryPeek` and the gap around the dividing line. The library takes the sidebar's width; the sidebar's first `libraryPeek` points stay visible, dimmed and still, until a click or swipe brings it back. When floating, the library fills the card.
+/// The library opens to the sidebar's left and pushes it aside. When docked, the column draws `libraryWidening` past its own width, the gap around the dividing line and `libraryPeek`, while it keeps the sidebar's width in the window's layout: the page keeps its size and moves aside by that distance (`BrowserWindowView`). The library takes the sidebar's width; the sidebar's first `libraryPeek` points stay visible, dimmed and still, as does the page, until a click on either or a swipe brings them back. When floating, the library fills the card.
 struct SidebarColumn: View {
     /// About a quarter of the narrowest sidebar.
     static let libraryPeek: CGFloat = 60
     /// The space on each side of the line between the library and the sidebar, beyond their own margins.
     static let dividerMargin: CGFloat = 8
+    /// How far the docked column reaches past its width while the library is open, which is how far the page moves aside.
+    static let libraryWidening: CGFloat = 2 * dividerMargin + libraryPeek
+    /// How much the open library dims what it pushes aside: the sidebar's visible part and the page.
+    static let displacedDimming: Double = 0.5
 
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -168,7 +172,7 @@ struct SidebarColumn: View {
     private var reveal: CGFloat { swipeReveal ?? (windowModel.isLibraryVisible ? travel : 0) }
     private var progress: CGFloat { reveal / travel }
     /// How much the docked column widens while the library is open.
-    private var widening: CGFloat { isFloating ? 0 : gap + peek }
+    private var widening: CGFloat { isFloating ? 0 : Self.libraryWidening }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -186,7 +190,7 @@ struct SidebarColumn: View {
                                                            ended: { distance, velocity in finishLibrarySwipe(opens: distance > travel * 0.3 || velocity > 300) }))
                 .frame(width: width)
                 .environment(\.libraryReveal, progress)
-                .opacity(1 - 0.5 * progress)
+                .opacity(1 - Self.displacedDimming * progress)
                 .allowsHitTesting(progress == 0)
                 .accessibilityHidden(progress > 0)
                 .overlay {
@@ -212,6 +216,10 @@ struct SidebarColumn: View {
         .background(SpaceSwipeView(isEnabled: windowModel.isLibraryVisible,
                                    onChange: { distance in swipeReveal = min(travel, max(0, travel + distance)) },
                                    onEnd: { distance, velocity in finishLibrarySwipe(opens: !(distance < -travel * 0.3 || velocity < -300)) }))
+        // The window lays the column out at the sidebar's width; the open library's widening draws past it, where the page has moved aside.
+        .frame(width: width, alignment: .leading)
+        // While fingers move the library, the page follows them; otherwise it follows `isLibraryVisible`.
+        .preference(key: LibrarySwipePushKey.self, value: isFloating ? nil : swipeReveal.map { widening * $0 / travel })
         // The handle covers the gap between the sidebar's controls and the page, including the sidebar's margin and the gap outside it.
         .overlay(alignment: .trailing) {
             if progress == 0, !isFloating {
@@ -232,6 +240,15 @@ struct SidebarColumn: View {
             swipeReveal = nil
             windowModel.isLibraryVisible = opens
         }
+    }
+}
+
+/// How far a swipe that moves the docked library has pushed the page aside, or nil while no swipe moves it.
+struct LibrarySwipePushKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
     }
 }
 
