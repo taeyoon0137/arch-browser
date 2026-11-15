@@ -125,7 +125,7 @@ let package = Package(
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences", "Browsing", "Sync"], path: "Packages/ARCH/Tests/PreferencesTests"),
-        // The settings tests compare the synced keys and values with the constants of `ARCHEngine`, `Browsing`, and `Preferences`.
+        // The settings tests compare the synced keys and values with the constants of `ARCHEngine`, `Browsing`, and `Preferences`; the sidebar record tests build live folders (`LiveFolders`).
         .testTarget(name: "SyncTests", dependencies: ["Sync", "ARCHEngine", "Browsing", "Preferences", "LiveFolders"], path: "Packages/ARCH/Tests/SyncTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],

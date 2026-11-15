@@ -96,6 +96,10 @@ public final class AgentControlConnection {
         let peer: AgentPeer
         do {
             peer = try check(socket)
+        } catch let AgentPeerCheckFailure.unreadablePeer(code) where code == ENOTCONN || code == EINVAL {
+            // The listener closed before the check read it, as Arch closes a client that fails its own check; nothing was sent.
+            Darwin.close(socket)
+            throw AgentClientError.closedBeforeAnswer
         } catch let failure as AgentPeerCheckFailure {
             Darwin.close(socket)
             throw AgentClientError.notArch(failure)
