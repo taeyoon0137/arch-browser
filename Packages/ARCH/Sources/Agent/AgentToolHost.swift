@@ -248,7 +248,7 @@ import Foundation
         }
         return [
             "Reading and navigating in your own agent tabs run without asking. \(interactions)",
-            "Arch refuses typing passwords, codes, or card details, file choosers, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, and every action in a tab the user shared ask the user.",
+            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, every action in a tab the user shared, and a page's file chooser ask the user, who picks files in Arch; you learn only how many.",
         ]
     }
 
@@ -1059,8 +1059,52 @@ import Foundation
         case .closedOverLimit:
             json["kind"] = "closedOverLimit"
             line = "A page in \(handle) opened another tab, which Arch closed: a client has at most \(AgentLimits.agentTabs) agent tabs open."
+        case .fileChooserAsked(let mode):
+            json["kind"] = "fileChooserAsked"
+            json["rule"] = "P7"
+            json["asks"] = .string(Self.chooserName(mode))
+            line = "A page in \(handle) asks for \(Self.chooserObject(mode)), which waits for the user in Arch (P7). The user picks in Arch's panel, and you learn only how many items the page receives."
+        case .fileChooserEnded(let mode, let chosen):
+            json["kind"] = "fileChooserEnded"
+            json["rule"] = "P7"
+            json["asks"] = .string(Self.chooserName(mode))
+            json["chosen"] = chosen.map { .number(Double($0)) } ?? .null
+            switch chosen {
+            case nil: line = "The file chooser in \(handle) ended before the user chose, so the page received no file (P7)."
+            case 0?: line = "The user cancelled the file chooser in \(handle), so the page received no file (P7)."
+            case let count?: line = "The user chose \(Self.chosenItems(count, mode: mode)) for the page in \(handle) (P7)."
+            }
         }
         return (line, .object(json))
+    }
+
+    /// What a file chooser asks for, as an event names it.
+    static func chooserName(_ mode: EngineFileChooserRequest.Mode) -> String {
+        switch mode {
+        case .openFile: return "file"
+        case .openFiles: return "files"
+        case .openFolder: return "folder"
+        case .save: return "save"
+        }
+    }
+
+    /// What a file chooser asks for, in a sentence.
+    static func chooserObject(_ mode: EngineFileChooserRequest.Mode) -> String {
+        switch mode {
+        case .openFile: return "a file"
+        case .openFiles: return "files"
+        case .openFolder: return "a folder"
+        case .save: return "a place to save a file"
+        }
+    }
+
+    /// How many items the user chose, in a sentence: files, a folder, whose files the page receives, or a place to save.
+    static func chosenItems(_ count: Int, mode: EngineFileChooserRequest.Mode) -> String {
+        switch mode {
+        case .openFolder: return "a folder, whose files the page received"
+        case .save: return "a place to save the file"
+        case .openFile, .openFiles: return count == 1 ? "1 file" : "\(count) files"
+        }
     }
 
     // MARK: Helpers
@@ -1334,7 +1378,7 @@ extension AgentToolHost {
         }
         return [
             "Reading runs without asking, and so does following a link by its ref. An address you write opens without asking only when a page or the user showed it, when it is the search engine's results address, or when it is the bare origin of a site in scope; any other address asks the user in every mode, and so does a redirect of it to a site outside the scope. \(interactions)",
-            "Arch refuses typing passwords, codes, or card details, file choosers, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads and links to other apps ask the user, and the tabs the user shared are for reading only.",
+            "Arch refuses typing passwords, codes, or card details, CAPTCHAs, sites excluded from AI, internal pages, and tabs you were not given. Hand such steps to the user with hand_to_user. Downloads, links to other apps, and a page's file chooser ask the user, who picks files in Arch; you learn only how many. The tabs the user shared are for reading only.",
         ]
     }
 

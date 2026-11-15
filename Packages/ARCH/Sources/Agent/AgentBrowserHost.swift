@@ -1,4 +1,4 @@
-// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, a window for the grant sheet, the agent tabs with what happens in them, the page script and captures that snapshots, actions, and screenshots use, the user's tabs that `request_tab` offers, the downloads of agent tabs, and the agent panel's place in the windows. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`.
+// What the agents' service needs from the browser (docs/agents.md, Parts and modules): Personas, spaces, tabs in sidebar order, the Agents Persona, a window for the grant sheet, the agent tabs with what happens in them, the page script and captures that snapshots, actions, and screenshots use, the user's tabs that `request_tab` offers, the downloads and file choosers of agent tabs, and the agent panel's place in the windows. `Browsing` implements it as `BrowserAgentHost`, so that `Agent` depends on neither `Browsing` nor `Plugins`.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -141,6 +141,72 @@ public struct AgentDownloadInfo: Equatable, Sendable {
     }
 }
 
+/// A file chooser that a page in an agent tab opened, whatever started it, which waits for the user's answer on a P7 card before any panel opens (docs/agents.md, Rules). `Browsing` makes it with the request, who asks as Arch's panel names it, and Arch's panel. It ends once, and the page receives only what the user picks in that panel.
+@MainActor public final class AgentFileChooser {
+    public let request: EngineFileChooserRequest
+    /// Who asks, as Arch's panel names it (`FileChooserPanel.asker(of:)`): from the request's `origin` and `pageOrigin`, never from the tab's address.
+    public let asker: String
+    /// Whether the page has its answer.
+    public private(set) var hasEnded = false
+    /// Set by the tool host: the chooser ended without its card, as when the tab loaded another document or closed, so the card goes.
+    var didEnd: (() -> Void)?
+    /// Shows Arch's panel for the request as a sheet on the window and answers with what the user chose, or nil for Cancel; returns what closes the panel with Cancel.
+    private let present: (NSWindow, @escaping ([URL]?) -> Void) -> () -> Void
+    private let answer: ([URL]?) -> Void
+    private var closePanel: (() -> Void)?
+    private var isEnding = false
+
+    public init(request: EngineFileChooserRequest, asker: String, present: @escaping (NSWindow, @escaping ([URL]?) -> Void) -> () -> Void, answer: @escaping ([URL]?) -> Void) {
+        self.request = request
+        self.asker = asker
+        self.present = present
+        self.answer = answer
+    }
+
+    /// Whether Arch's panel for the chooser is showing.
+    public var showsPanel: Bool { closePanel != nil }
+
+    /// Allow on the card: shows Arch's panel as a sheet on `window` and gives the page only what the user picks there: file addresses, and only the first for one item (`EngineFileChooserRequest.answer(from:)`). `chosen` receives how many items the page received, 0 when the user cancelled, or nil when the chooser ended before the user chose.
+    public func choose(on window: NSWindow, chosen: @escaping (Int?) -> Void) {
+        guard !hasEnded else { return chosen(nil) }
+        guard closePanel == nil else { return }
+        var isAnswered = false
+        let close = present(window) { [self] urls in
+            guard !isAnswered else { return }
+            isAnswered = true
+            let ended = isEnding
+            let files = ended ? nil : request.answer(from: urls)
+            finish(files)
+            chosen(ended ? nil : files?.count ?? 0)
+        }
+        if !isAnswered { closePanel = close }
+    }
+
+    /// Gives the page no file: the user did not allow the chooser, or the card ended without the user.
+    public func deny() {
+        finish(nil)
+    }
+
+    /// Ends the chooser with no file because its page moved on, its tab closed or changed engines, or Arch quits. A panel that is showing closes with Cancel, and the card goes.
+    public func end() {
+        guard !hasEnded else { return }
+        let didEnd = didEnd
+        isEnding = true
+        // AppKit runs the panel's completion before `endSheet` returns.
+        closePanel?()
+        finish(nil)
+        didEnd?()
+    }
+
+    private func finish(_ files: [URL]?) {
+        guard !hasEnded else { return }
+        hasEnded = true
+        closePanel = nil
+        didEnd = nil
+        answer(files)
+    }
+}
+
 /// A page of the browsing history.
 public struct AgentHistoryPage: Equatable, Sendable {
     public var url: URL
@@ -208,6 +274,8 @@ public struct AgentHistoryPage: Equatable, Sendable {
     var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)? { get set }
     /// Set by the service; the host asks it when a page in an agent tab starts a download. False refuses the download, and the tab then reports `downloadAsked` (P6).
     var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)? { get set }
+    /// Set by the service; the host hands it every file chooser of a page in an agent tab before any panel opens, and the service ends the chooser through its card (P7). Without it, the page gets no file.
+    var agentTabChoosesFiles: ((_ ownerID: UUID, _ tabID: UUID, _ chooser: AgentFileChooser) -> Void)? { get set }
 }
 
 public extension AgentBrowserHost {

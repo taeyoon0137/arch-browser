@@ -179,7 +179,7 @@ import Testing
         #expect(lines.contains("  - frame \u{201C}Payments\u{201D} (another site; not read)"))
         #expect(!text.contains("4111"))
         // The policy's annotations: file inputs, CAPTCHAs, and controls that read as a step that cannot be undone.
-        #expect(lines.contains("  - button \u{201C}Receipt\u{201D} [e15] (agents do not choose files)"))
+        #expect(lines.contains("  - button \u{201C}Receipt\u{201D} [e15] (the user picks files)"))
         #expect(lines.contains("  - checkbox \u{201C}I'm not a robot\u{201D} [e16] not checked (CAPTCHA: hand to the user)"))
         #expect(lines.contains("    - button \u{201C}Accept\u{201D} [e22] (asks the user)"))
         #expect(lines.contains("  - button \u{201C}Remove item\u{201D} [e27] (asks the user)"))
@@ -371,13 +371,15 @@ import Testing
         let fixture = try await PageFixture()
         fixture.toolHost.approvals.authenticator = FakeAuthenticator()
         _ = await fixture.outline()
-        // P1, P7, and P18 refuse, whatever the mode.
+        // P1 and P18 refuse, whatever the mode, and P7 refuses typing into a file input, which would name a file. A click on the file input runs, and the chooser it opens asks under P7; this page's web view has no UI delegate, so it opens nothing.
         for (ref, rule) in [("e7", "P1"), ("e8", "P1"), ("e10", "P1"), ("f1e2", "P1")] {
             let result = await fixture.call("type", ["tab": "t1", "ref": .string(ref), "text": "x"])
             #expect(result.status == .refused && result.code == rule, "\(ref)")
         }
         #expect(await fixture.call("press", ["tab": "t1", "ref": "e7", "keys": "a"]).code == "P1")
-        #expect(await fixture.call("click", ["tab": "t1", "ref": "e15"]).code == "P7")
+        #expect(await fixture.call("type", ["tab": "t1", "ref": "e15", "text": "/etc/hosts"]).code == "P7")
+        let receipt = await fixture.call("click", ["tab": "t1", "ref": "e15"])
+        #expect(receipt.status == .ok && fixture.toolHost.approvals.pending.isEmpty, "\(receipt.text)")
         #expect(await fixture.call("click", ["tab": "t1", "ref": "e16"]).code == "P18")
         #expect(try await fixture.page.evaluate("document.querySelector('[name=password]').value") as? String == "hunter2")
         // P2 asks on a sensitive card that shows the exact text, and Deny keeps the field as it was.

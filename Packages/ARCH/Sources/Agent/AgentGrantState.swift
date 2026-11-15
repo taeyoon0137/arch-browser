@@ -1,5 +1,6 @@
 // What the tool host keeps for one grant, or for one in-app session, for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, the calls that still run, which a Stop cancels, and the calls that wait for the user past the first answer.
 import AgentControl
+import ARCHEngine
 import Foundation
 
 /// The handles a grant's client uses for the launch: `t1`, `t2`, and so on for tabs, `s1`, `s2` for spaces, and `a1`, `a2` for calls that wait for the user, never reused, and the tabs the user shared with it through `request_tab`.
@@ -130,8 +131,12 @@ struct AgentEvent: Equatable {
         case hopStopped
         /// A page opened a tab beyond the limit of agent tabs, which Arch closed.
         case closedOverLimit
-        /// The user answered a card about a download or a link to another app that a page started, with the sentence to say.
+        /// The user answered a card about a download, a link to another app, or a file chooser that a page started, with the sentence to say.
         case decided(String)
+        /// Rule P7: a page in the tab opened a file chooser for this, which waits for the user.
+        case fileChooserAsked(EngineFileChooserRequest.Mode)
+        /// The user picked in Arch's panel for a page's file chooser: how many items the page received, 0 when the user cancelled, or nil when the chooser ended first. Never a name or a path.
+        case fileChooserEnded(EngineFileChooserRequest.Mode, chosen: Int?)
     }
 
     /// Counts the grant's events, so that a call can tell those it caused.
@@ -202,7 +207,7 @@ struct AgentTabActivity: Equatable {
         case .report(.stoppedLoading): tab.stops += 1
         case .report(.closed), .report(.takenOver): tab.isGone = true
         case .refused: tab.refusals += 1
-        case .report, .closedOverLimit, .decided, .hopStopped: break
+        case .report, .closedOverLimit, .decided, .hopStopped, .fileChooserAsked, .fileChooserEnded: break
         }
         activity[tabID] = tab
         switch kind {

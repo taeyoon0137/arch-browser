@@ -244,7 +244,8 @@ extension AgentToolHost {
         guard node.ref != nil else { return nil }
         let facts = AgentElementFacts(tag: "", role: node.role, name: node.name ?? "", inputType: node.inputType, valueClass: node.valueClass, isEditable: node.isEditable ?? false,
                                       isFileInput: node.isFileInput ?? false, submitsForm: node.submits ?? false, formFields: node.formFields ?? [])
-        if facts.isFileInput { return "(agents do not choose files)" }
+        // The chooser a click opens asks the user, who picks the files (P7).
+        if facts.isFileInput { return "(the user picks files)" }
         if AgentPolicy.isChallenge(facts) { return "(CAPTCHA: hand to the user)" }
         if facts.isEditable, facts.valueClass == .hidden { return "(agents do not type here)" }
         if access == .run { return nil }

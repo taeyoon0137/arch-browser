@@ -162,7 +162,7 @@ struct AgentApprovalCard: View {
                             if isReplying, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { answer(.reply(reply)) } else { isReplying = true }
                         }
                     } else {
-                        AgentPointerButton(title: offer.title(site: approval.site), requiresPointer: offer.allows && approval.isSensitive) { answer(offer) }
+                        AgentPointerButton(title: offer.title(site: approval.site), requiresPointer: offer.allows && approval.isSensitive, inWindow: { answer(offer, in: $0) })
                     }
                 }
             }
@@ -170,8 +170,9 @@ struct AgentApprovalCard: View {
         .controlSize(.small)
     }
 
-    private func answer(_ answer: AgentApprovalAnswer) {
-        Task { await approvals.answer(approval.id, with: answer) }
+    /// Answers in the card's window, where a file chooser's Allow opens Arch's panel (P7).
+    private func answer(_ answer: AgentApprovalAnswer, in window: NSWindow? = nil) {
+        Task { await approvals.answer(approval.id, with: answer, in: window) }
     }
 }
 
@@ -194,9 +195,15 @@ struct AgentPointerButton: NSViewRepresentable {
     let title: String
     var keyEquivalent = ""
     let requiresPointer: Bool
-    let action: () -> Void
+    /// What the press does, with the window of the pressed button.
+    let action: (NSWindow?) -> Void
 
     init(title: String, keyEquivalent: String = "", requiresPointer: Bool, action: @escaping () -> Void) {
+        self.init(title: title, keyEquivalent: keyEquivalent, requiresPointer: requiresPointer, inWindow: { _ in action() })
+    }
+
+    /// A button whose action receives the window it was pressed in.
+    init(title: String, keyEquivalent: String = "", requiresPointer: Bool, inWindow action: @escaping (NSWindow?) -> Void) {
         self.title = title
         self.keyEquivalent = keyEquivalent
         self.requiresPointer = requiresPointer
@@ -229,7 +236,7 @@ struct AgentPointerButton: NSViewRepresentable {
 
         @objc func press(_ sender: Any?) {
             if parent.requiresPointer, (sender as? AgentPointerNSButton)?.isPressedByPointer != true { return }
-            parent.action()
+            parent.action((sender as? NSView)?.window)
         }
     }
 }

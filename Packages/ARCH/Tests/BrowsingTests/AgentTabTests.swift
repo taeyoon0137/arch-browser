@@ -1,4 +1,4 @@
-// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), answers every file chooser with no file and no panel (P7), and asks the agent monitor about each navigation (P16).
+// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), hands every file chooser to the agents' service before any panel and ends it with no file when its page moves on, its tab closes, or Arch quits (P7), and asks the agent monitor about each navigation (P16).
 import AppKit
 import Combine
 import Agent
@@ -176,6 +176,58 @@ import Testing
         #expect(!source.isLoaded && ended[source.id] == [initial, reloaded])
     }
 
+    /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts and reaches the agents' service first through `BrowserAgentHost`, with who asks as Arch's panel names it. The service's denial, a new document, quitting, the tab's close, and a session without the service's callback give the page no file, and the user's own tab still queues Arch's panel.
+    @Test func anAgentTabsFileChooserReachesTheServiceBeforeAnyPanelAndEndsWithItsPage() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentChooserTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let host = BrowserAgentHost(session: session)
+        let space = try #require(session.spaces.first)
+        let info = try #require(host.openAgentTab(at: URL(string: "https://example.org/upload")!, engine: .webKit, for: AgentTabOwner(id: owner, spaceID: space.id, folderName: "Task")))
+        let tab = try #require(session.tabs.first { $0.id == info.id })
+        let request = EngineFileChooserRequest(mode: .openFiles, acceptedTypes: [".pdf"], origin: URL(string: "https://upload.example/frame"), pageOrigin: URL(string: "https://example.org/upload"))
+        var replies: [[URL]?] = []
+
+        // Without the service's callback, the page gets no file.
+        tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
+        #expect(replies == [nil] && !session.prompts.hasPrompt(for: tab.id))
+        // The service gets the chooser before any panel, with who asks as Arch's panel names it, and nothing waits among the tab's prompts.
+        var handed: [(owner: UUID, tab: UUID, chooser: AgentFileChooser)] = []
+        host.agentTabChoosesFiles = { handed.append(($0, $1, $2)) }
+        tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
+        let first = try #require(handed.last)
+        #expect(first.owner == owner && first.tab == tab.id && first.chooser.request == request)
+        #expect(first.chooser.asker == "\u{201C}upload.example\u{201D} in \u{201C}example.org\u{201D}")
+        #expect(replies == [nil] && !session.prompts.hasPrompt(for: tab.id) && !first.chooser.hasEnded)
+        first.chooser.deny()
+        #expect(replies == [nil, nil])
+        // A new document ends a waiting chooser with no file, and so does quitting.
+        tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
+        let waiting = try #require(handed.last?.chooser)
+        tab.webContents(tab.webContents, didCommitDocumentAt: URL(string: "https://example.org/next"))
+        #expect(waiting.hasEnded && replies == [nil, nil, nil])
+        tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
+        let quitting = try #require(handed.last?.chooser)
+        session.isQuitting = true
+        #expect(quitting.hasEnded && replies == [nil, nil, nil, nil])
+        session.isQuitting = false
+        // The tab's close ends one, and its late answer reaches no page.
+        tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
+        let closing = try #require(handed.last?.chooser)
+        host.closeAgentTab(tab.id)
+        #expect(closing.hasEnded && replies == [nil, nil, nil, nil, nil])
+        closing.deny()
+        #expect(replies.count == 5 && handed.count == 4)
+        // The user's own tab queues Arch's panel among its prompts and asks no service.
+        let userTab = session.openTab(url: URL(string: "https://example.org/mine")!, in: space.id, select: false)
+        userTab.webContents(userTab.webContents, runFileChooser: request) { _ in }
+        #expect(session.prompts.hasPrompt(for: userTab.id) && handed.count == 4)
+        session.prompts.dismiss(tabID: userTab.id)
+    }
+
     @Test func sessionProtectsAgentTabsUntilTakeoverOrClose() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentSessionTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -322,16 +374,12 @@ import Testing
                                     .downloadAsked(URL(string: "https://example.org/file.zip")!), .externalAppAsked(URL(string: "mailto:someone@example.org")!),
                                     .downloadStarted(URL(string: "https://example.org/allowed.zip")!)])
         #expect(monitor.owners == Set([owner]))
-        // P7: an agent tab's chooser gets nil and never reaches the session's panel; the user's own tab's does.
+        // P7: the tab hands every chooser to the session, which asks the agents' service first for an agent tab (`BrowserSession.chooseFiles(inAgentTab:owner:request:completion:)`); without the session's callback the page gets no file.
         var queued = 0
         let chooser = EngineFileChooserRequest(mode: .openFile, acceptedTypes: ["image/*"])
-        agentTab.chooseFiles = { _, completion in
-            queued += 1
-            completion([URL(fileURLWithPath: "/tmp/picked.png")])
-        }
         var chosen: [URL]?? = .none
         agentTab.webContents(page, runFileChooser: chooser) { chosen = .some($0) }
-        #expect(chosen == .some(nil) && queued == 0)
+        #expect(chosen == .some(nil) && monitor.choosers.isEmpty)
 
         // The user's own tab asks, shows its alerts, and downloads, and the monitor hears nothing of it.
         let (userTab, userPage) = tab(in: nil, folders: folders)
@@ -372,6 +420,13 @@ private final class MonitorDouble: AgentTabMonitor {
 
     func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {
         allowedDownloads.contains(url)
+    }
+
+    private(set) var choosers: [AgentFileChooser] = []
+
+    func agentTab(_ tab: Tab, owner: UUID, choosesFiles chooser: AgentFileChooser) {
+        choosers.append(chooser)
+        owners.insert(owner)
     }
 
     func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {

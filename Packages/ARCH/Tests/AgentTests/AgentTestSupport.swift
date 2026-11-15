@@ -22,6 +22,7 @@ import Testing
     var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
     var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)?
     var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    var agentTabChoosesFiles: ((_ ownerID: UUID, _ tabID: UUID, _ chooser: AgentFileChooser) -> Void)?
     var agentPanel: AgentPanelModel?
     /// Real web contents behind some tabs, which the page script and captures reach, as in the page script tests.
     var webContents: [UUID: any EngineWebContents] = [:]
@@ -215,6 +216,15 @@ import Testing
         agentTabDidReport?(owner, tabID, .takenOver)
     }
 
+    /// A file chooser that a page in an agent tab opens, as `Browsing` hands it over, whose panel the test answers (`FakeChooserPanel`).
+    @discardableResult
+    func chooseFiles(_ request: EngineFileChooserRequest, asker: String, in tabID: UUID, panel: FakeChooserPanel) -> AgentFileChooser? {
+        guard let owner = tabs.first(where: { $0.id == tabID })?.agentOwnerID else { return nil }
+        let chooser = AgentFileChooser(request: request, asker: asker, present: panel.present, answer: { panel.received.append($0) })
+        agentTabChoosesFiles?(owner, tabID, chooser)
+        return chooser
+    }
+
     /// What `Browsing` reports from an agent tab.
     func report(_ report: AgentTabReport, in tabID: UUID) {
         guard let owner = tabs.first(where: { $0.id == tabID })?.agentOwnerID else { return }
@@ -241,6 +251,33 @@ import Testing
 }
 
 /// A runner on a CLI that records what the session sends and emits the events a test gives it.
+/// Arch's panel for a file chooser as the tests see it: the windows it showed on, the answer the test gives in it, and what the page received.
+@MainActor final class FakeChooserPanel {
+    private(set) var windows: [NSWindow] = []
+    private(set) var closed = 0
+    /// What the page received from each chooser: file addresses, or nil for no file.
+    var received: [[URL]?] = []
+    private var answer: (([URL]?) -> Void)?
+
+    var present: (NSWindow, @escaping ([URL]?) -> Void) -> () -> Void {
+        { [self] window, answer in
+            windows.append(window)
+            self.answer = answer
+            return { [self] in
+                closed += 1
+                self.answer?(nil)
+                self.answer = nil
+            }
+        }
+    }
+
+    /// The user's pick in the panel, or Cancel for nil.
+    func pick(_ urls: [URL]?) {
+        answer?(urls)
+        answer = nil
+    }
+}
+
 @MainActor final class FakeRunner: AgentCommandLineRunning {
     let request: AIAgentSessionRequest
     let events: AsyncThrowingStream<AIAgentEvent, any Error>

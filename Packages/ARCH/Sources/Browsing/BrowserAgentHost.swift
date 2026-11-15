@@ -1,4 +1,4 @@
-// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, passes on what happens in them, and asks the service about each of their navigations and downloads. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
+// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, passes on what happens in them, asks the service about each of their navigations and downloads, and hands it their file choosers. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
 import Agent
 import AppKit
 import ARCHEngine
@@ -15,6 +15,7 @@ import Foundation
     public var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
     public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)?
     public var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    public var agentTabChoosesFiles: ((_ ownerID: UUID, _ tabID: UUID, _ chooser: AgentFileChooser) -> Void)?
     public var agentPanel: AgentPanelModel?
     /// The addresses of the downloads each owner's tabs started once the user allowed them, which `list_downloads` follows in the session's downloads.
     private var downloadsByOwner: [UUID: [URL]] = [:]
@@ -203,6 +204,11 @@ extension BrowserAgentHost: AgentTabMonitor {
         guard agentTabMayDownload?(owner, tab.id, url) == true else { return false }
         downloadsByOwner[owner, default: []].append(url)
         return true
+    }
+
+    func agentTab(_ tab: Tab, owner: UUID, choosesFiles chooser: AgentFileChooser) {
+        guard let agentTabChoosesFiles else { return chooser.deny() }
+        agentTabChoosesFiles(owner, tab.id, chooser)
     }
 
     func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {

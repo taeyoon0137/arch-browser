@@ -1,5 +1,7 @@
-// The tools that wait for the user (docs/agents.md, Tools ▸ Catalog; Approval interface): `request_tab`, `ask_user`, `request_approval` (P15), and `hand_to_user`, each a card in the agent panel, and the cards for a download (P6) or a link to another app (P11) that a page in an agent tab starts. The agent's words on a card are marked as the agent's, and a card whose words name a secret leads with Arch's warning. The user's answers are the user's own words and reach the agent as they are.
+// The tools that wait for the user (docs/agents.md, Tools ▸ Catalog; Approval interface): `request_tab`, `ask_user`, `request_approval` (P15), and `hand_to_user`, each a card in the agent panel, and the cards for a download (P6), a file chooser (P7), or a link to another app (P11) that a page in an agent tab starts. The agent's words on a card are marked as the agent's, and a card whose words name a secret leads with Arch's warning. The user's answers are the user's own words and reach the agent as they are.
 import AgentControl
+import AppKit
+import ARCHEngine
 import Foundation
 
 extension AgentToolHost {
@@ -200,5 +202,81 @@ extension AgentToolHost {
             }
             state.record(.decided("The user \(answer.allows ? "opened" : "did not open") the link from \(handle) in \(app)."), tab: tabID)
         }
+    }
+
+    /// P7: a card about a file chooser that a page in an agent tab opened, whatever started it: a trusted click, a DOM `click()`, or the page's own script after an earlier activation. It comes before any panel, in every mode, one at a time per tab, and names who asks as Arch's panel does, from the request's origins and never from the tab's address, what the page asks for, and its accepted types. Allow Once opens Arch's panel as a sheet on the window of the card that the user answered, or else the front main window, and the page receives only what the user picks there. Deny, Deny and Stop, Stop, the card's timeout, a new page, and the tab's close give the page no file. The agent learns that the page asked, then only how many items the user chose, or that the user cancelled, never a name or a path.
+    func askAboutFileChooser(_ chooser: AgentFileChooser, in tabID: UUID, of ownerID: UUID, state: AgentGrantState?, client: AgentToolClient?) {
+        guard let state, let client, host.tabs(withIDs: [tabID]).first?.agentOwnerID == ownerID,
+              case .ask(let ask) = AgentPolicy.decide(.fileChooser, client: client.kind, mode: client.level) else { return chooser.deny() }
+        let handle = state.handles.tabs.handle(for: tabID)
+        guard !approvals.pending.contains(where: { $0.kind == .fileChooser && $0.tabID == tabID }) else {
+            chooser.deny()
+            return state.record(.decided("A page in \(handle) opened another file chooser while one waits for the user, so Arch gave it no file."), tab: tabID)
+        }
+        guard !client.deniesApprovals else {
+            chooser.deny()
+            return state.record(.decided("Arch gave the page in \(handle) no file: this task was started with approvals denied."), tab: tabID)
+        }
+        let request = chooser.request
+        state.record(.fileChooserAsked(request.mode), tab: tabID)
+        var card = AgentApproval(ownerID: ownerID, clientName: client.name, isOutsideClient: client.isOutsideClient, kind: .fileChooser, rules: ask.rules, isSensitive: ask.isSensitive,
+                                 offers: [.allowOnce, .deny, .denyAndStop], action: "\(Self.chooserAction(request.mode, asker: chooser.asker)) in \(handle)", tabID: tabID, tabHandle: handle,
+                                 site: (request.origin ?? request.pageOrigin)?.host?.lowercased(), document: state.activity(of: tabID).pages, createdAt: now(),
+                                 deadline: now().addingTimeInterval(approvalWindow))
+        card.exactTextNote = Self.chooserNote(request)
+        let cardID = card.id
+        let host = host
+        let stopClient = stopClient
+        let approvals = approvals
+        chooser.didEnd = { [weak approvals] in approvals?.withdraw(cardID) }
+        approvals.open(card, onAnswerInWindow: { answer, window in
+            guard answer.allows, let window = window ?? host.windowForSheet(), !chooser.hasEnded else {
+                if answer == .denyAndStop { stopClient?(ownerID) }
+                let denied = answer == .deny || answer == .denyAndStop
+                chooser.deny()
+                return state.record(.decided(denied ? "The user did not allow the file chooser in \(handle), so the page received no file (P7)."
+                                                    : "The file chooser in \(handle) ended without the user's answer, so the page received no file (P7)."), tab: tabID)
+            }
+            chooser.choose(on: window) { chosen in state.record(.fileChooserEnded(request.mode, chosen: chosen), tab: tabID) }
+        })
+    }
+
+    /// A P7 card's step, as Arch's panel words it.
+    static func chooserAction(_ mode: EngineFileChooserRequest.Mode, asker: String) -> String {
+        switch mode {
+        case .openFile: return "Choose a file for \(asker)"
+        case .openFiles: return "Choose files for \(asker)"
+        case .openFolder: return "Choose a folder for \(asker)"
+        case .save: return "Choose where \(asker) saves a file"
+        }
+    }
+
+    /// How many accepted types a P7 card lists.
+    static let listedChooserTypes = 8
+
+    /// A P7 card's note: the types the page accepts, what a folder gives it, the name it suggests for saving, and what the agent learns. It lists the types only when each has a declared file type, as the panel offers them (`allowedContentTypes`), so that no page text reaches the card as a type.
+    static func chooserNote(_ request: EngineFileChooserRequest) -> String {
+        var sentences: [String] = []
+        switch request.mode {
+        case .openFile, .openFiles:
+            let types = request.acceptedTypes
+            if types.isEmpty {
+                sentences.append("The page names no file types, so the panel offers every file.")
+            } else if request.allowedContentTypes == nil {
+                sentences.append("The page names file types that macOS does not know, so the panel offers every file.")
+            } else {
+                let more = types.count - listedChooserTypes
+                sentences.append("The page accepts \(types.prefix(listedChooserTypes).joined(separator: ", "))\(more > 0 ? " and \(more) more" : "").")
+            }
+        case .openFolder: sentences.append("The page receives every file in the folder.")
+        case .save:
+            // The page chooses the name, which is cut as other names a page gives are.
+            if let name = request.suggestedName {
+                let cut = name.count > AgentLimits.pageNameCharacters ? String(name.prefix(AgentLimits.pageNameCharacters)) + "\u{2026}" : name
+                sentences.append("The page suggests the name \u{201C}\(quoted(cut))\u{201D}.")
+            }
+        }
+        sentences.append("You pick in Arch's panel. The agent learns only how many items you chose.")
+        return sentences.joined(separator: " ")
     }
 }

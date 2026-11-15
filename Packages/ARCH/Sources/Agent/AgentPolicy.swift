@@ -190,7 +190,8 @@ public enum AgentPolicy {
         AgentRuleEntry(rule: .p5, trigger: "Submitting a form whose action is on a different site from the page, after the session typed into it", effect: .asks(sensitive: true),
                        sentence: "Submitting what the agent typed to another site asks the user."),
         AgentRuleEntry(rule: .p6, trigger: "A download from an agent tab", effect: .asks(sensitive: false), sentence: "A download from an agent tab asks the user."),
-        AgentRuleEntry(rule: .p7, trigger: "A file input or a file chooser in an agent tab", effect: .refuses, sentence: "Agents do not choose files in this build of Arch. Hand the step to the user with hand_to_user."),
+        AgentRuleEntry(rule: .p7, trigger: "A file input or a file chooser in an agent tab, whatever started it", effect: .asks(sensitive: false),
+                       sentence: "A page's file chooser asks the user, who picks in Arch's panel. Agents never name a file and learn only how many items the page received."),
         AgentRuleEntry(rule: .p8, trigger: "A permission request from an agent tab", effect: .denies,
                        sentence: "Arch denies permission requests in agent tabs. Hand the tab to the user with hand_to_user for a step that needs one."),
         AgentRuleEntry(rule: .p9, trigger: "A confirm, prompt, or leave-page dialog, or HTTP authentication, in an agent tab", effect: .leavesToUser, sentence: "The dialog waits for the user in Arch."),
@@ -237,7 +238,7 @@ public enum AgentPolicy {
             return .ask(AgentAsk(rules: [.p15], isSensitive: true))
         case .download:
             return allowances.downloads ? .allow : .ask(AgentAsk(rules: [.p6], isSensitive: false, offersDownloads: true))
-        case .fileChooser: return .refuse(.p7, entry(.p7).sentence)
+        case .fileChooser: return .ask(AgentAsk(rules: [.p7], isSensitive: false))
         case .permissionRequest: return .deny(.p8)
         case .dialog: return .leaveToUser(.p9)
         case .alert: return .dismiss(.p10)
@@ -255,7 +256,8 @@ public enum AgentPolicy {
         case .agentTab, .shared(acting: true): break
         }
         if let element = step.element {
-            if element.isFileInput { return .refuse(.p7, entry(.p7).sentence) }
+            // A click on a file input runs as other clicks do, and the chooser it opens asks under P7; no tool writes a file input's value.
+            if element.isFileInput, step.tool == "type" { return .refuse(.p7, fileInputSentence) }
             if isChallenge(element) { return .refuse(.p18, entry(.p18).sentence) }
             if step.entersText, element.valueClass == .hidden { return .refuse(.p1, entry(.p1).sentence) }
         }
@@ -289,7 +291,7 @@ public enum AgentPolicy {
         }
     }
 
-    /// Whether `press` presses Enter or Space, with or without modifiers, on an element other than a text field or a select: a page's own key handlers can act on such a key as on a click, untrusted events too, on any element, such as a menu item or a tab, so the step counts as a click on it for P3, P4, and P5; P7 refuses a file input whatever the tool. P4 reads a generic element's name only when it is labeled, since the script names only some roles by their text.
+    /// Whether `press` presses Enter or Space, with or without modifiers, on an element other than a text field or a select: a page's own key handlers can act on such a key as on a click, untrusted events too, on any element, such as a menu item or a tab, so the step counts as a click on it for P3, P4, and P5, and on a file input as a click whose chooser P7 asks about. P4 reads a generic element's name only when it is labeled, since the script names only some roles by their text.
     static func pressActivates(_ keys: String?, on element: AgentElementFacts) -> Bool {
         guard let key = keys?.split(separator: "+", omittingEmptySubsequences: false).last, ["Enter", "Space", " "].contains(String(key)) else { return false }
         return !element.isEditable && !element.isSelect && !["textbox", "searchbox", "combobox", "listbox", "spinbutton", "slider"].contains(element.role)
@@ -423,4 +425,7 @@ public enum AgentPolicy {
 
     /// P8's sentence for the event.
     static let permissionSentence = entry(.p8).sentence
+
+    /// P7's refusal of `type` into a file input, whose value would name a file.
+    static let fileInputSentence = "Agents never name a file for a file input. Click it, and Arch asks the user, who picks the file in Arch's panel."
 }

@@ -1,4 +1,4 @@
-// The policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules): every rule P1 to P18 in every mode for in-app sessions and outside clients, the allowances that cover the mode's cards and never a sensitive one, Enter or Space by `press` on any element but a text field or select as a click on it, P5's sites as registrable domains, the scope rule for written addresses and redirect hops, and the word lists the rules and the page script read.
+// The policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules): every rule P1 to P18 in every mode for in-app sessions and outside clients, P7's file choosers and file inputs, the allowances that cover the mode's cards and never a sensitive one, Enter or Space by `press` on any element but a text field or select as a click on it, P5's sites as registrable domains, the scope rule for written addresses and redirect hops, and the word lists the rules and the page script read.
 import AgentControl
 import Foundation
 import Testing
@@ -57,8 +57,7 @@ import Testing
         (.p5, click(button("Continue", submits: true, action: "collect.other.example"), typed: true), [.readOnly, .asksSensitive([.p5]), .asksSensitive([.p5])],
          [.readOnly, .asksSensitive([.p5]), .asksSensitive([.p5])]),
         (.p6, .download, [.asks([.p6]), .asks([.p6]), .asks([.p6])], [.asks([.p6]), .asks([.p6]), .asks([.p6])]),
-        (.p7, click(AgentElementFacts(tag: "input", role: "button", name: "Receipt", inputType: "file", isFileInput: true)), [.refused(.p7), .refused(.p7), .refused(.p7)],
-         [.refused(.p7), .refused(.p7), .refused(.p7)]),
+        (.p7, .fileChooser, [.asks([.p7]), .asks([.p7]), .asks([.p7])], [.asks([.p7]), .asks([.p7]), .asks([.p7])]),
         (.p8, .permissionRequest, [.denied(.p8), .denied(.p8), .denied(.p8)], [.denied(.p8), .denied(.p8), .denied(.p8)]),
         (.p9, .dialog, [.leftToUser(.p9), .leftToUser(.p9), .leftToUser(.p9)], [.leftToUser(.p9), .leftToUser(.p9), .leftToUser(.p9)]),
         (.p10, .alert, [.dismissed(.p10), .dismissed(.p10), .dismissed(.p10)], [.dismissed(.p10), .dismissed(.p10), .dismissed(.p10)]),
@@ -90,6 +89,24 @@ import Testing
         #expect(AgentPolicy.mayRead(URL(string: "about:blank")!, allowsAI: { _ in true }) != .allowed)
         // Every rule has a row here or above.
         #expect(Set(Self.table.map(\.rule)).union([.p16]) == Set(AgentRule.allCases))
+    }
+
+    static let fileInput = AgentElementFacts(tag: "input", role: "button", name: "Receipt", inputType: "file", isFileInput: true)
+
+    /// P7's rows: a page's file chooser asks on a card that is not sensitive, in every mode and for both client kinds, whatever started it; a click on a file input, or Enter or Space on it, runs as the mode decides for any click, since its chooser asks; and `type`, which would name a file, is refused in every mode.
+    @Test func fileChoosersAskAndFileInputsClickAsTheModeDecides() {
+        let typing = AgentPolicyStep.interaction(AgentInteraction(tool: "type", element: Self.fileInput, text: "/etc/hosts", pageHost: "shop.example"))
+        for client in AgentClientKind.allCases {
+            for mode in Self.modes {
+                #expect(AgentPolicy.decide(.fileChooser, client: client, mode: mode, allowances: AgentAllowances(page: true, site: true, downloads: true)) == .ask(AgentAsk(rules: [.p7], isSensitive: false)), "\(client) \(mode)")
+                #expect(Expected(AgentPolicy.decide(typing, client: client, mode: mode)) == .refused(.p7), "\(client) \(mode)")
+            }
+            let click = Self.click(Self.fileInput)
+            #expect(Expected(AgentPolicy.decide(click, client: client, mode: .readOnly)) == .readOnly)
+            #expect(Expected(AgentPolicy.decide(click, client: client, mode: .askBeforeActing)) == .asks([]))
+            #expect(Expected(AgentPolicy.decide(click, client: client, mode: .actInAgentTabs)) == .allow)
+        }
+        #expect(AgentPolicy.entry(.p7).effect == .asks(sensitive: false) && !AgentPolicy.sensitiveRules.contains(.p7))
     }
 
     @Test func theTableHoldsEveryRuleInOrderWithTheSensitiveCards() {
@@ -184,10 +201,11 @@ import Testing
         // A submit control submits its form: P3 for the form's fields, and P5 for another site once the session typed into it.
         #expect(press("Enter", on: Self.button("Continue", submits: true, formFields: [.password])) == .asksSensitive([.p3]))
         #expect(press("Space", on: Self.button("Continue", submits: true, action: "collect.other.example"), typed: true) == .asksSensitive([.p5]))
-        // A control that reads as no irreversible step asks only as the mode does; a file input refuses (P7).
+        // A control that reads as no irreversible step asks only as the mode does, a file input too, whose chooser then asks under P7.
         #expect(press("Enter", on: Self.button("Next")) == .allow)
         #expect(press("Enter", on: Self.button("Next"), mode: .askBeforeActing) == .asks([]))
-        #expect(press("Space", on: AgentElementFacts(tag: "input", role: "button", name: "Receipt", inputType: "file", isFileInput: true)) == .refused(.p7))
+        #expect(press("Space", on: Self.fileInput) == .allow)
+        #expect(press("Enter", on: Self.fileInput, mode: .askBeforeActing) == .asks([]))
         // A text field is no control: Enter there is P3's and P4's submission by the default button, which `submits` carries.
         #expect(press("Enter", on: Self.field(name: "Place order")) == .allow)
     }

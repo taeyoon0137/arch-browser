@@ -185,6 +185,10 @@ import Foundation
         host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
         host.agentTabMayLoad = { [weak self] owner, tab, url, kind in self?.agentTab(tab, of: owner, mayLoad: url, kind: kind) ?? false }
         host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.toolState(of: owner)) ?? false }
+        host.agentTabChoosesFiles = { [weak self] owner, tab, chooser in
+            guard let self else { return chooser.deny() }
+            self.agentTab(tab, of: owner, choosesFiles: chooser)
+        }
         approvals.authenticator = dependencies.authenticator
         approvals.didAdd = { [weak self] approval in self?.cardDidOpen(approval) }
         approvals.didEnd = { [weak self] ownerID in
@@ -1609,6 +1613,16 @@ import Foundation
         // A session's cards about its pages' downloads and links to other apps wait as long as its other cards.
         if session != nil { tools.approvalWindow = sessionQuestionWindow }
         tools.tab(tabID, of: ownerID, didReport: report, state: toolState(of: ownerID), client: client)
+    }
+
+    /// A file chooser of a page in an agent tab, which asks on its owner's P7 card and waits as long as the owner's other cards that a page starts. A session that has ended gives the page no file.
+    private func agentTab(_ tabID: UUID, of ownerID: UUID, choosesFiles chooser: AgentFileChooser) {
+        let session = session(withID: ownerID)
+        if session?.hasEnded == true { return chooser.deny() }
+        let client = session.map { AgentToolClient(session: $0, searchesHistory: false) } ?? grants.first { $0.id == ownerID }.map(AgentToolClient.init(grant:))
+        var tools = toolHost()
+        if session != nil { tools.approvalWindow = sessionQuestionWindow }
+        tools.askAboutFileChooser(chooser, in: tabID, of: ownerID, state: toolState(of: ownerID), client: client)
     }
 
     private func agentTab(_ tabID: UUID, of ownerID: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool {
