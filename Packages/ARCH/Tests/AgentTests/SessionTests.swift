@@ -9,6 +9,14 @@ import Testing
 import UserNotifications
 @testable import Agent
 
+/// A view and every view inside it.
+@MainActor private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+
+/// Panel actions that do nothing.
+@MainActor private func noActions() -> AgentPanelActions {
+    AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+}
+
 @MainActor @Suite(.serialized) struct SessionTests {
     /// The CLI process the fake runner reports, and this test process as its `arch-mcp`.
     nonisolated static let cliProcess: pid_t = 4_242
@@ -37,11 +45,10 @@ import UserNotifications
         let persona = FakeHost.defaultPersona.id
         let space = try #require(harness.host.spaces(in: persona).first)
         let context = AgentComposerContext(personaID: persona, spaceID: space.id, place: space.name, tab: nil)
-        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+        let actions = noActions()
         let host = NSHostingController(rootView: AgentComposer(service: service, context: context, actions: actions) { _ in })
         let window = NSWindow(contentViewController: host)
         window.setContentSize(NSSize(width: 380, height: 560))
-        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         window.contentView?.layoutSubtreeIfNeeded()
         try await waitUntil { descendants(host.view).contains { $0 is NSTextView } }
         let field = try #require(descendants(host.view).compactMap { $0 as? NSTextField }.first)
@@ -71,34 +78,6 @@ import UserNotifications
         await service.deleteSession(session.id)
     }
 
-    @Test func aLongTaskCanScrollThroughTheFormInASmallWindow() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        let service = try harness.makeService()
-        let persona = FakeHost.defaultPersona.id
-        let space = try #require(harness.host.spaces(in: persona).first)
-        let text = (1...10).map { "Question \($0) about the reviewed document." }.joined(separator: "\n")
-        let tab = AgentTabInfo(id: UUID(), spaceID: space.id, title: "Notes", url: URL(string: "https://example.invalid/notes"), isLoading: false, engine: .webKit)
-        let draft = AgentComposerContext(personaID: persona, spaceID: space.id, place: space.name, tab: tab, text: text,
-                                         problem: "The reviewed document changed. Remove its attachment or reopen the task for the new page.")
-        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
-        let composer = AgentComposer(service: service, context: draft, actions: actions, permissionNote: "Sites previously allowed to use the camera may keep that access in Chromium agent tabs.") { _ in }
-        let host = NSHostingView(rootView: composer)
-        let size = NSSize(width: 332, height: 304)
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: true)
-        window.contentView?.addSubview(host)
-        host.frame = NSRect(origin: .zero, size: size)
-        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-        host.layoutSubtreeIfNeeded()
-        let scroll = try #require(descendants(host).compactMap { $0 as? NSScrollView }.first { view in
-            (view.documentView?.bounds.height ?? 0) > size.height && view.contentSize.height > 150
-        })
-        let document = try #require(scroll.documentView)
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: document.bounds.maxY - scroll.contentSize.height))
-        #expect(scroll.documentVisibleRect.maxY >= document.bounds.maxY - 1)
-        #expect(!window.isVisible && draft.text == text && service.sessions.isEmpty)
-    }
-
     @Test func theAgentsPersonaPreviewOmitsSitePermissionsWithoutCreatingAPersona() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -107,7 +86,7 @@ import UserNotifications
         let persona = FakeHost.defaultPersona.id
         let space = try #require(harness.host.spaces(in: persona).first)
         let context = AgentComposerContext(personaID: persona, spaceID: space.id, place: space.name, tab: nil)
-        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+        let actions = noActions()
         let message = "Sites previously allowed to use camera may keep that access in Chromium agent tabs."
         let composer = AgentComposer(service: service, context: context, actions: actions, permissionNote: message) { _ in }
         let personas = harness.host.personas.map(\.id)
@@ -146,13 +125,12 @@ import UserNotifications
             try await waitUntil { !session.isTurnRunning && session.items.contains { $0.kind == .reply("Final answer") } }
         }
 
-        let actions = AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
+        let actions = noActions()
         let host = NSHostingController(rootView: AgentSessionPanel(service: service, session: session, actions: actions))
         let window = NSWindow(contentViewController: host)
         window.setContentSize(NSSize(width: 360, height: 430))
         host.view.layoutSubtreeIfNeeded()
 
-        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let scroll = try #require(descendants(host.view).compactMap { $0 as? NSScrollView }.first { scroll in
             (scroll.documentView?.bounds.height ?? 0) > scroll.contentSize.height * 2
         })

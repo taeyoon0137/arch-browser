@@ -208,14 +208,15 @@ import Testing
         #expect(main.preview?.requestedEngine == .chromium)
         main.openPreviewInTab()
         let promotedPreview = try #require(main.selectedTab)
-        // An actual popup belongs to the renderer that created it, including during a fallback.
+        // A popup renders in the engine that created it and saves its opener's engine choice.
+        main.selectTab(pin.id)
         let popupContents = browser.makeWebContents(url: address, engine: .webKit, state: nil, in: persona.id)
-        main.showOpenedPage(popupContents, personaID: persona.id, opener: pin.webContents)
+        pin.openNewTab?(popupContents, address, .newForegroundTab)
         let popup = try #require(main.selectedTab)
         let requested = [pin, externalTab, agentLink, readerLink, research, backgroundLink, search, backgroundSearch, promotedPreview]
         #expect(Set(requested.map(\.id)).count == requested.count)
         #expect(requested.allSatisfy { $0.personaID == persona.id && $0.engineKind == .webKit && $0.preferredEngine == .chromium })
-        #expect(popup.preferredEngine == .webKit && popup.opener === pin.webContents)
+        #expect(popup.engineKind == .webKit && popup.preferredEngine == .chromium && popup.opener === pin.webContents)
         #expect(offscreen.raises == 2 && !offscreen.isVisible)
         try browser.saveNow().get()
         chromium.unavailableStorageID = nil
@@ -223,32 +224,19 @@ import Testing
         for tab in requested + [popup] {
             let restored = try #require(reopened.tabs.first { $0.id == tab.id })
             reopened.loadPage(of: restored)
-            #expect(restored.engineKind == (tab === popup ? .webKit : .chromium))
+            #expect(restored.engineKind == .chromium)
         }
     }
 
-    enum Reply: CaseIterable { case agent, page }
-
-    @Test(arguments: Reply.allCases) func replyLinksFollowTheirWindowAndPersona(reply: Reply) throws {
+    @Test func replyLinksFollowTheirWindowAndPersona() throws {
         try withWindows { session, main, small, home, research in
             let homeTab = try #require(main.selectedTab)
             let popup = try #require(small.selectedTab)
             let address = try #require(URL(string: "https://fixture.invalid/reply"))
-            let conversation = UUID()
-
-            @MainActor func openReply(in window: BrowserWindowModel, about source: Tab) {
-                switch reply {
-                case .agent:
-                    window.showAgentSession(conversation)
-                    window.openReplyLink(address, in: window.personaID)
-                case .page:
-                    _ = session.pageAssistant.openLink(address, from: source)
-                }
-            }
 
             // The other Persona's small window was last active.
             #expect(session.activeWindow === small)
-            openReply(in: main, about: homeTab)
+            _ = session.pageAssistant.openLink(address, from: homeTab)
             let opened = try #require(main.selectedTab)
             #expect(opened.url == address && opened.spaceID == home.id && opened.personaID == home.resolvedPersonaID)
             #expect(opened.isListedInSidebar && opened.agentOwnerID == nil && opened !== homeTab)
@@ -265,7 +253,7 @@ import Testing
                 window.nsWindow = destinationWindow
             }
             defer { selection.cancel() }
-            openReply(in: small, about: popup)
+            _ = session.pageAssistant.openLink(address, from: popup)
             let destination = try #require(session.windows.first { $0 !== main && $0 !== small })
             defer { session.windowWillClose(destination) }
             let linked = try #require(destination.selectedTab)

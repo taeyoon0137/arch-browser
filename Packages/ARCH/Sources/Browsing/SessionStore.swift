@@ -279,7 +279,7 @@ final class SessionStore {
     /// Read at startup so a session still awaiting backup also keeps its live folders' local data.
     var keepsUnknownLiveFolders: Bool { pendingBackup != nil || FileManager.default.fileExists(atPath: unreadableFileURL.path) }
 
-    /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
+    /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that cannot be read or does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
     func load() -> SessionSnapshot? {
         let data: Data
         do {
@@ -287,7 +287,11 @@ final class SessionStore {
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return nil
         } catch {
-            pendingBackup = unreadableFileURL
+            do {
+                try Self.rename(fileURL, to: unreadableFileURL)
+            } catch {
+                pendingBackup = unreadableFileURL
+            }
             return nil
         }
         let directory = fileURL.deletingLastPathComponent()
@@ -318,7 +322,7 @@ final class SessionStore {
         var version: Int?
     }
 
-    /// Capture on the main queue after half a quiet second, or after five seconds of continuous changes. The file is written on the serial writer.
+    /// Runs the newest `snapshot` closure on the main thread half a second after the last call, or five seconds after the first call since the last capture while calls continue, and writes nothing when it returns nil. The file is written on `writeQueue`. `now` and `enqueue` let tests supply the clock and the main queue.
     func scheduleSave(at now: DispatchTime = .now(),
                       enqueue: (DispatchTime, DispatchWorkItem) -> Void = { DispatchQueue.main.asyncAfter(deadline: $0, execute: $1) },
                       _ snapshot: @escaping () -> SessionSnapshot?) {
@@ -376,7 +380,16 @@ final class SessionStore {
             let data = try JSONEncoder().encode(snapshot.mappingPageState(seal.seal))
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             if let backup = pendingBackup {
-                try Self.write(Data(contentsOf: fileURL), to: backup)
+                // A file that cannot be read moves aside. A newer version's file is copied. A file that is gone leaves nothing to set aside.
+                do {
+                    if backup == unreadableFileURL {
+                        try Self.rename(fileURL, to: backup)
+                    } else {
+                        try Self.write(Data(contentsOf: fileURL), to: backup)
+                    }
+                } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                } catch let error as POSIXError where error.code == .ENOENT {
+                }
                 pendingBackup = nil
             }
             try Self.write(data, to: fileURL)

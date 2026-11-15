@@ -486,7 +486,7 @@ public enum BrowserWindowKind {
             guard let self, let preview else { return }
             runtime.browser.takeOwnership(of: popup)
             self.showOpenedPage(preview.webContents, personaID: personaID, preferredEngine: preview.requestedEngine)
-            self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents)
+            self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents, preferredEngine: preview.requestedEngine)
             DispatchQueue.main.async { [weak self] in
                 if let self, self.preview === preview { self.removePreview(closingPage: false) }
             }
@@ -789,10 +789,10 @@ public enum BrowserWindowKind {
 
     /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
     func sidebarAgentDraft(for tab: Tab, settings: AISettingsStore? = nil) -> AgentComposerContext? {
-        guard kind == .main, session.agents != nil, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
+        let settings = settings ?? AIService.shared.settings
+        guard kind == .main, session.agents != nil, settings.route(for: .agent).isEnabled, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
               session.allTabs.contains(where: { $0 === tab }) else { return nil }
-        return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas,
-                                     allowsAI: (settings ?? AIService.shared.settings).allowsAI(on:))
+        return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas, allowsAI: settings.allowsAI(on:))
     }
 
     static func sidebarAgentDraft(for tab: AgentTabInfo, in space: Space, personas: [Persona], allowsAI: (URL) -> Bool) -> AgentComposerContext? {
@@ -802,8 +802,8 @@ public enum BrowserWindowKind {
         return context.attachableTab(allowsAI: allowsAI) == nil ? nil : context
     }
 
-    func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext) {
-        guard let context = sidebarAgentDraft(for: tab), context.spaceID == reviewed.spaceID, context.personaID == reviewed.personaID,
+    func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext, settings: AISettingsStore? = nil) {
+        guard let context = sidebarAgentDraft(for: tab, settings: settings), context.spaceID == reviewed.spaceID, context.personaID == reviewed.personaID,
               let document = context.tab, let original = reviewed.tab, document.id == original.id,
               document.documentID == original.documentID, document.url == original.url else { return }
         showAgentPanel(.composer(context))
@@ -842,16 +842,17 @@ public enum BrowserWindowKind {
     }
 
     /// Continue as Agent Task in the page reader and the question popover, whose questions are about the selected tab's page: the composer with the question and that tab.
-    func continueAsAgentTask(_ question: String, from source: AgentHandoffSource, excerpt: AgentReaderExcerpt?) {
+    func continueAsAgentTask(_ question: String, from source: AgentHandoffSource, excerpt: AgentReaderExcerpt?, settings: AISettingsStore? = nil) {
+        let settings = settings ?? AIService.shared.settings
         guard !isSelectedPageCovered, let tab = selectedTab, tab.id == source.tabID, tab.documentID == source.documentID,
-              let url = tab.url, url == source.url, AIService.shared.settings.allowsAI(on: url) else { return }
+              let url = tab.url, url == source.url, settings.allowsAI(on: url) else { return }
         if let id = source.questionID {
             guard pageQuestion?.id == id else { return }
         } else if !isPageReaderVisible {
             return
         }
         let context = agentComposerContext(text: question)
-        if let excerpt, let attached = context.attachableTab(allowsAI: AIService.shared.settings.allowsAI(on:)), excerpt.matches(attached) {
+        if let excerpt, let attached = context.attachableTab(allowsAI: settings.allowsAI(on:)), excerpt.matches(attached) {
             context.readerExcerpt = excerpt
         }
         closePageQuestion()
@@ -859,7 +860,7 @@ public enum BrowserWindowKind {
     }
 
     /// Resolve the live owner again when a menu action or its confirmation returns.
-    @MainActor func agentSession(of folder: TabFolder) -> AgentSession? {
+    func agentSession(of folder: TabFolder) -> AgentSession? {
         guard let id = folder.agentSessionID, let owner = session.agents?.session(withID: id),
               !owner.hasEnded, owner.spaceID == currentSpaceID, owner.personaID == personaID,
               session.folders.contains(where: { $0.id == folder.id && $0.agentSessionID == id && $0.spaceID == currentSpaceID }) else { return nil }
@@ -868,7 +869,7 @@ public enum BrowserWindowKind {
 
     enum AgentFolderAction { case show, stop, keepTabs, deleteSession }
 
-    @MainActor func perform(_ action: AgentFolderAction, on folder: TabFolder, reviewed owner: AgentSession) async {
+    func perform(_ action: AgentFolderAction, on folder: TabFolder, reviewed owner: AgentSession) async {
         guard agentSession(of: folder) === owner else { return }
         switch action {
         case .show: showAgentSession(owner.id)
@@ -933,17 +934,21 @@ public enum BrowserWindowKind {
     }
 
     var resumableAgentDraft: AgentComposerContext? {
-        guard let draft = agentDrafts[currentSpaceID], draft.personaID == personaID else { return nil }
+        guard let draft = agentDrafts[currentSpaceID], draft.personaID == personaID,
+              !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return draft
     }
 
-    /// Each window has one local draft per space. Even a blank task can hold reviewed sharing choices.
+    /// Each window has one local draft per space. A blank one gives way.
     func canReceiveAgentDraft(_ draft: AgentComposerContext) -> Bool {
-        agentDrafts[draft.spaceID] == nil
+        agentDrafts[draft.spaceID].map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true
     }
 
+    /// A blank composer that shows for the same space gives way to the moved draft, so the panel shows the draft this window keeps.
     func receiveAgentDraft(_ draft: AgentComposerContext, showing: Bool) {
-        if showing && agentPanel == nil && !isPageReaderVisible {
+        if case .composer(let shown) = agentPanel, shown.spaceID == draft.spaceID {
+            showAgentPanel(.composer(draft))
+        } else if showing && agentPanel == nil && !isPageReaderVisible {
             showAgentPanel(.composer(draft))
         } else {
             agentDrafts[draft.spaceID] = draft

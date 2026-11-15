@@ -890,7 +890,7 @@ final class EngineRuntime {
 
     /// Adds a tab for `webContents`, which a runtime of the Persona `personaID` created or which stands in for a restored tab's page, to the list of the space `spaceID` or, when that space belongs to another Persona, of the Persona's preferred space. A tab that restores or reopens passes its saved `id`. `select` selects it in the sidebar target. `opener` is the page that opened it and `folderID` the folder that holds it, both set before the tab joins the list so that its `tabOpened` event names the opening tab and, for an agent folder, carries the kind `agent`.
     func adopt(_ webContents: any EngineWebContents, id: UUID = UUID(), spaceID: UUID, personaID: Persona.ID, pinned: Bool, select: Bool, opener: (any EngineWebContents)? = nil,
-               folderID: UUID? = nil, researchLoad: ((URL) -> Bool)? = nil, preferredEngine: EngineKind? = nil) -> Tab {
+               folderID: UUID? = nil, researchLoad: (@MainActor (URL) -> Bool)? = nil, preferredEngine: EngineKind? = nil) -> Tab {
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: id, spaceID: spaceID, personaID: personaID, pinned: pinned)
         tab.opener = opener
@@ -911,8 +911,8 @@ final class EngineRuntime {
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
             let window = self.window(showing: tab)
-            if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
-            let opened = self.adopt(popup, spaceID: tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents)
+            if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents, preferredEngine: tab.preferredEngine) }
+            let opened = self.adopt(popup, spaceID: tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents, preferredEngine: tab.preferredEngine)
             opened.isUnread = true
         }
         // A page that the engine loads only in another web contents of the tab's profile, as WebKit loads a web extension's pages, takes the tab's place as on an engine switch. A tab that has closed drops it.
@@ -1105,10 +1105,8 @@ final class EngineRuntime {
     public func requestDeleteTab(_ tab: Tab) {
         guard tab.spaceID != nil, tab.liveItemID == nil else { return }
         whenPageAgreesToLeave(tab) { [weak self] tab in
-            guard let self else { return }
-            let action: TabCloseAction = tab.agentOwnerID == nil ? .close(remember: true) : .forget
-            guard self.perform(action, on: tab, reason: .user) else { return }
-            if action == .forget { self.forgetUndoableCloses() } else { self.undoableCloseCount += 1 }
+            guard let self, self.perform(.close(remember: true), on: tab, reason: .user) else { return }
+            self.undoableCloseCount += 1
         }
     }
 
@@ -1127,7 +1125,7 @@ final class EngineRuntime {
         }
     }
 
-    /// Closes a tab without asking its page, as `TabCloseAction.of(_:reason:)` decides for the tab and `reason`, and returns whether the tab was still open: a pinned tab unloads, a favorite's tab ends, an agent tab is forgotten, a live folder item's tab is dismissed, and any other tab leaves its list, into the closed list unless it only pointed at a file. Every path that closes a tab comes here: the user's closes once the page agrees, the page's own `window.close()` and a crashed page that the engine closes, an extension's `tabs.remove`, a tab that only pointed at a file, Delete Persona, and archiving. `reason` goes to the tab close log when the tab leaves its list.
+    /// Closes a tab without asking its page, as `TabCloseAction.of(_:reason:)` decides for the tab and `reason`, and returns whether the tab was still open: a pinned tab unloads, a favorite's tab ends, an agent tab is forgotten, a live folder item's tab is dismissed, and any other tab leaves its list, into the closed list unless it only pointed at a file. Every path that closes a tab comes here: the user's closes once the page agrees, the page's own `window.close()` and a crashed page that the engine closes, an extension's `tabs.remove`, a tab that only pointed at a file, Delete Persona, and archiving. The one other entry is `closeAgentTab(_:reason:)`, which forgets an agent's own tab, as `TabCloseAction.forget` does, and posts the `agent` reason. `reason` goes to the tab close log when the tab leaves its list.
     @discardableResult
     public func closeTab(_ tab: Tab, reason: TabCloseReason = .user) -> Bool {
         perform(TabCloseAction.of(tab, reason: reason), on: tab, reason: reason)
@@ -1318,7 +1316,7 @@ final class EngineRuntime {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona, or in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona, in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), or in an agent folder that does not already hold the tab, since a tab reaches an agent only when the agent opens it, leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
     @discardableResult public func moveTab(_ id: UUID, to target: Tab, after: Bool? = nil) -> Bool {
         guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID), !folders.contains(where: { $0.id == target.folderID && $0.live != nil }),
               let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return false }
@@ -1338,7 +1336,7 @@ final class EngineRuntime {
         return true
     }
 
-    /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned.
+    /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned. It then removes each agent folder that the change emptied.
     private func movingItemTabs(_ change: () -> Void) {
         let left = LiveFolderTabs.itemTabsLeaving(tabs, during: change)
         if !left.isEmpty { itemTabsDidLeave(left) }
@@ -1814,7 +1812,7 @@ final class EngineRuntime {
     }
 
     /// Opens an agent's tab at `url` in the background, in `engine` or the default engine, in the agent folder of `owner`, which it makes named `folderName` among the open tabs of the space `spaceID` when there is none (docs/agents.md, In the browser ▸ Agent folders). It selects nothing and switches no window's space. Nil when no space has that ID.
-    func openAgentTab(url: URL, engine: EngineKind?, owner: UUID, folderName: String, in spaceID: UUID, researchLoad: ((URL) -> Bool)? = nil) -> Tab? {
+    func openAgentTab(url: URL, engine: EngineKind?, owner: UUID, folderName: String, in spaceID: UUID, researchLoad: (@MainActor (URL) -> Bool)? = nil) -> Tab? {
         let folder: TabFolder
         if let existing = folders.first(where: { $0.agentSessionID == owner }) {
             folder = existing
@@ -1839,7 +1837,7 @@ final class EngineRuntime {
     /// A page in an agent's tab opened `popup`, which joins the opener's agent folder behind it, in the opener's engine. One whose first address the agent monitor refuses closes again; the engine is still in its callback, so that happens on the next turn of the run loop, while the popup's own navigation check refuses the address meanwhile.
     private func adoptAgentPopup(_ popup: any EngineWebContents, targetURL: URL?, opener: Tab, owner: UUID) {
         guard let folder = folders.first(where: { $0.id == opener.folderID && $0.agentSessionID == owner }), let spaceID = opener.spaceID else { return retire(popup, of: opener.personaID) }
-        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, opener: opener.webContents, folderID: folder.id)
+        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, opener: opener.webContents, folderID: folder.id, preferredEngine: opener.preferredEngine)
         if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url) == false {
             DispatchQueue.main.async { [weak self, weak opened] in
                 if let self, let opened, opened.agentOwnerID == owner { self.closeAgentTab(opened, reason: .page) }
@@ -2001,15 +1999,17 @@ final class EngineRuntime {
 
     /// Clear the recovery marker only after the full fetch and its mirror checkpoint have been
     /// saved. If this final write fails, the next launch safely repeats the fetch.
-    @MainActor public func finishSidebarSyncRecovery() {
+    public func finishSidebarSyncRecovery() {
         guard needsFullSidebarSync else { return }
         needsFullSidebarSync = false
         if case .failure = saveNow() { needsFullSidebarSync = true }
     }
 
-    /// The app saves the session before confirming quit. Stop live folders and flush each Persona's cookie record only once the app actually terminates.
+    /// Stops live folders, writes the session again now that the quit is going ahead, and flushes each Persona's cookie record.
     public func finishWritesAtQuit() {
         liveFolderService.stop()
+        // A failure is logged, and the previous file stays.
+        saveNow()
         personaEngines.values.forEach { $0.cookieSync.saveAtQuit() }
         CookieSync.finishWrites()
     }
@@ -2017,28 +2017,15 @@ final class EngineRuntime {
     /// The session as `session.json` keeps it, without agent folders and their tabs, which are gone after quit unless the user kept them. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4). The tabs windows show are recorded as active now, as the archive timer counts them, so that the next launch does not archive a tab that was in view until the app quit.
     private func snapshot() -> SessionSnapshot {
         let mainWindows = windows.filter { $0.kind == .main }
-        let windowsToSave = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
+        let windowRecords = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
         let now = Date()
         let shownIDs = Set(windows.flatMap(\.paneTabs).map(\.id))
         let kept = SessionSnapshot.keptSidebar(tabs: tabs, folders: folders)
-        let favoriteRecords = favoriteTabRecords
-        let savedTabIDs = Set(kept.tabs.map(\.id)).union(favoriteRecords.compactMap(\.id))
-        let windowRecords = Self.windowsKeepingSelections(windowsToSave, among: savedTabIDs)
         let front = windowRecords[0]
         return SessionSnapshot(version: SessionSnapshot.currentVersion, needsFullSidebarSync: needsFullSidebarSync ? true : nil, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
                                tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) || $0.hasActivityToPreserve ? now : $0.lastActivatedAt) },
                                folders: kept.folders, selectedTabIndex: kept.tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
-                               splitViews: splitViewRecords(among: kept.tabs), favoriteTabs: favoriteRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
-    }
-
-    /// A window can show an agent tab, or have closed on one. Only a tab saved with the session can be its saved selection.
-    static func windowsKeepingSelections(_ windows: [SessionSnapshot.WindowRecord], among savedTabIDs: Set<UUID>) -> [SessionSnapshot.WindowRecord] {
-        windows.map { record in
-            guard let id = record.selectedTabID, !savedTabIDs.contains(id) else { return record }
-            var record = record
-            record.selectedTabID = nil
-            return record
-        }
+                               splitViews: splitViewRecords(among: kept.tabs), favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }
 
     /// The favorites' open tabs and the saved ones not opened since launch, in favorite order.

@@ -121,8 +121,9 @@ import Testing
         let requested = browser.openTab(url: URL(string: "https://fixture.invalid/background"), in: space.id, select: false)
         window.selectTab(selected.id)
         #expect(!window.canStartAgentTask && !window.canToggleAgentPanel && service.agentModels().isEmpty)
-        let reviewed = try #require(window.sidebarAgentDraft(for: requested))
-        window.askAgentAboutSidebarTab(requested, reviewed: reviewed)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: requested, settings: settings))
+        window.askAgentAboutSidebarTab(requested, reviewed: reviewed, settings: settings)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a local task draft"); return }
         #expect(draft.text.isEmpty && draft.tab?.id == requested.id && draft.tab?.documentID == reviewed.tab?.documentID)
         #expect(window.selectedTab === selected && service.sessions.isEmpty)
@@ -136,6 +137,11 @@ import Testing
         #expect(window.canToggleAgentPanel)
         window.toggleAgentPanel()
         #expect(window.agentPanel == .composer(draft) && draft.text == "Compare these notes" && service.sessions.isEmpty)
+        // Switching Agent Tasks off hides the command.
+        var switchedOff = settings.route(for: .agent)
+        switchedOff.isEnabled = false
+        settings.setRoute(switchedOff, for: .agent)
+        #expect(window.sidebarAgentDraft(for: requested, settings: settings) == nil)
     }
 
     @Test func aMountedSidebarMenuFollowsSiteExclusionsInBothDirections() async throws {
@@ -193,8 +199,9 @@ import Testing
         let space = try #require(browser.spaces.first { $0.resolvedPersonaID == persona.id })
         let window = BrowserWindowModel(session: browser, record: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         let tab = browser.openTab(url: URL(string: "https://fixture.invalid/reviewed"), in: space.id, select: false)
-        let draft = try #require(window.sidebarAgentDraft(for: tab))
-        window.askAgentAboutSidebarTab(tab, reviewed: draft)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let draft = try #require(window.sidebarAgentDraft(for: tab, settings: settings))
+        window.askAgentAboutSidebarTab(tab, reviewed: draft, settings: settings)
         guard case .composer(let context) = window.agentPanel else { Issue.record("Expected the reviewed draft"); return }
         context.text = "Compare this report"
         context.attachesTab = false
@@ -233,20 +240,21 @@ import Testing
         let page = browser.openTab(for: favorite)
         let selected = browser.openTab(url: URL(string: "https://fixture.invalid/selected"), in: home.id, select: false)
         window.selectTab(selected.id)
-        let reviewed = try #require(window.sidebarAgentDraft(for: page))
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: page, settings: settings))
         window.switchToSpace(otherSpace.id)
-        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed, settings: settings)
         #expect(window.agentPanel == nil)
         window.switchToSpace(away.id)
-        #expect(window.sidebarAgentDraft(for: page) == nil)
+        #expect(window.sidebarAgentDraft(for: page, settings: settings) == nil)
         window.switchToSpace(home.id)
-        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed, settings: settings)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a draft for the open favorite"); return }
         #expect(draft.spaceID == home.id && draft.tab?.id == page.id && draft.tab?.documentID == reviewed.tab?.documentID)
         #expect(window.selectedTab === selected && service.sessions.isEmpty)
         window.hideAgentPanel()
         browser.closeFavorite(favorite)
-        window.askAgentAboutSidebarTab(page, reviewed: reviewed)
+        window.askAgentAboutSidebarTab(page, reviewed: reviewed, settings: settings)
         #expect(window.agentPanel == nil && browser.openTab(ofFavorite: favorite) == nil)
     }
 
@@ -259,8 +267,9 @@ import Testing
         let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true)
         let window = BrowserWindowModel(session: browser, record: record, kind: .main)
         let tab = browser.openTab(url: URL(string: "https://fixture.invalid/reviewed"), in: space.id, select: false)
-        let reviewed = try #require(window.sidebarAgentDraft(for: tab))
-        window.askAgentAboutSidebarTab(tab, reviewed: reviewed)
+        let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: AIKeychain())
+        let reviewed = try #require(window.sidebarAgentDraft(for: tab, settings: settings))
+        window.askAgentAboutSidebarTab(tab, reviewed: reviewed, settings: settings)
         guard case .composer(let draft) = window.agentPanel else { Issue.record("Expected a reviewed draft"); return }
         draft.text = "Compare this with the earlier report"
         draft.attachesTab = false
@@ -299,8 +308,8 @@ import Testing
         #expect(window.agentPanel == nil)
         window.switchToSpace(anotherSpace.id)
         window.toggleAgentPanel()
-        guard case .composer(let remaining) = window.agentPanel else { Issue.record("Expected the surviving space's draft"); return }
-        #expect(remaining === afterStart)
+        guard case .composer(let remaining) = window.agentPanel else { Issue.record("Expected a new composer in the surviving space"); return }
+        #expect(remaining !== afterStart && remaining.text.isEmpty)
     }
 
     @Test func folderCommandsFollowOnlyTheReviewedSessionAndKeepUserTabs() async throws {

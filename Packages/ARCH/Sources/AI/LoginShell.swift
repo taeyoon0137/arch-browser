@@ -158,16 +158,9 @@ public enum AILoginShell {
 }
 
 extension AICommandLineConfiguration {
-    /// The absolute path of a tool: `name` itself when it is a path, with `~` expanded, or else the first match in the login shell's PATH. nil when no executable file is there.
+    /// The absolute path of a tool, found through the user's login shell (`LoginShell.locateExecutable(named:)`).
     public static func locateExecutable(named name: String) async -> URL? {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return nil }
-        if name.contains("/") {
-            let url = URL(fileURLWithPath: (name as NSString).expandingTildeInPath)
-            return isExecutable(at: url) ? url : nil
-        }
-        let searchPath = await LoginShell.shared.path() ?? LoginShell.baseEnvironment["PATH"] ?? ""
-        return locate(name, searchPath: searchPath)
+        await LoginShell.shared.locateExecutable(named: name)
     }
 
     /// Whether `url` is a file, or a link to one, that this user may run.

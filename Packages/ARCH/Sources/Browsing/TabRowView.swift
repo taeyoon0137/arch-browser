@@ -156,7 +156,7 @@ struct SidebarAgentMenuItem: View {
 
     var body: some View {
         if let context = windowModel.sidebarAgentDraft(for: tab, settings: settings) {
-            Button("Ask Agent About This Tab…") { windowModel.askAgentAboutSidebarTab(tab, reviewed: context) }
+            Button("Ask Agent About This Tab…") { windowModel.askAgentAboutSidebarTab(tab, reviewed: context, settings: settings) }
         }
     }
 }

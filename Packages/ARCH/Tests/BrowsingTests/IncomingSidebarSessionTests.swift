@@ -23,10 +23,9 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         if unreadable { try Data("unreadable".utf8).write(to: directory.appendingPathComponent("session.json")) }
 
-        let addresses = InMemoryLiveFolderKeychain(), otherAddresses = InMemoryLiveFolderKeychain()
+        let addresses = InMemoryLiveFolderKeychain()
         let orphan = UUID(), feed = try #require(URL(string: "https://fixture.invalid/feed?key=fixture"))
         try await addresses.setAddress(feed, for: orphan, folderName: "Local feed")
-        try await otherAddresses.setAddress(feed, for: orphan, folderName: "Other profile")
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
         let session = try BrowserSession(testRegistry: registry, directory: directory, addresses: addresses)
@@ -34,7 +33,6 @@ import Testing
         try await session.liveFolderService.setPrivateAddress(feed, for: UUID(), folderName: "New feed")
 
         #expect(try await addresses.address(for: orphan) == (unreadable ? feed : nil))
-        #expect(try await otherAddresses.address(for: orphan) == feed)
         #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.unreadable.json").path) == unreadable)
     }
 

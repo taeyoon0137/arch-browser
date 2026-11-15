@@ -143,7 +143,8 @@ struct DownloadRowView: View {
                 Text(fileIssue?.rawValue ?? status)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    // The instruction on a failed download without buttons gets a second line at the default sidebar width.
+                    .lineLimit(entry.state == .failed && !entry.canRetry ? 2 : 1)
                 if fileIssue != nil {
                     HStack {
                         if entry.containingFolder != nil {

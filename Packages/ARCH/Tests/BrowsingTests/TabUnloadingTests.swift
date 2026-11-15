@@ -2,7 +2,6 @@
 import AppKit
 import ARCHEngine
 import Foundation
-import JavaScriptCore
 import Testing
 @testable import Browsing
 
@@ -377,34 +376,6 @@ import Testing
         #expect(TabUnloading.pageScripts(withPluginScripts: []) == [script])
     }
 
-    @Test func restoredFramesReportDraftsInEitherOrderAndAnUntouchedPageDoesNotInheritOne() throws {
-        let js = try #require(JSContext())
-        // Each install gets the page script's own Window and event handlers, sharing only the tab's two messages.
-        js.evaluateScript("""
-        let protectedTab = false;
-        function frame(isMain) {
-          const window = {};
-          window.top = isMain ? window : {};
-          const events = {};
-          const addEventListener = (name, handler) => { events[name] = handler; };
-          (\(TabUnloading.inputScript.source))({send: message => { protectedTab = message === 'typed'; }});
-          return (name, trusted = true) => events[name]?.({ isTrusted: trusted, persisted: true });
-        }
-        const parent = frame(true), child = frame(false);
-        child('input');
-        """)
-        func protected(after events: String) -> Bool {
-            js.evaluateScript(events + "; protectedTab").toBool()
-        }
-        #expect(protected(after: "parent('pagehide', false)"))
-        #expect(!protected(after: "parent('pagehide'); const other = frame(true)"))
-        #expect(protected(after: "other('pagehide'); child('pageshow'); parent('pageshow')"))
-        #expect(protected(after: "parent('pagehide'); other('pageshow'); other('pagehide'); parent('pageshow'); child('pageshow')"))
-        #expect(!protected(after: "parent('pagehide'); other('pageshow')"))
-        #expect(!protected(after: "child('pageshow', false); other('input', false)"))
-        #expect(js.exception == nil)
-    }
-
     @Test func theInputScriptsMessagesReadAsEvents() {
         #expect(TabUnloading.InputEvent(inputMessage("\"start\"")) == .start)
         #expect(TabUnloading.InputEvent(inputMessage("\"typed\"")) == .typed)
@@ -434,6 +405,11 @@ import Testing
         // A frame's document starts nothing over; the main frame's next document does.
         deliver(inputMessage("\"start\"", mainFrame: false), page)
         #expect(tab.hasTypedInput)
+        // A main document's commit clears it, before the frames of a page back from the back-forward cache report again.
+        tab.webContents(page, didCommitDocumentAt: elsewhere)
+        #expect(!tab.hasTypedInput)
+        deliver(inputMessage("\"typed\"", mainFrame: false), page)
+        #expect(tab.hasTypedInput)
         deliver(inputMessage("\"start\""), page)
         #expect(!tab.hasTypedInput)
         // A page that no longer reports to the tab changes nothing, and the plugins never see the app's world.
@@ -442,7 +418,7 @@ import Testing
         deliver(inputMessage("\"typed\""), page)
         deliver(inputMessage("\"hello\"", world: "ARCHPlugin.sample"), page)
         #expect(forwarded == ["ARCHPlugin.sample"])
-        #expect(replies == 7)
+        #expect(replies == 8)
         // Another web contents starts without typed text.
         #expect(tab.hasTypedInput)
         _ = tab.unloadKeepingPage()

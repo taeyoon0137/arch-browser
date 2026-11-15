@@ -62,18 +62,12 @@ import Testing
         #expect(kept.tabs.map(\.id) == [userTab.id, looseTab.id])
         #expect(kept.folders.map(\.id) == [userFolder.id])
 
-        let windows = [agentTab.id, userTab.id].map {
-            SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: $0, isSidebarVisible: true)
-        }
-        let savedWindows = BrowserSession.windowsKeepingSelections(windows, among: Set(kept.tabs.map(\.id)))
-        #expect(savedWindows.map(\.selectedTabID) == [nil, userTab.id])
-
         // The saved file has neither, and a relaunch reopens only the user's tabs.
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentTabTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = SessionStore(directory: directory, seal: .fixture)
         store.saveNow(SessionSnapshot(version: SessionSnapshot.currentVersion, personas: [Persona(id: Persona.defaultID, name: "Default")], spaces: [space], currentSpaceID: space.id, favorites: [],
-                                      tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: space.id, lastActivatedAt: Date()) }, folders: kept.folders, windows: savedWindows))
+                                      tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: space.id, lastActivatedAt: Date()) }, folders: kept.folders))
         let file = try String(contentsOf: store.fileURL, encoding: .utf8)
         #expect(!file.contains(agentTab.id.uuidString) && !file.contains(agentFolder.id.uuidString) && !file.contains("claude"))
         let reopened = try #require(store.load())

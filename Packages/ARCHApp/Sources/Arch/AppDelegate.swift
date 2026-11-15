@@ -72,14 +72,15 @@ import Terminal
         guard profileOwnership == nil, !isAbandoningLaunch else { return }
         let alert = NSAlert()
         if let error = error as? POSIXError, error.code == .EWOULDBLOCK {
-            alert.messageText = "This Arch profile is already open."
-            alert.informativeText = "Quit the other copy of Arch, then try again. Links sent to this copy will open if you try again successfully."
+            alert.messageText = "Another copy of Arch is open."
+            alert.informativeText = "Quit the other copy of Arch, then click Try Again. Links sent to this copy open once it starts."
         } else {
             alert.messageText = "Arch couldn’t open its data folder."
             alert.informativeText = error.localizedDescription
         }
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Try Again")
+        NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertSecondButtonReturn {
             startWithProfile(in: directory)
         } else {
@@ -292,7 +293,7 @@ import Terminal
     func setQuitting(_ quitting: Bool) {
         session?.isQuitting = quitting
         // AppKit calls the quit on the main thread, where the agents' grant sheets show.
-        if quitting { MainActor.assumeIsolated { agents?.cancelQuestions() } }
+        if quitting { agents?.cancelQuestions() }
     }
 
     /// Pages an import has not written yet, visits still on the history store's queue, and the Personas' cookie records go in before the app quits. The agents' socket goes with the app.
@@ -567,11 +568,11 @@ import Terminal
         if side != .floating, let floatingDevTools { DevToolsDock.dock(floatingDevTools) }
     }
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
-    @MainActor @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
+    @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
-    @MainActor @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
-    @MainActor @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
-    @MainActor @objc private func stopAllAgents() {
+    @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
+    @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
+    @objc private func stopAllAgents() {
         agents?.stopAllAgents()
         hooks?.stopAgentHooks()
     }
@@ -867,7 +868,7 @@ import Terminal
             return !item.isHidden
         }
         if item.action == #selector(stopAllAgents) {
-            return MainActor.assumeIsolated { agents?.isAnyAgentActing ?? false }
+            return agents?.isAnyAgentActing ?? false
         }
         // Both imports wait while another import runs or the last main window shows a sheet, and open a main window when none is open. They touch no tab, so an internal page does not disable them.
         if item.action == #selector(importBookmarksAndHistory) || item.action == #selector(importFromBrowser) {
@@ -887,7 +888,7 @@ import Terminal
 
     // MARK: Page fullscreen
 
-    /// A page that fills its window in fullscreen leaves it on Escape in that window, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself. While the region capture overlay is up, Escape cancels the capture first.
+    /// A page that fills its window in fullscreen leaves it on Escape in that window, as in full browsers. WebKit shows fullscreen in its own window and handles Escape itself. While the region capture overlay is up, Escape cancels the capture first. While the page composes text, Escape goes to the input method.
     private func installFullscreenEscape() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
@@ -966,14 +967,14 @@ import Terminal
     // MARK: Shortcuts
 
     /// Applies the shortcuts chosen in Settings ▸ Shortcuts to the menu bar and registers the global shortcut.
-    @MainActor private func installShortcuts() {
+    private func installShortcuts() {
         let shortcuts = ShortcutSettings.shared
         shortcuts.onGlobalShortcut = { [weak self] in self?.openNewTabFromAnyApp() }
         if let menuBar = NSApp.mainMenu { shortcuts.manage(menuBar) }
     }
 
     /// The Plugins menu changes with the active window's Persona and its plugins, so the shortcut settings list its items each time they change.
-    @MainActor private func installPluginsMenu() {
+    private func installPluginsMenu() {
         guard let menuBar = NSApp.mainMenu, let windowMenu else { return }
         let pluginsMenu = PluginsMenu(session: session)
         pluginsMenu.install(in: menuBar, before: windowMenu)

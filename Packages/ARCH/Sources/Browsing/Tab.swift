@@ -63,7 +63,7 @@ import LiveFolders
     @Published public private(set) var isAudible = false
     /// Whether the page uses the camera or the microphone, which keeps the tab loaded (bookmark rule 5).
     @Published public private(set) var isCapturingMedia = false
-    /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). Another web contents starts without.
+    /// Whether the user typed into the page since its main frame's document loaded, as `TabUnloading.inputScript` reports, which keeps the tab loaded (bookmark rule 5). A main document's commit clears it, and another web contents starts without.
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
     var answersBeforeUnloadWithStay = false
@@ -271,7 +271,7 @@ import LiveFolders
     }
 
     /// Present only on a research tab the user explicitly opened. Releasing it to the user restores normal navigation.
-    var researchLoad: ((URL) -> Bool)?
+    var researchLoad: (@MainActor (URL) -> Bool)?
 
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
     public var agentOwnerID: UUID? {
@@ -286,7 +286,7 @@ import LiveFolders
 }
 
 /// Where agent tabs report what happened in them and ask about their navigations (docs/agents.md, Permissions, approvals, and injection defenses). `BrowserAgentHost` is the session's.
-protocol AgentTabMonitor: AnyObject {
+@MainActor protocol AgentTabMonitor: AnyObject {
     func userDocumentDidEnd(in tabID: UUID, document: UUID)
     func userTabAddressDidChange(_ tabID: UUID)
     /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
@@ -346,6 +346,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
         guard webContents === self.webContents else { return }
         documentID = UUID()
+        hasTypedInput = false
         engineCommittedURL = url
         pageDownloads.documentDidCommit(site: Self.site(of: url))
         didCommitDocument?()
