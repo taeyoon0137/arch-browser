@@ -911,7 +911,7 @@ arch-cli rename <tab> <name>
 
 | Field | Value |
 |---|---|
-| `tools` | `read_text` and `snapshot`, which the client could call itself at every level, and `rename_tab` for its own agent tabs (P19) |
+| `tools` | `read_text` and `snapshot`, which the client could call itself at every level, and `rename_tab` for its own agent tabs and the shared tabs the user let it rename on P19's card (P19) |
 | `tabAccess` | `page` |
 | `minimumRecord`, `maximumRecord` | Keep Activity Only, Keep the Session; `--record none` is refused with `notGranted` |
 | `limits` | The ceilings: 10 minutes, 20 rounds, 50 tool calls |

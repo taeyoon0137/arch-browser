@@ -324,7 +324,7 @@ extension AIFeature {
 }
 
 extension AgentRunGrant {
-    /// The run grant of an outside client with Start Agent Tasks (`docs/hooks.md`, arch-cli agent run and rename): `read_text` and `snapshot`, which the client could call itself at every level, and `rename_tab` for its own agent tabs (P19); page access; Keep Activity Only to Keep the Session; the ceilings of 10 minutes, 20 rounds, and 50 tool calls; the grant's runs a day; and the reply, since the client asked.
+    /// The run grant of an outside client with Start Agent Tasks (`docs/hooks.md`, arch-cli agent run and rename): `read_text` and `snapshot`, which the client could call itself at every level, and `rename_tab` for its own agent tabs and the shared tabs the user let it rename on P19's card (P19); page access; Keep Activity Only to Keep the Session; the ceilings of 10 minutes, 20 rounds, and 50 tool calls; the grant's runs a day; and the reply, since the client asked.
     public static func forClient(_ grant: AgentGrant) -> AgentRunGrant {
         AgentRunGrant(tools: [AgentToolCatalog.renameTab.name, "read_text", "snapshot"], tabAccess: .page, minimumRecord: .activity, maximumRecord: .session,
                       runsPerDay: grant.runsPerDay, limits: AgentRunLimits(timeout: .seconds(600), rounds: 20, toolCalls: 50), returnsReply: true)
