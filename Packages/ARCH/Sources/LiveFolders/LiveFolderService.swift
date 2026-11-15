@@ -63,7 +63,7 @@ public final class LiveFolderService {
         self.keepsUnknownFolders = keepsUnknownFolders
     }
 
-    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes. One whose item limit changed keeps the items within the new limit and refreshes without its validators, so a 304 cannot keep the old number of items; after a raise, that refresh counts the older items it adds as read. The others refresh when due. The store's entries for other folders go, and so do the Keychain items of folders that are not private feeds' (Storage), apart from addresses that `setPrivateAddress(_:for:folderName:)` wrote for folders not registered yet; with `keepsUnknownFolders`, only those of the folders that the last register listed.
+    /// Replaces the live folders, at launch and after each change. A folder that is new, or whose source changed, starts over and refreshes. One whose item limit changed keeps the items within the new limit and refreshes without its validators, so a 304 cannot keep the old number of items; after a raise, that refresh counts the older items it adds as read. The others refresh when due. The store's entries for other folders go, with the Keychain items of those folders and of folders that stopped being private feeds (Storage), apart from addresses that `setPrivateAddress(_:for:folderName:)` wrote for folders not registered yet; with `keepsUnknownFolders`, only those of the folders that the last register listed. Other items under the Keychain service, such as another data folder's, stay.
     public func register(_ folders: [UUID: LiveFolderConfiguration]) {
         let previous = self.folders
         let gone = Set(previous.keys).subtracting(folders.keys)
@@ -74,8 +74,9 @@ public final class LiveFolderService {
         }
         self.folders = folders
         unregisteredAddresses.subtract(Self.privateFeeds(in: folders))
+        let stale = keepsUnknownFolders ? [] : Set(store.folders.keys).subtracting(folders.keys)
         store.removeFolders(notIn: keepsUnknownFolders ? Set(store.folders.keys).subtracting(gone) : Set(folders.keys))
-        let candidates = keepsUnknownFolders ? gone.union(Self.privateFeeds(in: previous)) : nil
+        let candidates = gone.union(Self.privateFeeds(in: previous)).union(stale)
         afterEarlierAddressWork { [weak self] in await self?.removeUnusedAddresses(among: candidates) }
         for (folder, configuration) in folders {
             let state = store[folder]
@@ -294,13 +295,9 @@ public final class LiveFolderService {
 
     // MARK: Keychain
 
-    /// Removes the Keychain items of folders that are not private feeds' among the folders registered when it runs, apart from addresses written for folders not registered yet; with `candidates`, only those of these folders.
-    private func removeUnusedAddresses(among candidates: Set<UUID>?) async {
+    /// Removes the Keychain items of `candidates` that are not private feeds' among the folders registered when it runs, apart from addresses written for folders not registered yet. It never lists the Keychain service, whose other items can belong to another data folder.
+    private func removeUnusedAddresses(among candidates: Set<UUID>) async {
         let kept = Self.privateFeeds(in: folders).union(unregisteredAddresses)
-        guard let candidates else {
-            try? await addresses.removeAddresses(except: kept)
-            return
-        }
         for folder in candidates.subtracting(kept) { try? await addresses.removeAddress(for: folder) }
     }
 

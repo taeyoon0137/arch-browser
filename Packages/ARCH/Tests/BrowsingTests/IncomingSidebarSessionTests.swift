@@ -17,7 +17,7 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func privateFeedCleanupUsesOnlyTheSessionStoreAndPreservesAnUnreadableSession(_ unreadable: Bool) async throws {
+    func aFreshOrUnreadableSessionKeepsKeychainItemsItsStoreDoesNotList(_ unreadable: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -33,7 +33,7 @@ import Testing
         // This write is queued after the initial registration's cleanup.
         try await session.liveFolderService.setPrivateAddress(feed, for: UUID(), folderName: "New feed")
 
-        #expect(try await addresses.address(for: orphan) == (unreadable ? feed : nil))
+        #expect(try await addresses.address(for: orphan) == feed)
         #expect(try await otherAddresses.address(for: orphan) == feed)
         #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.unreadable.json").path) == unreadable)
     }
