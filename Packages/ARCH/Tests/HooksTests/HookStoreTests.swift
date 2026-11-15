@@ -1,4 +1,4 @@
-// `hooks.json` and the script folders (`docs/hooks.md`, Storage): the file read back sealed; an edited file, an earlier copy put back, and a file whose key is gone set aside; a Keychain that does not give the key leaving the file as it was until Try Again; a test migration from version 0 copied at the next write; a file from a later version copied once and kept, with its unknown members and hooks written back unchanged and its unknown hooks, also those with an unknown member inside a value, listed but not run; the hook's own JSON against fixed text; a command-line provider's destination; and scripts checked by digest in folders of mode 0700.
+// `hooks.json` and the script folders (`docs/hooks.md`, Storage): the file read back sealed; an edited file, an earlier copy put back, and a file whose key is gone set aside; a Keychain that does not give the key leaving the file as it was until Try Again; a test migration from version 0 written at the next change; a file from a later version kept, with its unknown members and hooks written back unchanged and its unknown hooks, also those with an unknown member inside a value, listed but not run; the hook's own JSON against fixed text; a command-line provider's destination; and scripts checked by digest in folders of mode 0700.
 import Agent
 import AgentControl
 import AI
@@ -119,7 +119,7 @@ import Testing
         #expect(registry.hooks.map(\.id) == [hook.id])
     }
 
-    @Test func anEarlierVersionIsMigratedAndCopiedBeforeTheNextWrite() async throws {
+    @Test func anEarlierVersionIsMigratedAndWrittenAtTheNextChange() async throws {
         let harness = RegistryHarness()
         defer { harness.cleanUp() }
         let url = harness.folder.appendingPathComponent("hooks.json")
@@ -135,19 +135,16 @@ import Testing
         let registry = try await harness.start(migrations: migrations)
         #expect(registry.isReady)
         #expect(!registry.runsHooks)
-        let copy = harness.folder.appendingPathComponent("hooks-v0.json")
-        #expect(!FileManager.default.fileExists(atPath: copy.path))
 
         registry.runsHooks = true
-        #expect(await eventually { FileManager.default.fileExists(atPath: copy.path) })
-        #expect(try AgentJSON.decode(Data(contentsOf: copy))["settings"]?["hooksOn"] == .bool(false))
+        #expect(await eventually { (try? AgentJSON.decode(Data(contentsOf: url))["settings"]?["runsHooks"]) == .bool(true) })
         let written = try AgentJSON.decode(Data(contentsOf: url))["settings"]
         #expect(written?["version"] == .number(1))
         #expect(written?["runsHooks"] == .bool(true))
         #expect(written?["hooksOn"] == nil)
     }
 
-    @Test func aLaterVersionIsCopiedAndWhatThisBuildDoesNotKnowIsKept() async throws {
+    @Test func whatALaterVersionHoldsThatThisBuildDoesNotKnowIsKept() async throws {
         let harness = RegistryHarness()
         defer { harness.cleanUp() }
         let store = harness.store
@@ -178,12 +175,9 @@ import Testing
         try await sealed.prepareKey()
         try await sealed.write(["version": 2, "runsHooks": true, "futureSetting": "kept",
                                 "hooks": [try members(of: known, setting: 1, at: ["futureMember"]), storedInFilter, storedInGrant, future]]).value
-        let original = try Data(contentsOf: url)
 
         let registry = try await harness.start()
         #expect(registry.notice == .newerVersion(2))
-        let copy = harness.folder.appendingPathComponent("hooks-v2.json")
-        #expect(try Data(contentsOf: copy) == original)
         #expect(registry.hooks.map(\.id) == [known.id, inFilter.id, inGrant.id, futureID])
         #expect(registry.hooks[3].name == "From Later")
         #expect(registry.hooks.map(\.state) == [.active, .paused(.needsNewerArch), .paused(.needsNewerArch), .paused(.needsNewerArch)])
@@ -212,11 +206,10 @@ import Testing
         #expect(hooks[0]["futureMember"] == .number(1))
         #expect(Array(hooks[1...]) == [storedInFilter, storedInGrant, future])
 
-        // The file still says version 2 after this build's write, and the next launch keeps the newer Arch's copy rather than copying that write.
+        // The file still says version 2 after this build's write.
         let next = RegistryHarness(folder: harness.folder, keys: harness.keys)
         let relaunched = try await next.start()
         #expect(relaunched.notice == .newerVersion(2))
-        #expect(try Data(contentsOf: copy) == original)
     }
 
     @Test func aHooksPartsHaveFixedJSON() throws {

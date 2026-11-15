@@ -1,4 +1,4 @@
-// `hooks.json` and the hooks' script folders (`docs/hooks.md`, Storage; hook decision 8). The file is sealed like `agent.json`, under its own Keychain item, and versioned: an earlier version is migrated in memory and copied to `hooks-v<version>.json` before the next write, and a later one is copied there at once unless a copy is there already, read as far as this build knows it, and written back with the members and hooks this build does not know unchanged; a later version's hook with a member this build would not write back, inside one of its values, is one this build cannot read. Each script lives in `Hooks/<hook id>/` and runs only while its bytes match the digest the sealed file holds.
+// `hooks.json` and the hooks' script folders (`docs/hooks.md`, Storage; hook decision 8). The file is sealed like `agent.json`, under its own Keychain item, and versioned: an earlier version is migrated in memory, and a later one is read as far as this build knows it and written back with the members and hooks this build does not know unchanged; a later version's hook with a member this build would not write back, inside one of its values, is one this build cannot read. Each script lives in `Hooks/<hook id>/` and runs only while its bytes match the digest the sealed file holds.
 import Agent
 import AgentControl
 import AI
@@ -41,7 +41,7 @@ public enum HookStoreNotice: Equatable, Sendable {
     case setAside
     /// The Keychain did not give the key, for this reason. The file stays as it was, and no hook runs until Try Again reads it.
     case keyUnavailable(String)
-    /// The file is from a newer Arch, at this version, and a copy is in `hooks-v<version>.json`. Hooks this build cannot read are listed and do not run.
+    /// The file is from a newer Arch, at this version. Hooks this build cannot read are listed and do not run.
     case newerVersion(Int)
     /// The last change was not written, for this reason.
     case notSaved(String)
@@ -71,8 +71,10 @@ public final class HookStore {
     public private(set) var notice: HookStoreNotice?
     /// Whether the file was read, or found missing, and may be written.
     public private(set) var isReady = false
-    /// Whether the file exists, read at launch or written since. The first write records the known providers.
+    /// Whether the file exists, read at launch or written since.
     public private(set) var hasFile = false
+    /// Whether the launch found no file, rather than one set aside.
+    private var readWasNone = false
 
     private let file: SealedSettingsFile<AgentJSON>
     private let version: Int
@@ -82,8 +84,6 @@ public final class HookStore {
     /// Each hook's members as read, by its identifier: written back unchanged for a hook this build cannot read, and merged for one it can.
     private var storedHooks: [UUID: AgentJSON] = [:]
     private var unreadableHooks: Set<UUID> = []
-    /// The version the file had before its migration, whose copy the next write makes first.
-    private var migratedFrom: Int?
     /// The version the next write gives the file: this build's, or a later file's own.
     private var writtenVersion: Int
 
@@ -103,16 +103,13 @@ public final class HookStore {
 
     public var fileURL: URL { file.fileURL }
 
-    /// The copy of the file at `version`.
-    public func copyURL(ofVersion version: Int) -> URL {
-        directory.appendingPathComponent("hooks-v\(version).json")
-    }
-
     // MARK: Reading
 
     /// Reads and checks the file, reading the key once. Returns nil when the Keychain did not give the key, which leaves the file unchanged; otherwise the settings, which are the defaults for a missing file or one set aside.
     public func load() async -> HookSettings? {
-        switch await file.read() {
+        let reading = await file.read()
+        if case .none = reading { readWasNone = true } else { readWasNone = false }
+        switch reading {
         case .none:
             return ready(notice: nil, hasFile: false)
         case .replaced:
@@ -130,6 +127,7 @@ public final class HookStore {
             } catch {
                 // A sealed file this build cannot read at all, as one whose migration fails, is set aside like one whose seal fails.
                 file.setAside()
+                readWasNone = false
                 return ready(notice: .setAside, hasFile: false)
             }
         }
@@ -142,7 +140,6 @@ public final class HookStore {
         members = [:]
         storedHooks = [:]
         unreadableHooks = []
-        migratedFrom = nil
         writtenVersion = version
         return HookSettings()
     }
@@ -152,7 +149,6 @@ public final class HookStore {
         guard var members = contents.objectValue else { throw HookStoreReadError() }
         let fileVersion = try members["version"].map { try $0.decode(as: Int.self) } ?? version
         notice = nil
-        migratedFrom = nil
         if fileVersion < version {
             var migrated = AgentJSON.object(members)
             for step in fileVersion..<version {
@@ -161,13 +157,7 @@ public final class HookStore {
             }
             guard let object = migrated.objectValue else { throw HookStoreReadError() }
             members = object
-            migratedFrom = fileVersion
         } else if fileVersion > version {
-            // The copy keeps the newer Arch's file as it was. Once this build has written the file, it still says the later version, so a copy that is there already is kept rather than replaced with this build's write.
-            let copy = copyURL(ofVersion: fileVersion)
-            if !FileManager.default.fileExists(atPath: copy.path) {
-                try? FileManager.default.copyItem(at: fileURL, to: copy)
-            }
             notice = .newerVersion(fileVersion)
         }
         writtenVersion = max(fileVersion, version)
@@ -214,7 +204,10 @@ public final class HookStore {
 
     public var hasKey: Bool { file.hasKey }
 
-    /// Writes the settings sealed: the members this build knows from `settings`, the others as read; each hook merged over its members as read, and a hook this build cannot read as read. A migrated file is first copied to `hooks-v<version>.json`. Returns the Keychain's record of the write's generation.
+    /// Whether the providers `ai.json` holds now may be taken as the user's: only when no `hooks.json` was ever sealed with the key, as for a user who adds a first hook. A file deleted or set aside leaves the Keychain at a later generation, so a program that removes `hooks.json` and edits `ai.json` gains no known provider. Needs the key, which `prepareKey()` reads.
+    public var trustsCurrentProviders: Bool { readWasNone && file.hasKey && file.keyGeneration == 0 }
+
+    /// Writes the settings sealed: the members this build knows from `settings`, the others as read; each hook merged over its members as read, and a hook this build cannot read as read. Returns the Keychain's record of the write's generation.
     @discardableResult
     public func save(_ settings: HookSettings) throws -> Task<Void, any Error> {
         guard isReady else { throw HookStoreError.notReady }
@@ -227,13 +220,7 @@ public final class HookStore {
             if unreadableHooks.contains(hook.id), let stored = storedHooks[hook.id] { return stored }
             return try Self.merge(AgentJSON(encoding: hook), over: storedHooks[hook.id])
         })
-        if let migratedFrom {
-            let copy = copyURL(ofVersion: migratedFrom)
-            try? FileManager.default.removeItem(at: copy)
-            try FileManager.default.copyItem(at: fileURL, to: copy)
-        }
         let record = try file.write(.object(written))
-        migratedFrom = nil
         hasFile = true
         members = written
         storedHooks = Dictionary(zip(settings.hooks.map(\.id), written["hooks"]?.arrayValue ?? []), uniquingKeysWith: { first, _ in first })

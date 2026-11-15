@@ -196,6 +196,9 @@ public struct AgentKeychainError: LocalizedError {
 
     public var hasKey: Bool { key != nil }
 
+    /// The generation of the file read or written last, or the Keychain's once the key is in: 0 until some file was sealed with the key.
+    public var keyGeneration: Int { generation }
+
     /// Writes the settings sealed at the next generation, then has the Keychain record that generation, after which every earlier file stops opening. Throws without a key, which `prepareKey()` reads or makes. Returns the record, whose failure leaves the file written and the file before it still opening.
     public func write(_ settings: Settings) throws -> Task<Void, any Error> {
         guard let key else { throw SealedSettingsFileError.noKey }

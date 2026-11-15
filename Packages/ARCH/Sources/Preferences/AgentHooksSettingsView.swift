@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, and every hook in run order. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
+// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs. A connected agent-capable model makes New Agent Hook… available.
 import Agent
 import AI
 import Browsing
@@ -56,7 +56,7 @@ struct AgentHooksPage: View {
         } footer: {
             formFootnote("A hook runs a script when something happens in a tab, such as a new tab loading its first page. Hooks run one after another, in this list's order, after Arch's own AI features. While Run Hooks is off, no hook runs.")
         }
-        Section("Hooks") {
+        Section {
             if registry.hooks.isEmpty {
                 Text("No hooks yet.").foregroundStyle(.secondary)
             }
@@ -69,6 +69,15 @@ struct AgentHooksPage: View {
                 // `onMove` counts the destination before the moved row leaves.
                 registry.move(hook.id, to: destination > from ? destination - 1 : destination)
             }
+            HStack {
+                Spacer()
+                Button("Clear Activity") { registry.clearActivity() }
+                    .disabled(registry.lastRuns.isEmpty && registry.log.entries.isEmpty)
+            }
+        } header: {
+            Text("Hooks")
+        } footer: {
+            formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run.")
         }
         .sheet(item: $sheet) { draft in
             ScriptHookSheet(registry: registry, draft: draft, currentTab: currentTab) { sheet = nil }
@@ -404,7 +413,7 @@ enum HookSummary {
         switch notice {
         case .setAside: return "hooks.json could not be opened, so Arch renamed it hooks.json.unreadable and started with no hooks."
         case .keyUnavailable(let reason): return "The Keychain did not give the key of hooks.json, so no hook runs: \(reason)"
-        case .newerVersion(let version): return "hooks.json is from a newer version of Arch, version \(version). Arch kept a copy as hooks-v\(version).json and lists the hooks it cannot read without running them."
+        case .newerVersion(let version): return "hooks.json is from a newer version of Arch, version \(version). Arch lists the hooks it cannot read without running them."
         case .notSaved(let reason): return "Arch could not save the last change to the hooks: \(reason)"
         }
     }
