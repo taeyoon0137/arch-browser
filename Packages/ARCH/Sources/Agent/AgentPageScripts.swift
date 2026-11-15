@@ -254,7 +254,11 @@ enum AgentPageScripts {
     static let body = #"""
     "use strict";
     const MAX_NAME = 80, MAX_VALUE = 200, MAX_TEXT = 200;
-    const EXTENSION = /^(chrome|safari-web|moz|webkit|ms-browser)-extension:/i;
+    // The extension schemes of Arch's two engines.
+    const EXTENSION = /^(chrome|webkit)-extension:/i;
+    // A form's named fields shadow its own properties, as a field named "action" does `form.action`, so the form's action and fields are read through the prototype's getters.
+    const FORM_ACTION = Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, "action").get;
+    const FORM_ELEMENTS = Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, "elements").get;
     const SKIPPED = new Set(["script", "style", "template", "noscript", "head", "meta", "link", "title"]);
     const INTERACTIVE = new Set(["link", "button", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "slider", "spinbutton", "switch", "tab", "menuitem",
       "menuitemcheckbox", "menuitemradio", "option", "treeitem", "gridcell"]);
@@ -390,7 +394,7 @@ enum AgentPageScripts {
     function formFieldsOf(form) {
       const kinds = new Set();
       if (!form) return [];
-      for (const field of form.elements) {
+      for (const field of FORM_ELEMENTS.call(form)) {
         const tag = tagOf(field), type = typeOf(field);
         if (!(tag === "textarea" || tag === "select" || (tag === "input" && TEXT_TYPES.has(type)))) continue;
         const tokens = (field.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
@@ -413,16 +417,15 @@ enum AgentPageScripts {
       return type === "submit" || type === "image";
     }
 
-    /// The button that Enter in one of the form's fields submits with: its first submit button, unless that one is disabled.
+    /// The form's default button, which Enter in one of its fields submits with: its first submit button in tree order, enabled or not. Enter submits nothing while it is disabled.
     function defaultSubmitterOf(form) {
       if (!form) return null;
-      const button = Array.from(form.elements).find((e) => submitsForm(e));
-      return button && !button.matches(":disabled") ? button : null;
+      return Array.from(FORM_ELEMENTS.call(form)).find((e) => submitsForm(e)) || null;
     }
 
     /// Where a submission goes: the submitter's own `formaction` when it has one, else the form's action.
     function actionOf(form, submitter) {
-      return submitter && submitter.hasAttribute("formaction") ? submitter.formAction : form.action;
+      return submitter && submitter.hasAttribute("formaction") ? submitter.formAction : FORM_ACTION.call(form);
     }
 
     function formKeyOf(el, frame) {
@@ -709,8 +712,11 @@ enum AgentPageScripts {
       const proceed = el.dispatchEvent(new win.KeyboardEvent("keydown", init));
       if (proceed && (key.length === 1 || key === "Enter")) el.dispatchEvent(new win.KeyboardEvent("keypress", init));
       el.dispatchEvent(new win.KeyboardEvent("keyup", init));
-      // Enter submits with the form's default button, or on a submit input with that input, as a click on it would: the one whose name and `formaction` the policy read.
-      if (proceed && key === "Enter" && !Object.keys(modifiers).length && tagOf(el) === "input" && el.form) el.form.requestSubmit((submitsForm(el) ? el : defaultSubmitterOf(el.form)) || undefined);
+      // Enter submits with the form's default button, or on a submit input with that input, as a click on it would: the one whose name and `formaction` the policy read. As in a browser, a disabled default button submits nothing.
+      if (proceed && key === "Enter" && !Object.keys(modifiers).length && tagOf(el) === "input" && el.form) {
+        const button = submitsForm(el) ? el : defaultSubmitterOf(el.form);
+        if (!button || !button.matches(":disabled")) el.form.requestSubmit(button || undefined);
+      }
     }
 
     function typeInto(el, text, replace) {

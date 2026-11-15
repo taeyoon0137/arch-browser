@@ -97,13 +97,15 @@ public struct AgentApproval: Identifiable {
     /// The step in a sentence, as "Click “Place order” on shop.example".
     public var action: String
     public var tabID: UUID?
-    /// Only an app session’s research card can depend on a shared source document.
-    var researchDocumentID: UUID?
+    /// The tab's document the card is about: a new document there withdraws it, as when a shared tab reloads at the same address.
+    var documentID: UUID?
     /// The tab's handle for the agent, as t3.
     public var tabHandle: String?
     public var site: String?
     /// The exact text or address that would be sent.
     public var exactText: String?
+    /// Arch's note under the exact text, as what an allowance for the page or site lets the site receive.
+    public var exactTextNote: String?
     /// The agent's explanation, its question, or its message.
     public var agentSays: String?
     /// A viewport capture with the element's box marked, which only the user sees, so it is not painted over.
@@ -270,9 +272,9 @@ public struct AgentApproval: Identifiable {
         }
     }
 
-    /// The attachment supplying the research address changed while this card was waiting.
-    func withdrawResearch(_ id: UUID) {
-        guard case .openSessionResearch? = cards[id]?.kind else { return }
+    /// Withdraws one waiting card, as when the document or attachment it is about changed.
+    func withdraw(_ id: UUID) {
+        guard isPending(id) else { return }
         finish(id, .withdrawn)
     }
 

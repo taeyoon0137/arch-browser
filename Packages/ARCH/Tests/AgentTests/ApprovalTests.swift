@@ -350,13 +350,24 @@ import Testing
         let external = try await fixture.waitForCard()
         #expect(fixture.toolHost.approvals.pending.count == 1)
         #expect(external.kind == .externalApp("Mail") && external.isSensitive && external.needsAuthentication)
+        #expect(external.offers == [.allowOnce, .deny, .denyAndStop, .takeOver])
         #expect(fixture.host.openedExternally.isEmpty)
         await fixture.toolHost.approvals.answer(external.id, with: .allowOnce)
         try await waitUntil { fixture.host.openedExternally == [mail] }
         // Never the full addresses.
         let events = await fixture.call("list_tabs")
         #expect(events.text.contains("The user opened the link from \(handle) in Mail."))
+        #expect(events.text.contains("tried to open another link in another app while one waits for the user"))
         #expect(!events.text.contains("token=1") && !events.text.contains("dana@example.org") && !downloads.text.contains("token=1"))
+        // Deny and Stop stops the client, as on other sensitive cards; the host is a value, so this copy reports with its own stop.
+        var stopped: [UUID] = []
+        var toolHost = fixture.toolHost
+        toolHost.stopClient = { stopped.append($0) }
+        toolHost.tab(tabID, of: fixture.grant.id, didReport: .externalAppAsked(mail), state: fixture.state)
+        let again = try await fixture.waitForCard()
+        await fixture.toolHost.approvals.answer(again.id, with: .denyAndStop)
+        try await waitUntil { !stopped.isEmpty }
+        #expect(stopped == [again.ownerID] && fixture.host.openedExternally == [mail])
     }
 
     @Test func aRequestedApprovalEndsWhenThePageChangesOnDenyAndStopAndOnAReply() async throws {

@@ -337,7 +337,7 @@ public enum AgentPolicy {
     public static let secretWords = [
         "password", "passwords", "passwd", "pwd", "passcode", "passphrase", "pin", "pin code", "cvv", "cvc", "cvv2", "csc", "security code", "verification code", "one time code",
         "one time password", "otp", "2fa", "token", "api key", "secret", "social security number", "ssn", "card number", "credit card", "card no",
-        "비밀번호", "암호", "패스워드", "인증번호", "인증 번호", "인증코드", "보안코드", "보안 코드", "주민등록번호", "주민번호", "카드번호", "카드 번호", "OTP",
+        "비밀번호", "암호", "패스워드", "인증번호", "인증 번호", "인증코드", "보안코드", "보안 코드", "주민등록번호", "주민번호", "카드번호", "카드 번호",
     ]
 
     /// `autocomplete` tokens of fields whose values never leave the page: credentials, one-time codes, and payment details.

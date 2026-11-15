@@ -168,8 +168,8 @@ import Foundation
         host.personasDidChange = { [weak self] in self?.personasDidChange() }
         host.userDocumentDidEnd = { [weak self] tabID, documentID in
             guard let self else { return }
-            for card in self.approvals.pending where card.tabID == tabID && card.researchDocumentID == documentID {
-                self.approvals.withdrawResearch(card.id)
+            for card in self.approvals.pending where card.tabID == tabID && card.documentID == documentID {
+                self.approvals.withdraw(card.id)
             }
             for session in self.sessions where session.handles.sharedTabIDs.contains(tabID) {
                 session.objectWillChange.send()
@@ -913,7 +913,7 @@ import Foundation
             guard let approvals else { return }
             for card in approvals.pending where card.ownerID == id {
                 if case .openSessionResearch = card.kind, card.tabID == tabID {
-                    approvals.withdrawResearch(card.id)
+                    approvals.withdraw(card.id)
                 }
                 if case .shareSessionTab(let choices) = card.kind, choices.contains(where: { $0.id == tabID }) {
                     approvals.end(card.id, because: "The tabs available to share changed.")
@@ -1412,7 +1412,7 @@ import Foundation
                                  kind: kind, isSensitive: false, offers: [.deny], action: action, tabID: research?.source.attachmentID,
                                  agentSays: call.arguments["reason"]?.stringValue, connectionID: connectionID, createdAt: now,
                                  deadline: now.addingTimeInterval(sessionQuestionWindow))
-        card.researchDocumentID = research?.source.documentID
+        card.documentID = research?.source.documentID
         let answer = await approvals.request(card)
         func stillRequested() -> Bool {
             !Task.isCancelled && isConnected() && session.callEpoch == epoch && session.takeoverGeneration == generation

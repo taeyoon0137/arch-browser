@@ -58,6 +58,12 @@ struct AgentApprovalCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
             }
+            if let note = approval.exactTextNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let says = approval.agentSays, !says.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("The agent says:")

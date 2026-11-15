@@ -753,6 +753,7 @@ import Foundation
             state.record(.decided("A page in \(state.handles.tabs.handle(for: tabID)) started another download while one waits for the user, so Arch did not start it."), tab: tabID)
             return
         }
+        if case .externalAppAsked(let url) = report, let state, !asksAboutExternalApp(url, in: tabID, state: state) { return }
         state?.record(.report(report), tab: tabID)
         switch report {
         case .addressChanged, .loaded: approvals.withdraw(tab: tabID, owner: ownerID, document: state?.activity(of: tabID).pages ?? Int.max)

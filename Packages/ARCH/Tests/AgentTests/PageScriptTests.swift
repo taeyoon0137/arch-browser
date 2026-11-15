@@ -447,6 +447,38 @@ import Testing
         #expect(await inShared.status == .denied && shared.host.shownTabIDs == [shared.tabID])
     }
 
+    /// A shared tab that reloads at the same address while its card waits has another document, in which the approved step does not run.
+    @Test func aStepAllowedForASharedTabsDocumentDoesNotRunInTheNext() async throws {
+        let shared = try await PageFixture(shared: true)
+        shared.toolHost.approvals.authenticator = FakeAuthenticator()
+        _ = await shared.outline()
+        async let click = shared.call("click", ["tab": "t1", "ref": "e12"])
+        try await waitUntil { !shared.toolHost.approvals.pending.isEmpty }
+        let index = try #require(shared.host.tabs.firstIndex { $0.id == shared.tabID })
+        #expect(shared.toolHost.approvals.pending.first?.documentID == shared.host.tabs[index].documentID)
+        shared.host.tabs[index].documentID = UUID()
+        _ = try await shared.answerNextCard(.allowOnce)
+        #expect(await click.status == .stale)
+    }
+
+    /// A field named "action" shadows `form.action`, which the script reads through the prototype, so P5 still sees the other site; and Enter submits nothing while the form's first submit button is disabled, as in a browser.
+    @Test func namedFieldsDoNotHideAFormsActionAndADisabledDefaultButtonBlocksEnter() async throws {
+        let fixture = try await PageFixture()
+        _ = try await fixture.page.evaluate("""
+            document.body.insertAdjacentHTML("beforeend", '<form id="named" action="https://collect.other.example/post"><input name="alias" aria-label="Zed alias"><input type="hidden" name="action" value="subscribe"><button type="submit">Go</button></form>'
+              + '<form id="blocked" onsubmit="document.body.dataset.blocked = \\'sent\\'; return false"><input name="promo" aria-label="Zed promo"><button type="submit" disabled>Next</button><button type="submit">Later</button></form>'); 0
+            """)
+        let lines = await fixture.outline()
+        let alias = try #require(fixture.ref("Zed alias", in: lines))
+        async let typed = fixture.call("type", ["tab": "t1", "ref": .string(alias), "text": "Alex", "submit": true])
+        let card = try await fixture.answerNextCard(.deny)
+        #expect(card.rules.contains(.p5), "\(card.rules)")
+        #expect(await typed.status == .denied)
+        let promo = try #require(fixture.ref("Zed promo", in: lines))
+        #expect(await fixture.call("press", ["tab": "t1", "ref": .string(promo), "keys": "Enter"]).status == .ok)
+        #expect(try await fixture.page.evaluate("document.body.dataset.blocked || 'none'") as? String == "none")
+    }
+
     @Test func screenshotsPaintFieldsAndFramesInsideAriaHiddenAndInertSubtrees() async throws {
         // A dialog's library marks the page's root aria-hidden: snapshots leave its fields out, but the screen still shows them.
         let fixture = try await PageFixture("hidden")
