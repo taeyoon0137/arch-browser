@@ -52,6 +52,12 @@ public protocol HookScriptRunning: AnyObject {
     /// Runs the invocation's script until it ends, its deadline passes, or `cancel(run:)` stops it.
     func run(_ invocation: HookInvocation) async -> HookRunOutcome
     func cancel(run: UUID)
+    /// The end of what the run's script wrote to standard error, once, after the run returned; nil for a runner without one.
+    func takeErrorOutput(of run: UUID) -> String?
+}
+
+extension HookScriptRunning {
+    public func takeErrorOutput(of run: UUID) -> String? { nil }
 }
 
 /// One run of a hook's script.
@@ -141,9 +147,11 @@ public struct HookRunSummary: Identifiable, Sendable {
     public var actions: [String: Int]?
     /// A failed run's message, its first 200 characters; never on disk. At Keep Nothing only Arch's own sentences stay.
     public var message: String?
+    /// The last 4 KB a shell script wrote to standard error, in memory only and never at Keep Nothing.
+    public var errorOutput: String?
     public var test: Bool
 
-    init(_ entry: HookRunEntry, message: String?) {
+    init(_ entry: HookRunEntry, message: String?, errorOutput: String? = nil) {
         id = entry.id
         date = entry.date
         outcome = entry.outcome
@@ -152,17 +160,19 @@ public struct HookRunSummary: Identifiable, Sendable {
         duration = entry.duration
         actions = entry.actions
         self.message = message
+        self.errorOutput = errorOutput
         test = entry.test
     }
 
     /// The failures whose message is Arch's own sentence, never a script's or a model's words.
-    static let archSentenceCodes: Set<String> = ["notConfigured", "unknownProvider", "scriptChanged", "runnerMissing"]
+    static let archSentenceCodes: Set<String> = ["notConfigured", "unknownProvider", "scriptChanged", "notStarted"]
 
     /// What Keep Nothing keeps of the last run or skip: its time, outcome, code, and reason, and Arch's own sentence for a failure.
     var reduced: HookRunSummary {
         var summary = self
         summary.duration = nil
         summary.actions = nil
+        summary.errorOutput = nil
         if !Self.archSentenceCodes.contains(code ?? "") { summary.message = nil }
         return summary
     }
@@ -182,26 +192,19 @@ public enum HookRegistryError: LocalizedError, Equatable {
     /// Hooks never see agent tabs, so a filter may not name them.
     case namesAgentTabs
     case invalidAgentOptions(String)
+    /// Allow Shell Scripts is off, or the shell hook comes from an outside program, which may add none (hook decision 4).
+    case shellScriptsOff
+    case invalidScript(String)
 
     public var errorDescription: String? {
         switch self {
         case .duplicate: return "A hook with this identifier exists already."
         case .unknownHook: return "Arch has no hook it can change with this identifier."
         case .namesAgentTabs: return "Hooks cannot run for agent tabs."
-        case .invalidAgentOptions(let reason): return reason
+        case .invalidAgentOptions(let reason), .invalidScript(let reason): return reason
+        case .shellScriptsOff: return "Turn on Allow Shell Scripts first."
         }
     }
-}
-
-/// Stands in for a runner Arch does not have yet, the shell runner until VII.31. Every run fails with `runnerMissing`.
-public final class UnavailableHookScriptRunner: HookScriptRunning {
-    public init() {}
-
-    public func run(_ invocation: HookInvocation) async -> HookRunOutcome {
-        .failed(code: "runnerMissing", message: "This version of Arch cannot run this kind of script.")
-    }
-
-    public func cancel(run: UUID) {}
 }
 
 // MARK: - Registry
@@ -227,6 +230,8 @@ public final class HookRegistry: ObservableObject {
     @Published public var runsHooks = true {
         didSet { runsHooksDidChange(from: oldValue) }
     }
+    /// Settings ▸ AI ▸ Hooks ▸ Allow Shell Scripts, off by default, which `setAllowsShellScripts(_:)` changes.
+    @Published public private(set) var allowsShellScripts = false
     /// The last runs of each hook, newest last, in memory (`docs/hooks.md`, Run log).
     @Published public private(set) var lastRuns: [UUID: [HookRunSummary]] = [:]
     /// Each hook's runs and failures today.
@@ -250,7 +255,6 @@ public final class HookRegistry: ObservableObject {
     private let javaScript: any HookScriptRunning
     private let shell: any HookScriptRunning
     private let now: () -> Date
-    private var allowsShellScripts = false
     private var knownProviders: [HookKnownProvider] = []
     /// Each provider's destination as last seen, from launch on: one that differs when `ai.json` changes is one the user set up in Arch.
     private var seenProviders: [AIProviderID: String]
@@ -336,6 +340,7 @@ public final class HookRegistry: ObservableObject {
         lastRuns = Self.summaries(of: log.entries, for: hooks)
         var changed = recordProviders(ai.settings.providers)
         changed = pauseChangedScripts() || changed
+        if !allowsShellScripts { changed = pauseShellHooks() || changed }
         changed = applyPlaces() || changed
         if changed, store.hasFile { persist() }
     }
@@ -387,10 +392,11 @@ public final class HookRegistry: ObservableObject {
 
     // MARK: Changes
 
-    /// Adds the hook at the end of the list with its script, whose digest the registry records. Its filter's kinds become its trigger's.
+    /// Adds the hook at the end of the list with its script, whose digest the registry records. Its filter's kinds become its trigger's. A shell hook needs Allow Shell Scripts and the user as its origin, and its file must pass the shell runner's check; the trust sheet asks for Touch ID first.
     public func add(_ hook: Hook, script: Data) throws {
         guard isReady else { throw HookStoreError.notReady }
         guard index(of: hook.id) == nil else { throw HookRegistryError.duplicate }
+        try checkShellScript(of: hook, script: script)
         var added = try Self.checked(hook)
         added.script = try store.writeScript(script, for: added)
         hooks.append(added)
@@ -398,16 +404,21 @@ public final class HookRegistry: ObservableObject {
         persist()
     }
 
-    /// Replaces the hook's settings, and its script when `script` is given; the hook keeps its origin, creation date, state, and, without a script, its recorded script. Only `pause(_:)`, `resume(_:)`, and the registry's own pauses change a hook's state.
+    /// Replaces the hook's settings, and its script when `script` is given; the hook keeps its origin, creation date, state, and, without a script, its recorded script. Only `pause(_:)`, `resume(_:)`, the registry's own pauses, and a shell script that the user trusts again, which lifts its `scriptChanged` pause, change a hook's state.
     public func update(_ hook: Hook, script: Data?) throws {
         guard isReady else { throw HookStoreError.notReady }
         guard let index = index(of: hook.id), !store.isUnreadable(hook.id) else { throw HookRegistryError.unknownHook }
         let stored = hooks[index]
+        if let script { try checkShellScript(of: hook, script: script, origin: stored.origin) }
         var updated = try Self.checked(hook)
         updated.origin = stored.origin
         updated.created = stored.created
         updated.state = stored.state
         updated.script = try script.map { try store.writeScript($0, for: updated) } ?? stored.script
+        if script != nil, updated.script.isShell, stored.state == .paused(.scriptChanged) {
+            updated.state = .active
+            failureCounts[updated.id] = nil
+        }
         hooks[index] = updated
         register(updated)
         // A running script keeps the grant and tabs it started with.
@@ -430,6 +441,42 @@ public final class HookRegistry: ObservableObject {
         limiter.reset(hook.owner)
         for tab in firstLoadCarryOvers.keys { firstLoadCarryOvers[tab]?.remove(id) }
         persist()
+    }
+
+    /// Refuses a shell script while Allow Shell Scripts is off, from an outside program, and when the shell runner would not run its bytes.
+    private func checkShellScript(of hook: Hook, script: Data, origin: HookOrigin? = nil) throws {
+        guard hook.script.isShell else { return }
+        guard allowsShellScripts, case .user = origin ?? hook.origin else { throw HookRegistryError.shellScriptsOff }
+        if let problem = HookShellScript.problem(in: script) { throw HookRegistryError.invalidScript(problem) }
+    }
+
+    /// Allow Shell Scripts: turning it off stops every shell hook's runs and pauses each active one with `shellScriptsOff`; turning it on resumes the shell hooks it paused.
+    public func setAllowsShellScripts(_ isOn: Bool) {
+        guard isReady, isOn != allowsShellScripts else { return }
+        allowsShellScripts = isOn
+        if isOn {
+            for index in hooks.indices where hooks[index].state == .paused(.shellScriptsOff) && mayResume(hooks[index], from: .shellScriptsOff) {
+                hooks[index].state = .active
+                failureCounts[hooks[index].id] = nil
+                limiter.reset(hooks[index].owner)
+            }
+        } else {
+            _ = pauseShellHooks()
+        }
+        persist()
+    }
+
+    /// Stops every shell hook's runs and pauses each active one with `shellScriptsOff`.
+    private func pauseShellHooks() -> Bool {
+        var changed = false
+        for index in hooks.indices where hooks[index].script.isShell {
+            cancelRuns(of: hooks[index])
+            if hooks[index].state == .active {
+                hooks[index].state = .paused(.shellScriptsOff)
+                changed = true
+            }
+        }
+        return changed
     }
 
     /// Settings' Clear Activity: empties the run log and every row's last runs.
@@ -521,7 +568,8 @@ public final class HookRegistry: ObservableObject {
         switch reason {
         case .needsNewerArch: return false
         case .unknownProvider: return providersForReview(of: hook.id).isEmpty && !store.isUnreadable(hook.id)
-        case .scriptChanged: return store.script(for: hook) != nil
+        // A shell hook runs again only once the user trusts its file again, which `update(_:script:)` records.
+        case .scriptChanged: return !hook.script.isShell && store.script(for: hook) != nil
         case .shellScriptsOff: return allowsShellScripts
         default: return !store.isUnreadable(hook.id)
         }
@@ -794,7 +842,10 @@ public final class HookRegistry: ObservableObject {
             return
         }
         guard let invocation = invocation(for: current, run: run, script: script, deadline: deadline, applying: true, requestDidEnd: requestDidEnd) else { return }
-        run.outcome = await perform(invocation, run: run, on: runner(for: current))
+        let runner = runner(for: current)
+        let outcome = await perform(invocation, run: run, on: runner)
+        run.errorOutput = runner.takeErrorOutput(of: run.id)
+        run.outcome = outcome
     }
 
     private func runner(for hook: Hook) -> any HookScriptRunning {
@@ -971,6 +1022,7 @@ public final class HookRegistry: ObservableObject {
             run.cancelScript()
         }
         let ended = await perform(invocation, run: run, on: runner)
+        run.errorOutput = runner.takeErrorOutput(of: run.id)
         watchdog.cancel()
         let outcome = run.didTimeOut ? .timedOut : ended
         record(outcome, of: run)
@@ -1023,7 +1075,9 @@ public final class HookRegistry: ObservableObject {
         case .cancelled:
             entry.outcome = .cancelled
         }
-        note(entry, message: message, of: hook)
+        note(entry, message: message, errorOutput: run.errorOutput, of: hook)
+        // A shell hook whose interpreter changed pauses for Review, also after a test.
+        if entry.code == "scriptChanged" { pauseHook(hook.id, .scriptChanged, stopping: true) }
         guard failed, !run.isTest else { return }
         dayCounts[hook.id] = dayCount(of: hook.id).adding(failures: 1)
         if entry.code == "unknownProvider" {
@@ -1031,7 +1085,7 @@ public final class HookRegistry: ObservableObject {
             return
         }
         // The agent runs' daily count, which `ai-usage.json` keeps across launches, says so in the row without pausing the hook.
-        guard countsAsFailure, entry.code != "dailyRuns" else { return }
+        guard countsAsFailure, entry.code != "dailyRuns", entry.code != "scriptChanged" else { return }
         let count = (failureCounts[hook.id] ?? 0) + 1
         failureCounts[hook.id] = count
         if count >= Self.failuresBeforePause { pauseHook(hook.id, .failures) }
@@ -1059,9 +1113,9 @@ public final class HookRegistry: ObservableObject {
         note(entry, message: nil, of: hook)
     }
 
-    /// Keep the Session and Keep Activity Only log the entry and keep it in the hook's last runs; Keep Nothing keeps the last run's reduced summary in memory only.
-    private func note(_ entry: HookRunEntry, message: String?, of hook: Hook) {
-        let summary = HookRunSummary(entry, message: message)
+    /// Keep the Session and Keep Activity Only log the entry and keep it in the hook's last runs, with a shell script's standard error in memory; Keep Nothing keeps the last run's reduced summary in memory only.
+    private func note(_ entry: HookRunEntry, message: String?, errorOutput: String? = nil, of hook: Hook) {
+        let summary = HookRunSummary(entry, message: message, errorOutput: errorOutput)
         let previous = lastRuns[hook.id] ?? []
         let runs: [HookRunSummary]
         if hook.record == .none {
@@ -1131,6 +1185,8 @@ final class HookRun {
     /// When its script started, after its slot.
     var startedAt: ContinuousClock.Instant?
     var outcome: HookRunOutcome?
+    /// The end of a shell script's standard error, for the hook's last runs.
+    var errorOutput: String?
     var runner: (any HookScriptRunning)?
     var didTimeOut = false
 

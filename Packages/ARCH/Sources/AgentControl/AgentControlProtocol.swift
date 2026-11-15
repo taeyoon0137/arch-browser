@@ -7,6 +7,8 @@ public enum AgentControlProtocol {
     /// The notification without params that Arch writes once its peer checks pass. The client sends nothing before it arrives.
     public static let readyMethod = "ready"
     public static let helloMethod = "hello"
+    /// The environment variable that carries a shell hook run's ticket, which `arch-cli` presents in `hello` (`docs/hooks.md`, Shell scripts).
+    public static let hookTicketVariable = "ARCH_HOOK_TICKET"
 }
 
 /// The methods a client calls after `hello`, and the notifications of each end (docs/agents.md, Local control channel ▸ Framing and methods). The tool messages' params and results are in `AgentToolMessages.swift`. The methods of later tasks join as they are built; Arch answers any other method with JSON-RPC error -32601.
@@ -50,7 +52,7 @@ public struct AgentHello: Codable, Equatable, Sendable {
     public var client: AgentClientKind
     /// The client's version, from the bundle that contains it.
     public var version: String
-    /// An in-app session's ticket (`ARCH_AGENT_TICKET`), which only `arch-mcp --session` sends.
+    /// An in-app session's ticket (`ARCH_AGENT_TICKET`), which only `arch-mcp --session` sends, or a shell hook run's (`ARCH_HOOK_TICKET`), which only `arch-cli` sends.
     public var ticket: String?
 
     public init(protocol: Int = AgentControlProtocol.version, client: AgentClientKind, version: String, ticket: String? = nil) {
@@ -76,7 +78,7 @@ public struct AgentHelloAnswer: Equatable, Sendable {
 }
 
 public enum AgentConnectionStatus: Equatable, Sendable {
-    /// The connection belongs to an in-app session, through its ticket.
+    /// The connection belongs to an in-app session or a shell hook's run, through its ticket.
     case bound
     /// An outside client with a grant.
     case granted(AgentGrantSummary)
@@ -173,7 +175,7 @@ public struct AgentRefusal: Codable, Equatable, Sendable {
         public static let protocolMismatch = Reason(rawValue: "protocol")
         /// Allow Outside Clients is off and the client presented no valid ticket.
         public static let outsideAccessOff = Reason(rawValue: "outsideAccessOff")
-        /// The ticket matches no session, or the peer is not in its session's process tree.
+        /// The ticket matches no session or hook run, or the peer is not in its process tree.
         public static let ticket = Reason(rawValue: "ticket")
         /// Arch could not tell which program the client is, as when a process on its parent chain ended while Arch read it.
         public static let unidentified = Reason(rawValue: "unidentified")

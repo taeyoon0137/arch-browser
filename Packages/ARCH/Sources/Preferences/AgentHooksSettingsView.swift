@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs, with Show Session and Delete Session… for a run whose agent runs were kept with Keep the Session. A connected agent-capable model makes New Agent Hook… available.
+// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, Allow Shell Scripts, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs, with a shell script's standard error and, for a run whose agent runs were kept with Keep the Session, Show Session and Delete Session…. A connected agent-capable model makes New Agent Hook… available.
 import Agent
 import AI
 import Browsing
@@ -33,6 +33,8 @@ struct AgentHooksPage: View {
         Section {
             Toggle("Run Hooks", isOn: $registry.runsHooks)
                 .disabled(!registry.isReady)
+            Toggle("Allow Shell Scripts", isOn: Binding(get: { registry.allowsShellScripts }, set: { registry.setAllowsShellScripts($0) }))
+                .disabled(!registry.isReady)
             if let notice = registry.notice {
                 HStack(alignment: .firstTextBaseline) {
                     Text(HookSummary.sentence(for: notice)).foregroundStyle(.secondary)
@@ -60,7 +62,7 @@ struct AgentHooksPage: View {
                     .disabled(!registry.isReady)
             }
         } footer: {
-            formFootnote("A hook runs a script when something happens in a tab, such as a new tab loading its first page. Hooks run one after another, in this list's order, after Arch's own AI features. While Run Hooks is off, no hook runs.")
+            formFootnote("A hook runs a script when something happens in a tab, such as a new tab loading its first page. Hooks run one after another, in this list's order, after Arch's own AI features. While Run Hooks is off, no hook runs. A shell script runs outside Arch's sandbox with your rights, only while Allow Shell Scripts is on and after you trust its file with Touch ID or your login password.")
         }
         Section {
             if registry.hooks.isEmpty {
@@ -151,11 +153,10 @@ struct AgentHooksPage: View {
 
     private func pauseRow(for hook: Hook, reason: HookPauseReason) -> some View {
         HStack {
-            Text(HookSummary.sentence(for: reason)).font(.caption).foregroundStyle(.orange)
+            Text(reason == .scriptChanged && hook.script.isShell ? "Its script or its interpreter changed." : HookSummary.sentence(for: reason)).font(.caption).foregroundStyle(.orange)
             switch reason {
             case .scriptChanged:
                 Button("Review") { edit(hook, reviewing: true) }
-                    .disabled(hook.script.isShell)
             case .unknownProvider:
                 Button("Review") {
                     let providers = registry.providersForReview(of: hook.id)
@@ -164,7 +165,8 @@ struct AgentHooksPage: View {
                     let described = providers.map { item in settings.providers.first { $0.id == item.id }.map(HookSummary.review(of:)) ?? item.id.rawValue }
                     providerReview = ProviderReview(hook: hook.id, providers: providers, description: ([HookSummary.reviewIntro] + described).joined(separator: "\n\n"))
                 }
-            case .user, .needsNewerArch:
+            // Allow Shell Scripts resumes the shell hooks it paused.
+            case .user, .needsNewerArch, .shellScriptsOff:
                 EmptyView()
             default:
                 Button("Resume") { registry.resume(hook.id) }
@@ -176,11 +178,12 @@ struct AgentHooksPage: View {
         let isReadable = hook.state != .paused(.needsNewerArch)
         return Menu {
             Button("Edit…") { edit(hook, reviewing: false) }
-                .disabled(!isReadable || hook.script.isShell)
+                .disabled(!isReadable)
             Button("Run on Current Tab") { runOnCurrentTab(hook) }
                 .disabled(!isReadable)
+            // The user trusts a shell script for its own hook only.
             Button("Duplicate") { duplicate(hook) }
-                .disabled(!isReadable || hook.state == .paused(.scriptChanged))
+                .disabled(!isReadable || hook.state == .paused(.scriptChanged) || hook.script.isShell)
             Divider()
             Button("Delete…", role: .destructive) { deleting = hook }
         } label: {
@@ -202,6 +205,17 @@ struct AgentHooksPage: View {
                 Text("\(run.date.formatted(date: .omitted, time: .standard)) · \(HookSummary.description(of: run))")
                 if let message = run.message {
                     Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                }
+                // A shell script's standard error, kept in memory only, in the type and scroll view of Show Session.
+                if let output = run.errorOutput {
+                    ScrollView {
+                        Text(output)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 120)
                 }
                 keptSession(of: run)
             }
@@ -297,16 +311,17 @@ enum HookScriptActions {
         var errorDescription: String? { sentence }
     }
 
-    /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest. Refused for a file that is missing or not text, which an empty editor would replace unseen.
+    /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest. Refused for a file that is missing or not text, which an empty editor would replace unseen. A shell script's bytes go to the trust sheet as they are.
     static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) throws -> ScriptHookDraft {
         guard let file, let script = String(data: file.contents, encoding: .utf8) else { throw Refusal(sentence: "Arch cannot read the script of \u{201C}\(hook.name)\u{201D}.") }
-        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || !file.matchesDigest)
+        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || !file.matchesDigest, contents: hook.script.isShell ? file.contents : nil)
     }
 
     /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch, and for an outside program's hook, whose copy would lose the caps of its origin.
     static func copy(of hook: Hook, file: HookScriptFile?) throws -> (hook: Hook, script: Data) {
         let name = "\u{201C}\(hook.name)\u{201D}"
         guard !hook.origin.isOutsideProgram else { throw Refusal(sentence: "Hooks that other programs added cannot be duplicated.") }
+        guard !hook.script.isShell else { throw Refusal(sentence: "A shell script is trusted for its own hook only. Make a new hook with its file instead.") }
         guard let file else { throw Refusal(sentence: "Arch cannot read the script of \(name).") }
         guard file.matchesDigest else { throw Refusal(sentence: "The script of \(name) changed outside Arch. Review it before you duplicate the hook.") }
         var copy = hook
@@ -324,9 +339,12 @@ enum HookScriptActions {
 /// The sentences Settings ▸ AI ▸ Hooks shows for hooks, their places, their runs, and the notices about `hooks.json`.
 @MainActor
 enum HookSummary {
-    /// The row's lines under the name: the situation, the scope, and the sites; an agent hook's model and record; the last run; and the program that added the hook.
+    /// The row's lines under the name: the situation, the scope, and the sites; a shell hook's file; an agent hook's model and record; the last run; and the program that added the hook.
     static func lines(for hook: Hook, places: [HookPersonaPlaces], lastRun: HookRunSummary?) -> [String] {
         var lines = [[situation(of: hook.trigger), scope(of: hook.filter.scope, places: places), sites(of: hook.filter)].joined(separator: " · ")]
+        if case .shell(let source, _, _) = hook.script {
+            lines.append("Shell script · \((source as NSString).lastPathComponent)")
+        }
         if hook.usesAgent, let agent = hook.agent {
             lines.append([model(of: agent.model), record(of: hook.record)].joined(separator: " · "))
         } else if hook.record == .none {

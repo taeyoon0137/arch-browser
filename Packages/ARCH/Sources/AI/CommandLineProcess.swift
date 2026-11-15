@@ -1,4 +1,4 @@
-// One run of a command-line tool, started with `posix_spawn`: its own process group, pipes for standard input, output, and error instead of a terminal, only the given environment, and its own working directory. Standard input closes after the first input, or stays open for more in order, as a Claude Code session's messages need. Ending it sends SIGTERM to the group and SIGKILL two seconds later.
+// One run of a command-line tool, started with `posix_spawn`: its own process group, pipes for standard input, output, and error instead of a terminal, only the given environment, and its own working directory. Standard input closes after the first input, or stays open for more in order, as a Claude Code session's messages need. A shell hook's interpreter also reads its script from a pipe at descriptor 3. Ending it sends SIGTERM to the group and SIGKILL two seconds later.
 import Darwin
 import Foundation
 
@@ -32,15 +32,36 @@ public final class CommandLineProcess: @unchecked Sendable {
     private let lock = NSLock()
     private var isTerminating = false
 
-    /// Starts the process. Throws a `POSIXError` when it cannot start, for example because the executable does not exist. `input` goes to standard input, which then closes, or with `keepsInputOpen` stays open for `write(_:)` until `closeInput()` or the process ends.
-    public init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data, keepsInputOpen: Bool = false) throws {
+    /// Starts the process. Throws a `POSIXError` when it cannot start, for example because the executable does not exist. `input` goes to standard input, which then closes, or with `keepsInputOpen` stays open for `write(_:)` until `closeInput()` or the process ends. `script`, when given, goes to a pipe at descriptor 3, which then closes, so that an interpreter started with `/dev/fd/3` runs exactly these bytes.
+    public init(executable: URL, arguments: [String], environment: [String: String], directory: URL, input: Data, keepsInputOpen: Bool = false, script: Data? = nil) throws {
         let pipes = try Self.makePipes()
+        var scriptPipe: [Int32] = [-1, -1]
+        if script != nil {
+            guard pipe(&scriptPipe) == 0 else {
+                let code = errno
+                pipes.all.forEach { close($0) }
+                throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+            }
+            scriptPipe.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
+            // A `dup2` onto itself would keep the descriptor's close-on-exec flag, so the read end moves off descriptor 3.
+            if scriptPipe[0] == 3 {
+                let moved = fcntl(3, F_DUPFD_CLOEXEC, 4)
+                close(3)
+                guard moved >= 0 else {
+                    pipes.all.forEach { close($0) }
+                    close(scriptPipe[1])
+                    throw POSIXError(.EMFILE)
+                }
+                scriptPipe[0] = moved
+            }
+        }
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
         posix_spawn_file_actions_adddup2(&actions, pipes.inputRead, STDIN_FILENO)
         posix_spawn_file_actions_adddup2(&actions, pipes.outputWrite, STDOUT_FILENO)
         posix_spawn_file_actions_adddup2(&actions, pipes.errorWrite, STDERR_FILENO)
+        if script != nil { posix_spawn_file_actions_adddup2(&actions, scriptPipe[0], 3) }
         posix_spawn_file_actions_addchdir_np(&actions, directory.path)
         var attributes: posix_spawnattr_t?
         posix_spawnattr_init(&attributes)
@@ -61,8 +82,10 @@ public final class CommandLineProcess: @unchecked Sendable {
             }
         }
         [pipes.inputRead, pipes.outputWrite, pipes.errorWrite].forEach { close($0) }
+        if script != nil { close(scriptPipe[0]) }
         guard status == 0 else {
             [pipes.inputWrite, pipes.outputRead, pipes.errorRead].forEach { close($0) }
+            if script != nil { close(scriptPipe[1]) }
             throw POSIXError(POSIXErrorCode(rawValue: status) ?? .EIO)
         }
         id = processID
@@ -73,6 +96,13 @@ public final class CommandLineProcess: @unchecked Sendable {
         self.input = inputPipe
         inputPipe.write(input)
         if !keepsInputOpen { inputPipe.close() }
+        if let script {
+            // An interpreter that exits before it reads its whole script ends the write with EPIPE instead of a signal.
+            _ = fcntl(scriptPipe[1], F_SETNOSIGPIPE, 1)
+            let scriptInput = InputPipe(descriptor: scriptPipe[1])
+            scriptInput.write(script)
+            scriptInput.close()
+        }
         let standardOutput = Self.stream(reading: pipes.outputRead)
         output = standardOutput.stream
         let outputSource = standardOutput.source
@@ -125,19 +155,26 @@ public final class CommandLineProcess: @unchecked Sendable {
 
     /// The last line the tool wrote to standard error. It is read once standard error ends, or a second after this call if a process the tool started keeps standard error open.
     public func lastErrorLine() async -> String? {
+        let text = String(decoding: await errorOutput(), as: UTF8.self)
+        return text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.last { !$0.isEmpty }
+    }
+
+    /// The last 8 KB the tool wrote to standard error, kept in memory only. It is read once standard error ends, or a second after this call if a process the tool started keeps standard error open.
+    public func errorOutput() async -> Data {
         let deadline = Task { [errorTail] in
             guard (try? await Task.sleep(for: .seconds(1))) != nil else { return }
             errorTail.cancel()
         }
         defer { deadline.cancel() }
-        let text = String(decoding: await errorTail.value, as: UTF8.self)
-        return text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.last { !$0.isEmpty }
+        return await errorTail.value
     }
 
     // MARK: Descriptors
 
     private struct Pipes {
         var inputRead, inputWrite, outputRead, outputWrite, errorRead, errorWrite: Int32
+
+        var all: [Int32] { [inputRead, inputWrite, outputRead, outputWrite, errorRead, errorWrite] }
     }
 
     /// Pipes for the three standard descriptors, closed on exec in any other process this app starts.
