@@ -1,4 +1,4 @@
-// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, and a hook's name stay, with a rename to that name and a favorite of the page. Tabs run on stand-ins, in a session on a test engine for the rename and the favorite, with the extension's name from a callback as the session gives it.
+// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, a hook's name, and a live folder item's title stay, with a rename to that name and a favorite of the page. Tabs run on stand-ins, in a session on a test engine for the rename and the favorite, with the extension's name from a callback as the session gives it.
 import ARCHEngine
 import Foundation
 import Testing
@@ -13,14 +13,14 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
     /// A tab at `url` whose page reports `title`, in which the extension with the identifier is named Reader.
     private func tab(at url: URL = options, title: String) -> Tab {
         let tab = Tab(id: UUID(), webContents: UnloadedWebContents(url: url, title: title, engine: .webKit, state: nil), spaceID: UUID(), isPinned: false, personaID: UUID())
-        tab.extensionName = { $0.scheme != "https" && $0.host == identifier ? "Reader" : nil }
+        tab.extensionName = { $0.host == identifier ? "Reader" : nil }
         return tab
     }
 
     @Test func anExtensionsPageWithoutATitleIsNamedByTheExtension() {
         // WebKit reports an empty title, for which the page's title is its host, the identifier.
         let untitled = tab(title: "")
-        #expect(untitled.displayTitle == identifier && untitled.shownTitle == "Reader")
+        #expect(untitled.displayTitle == identifier && untitled.shownTitle == "Reader" && untitled.shownPageTitle == "Reader")
         // Chromium reports the address as the title of a page without one, without the `/` of a bare host and with spaces unescaped.
         let chromium = URL(string: "chrome-extension://\(identifier)/options.html")!
         #expect(tab(at: chromium, title: chromium.absoluteString).shownTitle == "Reader")
@@ -30,21 +30,28 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
     }
 
     @Test func aTitleOrANameOfTheTabsOwnStays() {
-        #expect(tab(title: "Reader Options").shownTitle == "Reader Options")
+        let titled = tab(title: "Reader Options")
+        #expect(titled.shownTitle == "Reader Options" && titled.shownPageTitle == "Reader Options")
         let named = tab(title: "")
         named.customTitle = "Mine"
-        #expect(named.shownTitle == "Mine")
+        #expect(named.shownTitle == "Mine" && named.shownPageTitle == "Reader")
         let suggested = tab(title: "")
         suggested.suggestedTitle = SuggestedTitle(title: "From a hook", url: options)
         #expect(suggested.shownTitle == "From a hook")
         // A name the user turned down leaves the page's title, which the extension's name stands in for.
         suggested.suggestedTitle = SuggestedTitle(title: nil, url: options)
         #expect(suggested.shownTitle == "Reader")
+        // A live folder item's tab on its saved page shows the item's title, which the saved page keeps, and the extension's name only for an item without one.
+        let item = tab(title: "")
+        item.liveItemID = "item"
+        item.savedPage = SavedPage(url: options, title: "An item")
+        #expect(item.shownTitle == "An item")
+        item.savedPage = SavedPage(url: options, title: "")
+        #expect(item.shownTitle == "Reader")
     }
 
     @Test func otherPagesKeepTheirTitles() {
-        // A web page on a host of that name, a page without an extension's name, and a tab without the session's callback keep `displayTitle`.
-        #expect(tab(at: URL(string: "https://\(identifier)/options.html")!, title: "").shownTitle == identifier)
+        // A page without an extension's name and a tab without the session's callback keep `displayTitle`. The session names no web page, whatever its host (`EngineVersionsTests`).
         #expect(tab(at: URL(string: "webkit-extension://ponmlkjihgfedcbaponmlkjihgfedcba/options.html")!, title: "").shownTitle == "ponmlkjihgfedcbaponmlkjihgfedcba")
         let unwired = Tab(id: UUID(), webContents: UnloadedWebContents(url: options, title: "", engine: .chromium, state: nil), spaceID: nil, isPinned: false, personaID: UUID())
         #expect(unwired.shownTitle == unwired.displayTitle)
