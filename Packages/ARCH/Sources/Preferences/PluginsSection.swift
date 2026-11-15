@@ -790,7 +790,7 @@ extension InstalledPlugin {
     /// Which models a plugin with `ai` uses, for its section: those Settings ▸ AI ▸ Features gives its feature, which it needs of its own when its events run as hooks or when its feature is automatic, as the feature shared with the same plugin in another Persona that runs hooks is.
     func aiNote(isAutomatic: Bool) -> String? {
         guard grant.permissions.contains(.ai) else { return nil }
-        if runsHooks { return "Its events reach it, and its AI requests go out, once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own." }
+        if runsHooks { return "Its browser events reach it, and its AI requests go out, once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own." }
         return isAutomatic ? "Its AI requests go out once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own."
                            : "Its AI requests use the model that Settings \u{25B8} AI \u{25B8} Features gives it, or the default model."
     }
