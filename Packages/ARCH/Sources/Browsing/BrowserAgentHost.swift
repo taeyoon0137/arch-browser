@@ -85,9 +85,7 @@ import Foundation
     }
 
     public func openResearchTab(at url: URL, for owner: AgentTabOwner, mayLoad: @escaping @MainActor (URL) -> Bool) -> AgentTabInfo? {
-        guard let tab = session.openAgentTab(url: url, engine: nil, owner: owner.id, folderName: owner.folderName, in: owner.spaceID, researchLoad: { address in
-            MainActor.assumeIsolated { mayLoad(address) }
-        }) else { return nil }
+        guard let tab = session.openAgentTab(url: url, engine: nil, owner: owner.id, folderName: owner.folderName, in: owner.spaceID, researchLoad: mayLoad) else { return nil }
         follow(tab, owner: owner.id)
         return Self.info(of: tab)
     }
@@ -196,38 +194,32 @@ import Foundation
 }
 
 extension BrowserAgentHost: AgentTabMonitor {
-    nonisolated func userDocumentDidEnd(in tabID: UUID, document: UUID) {
-        MainActor.assumeIsolated { userDocumentDidEnd?(tabID, document) }
+    func userDocumentDidEnd(in tabID: UUID, document: UUID) {
+        userDocumentDidEnd?(tabID, document)
     }
 
-    nonisolated func userTabAddressDidChange(_ tabID: UUID) {
-        MainActor.assumeIsolated { userTabAddressDidChange?(tabID) }
+    func userTabAddressDidChange(_ tabID: UUID) {
+        userTabAddressDidChange?(tabID)
     }
 
-    nonisolated func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
-        MainActor.assumeIsolated { agentTabMayLoad?(owner, tab.id, url) ?? false }
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
+        agentTabMayLoad?(owner, tab.id, url) ?? false
     }
 
-    nonisolated func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {
-        MainActor.assumeIsolated {
-            guard agentTabMayDownload?(owner, tab.id, url) == true else { return false }
-            downloadsByOwner[owner, default: []].append(url)
-            return true
-        }
+    func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {
+        guard agentTabMayDownload?(owner, tab.id, url) == true else { return false }
+        downloadsByOwner[owner, default: []].append(url)
+        return true
     }
 
-    nonisolated func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {
-        MainActor.assumeIsolated {
-            if case .opened(let openedID) = report, let opened = session.tabs.first(where: { $0.id == openedID }) { follow(opened, owner: owner) }
-            agentTabDidReport?(owner, tab.id, report)
-        }
+    func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {
+        if case .opened(let openedID) = report, let opened = session.tabs.first(where: { $0.id == openedID }) { follow(opened, owner: owner) }
+        agentTabDidReport?(owner, tab.id, report)
     }
 
-    nonisolated func agentTabDidClose(_ tab: Tab, owner: UUID) {
-        MainActor.assumeIsolated {
-            tab.researchLoad = nil
-            guard followed.removeValue(forKey: tab.id) != nil, closingTabID != tab.id else { return }
-            agentTabDidReport?(owner, tab.id, .closed)
-        }
+    func agentTabDidClose(_ tab: Tab, owner: UUID) {
+        tab.researchLoad = nil
+        guard followed.removeValue(forKey: tab.id) != nil, closingTabID != tab.id else { return }
+        agentTabDidReport?(owner, tab.id, .closed)
     }
 }

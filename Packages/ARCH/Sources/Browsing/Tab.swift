@@ -269,7 +269,7 @@ import LiveFolders
     }
 
     /// Present only on a research tab the user explicitly opened. Releasing it to the user restores normal navigation.
-    var researchLoad: ((URL) -> Bool)?
+    var researchLoad: (@MainActor (URL) -> Bool)?
 
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
     public var agentOwnerID: UUID? {
@@ -284,7 +284,7 @@ import LiveFolders
 }
 
 /// Where agent tabs report what happened in them and ask about their navigations (docs/agents.md, Permissions, approvals, and injection defenses). `BrowserAgentHost` is the session's.
-protocol AgentTabMonitor: AnyObject {
+@MainActor protocol AgentTabMonitor: AnyObject {
     func userDocumentDidEnd(in tabID: UUID, document: UUID)
     func userTabAddressDidChange(_ tabID: UUID)
     /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
