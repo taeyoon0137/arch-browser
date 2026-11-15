@@ -1,9 +1,10 @@
-// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws; a panel's requests outside the plugin's hook steps; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document.
+// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws, and ending as `AIClient.reply(_:)` does; a panel's requests and renames outside the plugin's hook steps, and its requests stopped when it closes; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document.
 import AI
 import ARCHEngine
 import Events
 import Foundation
 import Testing
+import WebKit
 @testable import Plugins
 
 /// What the built-in test plugins saw and did.
@@ -673,6 +674,130 @@ extension PluginAITests {
         service.hooks.scheduler.cancel(subject: page.id)
         #expect(await eventually { storage.value(forKey: "step") == .string("cancelled") })
         #expect(await eventually { storage.value(forKey: "panel") == .string("Short answer") })
+    }
+
+    /// A panel's rename belongs to no hook step: it is for the document the tab shows, both while a step runs for the tab and once the scheduler has stopped that step, whose listener still runs.
+    @Test func aPanelsRenamesStayOutOfThePluginsHookSteps() async throws {
+        let manifest = #"{"id": "org.example.rename-panel", "name": "Rename Panel", "version": "1", "apiVersion": 1, "summary": "Renames.", "permissions": ["ai", "tabs.rename"], "events": ["pageLoaded"], "background": "b.js", "contributes": {"sidebarItems": [{"id": "panel", "title": "Rename", "symbol": "pencil", "panel": "panel.html"}]}}"#
+        // The listener runs on for a while after the scheduler stops its step.
+        let background = """
+        arch.events.on("pageLoaded", async (event) => {
+          await arch.storage.set("asking", true);
+          await arch.ai.reply({ messages: [{ role: "user", text: "Name it" }] }).catch(() => {});
+          await arch.storage.set("stepRenamed", await arch.tabs.rename(event.tab.id, "Step"));
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        });
+        """
+        let feature = AIFeatureID.plugin("org.example.rename-panel")
+        let service = service(answeringAfter: 5, for: [feature])
+        let manager = manager(ai: service)
+        defer { manager.close() }
+        let package = try await manager.stage(try writePackage([
+            "plugin.json": manifest, "b.js": background, "panel.html": #"<!doctype html><script src="panel.js"></script>"#, "panel.js": #"arch.storage.set("ready", true);"#,
+        ]))
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+        let page = tab("/page")
+        host.tabs = [pluginTab("https://example.org/page", title: "Page", id: page.id)]
+
+        bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: true))
+        #expect(await eventually { storage.value(forKey: "asking") == .bool(true) })
+        let item = try #require(manager.contributions.sidebarItems.first)
+        let panel = try #require(await manager.panel(for: item))
+        let webView = try #require(panel.view as? WKWebView)
+        panel.viewWillAppear()
+        defer { panel.viewDidDisappear() }
+        #expect(await eventually { storage.value(forKey: "ready") == .bool(true) })
+        func rename(to name: String) async throws -> Bool? {
+            try await webView.callAsyncJavaScript("return await arch.tabs.rename(id, name);", arguments: ["id": page.id.uuidString, "name": name], contentWorld: .page) as? Bool
+        }
+
+        #expect(try await rename(to: "During") == true)
+        #expect(host.renames.last?.name == "During" && host.renames.last?.document == nil)
+        service.hooks.scheduler.cancel(subject: page.id)
+        #expect(await eventually { storage.value(forKey: "stepRenamed") == .bool(false) })
+        #expect(try await rename(to: "After") == true)
+        #expect(host.renames.map(\.name) == ["During", "After"] && host.renames.last?.document == nil)
+    }
+
+    /// Closing a panel stops the requests of its document.
+    @Test func closingAPanelStopsItsRequests() async throws {
+        let manifest = #"{"id": "org.example.ask-panel", "name": "Ask Panel", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": ["ai"], "contributes": {"sidebarItems": [{"id": "panel", "title": "Ask", "symbol": "sparkles", "panel": "panel.html"}]}}"#
+        let panelScript = #"arch.storage.set("asking", true).then(() => arch.ai.reply({ messages: [{ role: "user", text: "Hi" }] }));"#
+        let feature = AIFeatureID.plugin("org.example.ask-panel")
+        let service = service(answeringAfter: 5, for: [feature])
+        let manager = manager(ai: service)
+        defer { manager.close() }
+        let package = try await manager.stage(try writePackage([
+            "plugin.json": manifest, "panel.html": #"<!doctype html><script src="panel.js"></script>"#, "panel.js": panelScript,
+        ]))
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+        let item = try #require(manager.contributions.sidebarItems.first)
+        let panel = try #require(await manager.panel(for: item))
+        _ = panel.view
+        panel.viewWillAppear()
+        #expect(await eventually { storage.value(forKey: "asking") == .bool(true) })
+        try await Task.sleep(for: .milliseconds(500))
+        let closed = ContinuousClock.now
+        panel.viewDidDisappear()
+        #expect(await eventually {
+            if case .cancelled? = service.activity.last?.result { return true }
+            return false
+        })
+        #expect(service.activity.count == 1 && service.activity.last?.feature == feature && ContinuousClock.now - closed < .seconds(3))
+    }
+
+    /// `arch.ai.stream` reads a reply by the rules of `AIClient.reply(_:)`, which `arch.ai.reply` follows: the same events end it with the same reason or error and hand on the same text.
+    @Test func aStreamEndsAsAReplyDoes() async {
+        let model = AIModelRef(provider: AIProviderID(), model: "")
+        let json = AIOutputFormat.json(schema: Data(#"{"type": "object"}"#.utf8))
+        let cases: [(output: AIOutputFormat, events: [AIEvent], error: AIError?)] = [
+            (.text, [.waiting(.queued), .started(model), .text("Short "), .text(""), .text("answer"), .finished(.completed)], nil),
+            (.text, [.started(model), .text("Cut"), .finished(.lengthLimit)], nil),
+            (.text, [.started(model), .text("Short")], nil),
+            (.text, [.text("Short"), .finished(.completed)], nil),
+            (.text, [.started(model), .text("Short")], .authentication(model.provider)),
+            (json, [.started(model), .text(#"{"a": "#), .text("1}"), .finished(.completed)], nil),
+            (json, [.started(model), .text("Short answer"), .finished(.completed)], nil),
+            (json, [.started(model), .text(#"{"a": "#), .finished(.lengthLimit)], nil),
+        ]
+        for (output, events, error) in cases {
+            let client = ScriptedClient(events: events, error: error)
+            let request = AIRequest(feature: .plugin("org.example.stream"), messages: [AIMessage(role: .user, parts: [.text("Hi")])], output: output)
+            let replied: String
+            var repliedText: String?
+            do {
+                let reply = try await client.reply(request)
+                replied = "\(reply.finishReason)"
+                repliedText = reply.text
+            } catch {
+                replied = "\(error)"
+            }
+            var streamedText = ""
+            let streamed: String
+            switch await ScriptPluginBridge.read(client.stream(request), output: output, receive: { streamedText += $0 }) {
+            case let .success(reason): streamed = "\(reason)"
+            case let .failure(error): streamed = "\(error)"
+            }
+            #expect(streamed == replied, "\(events)")
+            if let repliedText { #expect(streamedText == repliedText, "\(events)") }
+        }
+    }
+}
+
+/// A client that answers every request with the same events, then ends, with `error` if any.
+private struct ScriptedClient: AIClient {
+    let events: [AIEvent]
+    let error: AIError?
+
+    func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
+        AsyncThrowingStream { continuation in
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish(throwing: error)
+        }
     }
 }
 

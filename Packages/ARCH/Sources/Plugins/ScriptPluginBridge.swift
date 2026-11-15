@@ -11,7 +11,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     enum Role {
         /// The background script's, which sets the listeners.
         case background
-        /// A panel's, whose AI requests the user makes there, so they belong to no hook step of the plugin.
+        /// A panel's, whose AI requests and renames the user makes there, so they belong to no hook step of the plugin.
         case panel
     }
 
@@ -232,8 +232,14 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     /// The AI interface for a call of the document: a panel's belongs to no hook step of the plugin.
     private func aiClient() throws -> any AIClient {
-        if role == .panel, let context = context as? any PluginPanelAIContext { return try context.panelAI() }
+        if role == .panel, let context = context as? any PluginPanelContext { return try context.panelAI() }
         return try context.ai()
+    }
+
+    /// Renames the tab for a call of the document: a panel's rename belongs to no hook step of the plugin.
+    private func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
+        if role == .panel, let context = context as? any PluginPanelContext { return try context.panelRenameTab(id, to: name) }
+        return try context.renameTab(id, to: name)
     }
 
     /// Starts reading the reply of an `arch.ai.stream` call and returns the stream's number, with which the script asks for its text.
@@ -276,7 +282,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     /// Reads a reply, handing on each piece of text as it arrives, and returns how it ended, by the rules of `AIClient.reply(_:)`: a reply that ends without finishing is malformed, and a JSON reply must parse.
-    private static func read(_ events: AsyncThrowingStream<AIEvent, any Error>, output: AIOutputFormat, receive: (String) -> Void) async -> Result<AIFinishReason, any Error> {
+    static func read(_ events: AsyncThrowingStream<AIEvent, any Error>, output: AIOutputFormat, receive: (String) -> Void) async -> Result<AIFinishReason, any Error> {
         var text = ""
         var hasStarted = false
         var finishReason: AIFinishReason?
@@ -376,7 +382,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return try UUID(uuidString: try call.text(0)).flatMap { try context.tab($0) }?.scriptValue ?? .null
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
-            return .bool(try context.renameTab(id, to: try call.optionalText(1)))
+            return .bool(try renameTab(id, to: try call.optionalText(1)))
         default:
             throw BridgeFailure.invalidCall
         }

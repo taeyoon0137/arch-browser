@@ -1,7 +1,8 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, sidebar items that show a panel, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, a panel's page with its own `arch`, which keeps the instance while it shows, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
+// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, sidebar items that show a panel, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, a panel's page with its own `arch`, which keeps the instance while it shows, keeps to its page, and ends with its instance, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
 import ARCHEngine
 import Foundation
 import Testing
+import WebKit
 @testable import Plugins
 
 /// The sample script plugin's package folder.
@@ -320,6 +321,52 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(storage.value(forKey: "runs") == .number(1))
     }
 
+    /// A panel keeps to its page: a reload or a link to another document goes nowhere, while a link within the page moves there. Once its instance stops, its calls fail with `stopped` and it asks its popover to close.
+    @Test func keepsAPanelOnItsPageAndEndsItWithItsInstance() async throws {
+        let id = PluginID(rawValue: "org.example.page-panel")!
+        let root = folder.url.appendingPathComponent("Packages/PagePanel", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let page = #"<!doctype html><meta charset="utf-8"><script src="panel.js"></script>"#
+        let files = [
+            "plugin.json": #"{"id": "org.example.page-panel", "name": "Page Panel", "version": "1", "apiVersion": 1, "summary": "Shows.", "contributes": {"sidebarItems": [{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}]}}"#,
+            "panel.html": page,
+            "other.html": page,
+            "panel.js": #"arch.storage.get("loads").then((loads) => arch.storage.set("loads", (loads ?? 0) + 1));"#,
+        ]
+        for (path, text) in files {
+            try Data(text.utf8).write(to: root.appendingPathComponent(path))
+        }
+        let manager = manager()
+        defer { manager.close() }
+        let package = try await manager.stage(root)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+        let item = try #require(manager.contributions.sidebarItems.first)
+        let panel = try #require(await manager.panel(for: item) as? ScriptPluginPanel)
+        let ended = Flag()
+        panel.onEnd = { ended.isSet = true }
+        let webView = try #require(panel.view as? WKWebView)
+        panel.viewWillAppear()
+        defer { panel.viewDidDisappear() }
+        #expect(await eventually { storage.value(forKey: "loads") == .number(1) })
+        func run(_ script: String) async throws -> String? {
+            try await webView.callAsyncJavaScript(script, contentWorld: .page) as? String
+        }
+
+        _ = try await run("window.marker = true;")
+        // Each navigation gets time of its own, since a later one would abort it.
+        for script in [#"location.href = "other.html";"#, "location.reload();", ##"location.href = "#part";"##] {
+            _ = try await run(script)
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        #expect(try await run("return `${window.marker} ${location.pathname}${location.hash}`;") == "true /panel.html#part")
+        #expect(storage.value(forKey: "loads") == .number(1) && !ended.isSet)
+
+        manager.setEnabled(false, for: id)
+        #expect(await eventually { ended.isSet })
+        #expect(try await run(#"try { await arch.storage.get("loads"); return "answered"; } catch (error) { return error.message; }"#) == "stopped")
+    }
+
     @Test func stopsWhenIdleAndStartsAgainAtTheNextUse() async throws {
         let manager = manager(ScriptPluginLimits(hang: 10, idle: 0.2))
         defer { manager.close() }
@@ -500,6 +547,12 @@ private extension PluginValue {
         if case let .object(fields) = self { return fields }
         return nil
     }
+}
+
+/// Whether a closure ran.
+@MainActor
+private final class Flag {
+    var isSet = false
 }
 
 /// Polls the main actor until the condition holds or ten seconds pass.

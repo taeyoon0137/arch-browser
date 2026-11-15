@@ -62,7 +62,7 @@ private struct PluginSidebarItemRow: View {
         .accessibilityValue(badge ?? "")
     }
 
-    /// A command runs on the window's selected tab. A panel opens beside the row once the plugin hands it over and closes with a click outside it, Escape, or a click on the row.
+    /// A command runs on the window's selected tab. A panel opens beside the row once the plugin hands it over and closes with a click outside it, Escape, a click on the row, or its own end.
     private func open() {
         switch item.item.action {
         case let .command(id):
@@ -83,7 +83,7 @@ private final class PluginPanelAnchor: NSObject, NSPopoverDelegate {
     /// When the popover last began to close, in the time base of event timestamps.
     private var closedAt: TimeInterval = 0
 
-    /// Shows the panel that `request` returns in a popover beside the row. A click while the row waits for the panel, while the popover shows or closes, or that closed the popover shows nothing more.
+    /// Shows the panel that `request` returns in a popover beside the row, which closes when the panel ends. A click while the row waits for the panel, while the popover shows or closes, or that closed the popover shows nothing more.
     func showPanel(_ request: @escaping @MainActor () async -> NSViewController?) {
         guard !isRequestingPanel, popover == nil, !isClosingClick else { return }
         isRequestingPanel = true
@@ -95,6 +95,8 @@ private final class PluginPanelAnchor: NSObject, NSPopoverDelegate {
             popover.behavior = .transient
             popover.contentViewController = panel
             popover.delegate = self
+            // A panel that ends while it shows, as a script plugin's does once its instance stops, can do nothing more.
+            (panel as? any PluginEndingPanel)?.onEnd = { [weak popover] in popover?.performClose(nil) }
             popover.show(relativeTo: view.bounds, of: view, preferredEdge: .maxX)
             self.popover = popover
         }

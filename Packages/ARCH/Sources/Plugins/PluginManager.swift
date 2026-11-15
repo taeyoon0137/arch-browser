@@ -1445,7 +1445,7 @@ struct PluginListFile: Codable {
 
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.
 @MainActor
-final class ScopedPluginContext: PluginPanelAIContext {
+final class ScopedPluginContext: PluginPanelContext {
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
@@ -1514,11 +1514,20 @@ final class ScopedPluginContext: PluginPanelAIContext {
     }
 
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
+        try renameTab(id, to: name, inStep: true)
+    }
+
+    func panelRenameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
+        try renameTab(id, to: name, inStep: false)
+    }
+
+    /// With `inStep` false, as for a panel's call, the running hook step does not bind the rename.
+    private func renameTab(_ id: PluginTab.ID, to name: String?, inStep: Bool) throws -> Bool {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.renameTabs)
         guard let manager, manager.personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
         // A rename of the running hook step's tab is for its event's document, which a stopped step no longer renames.
-        guard let step = hookStep, step.tab == id else { return manager.renameTab(id, to: name, showing: nil, by: pluginID) }
+        guard inStep, let step = hookStep, step.tab == id else { return manager.renameTab(id, to: name, showing: nil, by: pluginID) }
         guard !step.isStopped else { return false }
         return manager.renameTab(id, to: name, showing: step.document, by: pluginID)
     }

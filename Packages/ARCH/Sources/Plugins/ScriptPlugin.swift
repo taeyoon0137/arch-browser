@@ -1,4 +1,4 @@
-// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, panel, page script value, or event starts, and each panel shows one of its package's HTML files in a web view of the same sandbox while the popover holds it. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted, or the end of its web content process, fails the instance; an instance without calls for the idle limit and without a panel that shows stops. Either way it releases its web view, ends its panels' documents, and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
+// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, panel, page script value, or event starts, and each panel shows one of its package's HTML files in a web view of the same sandbox while the popover holds it. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted, or the end of its web content process, fails the instance; an instance without calls for the idle limit and without a panel that shows stops. Either way it releases its web view, ends its panels' documents and closes their popovers, and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
 import JavaScriptCore
 import WebKit
 
@@ -246,7 +246,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         onStop?(.failed(reason))
     }
 
-    /// Releases the web view, which ends its web content process, ends the panels' documents, and fails the calls that wait for the background script with `error`.
+    /// Releases the web view, which ends its web content process, ends the panels' documents and closes their popovers, and fails the calls that wait for the background script with `error`.
     private func end(failing error: PluginError) {
         idleStop?.cancel()
         idleStop = nil
@@ -258,7 +258,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         bridge?.end()
         bridge = nil
         for panel in panels.allObjects {
-            panel.end()
+            panel.end(closesPopover: true)
         }
         let calls = waitingCalls
         waitingCalls = [:]
