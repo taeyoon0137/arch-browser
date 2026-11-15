@@ -106,7 +106,7 @@ import Testing
             let opened = try #require(window.selectedTab)
             #expect(opener.engineKind == .webKit && opener.preferredEngine == .chromium)
             #expect(opened.webContents === popup && opened.opener === preview.webContents)
-            #expect(opened.engineKind == .webKit && opened.preferredEngine == .webKit)
+            #expect(opened.engineKind == .webKit && opened.preferredEngine == .chromium)
             #expect(opened.personaID == persona.id && opener.personaID == persona.id)
         }
     }

@@ -486,7 +486,7 @@ public enum BrowserWindowKind {
             guard let self, let preview else { return }
             runtime.browser.takeOwnership(of: popup)
             self.showOpenedPage(preview.webContents, personaID: personaID, preferredEngine: preview.requestedEngine)
-            self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents)
+            self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents, preferredEngine: preview.requestedEngine)
             DispatchQueue.main.async { [weak self] in
                 if let self, self.preview === preview { self.removePreview(closingPage: false) }
             }

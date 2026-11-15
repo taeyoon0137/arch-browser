@@ -208,14 +208,15 @@ import Testing
         #expect(main.preview?.requestedEngine == .chromium)
         main.openPreviewInTab()
         let promotedPreview = try #require(main.selectedTab)
-        // An actual popup belongs to the renderer that created it, including during a fallback.
+        // A popup renders in the engine that created it and saves its opener's engine choice.
+        main.selectTab(pin.id)
         let popupContents = browser.makeWebContents(url: address, engine: .webKit, state: nil, in: persona.id)
-        main.showOpenedPage(popupContents, personaID: persona.id, opener: pin.webContents)
+        pin.openNewTab?(popupContents, address, .newForegroundTab)
         let popup = try #require(main.selectedTab)
         let requested = [pin, externalTab, agentLink, readerLink, research, backgroundLink, search, backgroundSearch, promotedPreview]
         #expect(Set(requested.map(\.id)).count == requested.count)
         #expect(requested.allSatisfy { $0.personaID == persona.id && $0.engineKind == .webKit && $0.preferredEngine == .chromium })
-        #expect(popup.preferredEngine == .webKit && popup.opener === pin.webContents)
+        #expect(popup.engineKind == .webKit && popup.preferredEngine == .chromium && popup.opener === pin.webContents)
         #expect(offscreen.raises == 2 && !offscreen.isVisible)
         try browser.saveNow().get()
         chromium.unavailableStorageID = nil
@@ -223,7 +224,7 @@ import Testing
         for tab in requested + [popup] {
             let restored = try #require(reopened.tabs.first { $0.id == tab.id })
             reopened.loadPage(of: restored)
-            #expect(restored.engineKind == (tab === popup ? .webKit : .chromium))
+            #expect(restored.engineKind == .chromium)
         }
     }
 

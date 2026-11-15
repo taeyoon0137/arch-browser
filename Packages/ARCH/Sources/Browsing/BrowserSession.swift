@@ -911,8 +911,8 @@ final class EngineRuntime {
             self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
             let window = self.window(showing: tab)
-            if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents) }
-            let opened = self.adopt(popup, spaceID: tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents)
+            if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents, preferredEngine: tab.preferredEngine) }
+            let opened = self.adopt(popup, spaceID: tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents, preferredEngine: tab.preferredEngine)
             opened.isUnread = true
         }
         // A page that the engine loads only in another web contents of the tab's profile, as WebKit loads a web extension's pages, takes the tab's place as on an engine switch. A tab that has closed drops it.
@@ -1837,7 +1837,7 @@ final class EngineRuntime {
     /// A page in an agent's tab opened `popup`, which joins the opener's agent folder behind it, in the opener's engine. One whose first address the agent monitor refuses closes again; the engine is still in its callback, so that happens on the next turn of the run loop, while the popup's own navigation check refuses the address meanwhile.
     private func adoptAgentPopup(_ popup: any EngineWebContents, targetURL: URL?, opener: Tab, owner: UUID) {
         guard let folder = folders.first(where: { $0.id == opener.folderID && $0.agentSessionID == owner }), let spaceID = opener.spaceID else { return retire(popup, of: opener.personaID) }
-        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, opener: opener.webContents, folderID: folder.id)
+        let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, opener: opener.webContents, folderID: folder.id, preferredEngine: opener.preferredEngine)
         if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url) == false {
             DispatchQueue.main.async { [weak self, weak opened] in
                 if let self, let opened, opened.agentOwnerID == owner { self.closeAgentTab(opened, reason: .page) }
