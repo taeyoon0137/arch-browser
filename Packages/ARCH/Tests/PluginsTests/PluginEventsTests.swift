@@ -1,4 +1,4 @@
-// Plugin events and tab calls (`docs/plugins.md`, Values, events, and storage; `docs/hooks.md`, Plugins): a manifest's `events` and `tabs.rename`, the bus's events of the manager's Persona reaching an enabled script plugin's `arch.events.on` in the script view its grant allows, only for the kinds it lists, never for the plugin's own renames and at most 10 for one tab a minute, the user's setting changes reaching a plugin that asks for them once they settle, and the context's tabs and renames through the browser host, under the grant, with the plugin as the rename's cause.
+// Plugin events and tab calls (`docs/plugins.md`, Values, events, and storage; `docs/hooks.md`, Plugins): a manifest's `events` and `tabs.rename`, the bus's events of the manager's Persona reaching an enabled script plugin's `arch.events.on` in the script view its grant allows, only for the kinds it lists, never for the plugin's own renames and at most 10 for one tab a minute, the user's setting changes reaching a plugin that asks for them once they settle, each save of a secret among them, and none once the plugin is switched off, updated without the setting or the event, or removed, or its manager closes, and the context's tabs and renames through the browser host, under the grant, with the plugin as the rename's cause.
 import ARCHEngine
 import Events
 import Foundation
@@ -50,7 +50,7 @@ private final class RenamingPlugin: BuiltInPlugin {
     func run(_ command: String, _ invocation: PluginInvocation) async throws {}
 }
 
-/// Keeps the keys of the setting changes it hears in its storage under `heard`; `QuietSettingsPlugin` does not ask for them.
+/// Keeps the keys of the setting changes it hears in `heard`, by Persona and plugin, where they stay whatever becomes of the manager; `QuietSettingsPlugin` does not ask for them.
 @MainActor
 private class SettingsPlugin: BuiltInPlugin {
     class var id: PluginID { PluginID(rawValue: "org.example.settings")! }
@@ -58,9 +58,12 @@ private class SettingsPlugin: BuiltInPlugin {
     static var manifest: PluginManifest {
         PluginManifest(id: id, name: "Settings", version: "1", summary: "",
                        contributions: PluginContributions(settings: [PluginSetting(key: "name", title: "Name", kind: .text(default: "")),
-                                                                     PluginSetting(key: "count", title: "Count", kind: .number(default: 1, range: 1...9))]),
+                                                                     PluginSetting(key: "count", title: "Count", kind: .number(default: 1, range: 1...9)),
+                                                                     PluginSetting(key: "token", title: "Token", kind: .secret)]),
                        receivesSettingChanges: receivesSettingChanges)
     }
+
+    static var heard: [PersonaID: [PluginID: [String]]] = [:]
 
     static var isOnByDefault: Bool { true }
 
@@ -76,9 +79,7 @@ private class SettingsPlugin: BuiltInPlugin {
 
     func handle(_ event: PluginEvent) async throws {
         guard case let .settingChanged(key) = event, let context else { return }
-        var heard: [PluginValue] = []
-        if case let .array(items)? = context.storage.value(forKey: "heard") { heard = items }
-        try context.storage.setValue(.array(heard + [.string(key)]), forKey: "heard")
+        Self.heard[context.personaID, default: [:]][context.pluginID, default: []].append(key)
     }
 }
 
@@ -109,6 +110,11 @@ private final class QuietSettingsPlugin: SettingsPlugin {
     }
 
     private let manifest = #"{"id": "org.example.events", "name": "Events", "version": "1", "apiVersion": 1, "summary": "Keeps events.""#
+
+    /// The keys of the setting changes that reached the Persona's `SettingsPlugin` or `QuietSettingsPlugin`.
+    private func heard(by id: PluginID? = nil) -> [String] {
+        SettingsPlugin.heard[persona]?[id ?? SettingsPlugin.id] ?? []
+    }
 
     @Test func readsTheEventsAndTheRenamePermissionOfAManifest() async throws {
         let manager = manager()
@@ -276,32 +282,116 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         let quiet = try #require(manager.plugins.first { $0.id == QuietSettingsPlugin.id })
         let name = listening.manifest.contributions.settings[0]
         let count = listening.manifest.contributions.settings[1]
-        let storage = manager.makeContext(for: listening).storage
-        let quietStorage = manager.makeContext(for: quiet).storage
-        func heard() -> PluginValue? { storage.value(forKey: "heard") }
 
         for text in ["a", "ab", "abc"] {
             try manager.setValue(.string(text), of: name, for: listening.id)
         }
         try manager.setValue(.string("x"), of: name, for: quiet.id)
         try await Task.sleep(for: .milliseconds(200))
-        #expect(heard() == nil)
-        #expect(await eventually { heard() == .array([.string("name")]) })
+        #expect(heard().isEmpty)
+        #expect(await eventually { heard() == ["name"] })
         // A change that the next one undoes before they settle, and a value written again as it is, change nothing the plugin would hear of.
         try manager.setValue(.number(5), of: count, for: listening.id)
         try manager.setValue(nil, of: count, for: listening.id)
         try manager.setValue(.string("abc"), of: name, for: listening.id)
         try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
-        #expect(heard() == .array([.string("name")]))
+        #expect(heard() == ["name"])
         // Restoring the default is a change.
         try manager.setValue(nil, of: name, for: listening.id)
-        #expect(await eventually { heard() == .array([.string("name"), .string("name")]) })
+        #expect(await eventually { heard() == ["name", "name"] })
         // Switched off, the plugin hears of nothing.
         manager.setEnabled(false, for: listening.id)
         try manager.setValue(.number(3), of: count, for: listening.id)
         try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
-        #expect(heard() == .array([.string("name"), .string("name")]))
-        #expect(quietStorage.value(forKey: "heard") == nil)
+        #expect(heard() == ["name", "name"])
+        #expect(heard(by: quiet.id).isEmpty)
+    }
+
+    /// The manager does not read a secret back, so each save counts, the same secret again among them.
+    @Test func eachSaveOfASecretSettingReachesThePlugin() async throws {
+        let manager = manager(builtIns: [SettingsPlugin.self])
+        defer { manager.close() }
+        let listening = try #require(manager.plugins.first)
+        let token = listening.manifest.contributions.settings[2]
+        try await manager.setSecret("secret", of: token, for: listening.id)
+        #expect(await eventually { heard() == ["token"] })
+        try await manager.setSecret("secret", of: token, for: listening.id)
+        #expect(await eventually { heard() == ["token", "token"] })
+    }
+
+    /// A change reaches nothing when, before it settles, its plugin is switched off or its manager closes, and switching the plugin on again brings neither that change nor one made while it was off.
+    @Test func aSettingChangeReachesNothingWhenItsPluginGoesOffBeforeItSettles() async throws {
+        let manager = manager(builtIns: [SettingsPlugin.self])
+        defer { manager.close() }
+        let listening = try #require(manager.plugins.first)
+        let name = listening.manifest.contributions.settings[0]
+
+        try manager.setValue(.string("a"), of: name, for: listening.id)
+        manager.setEnabled(false, for: listening.id)
+        try manager.setValue(.string("b"), of: name, for: listening.id)
+        try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
+        manager.setEnabled(true, for: listening.id)
+        try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
+        #expect(heard().isEmpty)
+
+        try manager.setValue(.string("c"), of: name, for: listening.id)
+        manager.close()
+        try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
+        #expect(heard().isEmpty)
+    }
+
+    /// A change reaches nothing when, before it settles, an update leaves its setting out or stops asking for setting changes, or the plugin is removed. The listener renames the Persona's tab after the key, so that the host sees each change that arrives, whatever becomes of the plugin's storage.
+    @Test func aSettingChangeReachesNothingAfterAnUpdateOrARemovalBeforeItSettles() async throws {
+        let manager = manager()
+        defer { manager.close() }
+        host.tabs[persona] = [PluginTab(id: UUID(), spaceID: UUID(), title: "Title", url: URL(string: "https://example.org/a"), engine: .webKit, isPinned: false, isSelected: true)]
+        let background = """
+        arch.events.on("settingChanged", async (event) => {
+          const [tab] = await arch.tabs.list();
+          await arch.tabs.rename(tab.id, event.key);
+        });
+        """
+        func stage(events: String, settings: [String]) async throws -> PluginPackage {
+            try await manager.stage(try writePackage([
+                "plugin.json": manifest + #", "permissions": ["tabs.rename"], "events": \#(events), "background": "b.js", "contributes": {"settings": [\#(settings.joined(separator: ", "))]}}"#,
+                "b.js": background,
+            ]))
+        }
+        func install(_ package: PluginPackage) throws -> InstalledPlugin {
+            _ = try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+            return try #require(manager.plugins.first)
+        }
+        func renames() -> [String?] { host.renames.map(\.name) }
+        let name = #"{"key": "name", "title": "Name", "type": "text"}"#
+        let other = #"{"key": "other", "title": "Other", "type": "text"}"#
+        let listening = try install(try await stage(events: #"["settingChanged"]"#, settings: [name, other]))
+        let nameSetting = listening.manifest.contributions.settings[0]
+        let otherSetting = listening.manifest.contributions.settings[1]
+        try manager.setValue(.string("a"), of: nameSetting, for: listening.id)
+        #expect(await eventually { renames() == ["name"] })
+
+        // An update without the setting; the plugin still hears of its other setting.
+        let withoutName = try await stage(events: #"["settingChanged"]"#, settings: [other])
+        try manager.setValue(.string("b"), of: nameSetting, for: listening.id)
+        _ = try install(withoutName)
+        try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
+        #expect(renames() == ["name"])
+        try manager.setValue(.string("x"), of: otherSetting, for: listening.id)
+        #expect(await eventually { renames() == ["name", "other"] })
+
+        // An update that no longer asks for setting changes.
+        let deaf = try await stage(events: "[]", settings: [name, other])
+        try manager.setValue(.string("y"), of: otherSetting, for: listening.id)
+        _ = try install(deaf)
+        try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
+        #expect(renames() == ["name", "other"])
+
+        // A removal.
+        _ = try install(try await stage(events: #"["settingChanged"]"#, settings: [name, other]))
+        try manager.setValue(.string("c"), of: nameSetting, for: listening.id)
+        try manager.remove(listening.id)
+        try await Task.sleep(for: PluginManager.settingChangeDelay * 2)
+        #expect(renames() == ["name", "other"])
     }
 
     /// A script plugin's `arch.events.on("settingChanged", …)` gets the key and reads the new value; a secret setting's change counts once the Keychain has it.

@@ -1,4 +1,4 @@
-// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws, and ending as `AIClient.reply(_:)` does; a panel's requests and renames outside the plugin's hook steps, and its requests stopped when it closes; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document.
+// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws, and ending as `AIClient.reply(_:)` does; a panel's requests and renames outside the plugin's hook steps, and its requests stopped when it closes; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document; and the setting changes of such a plugin reaching it outside the scheduler, also before its feature has a model.
 import AI
 import ARCHEngine
 import Events
@@ -44,12 +44,14 @@ private final class AIRecorder {
     }
 }
 
-/// Asks for `ai` and `tabs.rename` and listens for page loads, so its listeners run as hooks.
+/// Asks for `ai` and `tabs.rename` and listens for page loads, so its listeners run as hooks, and for its setting changes, which do not.
 @MainActor
 private final class AIHookPlugin: BuiltInPlugin {
     static let id = PluginID(rawValue: "org.example.ai-hook")!
     static var manifest: PluginManifest {
-        PluginManifest(id: id, name: "AI Hook", version: "1", summary: "", permissions: [.ai, .renameTabs], contributions: PluginContributions(), events: [.pageLoaded])
+        PluginManifest(id: id, name: "AI Hook", version: "1", summary: "", permissions: [.ai, .renameTabs],
+                       contributions: PluginContributions(settings: [PluginSetting(key: "tone", title: "Tone", kind: .text(default: ""))]),
+                       events: [.pageLoaded], receivesSettingChanges: true)
     }
 
     static var isOnByDefault: Bool { true }
@@ -418,6 +420,19 @@ private final class RecordingHost: PluginBrowserHost {
         bus.post(.pageLoaded(tab: tab("/b"), isRestore: false, isFirstLoadAfterOpen: true))
         #expect(await eventually { AIRecorder.shared.hookEvents.count == 3 && AIRecorder.shared.running == 0 })
         #expect(AIRecorder.shared.mostRunning == 1)
+    }
+
+    /// A plugin whose page loads run as hooks hears of its setting changes outside the scheduler, so they reach it while the scheduler skips its page loads for want of a model.
+    @Test func anAIPluginHearsOfItsSettingChangesWithoutAModelOfItsOwn() async throws {
+        let manager = manager(builtIns: [AIHookPlugin.self], ai: service())
+        defer { manager.close() }
+        let installed = try #require(manager.plugins.first)
+        #expect(installed.runsHooks)
+        bus.post(.pageLoaded(tab: tab(), isRestore: false, isFirstLoadAfterOpen: true))
+        try manager.setValue(.string("Short"), of: installed.manifest.contributions.settings[0], for: installed.id)
+        #expect(await eventually { AIRecorder.shared.hookEvents == [nil] })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(AIRecorder.shared.hookEvents == [nil])
     }
 
     /// The scheduler stops the step while the plugin activates, so the event never reaches it.
