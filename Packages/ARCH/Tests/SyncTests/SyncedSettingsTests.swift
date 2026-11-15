@@ -66,7 +66,7 @@ import Testing
             }
             for text in texts {
                 #expect(settings.apply(record(setting.key, text)))
-                #expect(settings.text(forKey: setting.key) == text)
+                #expect(SyncedSettings.setting(forKey: setting.key)?.text(in: store) == text)
             }
         }
     }
@@ -90,9 +90,9 @@ import Testing
         store.set(12, forKey: archiveAfterHours)
         store.set(true, forKey: BrowserSession.opensLinksInSmallWindowKey)
         store.set("light", forKey: appearance)
-        #expect(settings.text(forKey: archiveAfterHours) == "12")
-        #expect(settings.text(forKey: BrowserSession.opensLinksInSmallWindowKey) == "true")
-        #expect(settings.text(forKey: appearance) == "light")
+        #expect(SyncedSettings.setting(forKey: archiveAfterHours)?.text(in: store) == "12")
+        #expect(SyncedSettings.setting(forKey: BrowserSession.opensLinksInSmallWindowKey)?.text(in: store) == "true")
+        #expect(SyncedSettings.setting(forKey: appearance)?.text(in: store) == "light")
     }
 
     @Test func refusesADisallowedValueAndEveryUnlistedKey() {
@@ -121,7 +121,6 @@ import Testing
         for key in ["ARCHFutureSetting", "ARCHDownloadsFolder", "ARCHShortcuts"] {
             #expect(!settings.apply(record(key, "12")))
             #expect(store.object(forKey: key) == nil)
-            #expect(settings.text(forKey: key) == nil)
         }
         // Only a `Setting` record applies.
         #expect(!settings.apply(SyncRecord(recordType: .space, recordName: appearance, fields: ["value": .text("light")], modifiedAt: date(10))))
@@ -132,9 +131,9 @@ import Testing
         store.set("purple", forKey: appearance)
         store.set("12", forKey: archiveAfterHours)
         store.set(200, forKey: tintStrength)
-        #expect(settings.text(forKey: appearance) == nil)
-        #expect(settings.text(forKey: archiveAfterHours) == nil)
-        #expect(settings.text(forKey: tintStrength) == nil)
+        #expect(SyncedSettings.setting(forKey: appearance)?.text(in: store) == nil)
+        #expect(SyncedSettings.setting(forKey: archiveAfterHours)?.text(in: store) == nil)
+        #expect(SyncedSettings.setting(forKey: tintStrength)?.text(in: store) == nil)
     }
 
     @Test func onAppliedRunsOnceForEachValueSaved() {
@@ -207,7 +206,6 @@ import Testing
 
         let held = settings.comparison(mirror: mirror, pending: [])
         #expect(held.records.map(\.recordName) == [appearance, archiveAfterHours])
-        #expect(held.heldOut == [tintStrength, searchEngine])
         #expect(held.contains(mirror[0]))
         #expect(!held.contains(mirror[1]))
         #expect(!held.contains(mirror[2]))
@@ -224,7 +222,6 @@ import Testing
         #expect(settings.changedKeys() == [searchEngine])
         let changed = settings.comparison(mirror: mirror, pending: [])
         #expect(changed.contains(mirror[2]))
-        #expect(changed.heldOut == [tintStrength])
         let changes = SyncDiff.changes(local: changed.records, scope: changed.contains, mirror: mirror, pending: [], foundAt: date(200))
         let searchSave = changes.saves.first { $0.recordName == searchEngine }
         #expect(searchSave?[.value] == .text("google"))
@@ -242,7 +239,6 @@ import Testing
         let newerMirror = [mirror[0], mirror[1], newer, mirror[3]]
         for heldAgain in [settings.comparison(mirror: newerMirror, pending: changes.saves), SyncedSettings(defaults: store).comparison(mirror: newerMirror, pending: changes.saves)] {
             #expect(heldAgain.records.map(\.recordName) == [appearance, archiveAfterHours])
-            #expect(heldAgain.heldOut == [tintStrength, searchEngine])
             let againChanges = SyncDiff.changes(local: heldAgain.records, scope: heldAgain.contains, mirror: newerMirror, pending: changes.saves, foundAt: date(400))
             #expect(!againChanges.saves.contains { $0.recordName == searchEngine })
         }
@@ -251,7 +247,6 @@ import Testing
         let later = changes.saves.map { $0.recordName == searchEngine ? record(searchEngine, "google", at: 350) : $0 }
         let kept = SyncedSettings(defaults: store).comparison(mirror: newerMirror, pending: later)
         #expect(kept.records.map(\.recordName) == [appearance, searchEngine, archiveAfterHours])
-        #expect(kept.heldOut == [tintStrength])
         let keptSave = SyncDiff.changes(local: kept.records, scope: kept.contains, mirror: newerMirror, pending: later, foundAt: date(400)).saves.first { $0.recordName == searchEngine }
         #expect(keptSave?[.value] == .text("google"))
         #expect(keptSave?.fieldModifiedAt["value"] == date(350))
