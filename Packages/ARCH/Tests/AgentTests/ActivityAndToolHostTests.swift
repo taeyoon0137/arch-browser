@@ -125,32 +125,19 @@ import Testing
         #expect(await toolHost.run(AgentToolCall(name: "run_script"), for: grant, state: state).result.code == "unknownTool")
     }
 
-    @Test func guideAnswersWithTheGuideEachTopicAndTheTopicNames() async {
+    /// The harness's own test checks each topic and error; here only the host's routing.
+    @Test func guideAnswersWithTheHarnessResult() async {
         let host = FakeHost()
         let toolHost = AgentToolHost(host: host, allowsAI: { _ in true })
         let grant = grant(host)
         let state = AgentGrantState()
-        let topics = AgentJSON.array(AgentGuideTopic.allCases.map { .string($0.rawValue) })
-        let names = AgentGuideTopic.allCases.map(\.rawValue).joined(separator: ", ")
         func guide(_ arguments: [String: AgentJSON] = [:]) async -> AgentToolResult {
             await toolHost.run(AgentToolCall(name: "guide", arguments: arguments), for: grant, state: state).result
         }
 
-        #expect(await guide() == AgentToolResult(status: .ok, text: AgentHarness.instructions, structured: ["topics": topics]))
-        // A client may send an optional argument as null; that is the guide too.
-        let null = await guide(["topic": .null])
-        #expect(await guide() == null)
-        for topic in AgentGuideTopic.allCases {
-            #expect(await guide(["topic": .string(topic.rawValue)]) == AgentToolResult(status: .ok, text: topic.text, structured: ["topic": .string(topic.rawValue), "topics": topics]), "\(topic)")
-        }
-        // An unknown topic, a topic that is not text, and another argument are answered with the topic names, as arch-cli guide answers them.
-        for (arguments, sentence) in [
-            (["topic": "secrets"], "There is no guide topic named secrets."),
-            (["topic": 3], "topic must be a string."),
-            (["topic": "forms", "tab": "t1"], "guide takes only topic, not tab."),
-        ] as [([String: AgentJSON], String)] {
-            #expect(await guide(arguments) == AgentToolResult(status: .error, code: "invalidArguments", text: "\(sentence) Topics: \(names).", structured: ["topics": topics]), "\(sentence)")
-        }
+        #expect(await guide(["topic": "forms"]) == AgentHarness.guideResult(arguments: ["topic": "forms"]))
+        // A client may send an optional argument as null; that is the guide too, which the generic argument check would refuse.
+        #expect(await guide(["topic": .null]) == guide())
         // The tool gives no handles, and every level can call it, before a grant too.
         #expect(state.handles.tabs.id(for: "t1") == nil && state.handles.spaces.id(for: "s1") == nil)
         #expect(AgentToolHost.toolsBeforeGrant.map(\.name).contains("guide"))

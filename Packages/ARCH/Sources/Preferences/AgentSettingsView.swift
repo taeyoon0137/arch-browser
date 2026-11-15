@@ -337,7 +337,7 @@ struct AgentCommandLineToolsSection: View {
             if AgentCommandLineTools.hasTools(bundle) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("arch-cli and arch-mcp are in")
-                    pathText(bundle.helpersURL.path)
+                    AgentPathText(bundle.helpersURL.path)
                 }
                 .task { await readTools() }
                 .alert("Install Command-Line Tools?", isPresented: $isConfirmingInstall) {
@@ -374,7 +374,7 @@ struct AgentCommandLineToolsSection: View {
                 Text("Not linked into a folder on your PATH.").foregroundStyle(.secondary)
             } else {
                 Text("Linked on your PATH:")
-                ForEach(installed, id: \.location.path) { pathText(AgentCommandLineTools.line($0)) }
+                ForEach(installed, id: \.location.path) { AgentPathText(AgentCommandLineTools.line($0)) }
             }
             if let problem {
                 Text(problem).font(.callout).foregroundStyle(.red)
@@ -404,12 +404,8 @@ struct AgentCommandLineToolsSection: View {
                     NSPasteboard.general.setString(text, forType: .string)
                 }
             }
-            pathText(text)
+            AgentPathText(text)
         }
-    }
-
-    private func pathText(_ text: String) -> some View {
-        Text(text).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
     }
 
     /// Reads the login shell's PATH and the links already on it. A failed read leaves `tools` nil, and Install reads again.

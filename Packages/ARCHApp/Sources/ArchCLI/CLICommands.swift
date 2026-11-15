@@ -330,6 +330,10 @@ enum CLICommands {
         process.waitUntilExit()
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
             printError("\(arguments[0]) mcp add ended with status \(process.terminationStatus).")
+            if client == .claude {
+                let remove = AgentMCPConfiguration.shellCommand(["claude", "mcp", "remove", "--scope", "user", AgentMCPServer.serverName])
+                printError("If Claude Code already has an arch server, as after Arch moved, run \(remove), then arch-cli setup claude again.")
+            }
             return .toolError
         }
         print("\(client.title) now starts arch-mcp when it uses Arch's tools.")

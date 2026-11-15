@@ -33,8 +33,8 @@ public enum AgentMCPSetupClient: String, CaseIterable, Sendable {
 }
 
 public enum AgentMCPConfiguration {
-    /// Codex's tool timeout in the printed table, above the 45 seconds within which every call answers.
-    public static let codexToolTimeoutSeconds = 120
+    /// Codex's tool timeout in the printed table. It covers a first call that waits on the grant sheet for up to the longest approval window, which Codex's own default (300 seconds in 0.164.0) covers only for the current 5-minute window; every other call answers within `callAnswerSeconds`.
+    public static let codexToolTimeoutSeconds = (AgentLimits.outsideApprovalMinuteChoices.max() ?? AgentLimits.outsideApprovalDefaultMinutes) * 60 + AgentLimits.callAnswerSeconds
 
     /// The command `setup` shows and runs, program first.
     public static func setupArguments(for client: AgentMCPSetupClient, mcpPath: String) -> [String] {

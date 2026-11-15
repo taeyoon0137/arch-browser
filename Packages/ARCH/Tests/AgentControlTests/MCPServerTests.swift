@@ -1,4 +1,4 @@
-// arch-mcp's MCP core against transcripts. The client lines of the first two tests were recorded from arch-mcp's standard input: Claude Code 2.1.323's start, from `claude mcp list` with a scratch `CLAUDE_CONFIG_DIR`, and Codex 0.164.0's, from `codex exec` in an empty, signed-out `CODEX_HOME`, which starts its MCP servers before its model request fails. The other exchanges are written by hand for what a start does not reach: version negotiation, errors, tool calls with text, image, and structured results, `approvalPending` and `approval_wait`, progress, cancellation, list changes, Arch not running or closing the connection, and an in-app session's server.
+// arch-mcp's MCP core against transcripts. The client lines of the first two tests were recorded from arch-mcp's standard input: Claude Code 2.1.323's start, from `claude mcp list` with a scratch `CLAUDE_CONFIG_DIR`, and Codex 0.164.0's, from `codex exec` in an empty, signed-out `CODEX_HOME`, which starts its MCP servers before its model request fails. The other exchanges are written by hand for what a start does not reach: version negotiation, errors, tool calls with text and image results, `approvalPending` and `approval_wait`, progress, cancellation, list changes, Arch not running or closing the connection, and an in-app session's server.
 import AgentControl
 import Foundation
 import Testing
@@ -111,8 +111,8 @@ private let notRunning = AgentClientError.notRunning.message
     }
 
     @Test func versionsShapeToolsAndResults() throws {
-        // 2024-11-05 has no tool annotations, and neither it nor 2025-03-26 has structuredContent.
-        for (version, annotations, structured) in [("2024-11-05", false, false), ("2025-03-26", true, false), ("2025-06-18", true, true)] {
+        // 2024-11-05 has no tool annotations, and no version gets structuredContent.
+        for (version, annotations) in [("2024-11-05", false), ("2025-03-26", true), ("2025-06-18", true)] {
             var transcript = Transcript()
             transcript.initialize(version)
             _ = transcript.client(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
@@ -120,7 +120,7 @@ private let notRunning = AgentClientError.notRunning.message
             _ = transcript.client(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"session_info"}}"#)
             _ = transcript.connected()
             let result = try reply(transcript.arch(#"{"jsonrpc":"2.0","id":1,"result":{"status":"ok","content":[{"type":"text","text":"Read Only."}],"structured":{"mode":"readOnly"}}}"#)[0])["result"]
-            #expect((result?["structuredContent"] != nil) == structured, "\(version)")
+            #expect(result?["structuredContent"] == nil, "\(version)")
         }
     }
 
@@ -154,7 +154,7 @@ private let notRunning = AgentClientError.notRunning.message
         #expect(transcript.connected() == [#"arch <- {"id":1,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"tab":"nine"},"name":"click"}}"#])
     }
 
-    @Test func aCallWithTextImageAndStructuredContent() throws {
+    @Test func aCallWithTextAndImage() throws {
         var transcript = Transcript()
         transcript.initialize()
         #expect(transcript.client(#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"screenshot","arguments":{"tab":"t1","area":"viewport"}}}"#) == [outsideHello])
@@ -165,12 +165,12 @@ private let notRunning = AgentClientError.notRunning.message
         let result = AgentToolResult(status: .ok, content: [.text("Captured t1's viewport."), .image(image, mimeType: "image/jpeg")], structured: ["tab": "t1", "events": []])
         let message = String(decoding: try AgentRPCMessage.result(id: .number(1), result: AgentJSON(encoding: result)).encoded(), as: UTF8.self)
         #expect(transcript.arch(message) == [
-            #"client <- {"id":11,"jsonrpc":"2.0","result":{"content":[{"text":"Captured t1's viewport.","type":"text"},{"data":"/9j/4A==","mimeType":"image/jpeg","type":"image"}],"isError":false,"structuredContent":{"events":[],"status":"ok","tab":"t1"}}}"#,
+            #"client <- {"id":11,"jsonrpc":"2.0","result":{"content":[{"text":"Captured t1's viewport.","type":"text"},{"data":"/9j/4A==","mimeType":"image/jpeg","type":"image"}],"isError":false}}"#,
         ])
-        // A result that is not ok is an error for the client, with its status and the rule that refused in the structured facts.
+        // A result that is not ok is an error for the client, with its sentence.
         _ = transcript.client(#"{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"type","arguments":{"tab":"t1","ref":"e6","text":"x"}}}"#)
         #expect(transcript.arch(#"{"jsonrpc":"2.0","id":2,"result":{"status":"refused","code":"P1","content":[{"type":"text","text":"Agents never type into password fields. Use hand_to_user."}]}}"#) == [
-            #"client <- {"id":12,"jsonrpc":"2.0","result":{"content":[{"text":"Agents never type into password fields. Use hand_to_user.","type":"text"}],"isError":true,"structuredContent":{"code":"P1","status":"refused"}}}"#,
+            #"client <- {"id":12,"jsonrpc":"2.0","result":{"content":[{"text":"Agents never type into password fields. Use hand_to_user.","type":"text"}],"isError":true}}"#,
         ])
         // An answer Arch's tool host could not have written, and a JSON-RPC error, become error results.
         _ = transcript.client(#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"list_tabs"}}"#)
@@ -181,21 +181,6 @@ private let notRunning = AgentClientError.notRunning.message
         #expect(transcript.arch(#"{"jsonrpc":"2.0","id":99,"result":{"status":"ok","content":[]}}"#) == [])
     }
 
-    @Test func theGuideToolGoesToArchAndBackAsText() throws {
-        var transcript = Transcript()
-        transcript.initialize("2025-06-18")
-        #expect(transcript.client(#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"guide","arguments":{"topic":"forms"}}}"#) == [outsideHello])
-        #expect(transcript.connected() == [#"arch <- {"id":1,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"topic":"forms"},"name":"guide"}}"#])
-        // The tool host answers with the harness's result, which reaches the client as the topic's text.
-        let result = AgentHarness.guideResult(arguments: ["topic": "forms"])
-        let answer = try reply(try #require(transcript.arch(String(decoding: try AgentRPCMessage.result(id: .number(1), result: AgentJSON(encoding: result)).encoded(), as: UTF8.self)).first))
-        #expect(answer["id"] == 5)
-        #expect(answer["result"]?["content"] == [["type": "text", "text": .string(AgentHarness.text(for: .forms))]])
-        #expect(answer["result"]?["isError"] == false)
-        #expect(answer["result"]?["structuredContent"]?["topic"] == "forms")
-        #expect(answer["result"]?["structuredContent"]?["status"] == "ok")
-    }
-
     @Test func approvalPendingAtTheCapAndApprovalWait() throws {
         var transcript = Transcript()
         transcript.initialize()
@@ -203,13 +188,13 @@ private let notRunning = AgentClientError.notRunning.message
         _ = transcript.connected()
         // Arch answers a call that still waits for the user after 45 seconds with approvalPending and the approval's ID.
         #expect(transcript.arch(#"{"jsonrpc":"2.0","id":1,"result":{"status":"approvalPending","approval":"a7","content":[{"type":"text","text":"Clicking “Place order” on example.org asks the user."}]}}"#) == [
-            #"client <- {"id":21,"jsonrpc":"2.0","result":{"content":[{"text":"Waiting for the user in Arch; call approval_wait with this ID: a7","type":"text"},{"text":"Clicking “Place order” on example.org asks the user.","type":"text"}],"isError":false,"structuredContent":{"approval":"a7","status":"approvalPending"}}}"#,
+            #"client <- {"id":21,"jsonrpc":"2.0","result":{"content":[{"text":"Waiting for the user in Arch; call approval_wait with this ID: a7","type":"text"},{"text":"Clicking “Place order” on example.org asks the user.","type":"text"}],"isError":false}}"#,
         ])
         #expect(transcript.client(#"{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"approval_wait","arguments":{"approval":"a7"}}}"#) == [
             #"arch <- {"id":2,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"approval":"a7"},"name":"approval_wait"}}"#,
         ])
         #expect(transcript.arch(#"{"jsonrpc":"2.0","id":2,"result":{"status":"ok","content":[{"type":"text","text":"Clicked “Place order”."}]}}"#) == [
-            #"client <- {"id":22,"jsonrpc":"2.0","result":{"content":[{"text":"Clicked “Place order”.","type":"text"}],"isError":false,"structuredContent":{"status":"ok"}}}"#,
+            #"client <- {"id":22,"jsonrpc":"2.0","result":{"content":[{"text":"Clicked “Place order”.","type":"text"}],"isError":false}}"#,
         ])
         // approvalPending without an approval cannot be waited on.
         _ = transcript.client(#"{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"click","arguments":{"tab":"t2","ref":"e8"}}}"#)

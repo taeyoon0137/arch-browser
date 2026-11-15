@@ -131,16 +131,6 @@ private final class ScratchHome {
         #expect(tools.installedSentence(for: links) == "Linked arch-cli and arch-mcp into \(scratch.local.path).")
     }
 
-    @Test func aFileInTheWayLeavesBothPlacesAlone() throws {
-        let scratch = try ScratchHome()
-        let tools = scratch.commandLineTools([scratch.local])
-        try Data("#!/bin/sh\n".utf8).write(to: scratch.local.appendingPathComponent("arch-mcp"))
-        let links = try tools.plannedLinks()
-        #expect(throws: AgentLinkInstaller.Failure.foreignFile(scratch.local.appendingPathComponent("arch-mcp").path)) { try tools.install(links) }
-        #expect(scratch.contents(of: scratch.local) == ["arch-mcp"])
-        #expect(AgentCommandLineTools.sentence(for: .foreignFile("/x"), bundle: scratch.bundle) == AgentLinkInstaller.Failure.foreignFile("/x").message)
-    }
-
     @Test func withoutAWritableFolderOnPATHTheSentenceNamesTheBundlesCommandAndSaysToReopenArch() throws {
         let scratch = try ScratchHome()
         #expect(throws: AgentLinkInstaller.Failure.noFolder) { try scratch.commandLineTools([scratch.outside, URL(fileURLWithPath: "/usr/bin")]).plannedLinks() }

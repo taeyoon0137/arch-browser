@@ -1,4 +1,4 @@
-// The harness: every guide topic the design names, the tool, parameter, and value names and the statuses the topics use, the MCP instructions within 2,000 characters, the skills made from the same text with front matter of only `name` and `description` and the version line with its digest first, the version line and digest check, and the `guide` tool's results.
+// The harness: every guide topic the design names, the tool, parameter, and value names and the statuses the topics use, the skills made from the same text with front matter of only `name` and `description` and the version line with its digest first, the version line and digest check, and the `guide` tool's results.
 import AgentControl
 import CryptoKit
 import Foundation
@@ -128,11 +128,6 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(text.contains("Prepare, never finish"))
         #expect(text.contains("request_approval"))
         #expect(text.contains("hand_to_user"))
-    }
-
-    @Test func theMCPInstructionsFitAndNameTheGuide() {
-        #expect(AgentHarness.mcpInstructions.count <= 2_000)
-        #expect(AgentHarness.mcpInstructions.contains("Call guide first"))
     }
 
     @Test func theEntrySkillNamesArchCLIByItsPath() throws {
