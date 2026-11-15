@@ -171,6 +171,8 @@ public struct AgentApproval: Identifiable {
     static let keptOutcomes = 100
     /// Called with each new card, so that the service shows it.
     var didAdd: ((AgentApproval) -> Void)?
+    /// An owner's last waiting card ended.
+    var didEnd: ((UUID) -> Void)?
     /// Touch ID or the login password, for the sensitive cards of outside clients.
     var authenticator: any AgentAuthenticating = AgentDeviceOwnerAuthentication()
 
@@ -298,11 +300,13 @@ public struct AgentApproval: Identifiable {
     private func finish(_ id: UUID, _ answer: AgentApprovalAnswer) {
         guard waiting.remove(id) != nil else { return }
         pending.removeAll { $0.id == id }
+        let ownerID = cards[id]?.ownerID
         cards[id] = nil
         if questionDrafts[id] != nil { questionDrafts[id] = nil }
         outcomes[id] = answer
         endedOrder.append(id)
         if endedOrder.count > Self.keptOutcomes { outcomes[endedOrder.removeFirst()] = nil }
         completions.removeValue(forKey: id)?(answer)
+        if let ownerID, !pending.contains(where: { $0.ownerID == ownerID }) { didEnd?(ownerID) }
     }
 }

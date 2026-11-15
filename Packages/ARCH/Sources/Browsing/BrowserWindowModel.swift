@@ -140,7 +140,7 @@ public enum BrowserWindowKind {
     /// Selects the tab `id`, or the empty page for nil, and does what a selection does, in this order (`docs/windows-personas.md`, `BrowserWindowModel`). Selecting the tab already selected runs every step except the end of step 2.
     ///
     /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
-    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), and follows its space. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
+    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), follows its space, and, while the agent panel shows an outside client, switches it to the client that owns the newly selected agent tab. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
     /// 3. The session updates the focused tab.
     /// 4. The docked developer tools follow the tab.
     /// 5. The window republishes the tab's changes, and keyboard focus leaves another pane of the split view.

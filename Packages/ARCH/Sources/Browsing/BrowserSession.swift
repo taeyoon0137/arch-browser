@@ -231,13 +231,16 @@ final class EngineRuntime {
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
 
-    /// Opening a notification selects its still-waiting conversation without navigating the user's page.
+    /// Opening a notification selects its still-waiting conversation without navigating the user's page: in a window that already shows it, else in a main window of the owner's Persona, one without a panel first, whose composer draft stays kept otherwise.
     func showWaitingAgent(_ ownerID: UUID) {
         guard let agents, agents.pendingAttention(for: ownerID) else { return }
-        let isSession = agents.session(withID: ownerID) != nil
-        let panel: AgentPanelContent = isSession ? .session(ownerID) : .client(ownerID)
-        let window = windows.first { $0.agentPanel == panel } ?? windows.first { $0.agentPanel == nil }
-            ?? activeWindow ?? sidebarTarget()
+        let session = agents.session(withID: ownerID)
+        let panel: AgentPanelContent = session != nil ? .session(ownerID) : .client(ownerID)
+        let personaID = session?.personaID ?? agents.grants.first { $0.id == ownerID }?.personaID
+        let ownMain = windows.filter { $0.kind == .main && $0.personaID == personaID }
+        let window = windows.first { $0.agentPanel == panel } ?? ownMain.first { $0.agentPanel == nil } ?? ownMain.first
+            ?? windows.first { $0.agentPanel == nil } ?? activeWindow ?? sidebarTarget()
+        let isSession = session != nil
         if isSession { window.showAgentSession(ownerID) } else { window.showClientPanel(ownerID) }
         window.nsWindow?.makeKeyAndOrderFront(nil)
     }

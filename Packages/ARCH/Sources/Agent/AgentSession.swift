@@ -137,7 +137,7 @@ extension AgentAPISession: AgentSessionRunning {
     var reportedTools: [String]
     /// The service's: tells the session's connections that their tools changed, after a mode change.
     var modeDidChange: (() -> Void)?
-    /// Dismiss this session's question cards when the user or runner ends their turn.
+    /// Ends every card this session owns, questions and tab requests, when its turn ends, it is stopped or taken over, or it ends.
     var dismissQuestions: (() -> Void)?
     /// Withdraw outstanding tab requests that display a tab whose sharing has changed.
     var attachmentDidChange: ((UUID) -> Void)?

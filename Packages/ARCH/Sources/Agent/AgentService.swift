@@ -90,6 +90,7 @@ import Foundation
         var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
         /// Called when a card opens, for the notification without content while Arch is in the background.
         var attention: (UUID) -> Void = AgentAttention.notify
+        var withdrawAttention: (UUID) -> Void = AgentAttention.withdraw
     }
 
     /// Don't Allow remembers nothing, but Arch shows one grant sheet at a time and no new one for this long after any Don't Allow or timeout, so that a looping client, even one that changes its identity, cannot flood the user.
@@ -186,6 +187,7 @@ import Foundation
         host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.states[owner]) ?? false }
         approvals.authenticator = dependencies.authenticator
         approvals.didAdd = { [weak self] approval in self?.cardDidOpen(approval) }
+        approvals.didEnd = { [weak self] ownerID in self?.dependencies.withdrawAttention(ownerID) }
         panel.showTab = { [weak host] in host?.showTab($0) }
         panel.stop = { [weak self] in self?.stopClient($0) }
         host.agentPanel = panel
@@ -1677,8 +1679,9 @@ private final class ClientConnection {
 
 /// One `tools/call` on a connection, which its client may cancel.
 private final class ConnectionCall {
-    /// The request ID, when it is a number, as `tools/cancel` names calls.
+    /// The call's JSON-RPC request ID, by which the connection tracks it.
     let requestID: AgentRPCID
+    /// The request ID, when it is a number, as `tools/cancel` names calls.
     let callID: Int?
     var task: Task<Void, Never>?
     var isCancelled = false
