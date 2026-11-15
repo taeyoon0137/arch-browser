@@ -21,6 +21,8 @@ import Foundation
     /// How long an outside client's call waits for the user before it answers `approvalPending`, and how long a card stays open (docs/agents.md, Tools ▸ Limits). An in-app session's call waits on its card until the card ends, which the service gives the in-app approval wait.
     var answerWait = TimeInterval(AgentLimits.callAnswerSeconds)
     var approvalWindow = TimeInterval(AgentLimits.outsideApprovalDefaultMinutes * 60)
+    /// When an in-app session's call stops waiting for the user, from its arrival: its cards and its wait while the session is taken over share this time, which stays below the tool timeout of the user's CLI (docs/agents.md, Tools ▸ Limits).
+    var callDeadline: Date?
     /// After an action, how long the host waits for a load it started, and the pause after it.
     var settleWait: TimeInterval = 3
     var settlePause: TimeInterval = 0.3
@@ -347,31 +349,39 @@ import Foundation
             }
             isWritten = true
         }
-        let openTabs = host.agentTabs(of: client.id)
-        guard openTabs.count < AgentLimits.agentTabs else {
-            return Outcome(result: AgentToolResult(status: .error, code: "limitReached",
-                                                   text: "This client has \(AgentLimits.agentTabs) agent tabs open, the most at once. Close one with close_tab first.",
-                                                   structured: ["limits": ["agentTabs": .number(Double(AgentLimits.agentTabs))]]), site: AgentActivityEntry.site(of: url))
-        }
+        if let full = tabLimit(client, opening: url) { return full }
         guard let space = space(of: client) else { return Self.error("noSpace", "The \(personaName(of: client)) Persona has no space for agent tabs.") }
-        if isWritten, var refusal = await askAboutWrittenAddress(url, in: nil, handle: nil, client, state: state, box: box) {
-            refusal.site = AgentActivityEntry.site(of: url)
-            return refusal
+        var decision: AgentActivityEntry.Decision?
+        if isWritten {
+            switch await askAboutWrittenAddress(url, in: nil, handle: nil, client, state: state, box: box) {
+            case .value(let answered): decision = answered
+            case .outcome(var refusal):
+                refusal.site = AgentActivityEntry.site(of: url)
+                return refusal
+            }
         }
-        // A session whose turn ended or that the user took over while the card waited opens nothing.
+        // A session whose turn ended or that the user took over while the card waited opens nothing, and other calls may have opened tabs meanwhile.
         guard !Task.isCancelled, client.isCurrent else { return Self.ended }
+        if decision != nil, var full = tabLimit(client, opening: url) {
+            full.decision = decision
+            return full
+        }
         let engine = arguments["engine"]?.stringValue.map { $0 == "webkit" ? EngineKind.webKit : EngineKind.chromium }
         let owner = AgentTabOwner(id: client.id, spaceID: space.id, folderName: client.folderName)
         guard let tab = host.openAgentTab(at: url, engine: engine, for: owner) else { return Self.error("noSpace", "Arch could not open an agent tab in this client's space.") }
         let handle = state.handles.tabs.handle(for: tab.id)
-        if isWritten, client.kind == .inApp { state.writtenLoads[tab.id] = url }
-        defer {
-            state.writtenLoads[tab.id] = nil
-            state.heldHops[tab.id] = nil
-        }
-        var outcome = await finishLoad(of: tab.id, handle: handle, client, state: state, box: box, since: AgentTabActivity(), opened: true)
+        let load = isWritten && client.kind == .inApp ? state.beginWrittenLoad(url, in: tab.id) : nil
+        var outcome = await finishLoad(of: tab.id, handle: handle, load: load, client, state: state, box: box, since: AgentTabActivity(), opened: true, decision: decision)
         outcome.site = AgentActivityEntry.site(of: url)
         return outcome
+    }
+
+    /// The refusal of a tab past the limit of agent tabs, or nil while the client has room for one.
+    private func tabLimit(_ client: AgentToolClient, opening url: URL) -> Outcome? {
+        guard host.agentTabs(of: client.id).count >= AgentLimits.agentTabs else { return nil }
+        return Outcome(result: AgentToolResult(status: .error, code: "limitReached",
+                                               text: "This client has \(AgentLimits.agentTabs) agent tabs open, the most at once. Close one with close_tab first.",
+                                               structured: ["limits": ["agentTabs": .number(Double(AgentLimits.agentTabs))]]), site: AgentActivityEntry.site(of: url))
     }
 
     private func navigate(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
@@ -406,8 +416,11 @@ import Foundation
             }
         }
         let written = arguments["url"] != nil
+        var decision: AgentActivityEntry.Decision?
         if written, case .load(let url) = navigation {
-            if var refusal = await askAboutWrittenAddress(url, in: tab, handle: handle, client, state: state, box: box) {
+            switch await askAboutWrittenAddress(url, in: tab, handle: handle, client, state: state, box: box) {
+            case .value(let answered): decision = answered
+            case .outcome(var refusal):
                 refusal.site = AgentActivityEntry.site(of: url)
                 return refusal
             }
@@ -419,13 +432,14 @@ import Foundation
         }
         guard !Task.isCancelled, client.isCurrent else { return Self.ended }
         let before = state.activity(of: tab.id)
-        if written, client.kind == .inApp, case .load(let url) = navigation { state.writtenLoads[tab.id] = url }
-        defer {
-            state.writtenLoads[tab.id] = nil
-            state.heldHops[tab.id] = nil
+        // The navigation replaces the tab's earlier one, whose checks end; a written address's starts its own.
+        var load: UUID?
+        if client.kind == .inApp {
+            if written, case .load(let url) = navigation { load = state.beginWrittenLoad(url, in: tab.id) } else { state.endWrittenLoad(in: tab.id) }
         }
         host.navigate(tab.id, navigation)
-        var outcome = await finishLoad(of: tab.id, handle: handle, client, state: state, box: box, since: before, opened: false, history: navigation == .back || navigation == .forward)
+        var outcome = await finishLoad(of: tab.id, handle: handle, load: load, client, state: state, box: box, since: before, opened: false,
+                                       history: navigation == .back || navigation == .forward, decision: decision)
         if case .load(let url) = navigation { outcome.site = AgentActivityEntry.site(of: url) }
         return outcome
     }
@@ -433,40 +447,55 @@ import Foundation
     /// How many redirect hops off the scope one call asks the user about before it gives up.
     static let askedHopsPerCall = 3
 
-    /// Waits for the load a call started and answers with it. A redirect hop of an in-app session's written address that the scope stopped (`heldHops`) asks the user with the hop's full address; Allow adds it to the scope and loads it, and any other answer ends the call without it.
-    private func finishLoad(of tabID: UUID, handle: String, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox, since start: AgentTabActivity, opened: Bool, history: Bool = false) async -> Outcome {
+    /// Waits for the load a call started and answers with it, with the user's decision when a card asked. A redirect hop of an in-app session's written address (`load`) that the scope stopped (`heldHops`) asks the user with the hop's full address; Allow adds it to the scope and loads it as a written address's navigation of its own, and any other answer ends the call without it. Once the call ends, a hop of its navigation that the scope stops is refused.
+    private func finishLoad(of tabID: UUID, handle: String, load: UUID?, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox, since start: AgentTabActivity, opened: Bool,
+                            history: Bool = false, decision: AgentActivityEntry.Decision? = nil) async -> Outcome {
         var before = start
         var asked = 0
+        var load = load
+        var decision = decision
+        defer { if let load { state.stopAwaiting(load, in: tabID) } }
         while true {
-            let loaded = await waitForLoad(of: tabID, client, state: state, since: before)
+            let loaded = await waitForLoad(of: tabID, load: load, client, state: state, since: before)
             if Task.isCancelled { return Self.ended }
-            guard let question = state.heldHops.removeValue(forKey: tabID) else {
-                return loadOutcome(of: tabID, handle: handle, client, state: state, since: before, didLoad: loaded, opened: opened, history: history)
+            guard let current = load, let question = state.takeHeldHop(of: current, in: tabID) else {
+                var outcome = loadOutcome(of: tabID, handle: handle, client, state: state, since: before, didLoad: loaded, opened: opened, history: history)
+                outcome.decision = decision
+                return outcome
             }
+            load = nil
             guard asked < Self.askedHopsPerCall else {
-                return Self.error("navigationFailed", "\(handle) kept redirecting to sites outside the session's scope, so Arch stopped its navigation.")
+                var outcome = Self.error("navigationFailed", "\(handle) kept redirecting to sites outside the session's scope, so Arch stopped its navigation.")
+                outcome.decision = decision
+                return outcome
             }
             asked += 1
             guard let tab = host.tabs(withIDs: [tabID]).first, tab.agentOwnerID == client.id else {
-                return loadOutcome(of: tabID, handle: handle, client, state: state, since: before, didLoad: loaded, opened: opened, history: history)
+                var outcome = loadOutcome(of: tabID, handle: handle, client, state: state, since: before, didLoad: loaded, opened: opened, history: history)
+                outcome.decision = decision
+                return outcome
             }
-            if let refusal = await askAboutAddress(question, in: tab, handle: handle, isHop: true, client, state: state, box: box) { return refusal }
+            switch await askAboutAddress(question, in: tab, handle: handle, isHop: true, client, state: state, box: box) {
+            case .value(let answered): decision = answered ?? decision
+            case .outcome(let refusal): return refusal
+            }
             guard !Task.isCancelled, client.isCurrent, host.tabs(withIDs: [tabID]).first?.agentOwnerID == client.id else { return Self.ended }
             before = state.activity(of: tabID)
+            load = state.beginWrittenLoad(question.url, in: tabID)
             host.navigate(tabID, .load(question.url))
         }
     }
 
-    /// Rule P13 for an address an in-app session's agent wrote (docs/agents.md, Site scope and navigation): it opens without asking only when the session has seen it, when it is the search engine's results address, or when it is the bare origin of a site in scope; otherwise the user decides on a sensitive card, in every mode. An outside client navigates freely in its own agent tabs. Nil when the address may open.
-    private func askAboutWrittenAddress(_ url: URL, in tab: AgentTabInfo?, handle: String?, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome? {
-        guard client.kind == .inApp, let owner = client.inAppSession, case .asks(let question) = owner.scope.written(url) else { return nil }
+    /// Rule P13 for an address an in-app session's agent wrote (docs/agents.md, Site scope and navigation): it opens without asking only when the session has seen it, when it is the search engine's results address, or when it is the bare origin of a site in scope; otherwise the user decides on a sensitive card, in every mode. An outside client navigates freely in its own agent tabs. The address may open with the user's decision, nil when no card asked.
+    private func askAboutWrittenAddress(_ url: URL, in tab: AgentTabInfo?, handle: String?, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Resolved<AgentActivityEntry.Decision?> {
+        guard client.kind == .inApp, let owner = client.inAppSession, case .asks(let question) = owner.scope.written(url) else { return .value(nil) }
         return await askAboutAddress(question, in: tab, handle: handle, isHop: false, client, state: state, box: box)
     }
 
-    /// A P13 card: the step, the scope's sentence, and the full address with the parts the session has not seen marked. Allow adds the address to the scope, which makes its site part of it; any other answer gives the call's outcome.
-    private func askAboutAddress(_ question: AgentAddressQuestion, in tab: AgentTabInfo?, handle: String?, isHop: Bool, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome? {
+    /// A P13 card: the step, the scope's sentence, and the full address with the parts the session has not seen marked. The card is about the address, not the tab's page, so a new page in the tab leaves it waiting. Allow adds the address to the scope, which makes its site part of it, and gives the decision for the activity log; any other answer gives the call's outcome.
+    private func askAboutAddress(_ question: AgentAddressQuestion, in tab: AgentTabInfo?, handle: String?, isHop: Bool, _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Resolved<AgentActivityEntry.Decision?> {
         let facts = AgentNavigationFacts(isWritten: true, siteInScope: !question.isOutsideScope, isRedirectHop: isHop)
-        guard let owner = client.inAppSession, case .ask(let ask) = AgentPolicy.decide(.navigation(facts), client: client.kind, mode: client.level) else { return nil }
+        guard let owner = client.inAppSession, case .ask(let ask) = AgentPolicy.decide(.navigation(facts), client: client.kind, mode: client.level) else { return .value(nil) }
         let place = handle.map { "in \($0)" } ?? "in a new agent tab"
         // A hop asks only when it leaves the scope; its address may be one a page showed.
         let action = isHop ? "Follow a redirect \(place) to a site outside the session's scope" : "Open an address \(place)"
@@ -480,13 +509,10 @@ import Foundation
         card.addressQuestion = question
         box.approvalID = card.id
         let answer = await request(card, for: client)
-        if var ended = answerOutcome(answer, card: card, handle: handle ?? "", client: client) {
-            ended.step = "Not allowed: \(action)"
-            return ended
-        }
-        guard !Task.isCancelled, client.isCurrent else { return Self.ended }
+        if let ended = answerOutcome(answer, card: card, handle: handle ?? "", client: client) { return .outcome(ended) }
+        guard !Task.isCancelled, client.isCurrent else { return .outcome(Self.ended) }
         owner.scope.add(question.url)
-        return nil
+        return .value(card.needsAuthentication ? .approvedWithTouchID : .approved)
     }
 
     /// An address the agent wrote, as rule P16 lets it open: http or https, with a host, on a site not excluded from AI.
@@ -524,11 +550,12 @@ import Foundation
         Outcome(result: AgentToolResult(status: .stale, code: "stale", text: "The page in \(handle) changed since your last snapshot. Take a new snapshot.", structured: ["tab": .string(handle)]))
     }
 
-    /// Waits until the tab's main frame finishes a document, the tab stops loading, a rule stops its navigation, or it closes or leaves the client, at most `loadWait`, and says whether one of them happened.
-    private func waitForLoad(of tabID: UUID, _ client: AgentToolClient, state: AgentGrantState, since before: AgentTabActivity) async -> Bool {
+    /// Waits until the tab's main frame finishes a document, the tab stops loading, a rule stops its navigation or the scope a hop of `load`, or it closes or leaves the client, at most `loadWait`, and says whether one of them happened.
+    private func waitForLoad(of tabID: UUID, load: UUID?, _ client: AgentToolClient, state: AgentGrantState, since before: AgentTabActivity) async -> Bool {
         await Self.poll(for: loadWait) {
             let activity = state.activity(of: tabID)
-            if activity.documents > before.documents || activity.stops > before.stops || activity.refusals > before.refusals || activity.isGone || state.heldHops[tabID] != nil { return true }
+            let isHeld = load != nil && state.heldHops[tabID]?.loadID == load
+            if activity.documents > before.documents || activity.stops > before.stops || activity.refusals > before.refusals || activity.isGone || isHeld { return true }
             return host.tabs(withIDs: [tabID]).first?.agentOwnerID != client.id
         }
     }
@@ -573,6 +600,7 @@ import Foundation
         }
         guard client.isCurrent else { return Self.ended }
         host.closeAgentTab(tab.id)
+        state.endWrittenLoad(in: tab.id)
         return Outcome(result: AgentToolResult(status: .ok, text: "Closed \(handle).", structured: ["tab": .string(handle), "closed": true]), site: tab.url.flatMap(AgentActivityEntry.site(of:)))
     }
 
@@ -868,7 +896,9 @@ import Foundation
         state?.record(.report(report), tab: tabID)
         switch report {
         case .addressChanged, .loaded: approvals.withdraw(tab: tabID, owner: ownerID, document: state?.activity(of: tabID).pages ?? Int.max)
-        case .closed, .takenOver: approvals.withdraw(tab: tabID, owner: ownerID, document: nil)
+        case .closed, .takenOver:
+            state?.endWrittenLoad(in: tabID)
+            approvals.withdraw(tab: tabID, owner: ownerID, document: nil)
         case .downloadAsked(let url): if let state { askAboutDownload(url, in: tabID, of: ownerID, state: state, client: client) }
         case .externalAppAsked(let url): if let state { askAboutExternalApp(url, in: tabID, of: ownerID, state: state, client: client) }
         default: break
@@ -882,15 +912,29 @@ import Foundation
         return url.host.map { state.downloadSites.contains($0.lowercased()) } ?? false
     }
 
-    /// Rule P16 at each main frame navigation, redirect hop, and popup of an agent tab, whoever started it: the exclusions then in force decide, and a refusal is an event for the client. For an in-app session, rule P13 at each redirect hop of a navigation by an address its agent wrote (`writtenLoads`): a hop to a site outside `scope` stops, and the call that waits for the load asks the user with the hop's full address (`heldHops`).
-    func tab(_ tabID: UUID, mayLoad url: URL, state: AgentGrantState?, scope: AgentSiteScope? = nil) -> Bool {
+    /// Rule P16 at each main frame navigation, redirect hop, and popup of an agent tab, whoever started it: the exclusions then in force decide, and a refusal is an event for the client. For an in-app session, rule P13 at each server redirect of a navigation by an address its agent wrote (`writtenLoads`), never at a popup or a link that opens elsewhere: a hop to a site outside `scope` stops, and the call that waits for the navigation asks the user with the hop's full address (`heldHops`), or, once no call waits, the hop is refused and the agent hears so. The navigation's checks end once the tab commits another document than the one it showed at the navigation's first check.
+    func tab(_ tabID: UUID, mayLoad url: URL, kind: AgentLoadKind, state: AgentGrantState?, scope: AgentSiteScope? = nil) -> Bool {
         if case .refused = AgentPolicy.mayLoad(url, allowsAI: allowsAI) {
             state?.record(.refused(url), tab: tabID)
             return false
         }
-        guard let state, let scope, let written = state.writtenLoads[tabID], url != written, AgentSeenAddress(url) != AgentSeenAddress(written),
+        guard kind != .popup, let state, var load = state.writtenLoads[tabID] else { return true }
+        let document = host.tabs(withIDs: [tabID]).first?.documentID
+        if load.documentID == nil {
+            load.documentID = document
+            state.writtenLoads[tabID] = load
+        } else if load.documentID != document {
+            state.writtenLoads[tabID] = nil
+            return true
+        }
+        guard kind == .redirect, let scope, AgentSeenAddress(url) != AgentSeenAddress(load.url),
               case .asks(let question) = scope.hop(to: url, ofWrittenAddress: true) else { return true }
-        state.heldHops[tabID] = question
+        if load.isAwaited {
+            state.heldHops[tabID] = AgentHeldHop(loadID: load.id, question: question)
+        } else {
+            state.writtenLoads[tabID] = nil
+            state.record(.hopStopped, tab: tabID)
+        }
         return false
     }
 
@@ -1008,6 +1052,10 @@ import Foundation
             if let scheme { json["scheme"] = .string(scheme) }
             line = isWeb ? "Arch stopped \(handle) from loading a site excluded from AI (P16)."
                 : "Arch stopped \(handle) from loading an address with \(scheme.map { "the scheme \($0), which" } ?? "a scheme that") agents never open (P16)."
+        case .hopStopped:
+            json["kind"] = "redirectStopped"
+            json["rule"] = "P13"
+            line = "Arch stopped \(handle)'s navigation at a redirect to a site outside the session's scope, since no call waited to ask the user (P13). Navigate to the address again to let the user decide."
         case .closedOverLimit:
             json["kind"] = "closedOverLimit"
             line = "A page in \(handle) opened another tab, which Arch closed: a client has at most \(AgentLimits.agentTabs) agent tabs open."
@@ -1091,13 +1139,17 @@ import Foundation
         error("notAvailable", text)
     }
 
-    /// Shows a card for the client's call and waits for the user's answer. A session an outside client started with `--deny-approvals` gets a denial at once, and no card opens.
+    /// Shows a card for the client's call and waits for the user's answer, at most until the call's deadline. A session an outside client started with `--deny-approvals` gets a denial at once, and no card opens; nor does one for a call whose session's turn ended or that the user took over.
     func request(_ card: AgentApproval, for client: AgentToolClient) async -> AgentApprovalAnswer {
         guard !client.deniesApprovals else { return .ended(Self.deniedApprovalsReason) }
+        guard client.isCurrent else { return .ended(Self.notCurrentReason) }
+        var card = card
+        if let callDeadline, callDeadline < card.deadline { card.deadline = callDeadline }
         return await approvals.request(card)
     }
 
     static let deniedApprovalsReason = "This task was started with approvals denied, so Arch denied the step without asking the user."
+    static let notCurrentReason = "The session's turn ended or the user took the session over."
 
 
     /// A rule's refusal, named in its code and its text.
@@ -1134,7 +1186,7 @@ struct AgentToolClient {
     var spaceID: UUID
     var level: AgentAccessLevel
     var scopes: AgentGrantScopes
-    /// The name cards give the client: an outside client's, or the session's title.
+    /// The name cards and Touch ID's reason give the client: an outside client's as Arch verified it, also for a session it started, or the title of a session the user started.
     var name: String
     /// The agent folder's name: the client and its app, as "claude · Terminal", or the session's title (docs/agents.md, Agent folders).
     var folderName: String
@@ -1168,7 +1220,8 @@ struct AgentToolClient {
         spaceID = session.spaceID
         level = session.mode
         scopes = AgentGrantScopes(searchHistory: searchesHistory, startTasks: false)
-        name = session.title
+        // A session an outside client started names the client as Arch verified it, never words of the client's task.
+        name = session.cardName
         folderName = session.title
         kind = .inApp
         isOutsideClient = session.isFromOutsideClient

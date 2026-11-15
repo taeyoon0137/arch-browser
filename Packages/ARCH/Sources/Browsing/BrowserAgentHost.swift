@@ -13,7 +13,7 @@ import Foundation
     public var userDocumentDidEnd: ((_ tabID: UUID, _ documentID: UUID) -> Void)?
     public var userTabAddressDidChange: ((_ tabID: UUID) -> Void)?
     public var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
-    public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    public var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)?
     public var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
     public var agentPanel: AgentPanelModel?
     /// The addresses of the downloads each owner's tabs started once the user allowed them, which `list_downloads` follows in the session's downloads.
@@ -195,8 +195,8 @@ extension BrowserAgentHost: AgentTabMonitor {
         userTabAddressDidChange?(tabID)
     }
 
-    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
-        agentTabMayLoad?(owner, tab.id, url) ?? false
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool {
+        agentTabMayLoad?(owner, tab.id, url, kind) ?? false
     }
 
     func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {

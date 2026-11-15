@@ -1,4 +1,4 @@
-// Which navigations the WebKit adapter asks its navigation delegate about, as the agents' site checks need (docs/agents.md, Site exclusions): every main frame navigation, again at each server redirect with the redirect's address and before its request leaves, and nothing for a frame inside the page. A server on the loopback address answers the requests, so no page comes from the network; the profile keeps nothing on disk.
+// Which navigations the WebKit adapter asks its navigation delegate about, as the agents' site checks need (docs/agents.md, Site exclusions): every main frame navigation, again at each server redirect with the redirect's address, marked as one, and before its request leaves, and nothing for a frame inside the page. A server on the loopback address answers the requests, so no page comes from the network; the profile keeps nothing on disk.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -32,6 +32,11 @@ import Testing
         #expect(await eventually { tab.webView.title == "Final" && server.paths.contains("/frame") })
         #expect(recorder.paths == ["/start", "/hop", "/final"])
         #expect(recorder.dispositions.allSatisfy { $0 == .currentTab })
+        // Each hop is marked as a redirect, and a navigation after the commit is not.
+        #expect(recorder.redirects == [false, true, true])
+        tab.navigationController.load(URLRequest(url: server.url("/final")))
+        #expect(await eventually { recorder.paths.count == 4 && !tab.isLoading })
+        #expect(recorder.redirects == [false, true, true, false])
     }
 
     @Test func aHopTheDelegateCancelsSendsNoRequest() async throws {
@@ -46,16 +51,23 @@ import Testing
         try await Task.sleep(for: .milliseconds(300))
         #expect(server.paths == ["/start", "/hop"])
         #expect(tab.webView.title != "Final")
+        // The cancelled hop ended the navigation, so the next one is no redirect.
+        recorder.cancelledPath = nil
+        tab.navigationController.load(URLRequest(url: server.url("/final")))
+        #expect(await eventually { tab.webView.title == "Final" })
+        #expect(recorder.redirects == [false, true, true, false])
     }
 
     private final class PolicyRecorder: EngineWebContentsNavigationDelegate {
         var cancelledPath: String?
         private(set) var paths: [String] = []
         private(set) var dispositions: [EngineNavigationDisposition] = []
+        private(set) var redirects: [Bool] = []
 
         func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
             paths.append(action.url.path)
             dispositions.append(action.disposition)
+            redirects.append(action.isRedirect)
             return action.url.path == cancelledPath ? .cancel : .allow
         }
     }

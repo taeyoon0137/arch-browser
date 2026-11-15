@@ -1852,7 +1852,7 @@ final class EngineRuntime {
     private func adoptAgentPopup(_ popup: any EngineWebContents, targetURL: URL?, opener: Tab, owner: UUID) {
         guard let folder = folders.first(where: { $0.id == opener.folderID && $0.agentSessionID == owner }), let spaceID = opener.spaceID else { return retire(popup, of: opener.personaID) }
         let opened = adopt(popup, spaceID: spaceID, personaID: opener.personaID, pinned: false, select: false, opener: opener.webContents, folderID: folder.id, preferredEngine: opener.preferredEngine)
-        if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url) == false {
+        if let url = popup.url ?? targetURL, agentMonitor?.agentTab(opener, owner: owner, mayLoad: url, kind: .popup) == false {
             DispatchQueue.main.async { [weak self, weak opened] in
                 if let self, let opened, opened.agentOwnerID == owner { self.closeAgentTab(opened, reason: .page) }
             }

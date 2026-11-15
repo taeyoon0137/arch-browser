@@ -887,7 +887,8 @@ import UserNotifications
         let guide = try await client.callTool("guide")
         #expect(guide.text == AgentHarness.sessionInstructions)
         let research = try await client.callTool("guide", ["topic": "research"])
-        #expect(research.text.contains("Shared Tabs") && !research.text.contains("open_tab"))
+        // The session's research topic sends the agent to sources by links from pages it read, since an address it writes may ask the user.
+        #expect(research.text.contains("Shared Tabs") && research.text.contains("by following links from the pages you read"))
         // Raising the mode tells the session's connection, and the next list, which adds the interactions and request_approval, reaches the runner once; a list that differs from the last one reported reaches it again.
         session.setMode(.askBeforeActing)
         #expect(try await client.receive() == .notification(method: AgentControlMethod.toolsChangedNotification, params: nil))

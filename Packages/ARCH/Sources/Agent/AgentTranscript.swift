@@ -152,9 +152,10 @@ enum AgentStepText {
         case "guide":
             // The model wrote the topic, so only a topic the guide has appears in the sentence.
             done = call.arguments["topic"]?.stringValue.flatMap(AgentGuideTopic.init(rawValue:)).map { "Read the guide\u{2019}s \($0.rawValue) topic" } ?? "Read the guide"
-        case "open_tab": done = "Opened a tab"
-        case "navigate": done = "Opened a page"
-        case "close_tab": done = "Closed a tab"
+        // A step that did not happen reads as what the agent asked for, such as "Open a page: you said no".
+        case "open_tab": done = result.status == .ok ? "Opened a tab" : "Open a tab"
+        case "navigate": done = result.status == .ok ? "Opened a page" : "Open a page"
+        case "close_tab": done = result.status == .ok ? "Closed a tab" : "Close a tab"
         default:
             guard let tool = AgentToolCatalog.tool(named: call.name) else { return "Unrecognized tool" }
             done = hostStep ?? "Requested " + tool.name.replacingOccurrences(of: "_", with: " ")

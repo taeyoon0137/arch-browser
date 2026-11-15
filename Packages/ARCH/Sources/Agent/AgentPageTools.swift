@@ -577,6 +577,8 @@ extension AgentToolHost {
         case .reply(let text), .answer(let text):
             return Outcome(result: AgentToolResult(status: .denied, text: "The user did not allow this step and wrote instead: \(text)", structured: ["tab": .string(handle), "reply": .string(text)]), decision: .denied)
         case .takeOver:
+            // On a session's card, Take Over pauses the session as the panel's Take Over does, so its agent waits until Hand Back.
+            client.inAppSession?.takeOver()
             if let tabID = card.tabID { host.showTab(tabID) }
             return Outcome(result: AgentToolResult(status: .denied, text: "The user chose to do this step in \(handle) in Arch. Wait, then take a new snapshot.", structured: structured), decision: .denied)
         case .timedOut: return Outcome(result: AgentToolResult(status: .timeout, code: "notAnswered", text: "The user did not answer in Arch in time, so the step did not run.", structured: structured), decision: .timedOut)

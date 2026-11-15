@@ -1,4 +1,4 @@
-// An in-app session's calls on the tool host's grant path (docs/agents.md, Site scope and navigation; Approval interface), through a fake host and the session's `AgentSessionTools`: the mode's tools; rule P13 at `open_tab`, `navigate`, and the redirect hops of a written address, at most three a call, in Read Only too, with a sensitive card that shows the full address with its unseen parts marked and whose Allow adds the address to the scope; agent tabs in the session's own folder; a call held while the user has taken the session over until Hand Back; the 150 calls of a message; each call a step and an activity entry; a call waiting on a card withdrawn as denied, with nothing run, when its task is cancelled, at Stop All Agents, and at Deny and Stop; a dragged-out tab refused under P17; and Touch ID and `--deny-approvals` for a session an outside client started.
+// An in-app session's calls on the tool host's grant path (docs/agents.md, Site scope and navigation; Approval interface), through a fake host and the session's `AgentSessionTools`: the mode's tools; rule P13 at `open_tab`, `navigate`, and the redirect hops of a written address, at most three a call, in Read Only too, with a sensitive card that shows the full address with its unseen parts marked and whose Allow adds the address to the scope and is the activity entry's decision; hops checked per navigation, not per call: a popup is none, a hop once no call waits is refused with an event, and a commit ends the checks; the cards of one call ending at its deadline; agent tabs in the session's own folder and their limit after a card; a call held while the user has taken the session over until Hand Back, and no card from a call running then; Take Over on a card pausing the session; the 150 calls of a message; each call a step and an activity entry; a call waiting on a card withdrawn as denied, with nothing run, when its task is cancelled, at Stop All Agents, and at Deny and Stop; a dragged-out tab refused under P17; and the verified client's name, Touch ID, and `--deny-approvals` for a session an outside client started.
 import AgentControl
 import AI
 import Foundation
@@ -91,7 +91,10 @@ import Testing
         #expect(await service.approvals.answer(card.id, with: .deny))
         let deniedResult = await denied.value
         #expect(deniedResult.status == .denied && harness.host.agentTabs(of: session.id).count == 2)
-        #expect(session.state == .running)
+        #expect(session.state == .running && service.activity.entries.last?.decision == .denied)
+        // The transcript names the step the user turned down as what the agent asked for.
+        let deniedStep = session.items.compactMap { item -> AgentStep? in if case .step(let step) = item.kind { return step } else { return nil } }.last
+        #expect(deniedStep?.sentence == "Open a tab: you said no")
 
         // A site outside the scope asks and says so; Allow opens it and adds it to the scope.
         let outside = "https://elsewhere.example/collect?d=1"
@@ -102,6 +105,8 @@ import Testing
         let allowedResult = await allowed.value
         #expect(allowedResult.status == .ok && session.siteScope == ["docs.example", "elsewhere.example"])
         #expect(harness.host.agentTabs(of: session.id).count == 3)
+        // The activity log keeps the user's Allow, not a step that ran without asking.
+        #expect(service.activity.entries.last?.tool == "open_tab" && service.activity.entries.last?.decision == .approved)
         await service.deleteSession(session.id)
     }
 
@@ -292,13 +297,16 @@ import Testing
         let (session, _, tools) = try await start(service, harness, mode: .readOnly, origin: .outsideClient(grantID: UUID(), clientName: "agent", deniesApprovals: false))
         let opening = Task { await call(tools, "open_tab", ["url": "https://shop.example/?d=1"]) }
         let card = try await waitingCard(service, of: session)
-        #expect(card.isOutsideClient && card.needsAuthentication)
+        // The card and Touch ID name the client as Arch verified it, not the words of its task, which make the session's title.
+        #expect(card.isOutsideClient && card.needsAuthentication && card.clientName == "agent" && session.title == "Read this")
         harness.authenticator.answer = false
         #expect(!(await service.approvals.answer(card.id, with: .allowOnce)))
         #expect(service.approvals.isPending(card.id))
         harness.authenticator.answer = true
         #expect(await service.approvals.answer(card.id, with: .allowOnce))
         #expect(await opening.value.status == .ok && harness.authenticator.count == 2)
+        #expect(harness.authenticator.reasons == Array(repeating: "allow agent to open an address in a new agent tab", count: 2))
+        #expect(service.activity.entries.last?.decision == .approvedWithTouchID)
         await service.deleteSession(session.id)
 
         // With --deny-approvals, each card is denied at once and none opens.
@@ -307,5 +315,110 @@ import Testing
         #expect(result.status == .denied && result.code == "ended" && result.text.contains("approvals denied"))
         #expect(service.approvals.pending.isEmpty && harness.host.openedOwners.count == 1)
         await service.deleteSession(denying.id)
+    }
+
+    @Test func hopsAreCheckedPerNavigationNotPerCall() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let slow = try #require(URL(string: "https://docs.example/slow"))
+        harness.host.hangingAddresses = [slow]
+        let (session, _, tools) = try await start(service, harness, task: "Open https://docs.example/ and https://docs.example/slow", mode: .readOnly)
+        let opened = await call(tools, "open_tab", ["url": "https://docs.example/"])
+        let handle = try #require(opened.structured?["tab"]?.stringValue)
+        let tabID = try #require(session.handles.tabs.id(for: handle))
+
+        // While a written address's navigation loads, a popup the page opens is no hop of it and opens without a card; a redirect off the scope is, and the call asks.
+        let loading = Task { await call(tools, "navigate", ["tab": .string(handle), "url": .string(slow.absoluteString)]) }
+        try await waitUntil { session.toolState.writtenLoads[tabID].map { $0.url == slow && $0.documentID != nil } == true }
+        #expect(harness.host.openPopup(from: tabID, at: URL(string: "https://tracker.example/window")!) != nil)
+        #expect(service.approvals.pending.isEmpty)
+        #expect(!harness.host.redirect(tabID, to: URL(string: "https://tracker.example/hop?d=1")!))
+        let card = try await waitingCard(service, of: session)
+        #expect(card.action == "Follow a redirect in \(handle) to a site outside the session's scope" && card.addressQuestion?.unseenParts == [.host, .path, .query])
+        #expect(await service.approvals.answer(card.id, with: .deny))
+        #expect(await loading.value.status == .denied)
+
+        // Once no call waits, as after Stop, the navigation goes on, but a hop of it off the scope is refused without a card, and the agent hears so.
+        let again = Task { await call(tools, "navigate", ["tab": .string(handle), "url": .string(slow.absoluteString)]) }
+        try await waitUntil { session.toolState.writtenLoads[tabID].map { $0.url == slow && $0.documentID != nil } == true }
+        session.stop()
+        _ = await again.value
+        #expect(!harness.host.redirect(tabID, to: URL(string: "https://tracker.example/later?d=2")!))
+        #expect(service.approvals.pending.isEmpty && session.toolState.writtenLoads[tabID] == nil)
+        #expect(session.toolState.events.contains { $0.tabID == tabID && $0.kind == .hopStopped })
+
+        // A written address's navigation that committed is over, so a redirect of the page's next navigation goes on.
+        #expect(await call(tools, "navigate", ["tab": .string(handle), "url": "https://docs.example/"]).status == .ok)
+        #expect(harness.host.redirect(tabID, to: URL(string: "https://tracker.example/next")!))
+        #expect(session.toolState.writtenLoads[tabID] == nil && service.approvals.pending.isEmpty)
+        await service.deleteSession(session.id)
+    }
+
+    @Test func aCallOpensNoCardOnceTheUserTookTheSessionOverAndTakeOverOnACardPausesIt() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let slow = try #require(URL(string: "https://docs.example/slow"))
+        harness.host.hangingAddresses = [slow]
+        let (session, _, tools) = try await start(service, harness, task: "Open https://docs.example/ and https://docs.example/slow", mode: .actInAgentTabs)
+        let opened = await call(tools, "open_tab", ["url": "https://docs.example/"])
+        let handle = try #require(opened.structured?["tab"]?.stringValue)
+        let tabID = try #require(session.handles.tabs.id(for: handle))
+        // A hop held after the user took the session over asks nothing: the call ends without a card.
+        let loading = Task { await call(tools, "navigate", ["tab": .string(handle), "url": .string(slow.absoluteString)]) }
+        try await waitUntil { session.toolState.writtenLoads[tabID].map { $0.url == slow && $0.documentID != nil } == true }
+        session.takeOver()
+        #expect(!harness.host.redirect(tabID, to: URL(string: "https://tracker.example/hop?d=1")!))
+        let held = await loading.value
+        #expect(held.status == .refused && held.code == "stopped" && service.approvals.pending.isEmpty)
+        session.handBack()
+
+        // Take Over on a card shows its tab and pauses the session, as the panel's Take Over does.
+        let navigation = Task { await call(tools, "navigate", ["tab": .string(handle), "url": "https://docs.example/plans?d=1"]) }
+        let card = try await waitingCard(service, of: session)
+        #expect(await service.approvals.answer(card.id, with: .takeOver))
+        #expect(await navigation.value.status != .ok)
+        #expect(session.isTakenOver && harness.host.shownTabIDs.last == tabID)
+        session.handBack()
+        await service.deleteSession(session.id)
+    }
+
+    @Test func aCallsCardsShareItsDeadlineAndATabOpensOnlyWithinTheLimitAfterItsCard() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let start = harness.now
+        let written = try #require(URL(string: "https://docs.example/out?d=1"))
+        harness.host.redirects[written] = URL(string: "https://tracker.example/hop")
+        let attached = try userTab(harness)
+        let (session, _, tools) = try await self.start(service, harness, attaching: [attached.id], mode: .readOnly)
+        // A hop's card after the written address's card waits only for what is left of the call's time.
+        let opening = Task { await call(tools, "open_tab", ["url": .string(written.absoluteString)]) }
+        let first = try await waitingCard(service, of: session)
+        #expect(first.deadline == start.addingTimeInterval(service.sessionQuestionWindow))
+        harness.now = start.addingTimeInterval(100)
+        #expect(await service.approvals.answer(first.id, with: .allowOnce))
+        try await waitUntil { service.approvals.pending.contains { $0.ownerID == session.id && $0.id != first.id } }
+        let hop = try #require(service.approvals.pending.first { $0.ownerID == session.id })
+        #expect(hop.deadline == first.deadline)
+        #expect(await service.approvals.answer(hop.id, with: .deny))
+        _ = await opening.value
+        harness.now = start
+
+        // Other calls may fill the agent tabs while a card waits: the tab opens only if there is still room for it.
+        while harness.host.agentTabs(of: session.id).count < AgentLimits.agentTabs - 1 { _ = await call(tools, "open_tab", ["url": "https://docs.example/"]) }
+        let one = Task { await call(tools, "open_tab", ["url": "https://docs.example/a?d=1"]) }
+        let oneCard = try await waitingCard(service, of: session)
+        let two = Task { await call(tools, "open_tab", ["url": "https://docs.example/b?d=2"]) }
+        try await waitUntil { service.approvals.pending.filter { $0.ownerID == session.id }.count == 2 }
+        let twoCard = try #require(service.approvals.pending.first { $0.ownerID == session.id && $0.id != oneCard.id })
+        #expect(await service.approvals.answer(oneCard.id, with: .allowOnce))
+        #expect(await one.value.status == .ok)
+        #expect(await service.approvals.answer(twoCard.id, with: .allowOnce))
+        let full = await two.value
+        #expect(full.code == "limitReached" && harness.host.agentTabs(of: session.id).count == AgentLimits.agentTabs)
+        #expect(service.activity.entries.last?.decision == .approved)
+        await service.deleteSession(session.id)
     }
 }

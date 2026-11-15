@@ -183,7 +183,7 @@ import Foundation
             }
         }
         host.agentTabDidReport = { [weak self] owner, tab, report in self?.agentTab(tab, of: owner, didReport: report) }
-        host.agentTabMayLoad = { [weak self] owner, tab, url in self?.agentTab(tab, of: owner, mayLoad: url) ?? false }
+        host.agentTabMayLoad = { [weak self] owner, tab, url, kind in self?.agentTab(tab, of: owner, mayLoad: url, kind: kind) ?? false }
         host.agentTabMayDownload = { [weak self] owner, tab, url in self?.toolHost().tab(tab, mayDownload: url, state: self?.toolState(of: owner)) ?? false }
         approvals.authenticator = dependencies.authenticator
         approvals.didAdd = { [weak self] approval in self?.cardDidOpen(approval) }
@@ -1259,6 +1259,8 @@ import Foundation
     /// Shared permission, turn, and budget checks for CLI and HTTP sessions.
     private func sessionResult(of call: AgentToolCall, in session: AgentSession, arrivedAt epoch: Int, connectionID: UUID? = nil, callID: Int? = nil,
                                isConnected: () -> Bool = { true }) async -> AgentToolHost.Outcome {
+        // The call's waits for the user, while the session is taken over and on its cards, share one time from its arrival, so that it answers before the CLI's tool timeout.
+        let deadline = dependencies.now().addingTimeInterval(sessionQuestionWindow)
         guard await session.ready.wait(timeout: sessionReadyWait) else {
             if Task.isCancelled { return AgentToolHost.ended }
             if let stale = session.staleCallResult(arrivedAt: epoch) { return AgentToolHost.Outcome(result: stale) }
@@ -1266,7 +1268,7 @@ import Foundation
         }
         // A call the turn's end or Stop cut off, or whose connection closed while it waited, runs nothing.
         if let stale = session.staleCallResult(arrivedAt: epoch) { return AgentToolHost.Outcome(result: stale) }
-        guard await session.handedBack.wait(timeout: sessionTakeOverWait) else {
+        guard await session.handedBack.wait(timeout: min(sessionTakeOverWait, .seconds(max(0, deadline.timeIntervalSince(dependencies.now()))))) else {
             if Task.isCancelled { return AgentToolHost.ended }
             if let stale = session.staleCallResult(arrivedAt: epoch) { return AgentToolHost.Outcome(result: stale) }
             return AgentToolHost.Outcome(result: AgentToolResult(status: .timeout, text: session.hasEnded ? "The session ended." : "The user took the session over and has not handed it back. Wait for the user's next message."))
@@ -1278,6 +1280,7 @@ import Foundation
         if let refusal = session.countCall() { return AgentToolHost.Outcome(result: refusal) }
         var toolHost = toolHost(connectionID: connectionID, callID: callID)
         toolHost.approvalWindow = sessionQuestionWindow
+        toolHost.callDeadline = deadline
         let generation = session.takeoverGeneration
         let read: AgentReadPage?
         if session.origin == .app, call.name == "snapshot" || call.name == "read_text",
@@ -1289,7 +1292,7 @@ import Foundation
         }
         let outcome: AgentToolHost.Outcome
         if call.name == "request_tab" {
-            outcome = AgentToolHost.Outcome(result: await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, isConnected: isConnected))
+            outcome = AgentToolHost.Outcome(result: await requestSharedTab(call, in: session, epoch: epoch, generation: generation, connectionID: connectionID, deadline: deadline, isConnected: isConnected))
         } else {
             outcome = await toolHost.runSession(call, in: session, searchesHistory: searchesHistory(session))
         }
@@ -1313,7 +1316,7 @@ import Foundation
 
     /// The card keeps local titles and addresses. Only the resulting read handle goes to the model.
     private func requestSharedTab(_ call: AgentToolCall, in session: AgentSession, epoch: Int, generation: Int,
-                                  connectionID: UUID?, isConnected: () -> Bool) async -> AgentToolResult {
+                                  connectionID: UUID?, deadline: Date, isConnected: () -> Bool) async -> AgentToolResult {
         guard canEditAttachments(of: session) else {
             return AgentToolResult(status: .refused, code: "notAvailable", text: "Only a task started in Arch can ask to share a tab here.")
         }
@@ -1328,7 +1331,7 @@ import Foundation
         let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
                                  kind: .shareSessionTab(choices), isSensitive: false, offers: [.deny],
                                  action: "Choose a tab for this session to read", agentSays: call.arguments["reason"]?.stringValue,
-                                 connectionID: connectionID, createdAt: now, deadline: now.addingTimeInterval(sessionQuestionWindow))
+                                 connectionID: connectionID, createdAt: now, deadline: min(now.addingTimeInterval(sessionQuestionWindow), deadline))
         let answer = await approvals.request(card)
         guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
               session.acceptsQuestions, !session.isTakenOver, !session.hasEnded else { return AgentToolHost.ended.result }
@@ -1608,8 +1611,8 @@ import Foundation
         tools.tab(tabID, of: ownerID, didReport: report, state: toolState(of: ownerID), client: client)
     }
 
-    private func agentTab(_ tabID: UUID, of ownerID: UUID, mayLoad url: URL) -> Bool {
-        toolHost().tab(tabID, mayLoad: url, state: toolState(of: ownerID), scope: session(withID: ownerID)?.scope)
+    private func agentTab(_ tabID: UUID, of ownerID: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool {
+        toolHost().tab(tabID, mayLoad: url, kind: kind, state: toolState(of: ownerID), scope: session(withID: ownerID)?.scope)
     }
 
     /// A call's step in the agent panel: the tool host's sentence for the user, or the tool and its tab, with how it ended.

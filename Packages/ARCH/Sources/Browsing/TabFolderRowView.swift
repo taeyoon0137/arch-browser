@@ -1,4 +1,4 @@
-// A folder's row in a space's tab list, above the folder's indented folders and tabs, with a session's waiting step under an agent folder's row, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row, drags it, and reports its frame, so a dragged tab or folder can find it.
+// A folder's row in a space's tab list, above the folder's indented folders and tabs, the line with a session's waiting step that goes under an agent folder's row, and the Move to Folder submenu that folder and tab rows share. `SpaceTabsView` places and indents the row and the line, drags the row, and reports the row's frame alone, so a dragged tab or folder can find it.
 import Agent
 import LiveFolders
 import SwiftUI
@@ -44,18 +44,6 @@ struct TabFolderRowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            row
-            // A session's waiting cards show under its folder's row, beside the page and never over it (docs/agents.md, Approval interface).
-            if let owner = windowModel.agentSession(of: folder), let approvals = session.agents?.approvals {
-                SessionFolderCards(approvals: approvals, ownerID: owner.id) {
-                    Task { await windowModel.perform(.show, on: folder, reviewed: owner) }
-                }
-            }
-        }
-    }
-
-    private var row: some View {
         HStack(spacing: 8) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
@@ -180,26 +168,45 @@ private struct SessionFolderState: View {
     }
 }
 
-/// The step a folder's session waits on, under the folder's row: the first waiting card's sentence and Review, which opens the session's panel at its cards, where the user answers with the card's facts, capture, and exact text in view.
+/// The step an agent folder's session waits on, under the folder's row and outside its frame, so that the line is neither a drop target nor a handle for dragging the folder (docs/agents.md, Approval interface): the first waiting card's sentence and Review, which opens the session's panel at its cards, where the user answers with the card's facts, capture, and exact text in view. It shows beside the page and never over it.
+struct SessionFolderStepLine: View {
+    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    let folder: TabFolder
+
+    var body: some View {
+        if let owner = windowModel.agentSession(of: folder), let approvals = session.agents?.approvals {
+            SessionFolderCards(approvals: approvals, ownerID: owner.id) {
+                Task { await windowModel.perform(.show, on: folder, reviewed: owner) }
+            }
+        }
+    }
+
+    /// The first waiting card's sentence and how many of the owner's cards wait, or nil when none does.
+    static func waitingStep(in approvals: AgentApprovals, of ownerID: UUID) -> (sentence: String, count: Int)? {
+        let waiting = approvals.pending.filter { $0.ownerID == ownerID }
+        return waiting.first.map { ($0.action, waiting.count) }
+    }
+}
+
 private struct SessionFolderCards: View {
     @ObservedObject var approvals: AgentApprovals
     let ownerID: UUID
     let review: () -> Void
 
     var body: some View {
-        let waiting = approvals.pending.filter { $0.ownerID == ownerID }
-        if let first = waiting.first {
+        if let step = SessionFolderStepLine.waitingStep(in: approvals, of: ownerID) {
+            // The sidebar's second lines, as a connected client's access and the library's download actions, are 11 points.
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(first.action)
-                    .font(.system(size: 12))
+                Text(step.sentence)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 Spacer(minLength: 0)
-                Button(waiting.count > 1 ? "Review \(waiting.count)" : "Review", action: review)
+                Button(step.count > 1 ? "Review \(step.count)" : "Review", action: review)
                     .buttonStyle(.link)
-                    .font(.system(size: 12))
-                    .accessibilityLabel(waiting.count > 1 ? "Review \(waiting.count) requests" : "Review the request")
+                    .accessibilityLabel(step.count > 1 ? "Review \(step.count) requests" : "Review the request")
             }
+            .font(.system(size: 11))
             // Under the folder's name, past its symbol.
             .padding(.leading, 36)
             .padding(.trailing, 10)

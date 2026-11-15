@@ -20,7 +20,7 @@ import Testing
     var userDocumentDidEnd: ((_ tabID: UUID, _ documentID: UUID) -> Void)?
     var userTabAddressDidChange: ((_ tabID: UUID) -> Void)?
     var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)?
-    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
+    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)?
     var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)?
     var agentPanel: AgentPanelModel?
     /// Real web contents behind some tabs, which the page script and captures reach, as in the page script tests.
@@ -142,7 +142,7 @@ import Testing
         Array(history.filter { $0.url.absoluteString.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query) }.prefix(limit))
     }
 
-    /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one, which changes the tab's address, and reports the document once it finishes, or reports only the stop when a hop was refused or the load failed.
+    /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one, which changes the tab's address and document, and reports the document once it finishes, or reports only the stop when a hop was refused or the load failed.
     func load(_ url: URL, in tabID: UUID, keepsHistory: Bool = false) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
         tabs[index].isLoading = true
@@ -150,16 +150,19 @@ import Testing
         DispatchQueue.main.async { [self] in
             MainActor.assumeIsolated {
                 var address = url
+                var kind = AgentLoadKind.navigation
                 while true {
-                    if let owner, agentTabMayLoad?(owner, tabID, address) == false { return stop(tabID) }
+                    if let owner, agentTabMayLoad?(owner, tabID, address, kind) == false { return stop(tabID) }
                     guard let next = redirects[address] else { break }
                     address = next
+                    kind = .redirect
                 }
                 guard !hangingAddresses.contains(address) else { return }
                 guard !failingAddresses.contains(address) else { return stop(tabID) }
                 guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
                 if !keepsHistory, let current = tabs[index].url { backList[tabID, default: []].append(current) }
                 tabs[index].url = address
+                tabs[index].documentID = UUID()
                 if let owner { agentTabDidReport?(owner, tabID, .addressChanged(address)) }
                 guard !committingAddresses.contains(address) else { return }
                 tabs[index].title = pages[address]?.title ?? ""
@@ -171,6 +174,17 @@ import Testing
                 }
             }
         }
+    }
+
+    /// A server redirect of the navigation that still loads in `tabID`, asked about as an engine asks before the hop's request, which stops the navigation when the monitor refuses it; says whether it may go on.
+    @discardableResult
+    func redirect(_ tabID: UUID, to url: URL) -> Bool {
+        guard let owner = tabs.first(where: { $0.id == tabID })?.agentOwnerID else { return false }
+        guard agentTabMayLoad?(owner, tabID, url, .redirect) != false else {
+            stop(tabID)
+            return false
+        }
+        return true
     }
 
     private func stop(_ tabID: UUID) {
@@ -185,7 +199,7 @@ import Testing
         guard let opener = tabs.first(where: { $0.id == openerID }), let owner = opener.agentOwnerID else { return nil }
         let popup = AgentTabInfo(id: UUID(), spaceID: opener.spaceID, title: "", url: nil, isLoading: true, engine: opener.engine, agentOwnerID: owner)
         tabs.append(popup)
-        guard agentTabMayLoad?(owner, openerID, url) != false else {
+        guard agentTabMayLoad?(owner, openerID, url, .popup) != false else {
             tabs.removeAll { $0.id == popup.id }
             return nil
         }
@@ -327,6 +341,7 @@ final class FakeAuthenticator: AgentAuthenticating, @unchecked Sendable {
     private let lock = NSLock()
     private var _answer = true
     private var _count = 0
+    private var _reasons: [String] = []
 
     var answer: Bool {
         get { lock.withLock { _answer } }
@@ -334,10 +349,13 @@ final class FakeAuthenticator: AgentAuthenticating, @unchecked Sendable {
     }
 
     var count: Int { lock.withLock { _count } }
+    /// The reasons the prompts gave, in order.
+    var reasons: [String] { lock.withLock { _reasons } }
 
     func authenticate(reason: String) async -> Bool {
         lock.withLock {
             _count += 1
+            _reasons.append(reason)
             return _answer
         }
     }

@@ -229,6 +229,11 @@ extension AgentAPISession: AgentSessionRunning {
         return "Arch"
     }
 
+    /// The name the session's cards lead with, which Touch ID's reason repeats: the outside client's name as Arch verified it for a session the client started, whose title is the client's own words, and otherwise the title.
+    var cardName: String {
+        isFromOutsideClient ? clientName : title
+    }
+
     // MARK: Runner
 
     var commandLineRunner: (any AgentCommandLineRunning)? { runner as? any AgentCommandLineRunning }
@@ -384,8 +389,8 @@ extension AgentAPISession: AgentSessionRunning {
         acceptsQuestions = false
         dismissQuestions?()
         toolState.cancelCalls()
-        toolState.writtenLoads = [:]
-        toolState.heldHops = [:]
+        // The navigations of written addresses go on, but a hop of one that leaves the scope is refused from now on, since no call asks the user.
+        toolState.stopAwaitingLoads()
         callEpoch += 1
         ready.release()
         handedBack.release()

@@ -384,7 +384,7 @@ import Testing
         #expect(browser.tabs.contains { $0.id == kept.id })
     }
 
-    @Test func aSessionsToolsOpenItsFolderWhoseRowShowsTheWaitingStepAndADraggedOutTabIsTheUsers() async throws {
+    @Test func aSessionsToolsOpenItsFolderWhoseStepLineNamesTheWaitingCardAndADraggedOutTabIsTheUsers() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchSessionFolder-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let (browser, _, service) = try fixture(in: directory, client: StartedFolderClient())
@@ -409,17 +409,20 @@ import Testing
         #expect(folder.name == session.title && folder.spaceID == home.id && tab.folderID == folder.id)
         #expect(window.agentSession(of: folder) === session)
 
-        // A written address no page showed waits on a card, which the folder's row names under it.
+        // A written address no page showed waits on a card, whose step the line under the folder's row names.
         let navigation = Task { await tools.run(AgentToolCall(name: "navigate", arguments: ["tab": .string(handle), "url": "https://fixture.invalid/plans?d=1"])) }
         try #require(await eventually { service.approvals.pending.contains { $0.ownerID == session.id } })
         let card = try #require(service.approvals.pending.first { $0.ownerID == session.id })
         #expect(card.tabID == tab.id && card.action == "Open an address in \(handle)" && session.state == .waitingForUser)
+        let step = try #require(SessionFolderStepLine.waitingStep(in: service.approvals, of: session.id))
+        #expect(step.sentence == card.action && step.count == 1)
 
         // Dragging the tab out of the folder makes it the user's: the card is withdrawn, the folder goes with its last tab, and the handle is refused (P17).
         browser.moveOutOfFolder(tab)
         #expect(await navigation.value.status == .stale)
         #expect(tab.agentOwnerID == nil && !browser.folders.contains { $0.id == folder.id })
         #expect(!service.approvals.isPending(card.id) && session.state == .running)
+        #expect(SessionFolderStepLine.waitingStep(in: service.approvals, of: session.id) == nil)
         let refused = await tools.run(AgentToolCall(name: "navigate", arguments: ["tab": .string(handle), "action": "reload"]))
         #expect(refused.code == "P17")
         await service.endSessionsForQuit()

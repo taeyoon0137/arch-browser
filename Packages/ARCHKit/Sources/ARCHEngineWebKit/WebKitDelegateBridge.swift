@@ -18,6 +18,10 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var observations: [NSKeyValueObservation] = []
     /// The address the main frame last committed, by which a file chooser's request names the page (`runOpenPanelWith`). WebKit gives `url` that address when it reports the commit; before a navigation commits, `url` already gives the navigation's address, and from the start of a back or forward navigation, also one the page starts with `history.back()`, the back-forward list's current item is the target's.
     private var committedURL: URL?
+    /// Whether a main frame navigation has started and not yet committed or failed. WebKit has no public flag for a server redirect, so a main frame navigation the delegate hears of meanwhile counts as one: a redirect hop, or a navigation that replaces the one still loading.
+    private var isProvisional = false
+    /// The navigation that made `isProvisional` true, so that the failure of one it replaced, which can come after, leaves it.
+    private var provisionalNavigation: WKNavigation?
 
     init(owner: WebKitWebContents) {
         self.owner = owner
@@ -65,7 +69,9 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         let disposition = linkTab ?? Self.disposition(of: navigationAction)
         if let url = navigationAction.request.url, let delegate = owner.navigationDelegate,
            navigationAction.targetFrame?.isMainFrame != false || disposition == .newWindow || linkTab != nil {
-            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated, opensLinkInNewTab: linkTab != nil && navigationAction.targetFrame != nil)
+            let isRedirect = isProvisional && disposition == .currentTab && navigationAction.targetFrame?.isMainFrame == true
+            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated,
+                                                opensLinkInNewTab: linkTab != nil && navigationAction.targetFrame != nil, isRedirect: isRedirect)
             let decision = delegate.webContents(owner, decidePolicyFor: action)
             if decision == .openLinkInNewTab, let linkTab, let ui = owner.uiDelegate {
                 decisionHandler(.cancel)
@@ -142,7 +148,20 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         owner.context.webKitDownloads.add(download, from: owner)
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        isProvisional = true
+        provisionalNavigation = navigation
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        guard navigation == nil || navigation === provisionalNavigation else { return }
+        isProvisional = false
+        provisionalNavigation = nil
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        isProvisional = false
+        provisionalNavigation = nil
         committedURL = webView.url
         owner.uiDelegate?.webContents(owner, didCommitDocumentAt: webView.url)
     }

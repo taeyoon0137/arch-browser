@@ -173,13 +173,14 @@ private struct PagePaneView: View {
     }
 }
 
-/// The frame around an agent tab's page while its session's turn runs and the user has not taken the session over (docs/agents.md, Sidebar and attention): a 2-point ring in the accent color 2 points outside the page frame, in the window's margin, so it never covers the page.
+/// The frame around an agent tab's page while its session's turn runs and the user has not taken the session over (docs/agents.md, Sidebar and attention): a 2-point ring in the space's tint, the color of a split view's focus ring, 2 points outside the page frame, in the window's margin, so it never covers the page.
 private struct AgentActingFrame: View {
     @ObservedObject var owner: AgentSession
+    @Environment(\.spaceTheme) private var theme
 
     var body: some View {
         if owner.isTurnRunning, !owner.isTakenOver, !owner.hasEnded {
-            PageFrameShape().inset(by: -3).stroke(Color.accentColor, lineWidth: 2)
+            PageFrameShape().inset(by: -3).stroke(theme.tint, lineWidth: 2)
                 .accessibilityHidden(true)
         }
     }

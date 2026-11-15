@@ -287,8 +287,8 @@ import LiveFolders
 @MainActor protocol AgentTabMonitor: AnyObject {
     func userDocumentDidEnd(in tabID: UUID, document: UUID)
     func userTabAddressDidChange(_ tabID: UUID)
-    /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address (rule P16).
-    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool
+    /// Whether the agent tab's main frame may load `url`, asked before each navigation, again before each redirect hop's request, and for a popup's first address, which `kind` tells apart (rules P13 and P16).
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool
     /// Whether a download the agent tab's page started from `url` may go ahead, because the user allowed it (rule P6).
     func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool
     /// What happened in an agent tab, for its agent's next result.
@@ -645,9 +645,10 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 // MARK: Navigation checks and link previews
 
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
-    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rule P16), whoever started the navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
+    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rules P13 and P16), whoever started the navigation; a link or window that opens elsewhere is asked about as a popup, not as a hop of the tab's navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
-        if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url) == false { return .cancel }
+        let kind: AgentLoadKind = action.disposition != .currentTab ? .popup : action.isRedirect ? .redirect : .navigation
+        if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url, kind: kind) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), let openURLInNewTab {
             guard agentOwnerID == nil else { return .cancel }

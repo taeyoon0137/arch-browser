@@ -548,10 +548,10 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         }
         return true
     }
-    /// Every main frame navigation reaches the navigation delegate, and each server redirect again before its request, as on the WebKit engine, so that a hop the delegate refuses sends nothing. A frame inside the page loads without asking.
+    /// Every main frame navigation reaches the navigation delegate, and each server redirect again before its request, marked as one, as on the WebKit engine, so that a hop the delegate refuses sends nothing. A frame inside the page loads without asking.
     public func cefBrowserShouldBrowse(toURL url: String, isRedirect: Bool, userGesture: Bool) -> Bool {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
-        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture)) == .allow
+        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture, isRedirect: isRedirect)) == .allow
     }
 
     /// Lets the source tab handle a user-requested tab or window before Alloy loads the link in place.

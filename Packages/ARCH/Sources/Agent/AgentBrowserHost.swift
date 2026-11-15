@@ -84,6 +84,13 @@ public enum AgentNavigation: Equatable, Sendable {
     case reload
 }
 
+/// What the host asks `agentTabMayLoad` about: a main frame navigation of an agent tab as it starts, a server redirect of one before the hop's request, or the first address of a tab a page in it opened. Rule P16 checks each; rule P13 checks only redirects, since a popup or a page's own navigation is no hop of the agent's.
+public enum AgentLoadKind: Equatable, Sendable {
+    case navigation
+    case redirect
+    case popup
+}
+
 /// What `Browsing` reports from an agent tab for its agent's next result (docs/agents.md, Tools ▸ Results), including what rules P6 and P8 to P11 did there.
 public enum AgentTabReport: Equatable, Sendable {
     /// The main frame's address changed: a navigation started or committed a document there, before it finishes loading, or the page changed its address within the document. It is no event of its own; the tool host counts a new page from it.
@@ -197,8 +204,8 @@ public struct AgentHistoryPage: Equatable, Sendable {
     var searchResultsAddress: AgentSearchResultsAddress? { get }
     /// Set by the service; the host calls it with what happened in an agent tab and the tab's owner, the owner before a take-over for `takenOver`.
     var agentTabDidReport: ((_ ownerID: UUID, _ tabID: UUID, _ report: AgentTabReport) -> Void)? { get set }
-    /// Set by the service; the host asks it before each main frame navigation of an agent tab, again before each redirect hop's request, and for the first address of a popup that joins an agent folder. False stops the navigation, or closes the popup.
-    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)? { get set }
+    /// Set by the service; the host asks it before each main frame navigation of an agent tab, again before each redirect hop's request, and for the first address of a popup that joins an agent folder, which it names by the opener, saying which of them it asks about. False stops the navigation, or closes the popup.
+    var agentTabMayLoad: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL, _ kind: AgentLoadKind) -> Bool)? { get set }
     /// Set by the service; the host asks it when a page in an agent tab starts a download. False refuses the download, and the tab then reports `downloadAsked` (P6).
     var agentTabMayDownload: ((_ ownerID: UUID, _ tabID: UUID, _ url: URL) -> Bool)? { get set }
 }

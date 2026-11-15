@@ -1,4 +1,4 @@
-// An in-app session's site scope (docs/agents.md, Site scope and navigation; rule P13): what joins the scope, sites as registrable domains, written copies of seen links, written addresses on a site in scope whose path, query, or fragment no page showed, seen addresses after normalizing, the search engine's results address and its other addresses, bare origins, and redirect hops of written and followed navigations.
+// An in-app session's site scope (docs/agents.md, Site scope and navigation; rule P13): what joins the scope, sites as registrable domains, written copies of seen links, written addresses whose host, path, query, or fragment no page showed, seen addresses after normalizing, the search engine's results address and its other addresses, bare origins, and redirect hops of written and followed navigations.
 import Foundation
 import Testing
 @testable import Agent
@@ -61,9 +61,9 @@ import Testing
         #expect(scope.written(fragment) == .asks(AgentAddressQuestion(url: fragment, unseenParts: [.fragment], isOutsideScope: false)))
         let both = url("https://shop.example/t?d=inbox")
         #expect(scope.written(both) == .asks(AgentAddressQuestion(url: both, unseenParts: [.path, .query], isOutsideScope: false)))
-        // A bare origin with a query is not bare; one outside the scope asks for its site alone.
+        // A bare origin with a query is not bare; one outside the scope asks for its site, whose host no page showed.
         #expect(scope.written(url("https://shop.example/?d=inbox")) == .asks(AgentAddressQuestion(url: url("https://shop.example/?d=inbox"), unseenParts: [.query], isOutsideScope: false)))
-        #expect(scope.written(url("https://other.example/")) == .asks(AgentAddressQuestion(url: url("https://other.example/"), unseenParts: [], isOutsideScope: true)))
+        #expect(scope.written(url("https://other.example/")) == .asks(AgentAddressQuestion(url: url("https://other.example/"), unseenParts: [.host], isOutsideScope: true)))
         // Seen addresses compare after normalizing the scheme, host case, default port, and an empty path.
         #expect(scope.written(url("HTTPS://Shop.Example:443/cart")) == .opens)
         #expect(scope.written(url("https://shop.example:8443/")) == .asks(AgentAddressQuestion(url: url("https://shop.example:8443/"), unseenParts: [], isOutsideScope: false)))
@@ -81,9 +81,13 @@ import Testing
         #expect(scope.written(url("https://corp.example")) == .opens)
         #expect(scope.written(url("https://www.corp.example")) == .opens)
         #expect(scope.written(url("https://news.corp.example")) == .opens)
-        // Any other host asks, naming the host as the part no page showed.
+        // Any other host asks, naming the host as a part no page showed, also beside an unseen path and query.
         let label = url("https://nbswy3dpeb3w64tmmq.corp.example/")
         #expect(scope.written(label) == .asks(AgentAddressQuestion(url: label, unseenParts: [.host], isOutsideScope: false)))
+        let labelAndQuery = url("https://nbswy3dpeb3w64tmmq.corp.example/x?y=1")
+        #expect(scope.written(labelAndQuery) == .asks(AgentAddressQuestion(url: labelAndQuery, unseenParts: [.host, .path, .query], isOutsideScope: false)))
+        let marked = AgentAddressQuestion(url: labelAndQuery, unseenParts: [.host, .path, .query], isOutsideScope: false).markedAddress
+        #expect(marked.unseen.map { String(marked.text[$0]) } == ["nbswy3dpeb3w64tmmq.corp.example", "/x", "y=1"])
         // A hosting platform's customers are other sites, so another customer's subdomain stays outside the scope.
         scope.add(url("https://mine.github.io/"))
         #expect(scope.written(url("https://theirs.github.io/")) != .opens)
@@ -104,7 +108,7 @@ import Testing
         var scope = AgentSiteScope(searchResults: search)
         scope.add(url("http://127.0.0.1:8000/start"))
         let away = url("http://localhost:8000/landing?from=302")
-        #expect(scope.hop(to: away, ofWrittenAddress: true) == .asks(AgentAddressQuestion(url: away, unseenParts: [.path, .query], isOutsideScope: true)))
+        #expect(scope.hop(to: away, ofWrittenAddress: true) == .asks(AgentAddressQuestion(url: away, unseenParts: [.host, .path, .query], isOutsideScope: true)))
         #expect(scope.hop(to: url("http://127.0.0.1:8000/next"), ofWrittenAddress: true) == .opens)
         #expect(scope.hop(to: url("https://www.google.com/search?q=a"), ofWrittenAddress: true) == .opens)
         // A followed link's hops go on wherever they lead; the read checks and site exclusions still apply to them.

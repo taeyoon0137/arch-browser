@@ -16,12 +16,15 @@ public struct EngineNavigationAction: Sendable {
     public var isUserInitiated: Bool
     /// The user asked to open this link in a tab with Command-click or the middle button.
     public var opensLinkInNewTab: Bool
+    /// A server redirect of a main frame navigation, asked about before the hop's request.
+    public var isRedirect: Bool
 
-    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool, opensLinkInNewTab: Bool = false) {
+    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool, opensLinkInNewTab: Bool = false, isRedirect: Bool = false) {
         self.url = url
         self.disposition = disposition
         self.isUserInitiated = isUserInitiated
         self.opensLinkInNewTab = opensLinkInNewTab
+        self.isRedirect = isRedirect
     }
 }
 

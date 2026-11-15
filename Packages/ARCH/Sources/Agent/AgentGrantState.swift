@@ -104,12 +104,30 @@ struct AgentHandleTable {
     }
 }
 
+/// An in-app session's navigation by an address its agent wrote, in one tab (rule P13).
+struct AgentWrittenLoad {
+    let id = UUID()
+    var url: URL
+    /// The tab's document at the navigation's first check; once another document commits, the navigation's redirects are over and its checks end.
+    var documentID: UUID?
+    /// Whether a call waits for the navigation, to ask the user about a hop the scope stops; with none, such a hop is refused.
+    var isAwaited = true
+}
+
+/// A redirect hop that the scope stopped in a written address's navigation, which ended there.
+struct AgentHeldHop {
+    var loadID: UUID
+    var question: AgentAddressQuestion
+}
+
 /// Something that happened in one of the client's agent tabs since its previous call.
 struct AgentEvent: Equatable {
     enum Kind: Equatable {
         case report(AgentTabReport)
         /// Rule P16 stopped a navigation, redirect hop, or popup at this address.
         case refused(URL)
+        /// Rule P13 stopped a redirect hop of a written address's navigation to a site outside the session's scope, since no call waited to ask the user.
+        case hopStopped
         /// A page opened a tab beyond the limit of agent tabs, which Arch closed.
         case closedOverLimit
         /// The user answered a card about a download or a link to another app that a page started, with the sentence to say.
@@ -145,10 +163,10 @@ struct AgentTabActivity: Equatable {
     private var calls = 0
     /// Each tab's latest snapshot, and how many it had this launch. A session replaces the store at Stop and Take Over, so that no ref or diff outlives them.
     var snapshots = AgentSnapshotStore()
-    /// An in-app session's navigations by an address the agent wrote, by tab, until the call that started one ends: their redirect hops are checked against the site scope (P13).
-    var writtenLoads: [UUID: URL] = [:]
-    /// A redirect hop of a written address's navigation that the scope stopped, by tab, which the call that waits for the load asks the user about.
-    var heldHops: [UUID: AgentAddressQuestion] = [:]
+    /// An in-app session's navigations by an address the agent wrote, by tab: their redirect hops are checked against the site scope (P13) until the navigation commits a document, stops at a hop, or another navigation of the session replaces it, or its tab closes or leaves the session, whether or not a call still waits for it.
+    var writtenLoads: [UUID: AgentWrittenLoad] = [:]
+    /// A redirect hop of a written address's navigation that the scope stopped, by tab, which the call that waits for that navigation asks the user about.
+    var heldHops: [UUID: AgentHeldHop] = [:]
     /// Allow on This Page: the tab's page count when the user allowed it, which lasts until the tab shows another page.
     var pageAllowances: [UUID: Int] = [:]
     /// Allow on <site> for This Session, and Allow Downloads from This Site for This Session, by host.
@@ -184,7 +202,7 @@ struct AgentTabActivity: Equatable {
         case .report(.stoppedLoading): tab.stops += 1
         case .report(.closed), .report(.takenOver): tab.isGone = true
         case .refused: tab.refusals += 1
-        case .report, .closedOverLimit, .decided: break
+        case .report, .closedOverLimit, .decided, .hopStopped: break
         }
         activity[tabID] = tab
         switch kind {
@@ -204,6 +222,40 @@ struct AgentTabActivity: Equatable {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.fragment != nil else { return url }
         components.fragment = nil
         return components.url ?? url
+    }
+
+    /// Starts the checks of a written address's navigation in `tabID`, which replaces the navigation there before, with a call that waits for it.
+    func beginWrittenLoad(_ url: URL, in tabID: UUID) -> UUID {
+        let load = AgentWrittenLoad(url: url)
+        writtenLoads[tabID] = load
+        heldHops[tabID] = nil
+        return load.id
+    }
+
+    /// The call that waited for the navigation ended: from then on, a hop the scope stops is refused without asking.
+    func stopAwaiting(_ loadID: UUID, in tabID: UUID) {
+        if writtenLoads[tabID]?.id == loadID { writtenLoads[tabID]?.isAwaited = false }
+        if heldHops[tabID]?.loadID == loadID { heldHops[tabID] = nil }
+    }
+
+    /// Every written address's navigation goes on with no call that waits for it, as at the end of a turn, at Stop, and at the session's end.
+    func stopAwaitingLoads() {
+        for tabID in writtenLoads.keys { writtenLoads[tabID]?.isAwaited = false }
+        heldHops = [:]
+    }
+
+    /// The hop the scope stopped in the navigation `loadID`, which ended there; the call that waits for it asks the user.
+    func takeHeldHop(of loadID: UUID, in tabID: UUID) -> AgentAddressQuestion? {
+        guard let hop = heldHops[tabID], hop.loadID == loadID else { return nil }
+        heldHops[tabID] = nil
+        if writtenLoads[tabID]?.id == loadID { writtenLoads[tabID] = nil }
+        return hop.question
+    }
+
+    /// The tab's navigations are no longer the agent's to check: it closed, left the client, or another navigation of the client replaced the written one.
+    func endWrittenLoad(in tabID: UUID) {
+        writtenLoads[tabID] = nil
+        heldHops[tabID] = nil
     }
 
     /// Cancels the calls that still run, or those of one connection: each answers that the client's work ended at its next step, and opens no card.

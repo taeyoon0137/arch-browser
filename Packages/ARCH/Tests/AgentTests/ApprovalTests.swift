@@ -160,7 +160,7 @@ import Testing
             let toolHost = toolHost
             let client = AgentToolClient(grant: grant)
             host.agentTabDidReport = { owner, tab, report in toolHost.tab(tab, of: owner, didReport: report, state: state, client: client) }
-            host.agentTabMayLoad = { _, tab, url in toolHost.tab(tab, mayLoad: url, state: state) }
+            host.agentTabMayLoad = { _, tab, url, kind in toolHost.tab(tab, mayLoad: url, kind: kind, state: state) }
             host.agentTabMayDownload = { _, tab, url in toolHost.tab(tab, mayDownload: url, state: state) }
         }
 

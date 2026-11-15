@@ -313,7 +313,11 @@ import Testing
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://excluded.example/")!, disposition: .currentTab, isUserInitiated: false)) == .cancel)
         monitor.allows = true
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/next")!, disposition: .currentTab, isUserInitiated: true)) == .allow)
-        #expect(monitor.asked == [URL(string: "https://excluded.example/")!, URL(string: "https://example.org/next")!])
+        // A server redirect is asked about as a hop of the tab's navigation (P13), and a window the page opens elsewhere as a popup, never as a hop.
+        #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/hop")!, disposition: .currentTab, isUserInitiated: false, isRedirect: true)) == .allow)
+        _ = agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/window")!, disposition: .newWindow, isUserInitiated: false, isRedirect: true))
+        #expect(monitor.asked == ["https://excluded.example/", "https://example.org/next", "https://example.org/hop", "https://example.org/window"].map { URL(string: $0)! })
+        #expect(monitor.kinds == [.navigation, .navigation, .redirect, .popup])
         #expect(monitor.reports == [.permissionDenied([.camera]), .alertDismissed(message: "Hello", frame: frame), .dialogWaiting(.confirm, message: "Sure?"),
                                     .downloadAsked(URL(string: "https://example.org/file.zip")!), .externalAppAsked(URL(string: "mailto:someone@example.org")!),
                                     .downloadStarted(URL(string: "https://example.org/allowed.zip")!)])
@@ -353,11 +357,13 @@ import Testing
 private final class MonitorDouble: AgentTabMonitor {
     var allows = true
     private(set) var asked: [URL] = []
+    private(set) var kinds: [AgentLoadKind] = []
     private(set) var reports: [AgentTabReport] = []
     private(set) var owners: Set<UUID> = []
 
-    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL) -> Bool {
+    func agentTab(_ tab: Tab, owner: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool {
         asked.append(url)
+        kinds.append(kind)
         owners.insert(owner)
         return allows
     }
