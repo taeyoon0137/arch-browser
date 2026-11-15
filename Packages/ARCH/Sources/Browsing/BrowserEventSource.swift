@@ -26,6 +26,7 @@ extension BrowserTabCloseReason {
         case .archive: self = .archive
         case .download: self = .download
         case .webExtension: self = .webExtension
+        case .plugin: self = .plugin
         case .persona: self = .spaceDeleted
         case .sync: self = .sync
         }

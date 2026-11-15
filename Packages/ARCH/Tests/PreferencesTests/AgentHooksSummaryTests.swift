@@ -114,6 +114,8 @@ import Testing
         let saved = try draft.makeHook().hook
         #expect(saved.grant.permissions == [.tabsRename] && saved.grant.agent == nil && saved.agent == nil)
         #expect(ScriptHookDraft.label(of: .spaceDeleted) == "Its Persona is deleted" && !ScriptHookDraft.offeredCloseReasons.contains(.hook))
+        // Plugins close tabs, so When offers their closes.
+        #expect(ScriptHookDraft.offeredCloseReasons.contains(.plugin) && ScriptHookDraft.label(of: .plugin) == "A plugin closes it")
     }
 
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {

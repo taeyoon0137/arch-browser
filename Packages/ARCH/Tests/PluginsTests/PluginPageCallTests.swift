@@ -132,6 +132,10 @@ final class PageHost: PluginBrowserHost {
     func tabs(in persona: PersonaID) -> [PluginTab] { tabs }
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool { false }
     func webContents(forTab id: UUID) -> (any EngineWebContents)? { pages[id] }
+    func selectedTab(in persona: PersonaID) -> UUID? { nil }
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID? { nil }
+    func closeTab(_ id: UUID, cause: BrowserEventCause) {}
+    func selectTab(_ id: UUID, cause: BrowserEventCause) {}
 
     /// A tab whose engine committed a document at `address` and whose page runs scripts there.
     @discardableResult

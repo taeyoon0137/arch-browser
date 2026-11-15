@@ -137,6 +137,8 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case tabs
     /// Suggested names for tabs, which the user's own names always outrank (`docs/hooks.md`, hook decision 13).
     case renameTabs = "tabs.rename"
+    /// Opening, closing, and selecting the Persona's tabs, and what `renameTabs` grants. The tabs it opens load pages from any host, so an address can carry what the plugin knows to any host.
+    case manageTabs = "tabs.manage"
     /// Writing text to the clipboard.
     case clipboard
     /// Messages to native apps on the Mac that the plugin names. Web extensions only; granting it asks for Touch ID or the login password.
@@ -149,6 +151,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         switch self {
         case .tabs: return "Read the titles and addresses of your tabs"
         case .renameTabs: return "Suggest names for your tabs"
+        case .manageTabs: return "Open, close, and select your tabs, and suggest names for them"
         case .clipboard: return "Write text to the clipboard"
         case .nativeMessaging: return "Exchange messages with apps on this Mac"
         case .ai: return "Send text to the AI models you connected"

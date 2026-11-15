@@ -15,8 +15,8 @@ import Testing
     private let elsewhere = URL(string: "https://other.example/page")!
     private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
-    /// Every reason a tab closes for: ⌘W and the row's button, the page's `window.close()`, a crashed page, archiving, a tab that only pointed at a file, an extension's `tabs.remove`, and Delete Persona.
-    private let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .persona, .sync]
+    /// Every reason a tab closes for: ⌘W and the row's button, the page's `window.close()`, a crashed page, archiving, a tab that only pointed at a file, an extension's `tabs.remove`, a plugin's `closeTab(_:)`, Delete Persona, and sync.
+    private let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .plugin, .persona, .sync]
 
     /// A tab of the space, or a favorite's tab without `inSpace`, on a page in `engine` that shows `url` with `title`.
     private func tab(at url: URL, title: String, pinned: Bool, inSpace: Bool = true, engine: EngineKind = .webKit) -> (tab: Tab, page: PageStub) {
@@ -79,7 +79,7 @@ import Testing
         tab.liveItemID = "post"
         for reason in reasons {
             let expected: TabCloseAction = switch reason {
-            case .user, .page, .webExtension: .dismiss
+            case .user, .page, .webExtension, .plugin: .dismiss
             case .persona, .sync: .close(remember: false)
             case .crash, .download, .archive: .unload
             }

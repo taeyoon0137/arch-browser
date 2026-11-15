@@ -66,7 +66,15 @@ public protocol PluginContext: AnyObject {
     func tabs() throws -> [PluginTab]
     /// One of the tabs the plugin reaches, or nil for any other tab.
     func tab(_ id: PluginTab.ID) throws -> PluginTab?
-    /// Needs `tabs.rename`. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives; while a hook step of the plugin runs, a rename of its event's tab is for its event's document, and once the scheduler has stopped the step, the tab does not take it; a script plugin's panel renames outside any step. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
+    /// The tab the user has in front, as `tab(_:)` gives it: the selected tab of the browser window that last became main, when it is one of the tabs the plugin reaches and no internal page or the preview panel covers its page, as a command gets it. Nil otherwise. Needs no permission.
+    func selectedTab() throws -> PluginTab?
+    /// Needs `tabs.manage`. Opens a tab at the web address, `http` or `https`, in the space the options name, which must be one of the Persona's, or else in the last main window's space while it is the Persona's, or the Persona's first space, in the engine they name or the default engine, where a new tab that the user opens goes, and selects it unless they say not to, as `selectTab(_:)` does. Returns its identifier. The tab's opening, its selection, and its first load come with the plugin as their cause, so the plugin does not hear of them. Throws `PluginError.invalidAddress` for any other address, `notGranted` for a space that is not the Persona's, and `closed` once the Persona is gone.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
+    /// Needs `tabs.manage`. Closes one of the tabs the plugin reaches without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads and keeps its place, a favorite's tab ends, a live folder item's tab is dismissed, and any other tab joins the closed list, from which ⌘Z reopens it. The close comes with the plugin as its cause. Throws `PluginError.notGranted` for any other tab.
+    func closeTab(_ id: PluginTab.ID) throws
+    /// Needs `tabs.manage`. Selects one of the tabs the plugin reaches in a browser window of its Persona: the window that shows the tab, else the front main window on its space, else the front main window of its Persona, which then shows its space. A window of another Persona keeps its Persona / Space, so without a main window of the Persona nothing changes, and no window or the app comes forward. The selection comes with the plugin as its cause. Throws `PluginError.notGranted` for any other tab.
+    func selectTab(_ id: PluginTab.ID) throws
+    /// Needs `tabs.rename`, which `tabs.manage` includes. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives; while a hook step of the plugin runs, a rename of its event's tab is for its event's document, and once the scheduler has stopped the step, the tab does not take it; a script plugin's panel renames outside any step. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
     /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any, and a script plugin's panel's to none: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. Every request stops when the instance stops.
     func ai() throws -> any AIClient
@@ -77,6 +85,22 @@ public protocol PluginContext: AnyObject {
 }
 
 extension PluginContext {
+    /// A context that offers no selected tab, such as a hook script's, which acts on its run's tabs, gives none.
+    public func selectedTab() throws -> PluginTab? { nil }
+
+    /// A context that changes no tabs, such as a hook script's, refuses to open, close, and select them.
+    public func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
+        throw PluginError.permissionDenied(.manageTabs)
+    }
+
+    public func closeTab(_ id: PluginTab.ID) throws {
+        throw PluginError.permissionDenied(.manageTabs)
+    }
+
+    public func selectTab(_ id: PluginTab.ID) throws {
+        throw PluginError.permissionDenied(.manageTabs)
+    }
+
     /// A context that offers no AI, such as a hook script's, refuses it.
     public func ai() throws -> any AIClient {
         throw PluginError.permissionDenied(.ai)
@@ -116,6 +140,30 @@ public protocol PluginBrowserHost: AnyObject {
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
     /// The page of a tab that `tabs(in:)` lists, through which plugins run scripts in it and post to its page scripts; nil for an agent tab and for a tab that is gone.
     func webContents(forTab id: UUID) -> (any EngineWebContents)?
+    /// The selected tab of the browser window that last became main, a main or a small window, when it is the Persona's and no internal page or the preview panel covers its page; nil otherwise. It can be an agent tab, which the caller leaves out.
+    func selectedTab(in persona: PersonaID) -> UUID?
+    /// Opens a tab of the Persona at the address as `PluginContext.openTab(_:_:)` describes, with its events, its selection's, and its first load's carrying `cause`, and returns its identifier; nil when the options name a space that is not the Persona's, or the Persona is gone.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID?
+    /// Closes a tab that `tabs(in:)` lists as `PluginContext.closeTab(_:)` describes, with its event carrying `cause`. Nothing happens for an agent tab or a tab that is gone.
+    func closeTab(_ id: UUID, cause: BrowserEventCause)
+    /// Selects a tab that `tabs(in:)` lists as `PluginContext.selectTab(_:)` describes, with its event carrying `cause`. Nothing happens for an agent tab or a tab that is gone.
+    func selectTab(_ id: UUID, cause: BrowserEventCause)
+}
+
+/// Where `PluginContext.openTab(_:_:)` opens a tab.
+public struct PluginOpenTabOptions: Hashable, Sendable {
+    /// A space of the plugin's Persona; nil for the space where a new tab that the user opens goes.
+    public var spaceID: UUID?
+    /// Whether the tab is selected once it opens.
+    public var select: Bool
+    /// nil for the default engine.
+    public var engine: EngineKind?
+
+    public init(spaceID: UUID? = nil, select: Bool = true, engine: EngineKind? = nil) {
+        self.spaceID = spaceID
+        self.select = select
+        self.engine = engine
+    }
 }
 
 /// What a command runs on.
@@ -306,7 +354,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidVersions(String)
     /// The manager's Persona was deleted, so it stages, installs, and stores nothing.
     case closed
-    /// The call names a tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover.
+    /// The call names a tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover; or a space of another Persona.
     case notGranted(UUID)
     /// A script plugin's background script set no listener for the event's kind with `arch.events.on`.
     case noListener
@@ -320,6 +368,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case pageScriptFailed(String)
     /// The tab's engine could run a page call's script, or deliver its message, only with the user's gesture, which would give the page's handlers for the events it dispatches user activation, so it ran nothing: on WebKit while the flags on `flags://` switch off plugins' page runs and messages, or the private member they use is gone.
     case pageRunUnavailable
+    /// The address that the plugin would open a tab at is not a web page's, `http` or `https`, such as a file's or an internal page's, as the text gives it.
+    case invalidAddress(String)
 }
 
 extension PluginError: LocalizedError {
@@ -337,13 +387,14 @@ extension PluginError: LocalizedError {
         case .timedOut: return "The plugin did not answer in time."
         case let .invalidVersions(reason): return reason
         case .closed: return "The plugin\u{2019}s Persona was deleted."
-        case .notGranted: return "The tab is not one this plugin or hook may reach."
+        case .notGranted: return "The tab or space is not one this plugin or hook may reach."
         case .noListener: return "The plugin\u{2019}s script set no listener for the event."
         case let .listenerFailed(message): return message
         case .siteNotGranted: return "The page is not on a website this plugin may reach."
         case let .invalidPageScript(reason): return reason
         case let .pageScriptFailed(message): return message
         case .pageRunUnavailable: return "Arch cannot reach this tab\u{2019}s page for the plugin without your gesture now."
+        case let .invalidAddress(text): return "\u{201C}\(text)\u{201D} is not the address of a web page."
         }
     }
 }

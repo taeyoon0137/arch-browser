@@ -89,7 +89,7 @@ The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions
 | `settings` | `key`, `title`, `help`, `type` (`toggle`, `text`, `number` with optional `min` and `max`, `choice` with its `options`, or `secret`), `default` (false, empty text, the minimum or 0, or the first option when missing; none for a secret) |
 | `pageScripts` | `matches`, `excludes`, `js`, `css`, `runAt` (`documentStart`, or `documentEnd` by default), `allFrames` |
 
-- Arch refuses every other key until its implementation reads it, such as `network`, `settingsPage`, a command's `takesArgument`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, `clipboard`, and `ai`, by name, and `ai` also as an object with one key, `{"ai": ["page", "selection"]}`, that lists the data kinds beyond text that its requests carry: `page` for the text of pages that its page calls read and `selection` for selected text, and no other kind. `events` refuses a kind the bus does not have, other than `settingChanged`.
+- Arch refuses every other key until its implementation reads it, such as `network`, `settingsPage`, a command's `takesArgument`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, `tabs.manage`, `clipboard`, and `ai`, by name, and `ai` also as an object with one key, `{"ai": ["page", "selection"]}`, that lists the data kinds beyond text that its requests carry: `page` for the text of pages that its page calls read and `selection` for selected text, and no other kind. `events` refuses a kind the bus does not have, other than `settingChanged`.
 - A `name` loses the spaces at either end, so every view shows it alike, and one of nothing but spaces gives the plugin its `id` as its name, which every view then shows, as a web extension takes its identifier. An empty `name` is refused, as empty text in any field is (`name must not be empty`), and as Chromium refuses an extension's empty name.
 - Commands need a background script; panels do not. Menu items name listed commands, and a sidebar item names a listed command or an HTML file of the package, not both. Command and sidebar item identifiers and setting keys are unique.
 - A path names a regular file of the package: names separated by `/`, none empty, `.`, or `..`, and no link leading out of the package. Each file in a page script's `js` becomes a separate page script with the entry's patterns and timing. It must be UTF-8 text that parses as a function body on its own, which both the review and the index check. An entry lists `js`, `css`, or both: its `css` files, UTF-8 text too, become one page script before those of its `js`, with the same patterns and timing, that adds them in their order (see Page scripts).
@@ -156,10 +156,10 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | Permission | Grants | Without it |
 |---|---|---|
 | `tabs` | Titles and addresses of the Persona's tabs, in calls and events | Tabs and events carry identifiers, engines, and pinned state only, except for pages the site grant covers |
-| `tabs.manage` | Open, close, select, rename, and move tabs | Calls throw `permissionDenied` |
+| `tabs.manage` | Open, close, select, and rename the Persona's tabs (`openTab(_:_:)`, `closeTab(_:)`, `selectTab(_:)`, and what `tabs.rename` grants). Moving tabs follows once `PluginContext` has a member for it | Calls throw `permissionDenied` |
 | `tabs.rename` | Rename tabs; included in `tabs.manage`. A name set by code is the tab's suggested name, so the user's own name wins (`docs/hooks.md`, hook decision 13) | Calls throw `permissionDenied` |
 | Sites (`sites` with `siteAccess`) | Page scripts, page messages, and running package scripts in matching pages | No page access |
-| `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) |
+| `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) and the pages of the tabs that a plugin with `tabs.manage` opens, whose addresses can carry what it knows to any host |
 | `history` | Search browsing history | Calls throw `permissionDenied` |
 | `downloads` | `downloadFinished` events with file names and addresses; renaming finished downloads | No download events |
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
@@ -237,7 +237,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 ## Personas
 
-- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it.
+- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it, and `selectedTab()` gives the selected tab of the window that last became main under the same rule. A plugin with `tabs.manage` opens tabs only in its Persona's spaces and selects a tab only in a window of its Persona, so a window of another Persona keeps its Persona / Space.
 - The session creates a Persona's manager when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`) and keeps it in the Persona's `PersonaEngines`. A window shows contributions from its current space's Persona, or its tab's Persona for a small window, and runs its palette commands and sidebar items through that Persona's manager. A tab's page scripts and the plugin items of its page's and its row's context menus come from the tab's Persona, and those of a space's menu from the space's. The Plugins menu follows the active window's Persona, or the default one while no window is open. Settings ▸ Plugins shows one Persona's plugins, with a picker once there are two Personas, and installs plugins into that Persona. A review sheet still open when the user deletes its Persona closes without installing, and an install that was waiting for Touch ID then throws `PluginError.closed`.
 - Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. Once there are two Personas, Settings will offer Install in Another Persona, which copies the package and asks for a new grant; it is not built yet.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
@@ -450,9 +450,10 @@ public struct PluginManifest: Hashable, Codable, Sendable {
 public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable {
     case tabs
     case renameTabs = "tabs.rename"
+    /// Includes `renameTabs`.
+    case manageTabs = "tabs.manage"
     case clipboard, nativeMessaging, ai
     // Not built yet.
-    case manageTabs = "tabs.manage"
     case history, downloads, notifications
     /// The permission as a plain sentence, such as "Read the titles and addresses of your tabs".
     public var summary: String { get }
@@ -657,7 +658,15 @@ public protocol PluginContext: AnyObject {
     func tabs() throws -> [PluginTab]
     /// One of those tabs, for `arch.tabs.get`; nil for any other.
     func tab(_ id: PluginTab.ID) throws -> PluginTab?
-    /// Needs `tabs.rename`. The tab's suggested name for the document it shows when the call arrives (a hook script: its run's document for the tab; a plugin hook step: its event's document for its event's tab, and nothing once the scheduler has stopped the step; a script plugin's panel: the document the tab shows, whatever step runs), under hook decision 13; nil removes it. Returns whether the tab took it, and throws `notGranted` for a tab the caller does not reach.
+    /// The selected tab of the browser window that last became main, as `tab(_:)` gives it, while it is one the plugin reaches and no internal page or the preview panel covers its page, as a command gets it; nil otherwise.
+    func selectedTab() throws -> PluginTab?
+    /// Needs `tabs.manage`, as do the next two. Opens a tab at an `http` or `https` address, else throws `invalidAddress`, in the options' space, which must be the Persona's (else `notGranted`), or where a new tab that the user opens goes, and selects it as `selectTab(_:)` does unless the options say not to. Its opening, selection, and first load carry the plugin as their cause, so the plugin does not hear of them.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
+    /// Closes the tab without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads, a favorite's tab ends, a live folder item's tab is dismissed, and any other joins the closed list. The close's reason is `plugin`.
+    func closeTab(_ id: PluginTab.ID) throws
+    /// Selects the tab in a window of its Persona: the one that shows it, else the front main window on its space, else the front main window of the Persona; none without one. No window or the app comes forward.
+    func selectTab(_ id: PluginTab.ID) throws
+    /// Needs `tabs.rename` or `tabs.manage`. The tab's suggested name for the document it shows when the call arrives (a hook script: its run's document for the tab; a plugin hook step: its event's document for its event's tab, and nothing once the scheduler has stopped the step; a script plugin's panel: the document the tab shows, whatever step runs), under hook decision 13; nil removes it. Returns whether the tab took it, and throws `notGranted` for a tab the caller does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
 
     // AI: `ai`.
@@ -671,10 +680,6 @@ public protocol PluginContext: AnyObject {
     func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws
 
     // Not built yet.
-    func selectedTab() throws -> PluginTab?
-    func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
-    func closeTab(_ id: PluginTab.ID) throws
-    func selectTab(_ id: PluginTab.ID) throws
     /// An agent run (`docs/hooks.md`, Agent run API); needs `agent`. The options and the result are the run's JSON.
     func runAgent(_ options: PluginValue) async throws -> PluginValue
 
@@ -722,10 +727,11 @@ public struct PluginTab: Identifiable, Hashable, Sendable {
     public static func name(from text: String) -> String?
 }
 
-// Not built yet, with the tab, page, and data members of `PluginContext`.
 public struct PluginOpenTabOptions: Hashable, Sendable {
+    /// A space of the plugin's Persona; nil for the space where a new tab that the user opens goes: the last main window's while it is the Persona's, else the Persona's first.
     public var spaceID: UUID?
     public var select: Bool
+    /// nil for the default engine.
     public var engine: EngineKind?
     public init(spaceID: UUID? = nil, select: Bool = true, engine: EngineKind? = nil)
 }
@@ -819,7 +825,7 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidVersions(String)
     /// The manager's Persona was deleted, so it stages, installs, and stores nothing.
     case closed
-    /// A tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover.
+    /// A tab the plugin or hook script does not reach: another Persona's, an agent tab, or for a hook one its filter does not cover; or a space of another Persona.
     case notGranted(UUID)
     /// A script plugin's background script set no listener for the event's kind.
     case noListener
@@ -833,6 +839,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case pageScriptFailed(String)
     /// A page call's engine could run the script or deliver the message only with the user's gesture, so it did neither: on WebKit while the flags switch plugins' page runs and messages off.
     case pageRunUnavailable
+    /// An address that `openTab(_:_:)` does not open: not `http` or `https`, such as a file's or an internal page's.
+    case invalidAddress(String)
     // Not built yet: a host outside its `network`.
     case networkHostNotGranted(String)
 }
@@ -1005,10 +1013,13 @@ public protocol PluginBrowserHost: AnyObject {
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
     /// The page of a tab that `tabs(in:)` lists, for page calls; nil for an agent tab and a tab that is gone.
     func webContents(forTab id: UUID) -> (any EngineWebContents)?
+    /// The selected tab of the window that last became main while it is the Persona's and no internal page or the preview panel covers its page, as `BrowserWindowModel` gives commands their tab; it can be an agent tab, which the manager leaves out.
+    func selectedTab(in persona: PersonaID) -> UUID?
+    /// For the tab members of `PluginContext`, with `cause` on the events they post, the opened tab's first load among them: nil from `openTab` for a space that is not the Persona's or a Persona that is gone, and nothing for an agent tab or a tab that is gone. `closeTab` closes with `TabCloseReason.plugin`.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID?
+    func closeTab(_ id: UUID, cause: BrowserEventCause)
+    func selectTab(_ id: UUID, cause: BrowserEventCause)
     // Not built yet.
-    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID) -> UUID
-    func closeTab(_ id: UUID)
-    func selectTab(_ id: UUID)
     func renameDownload(_ id: String, to filename: String) throws
     func present(_ panel: NSViewController, for item: Attributed<PluginSidebarItem>)
 }
@@ -1171,7 +1182,7 @@ public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) 
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
@@ -1188,7 +1199,8 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.history.search(text, limit)`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `renameDownload(_:to:)` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
-- A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out. A page message listener's return value, or the value its promise resolves with, is the page script's reply.
+- A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.selected()` with the tab or `null`, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out.
+- `tabs.open(url, options)` takes `{spaceId, select, engine}`, each optional, with `null` as missing and the engine named as tab objects name it, `webKit` or `chromium`, and resolves with the new tab's identifier; `tabs.close(id)` and `tabs.select(id)` resolve with nothing. They reject with `permissionDenied` without `tabs.manage`, `invalidCall` for text that is not an absolute address or a tab identifier and for an option of another key or value, `invalidAddress` for an address other than `http` or `https`, and `notGranted` for a space or tab outside the Persona. A panel's `arch` has them too, and their changes belong to no hook step: they act on the tab as it is when the call arrives, also while a hook step of the plugin runs. A page message listener's return value, or the value its promise resolves with, is the page script's reply.
 - An event's listeners run one after another. The delivery function returns what the first that throws or rejects threw, as an error's message after its name unless it is a plain `Error`, or as the thrown value's text, and that no listener was set for the kind, as JSON, which `Plugin.handle(_:)` throws as `PluginError.listenerFailed` and `noListener`. The manager ignores both; a hook script's run fails with them.
 - A plugin never receives an event its own calls caused, such as the title change of its own rename, and receives at most 10 events for one subject and 60 in all within a minute (`docs/hooks.md`, Plugins). Its listeners run outside hook chains, so this cap is what stops two plugins, or a plugin and a hook, that answer each other's renames.
 - `storage.set(key)` without a value, or with `undefined`, removes the key; `storage.set(key, null)` stores `null`. `secrets.set(key)` and `ui.setBadge(itemId)` without text, or with `null`, delete the secret and the badge.
@@ -1257,7 +1269,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 4. The script runtime with its sandboxed web view, scheme handler, bridge, install sheet, and lifecycle.
 5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof, IV.17 the Web Store's client and staging, IV.18 its entry points, IV.19 Chromium's store button, and IV.20 its updates; IV.21 added the password managers' host discovery and proof gate, and IV.22 the install script and the native app status in Settings; IV.17 then added the store's page hosts, and the password managers' checks with the app (IV.13) follow.
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) are built. Script plugin panels and `arch.ai.stream` are built. The page members, `runPageScript(_:in:)` and `postMessage(_:toTab:)` with `arch.pages.run` and `post`, are built, and so are the data kinds that the `ai` permission lists, `page` and `selection`, with page and selection parts in `arch.ai.reply` and `arch.ai.stream`.
-7. Site access modes, `siteAccess` with `whenInvoked` in the manifest, the grant, the review, and Settings, are built, and so are page script styles, a page script's `css`, and the plugin's own `settingChanged` event. The rest of what the plan's V.11 row lists as not built follows in the row's order.
+7. Site access modes, `siteAccess` with `whenInvoked` in the manifest, the grant, the review, and Settings, are built, and so are page script styles, a page script's `css`, the plugin's own `settingChanged` event, and the tab members, `selectedTab()` and, with `tabs.manage`, `openTab(_:_:)`, `closeTab(_:)`, and `selectTab(_:)`, with `arch.tabs.selected`, `open`, `close`, and `select`. The rest of what the plan's V.11 row lists as not built follows in the row's order.
 
 ## Open decisions
 
@@ -1267,6 +1279,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - Engine versions by name: without a shared `key`, two packages match only by name and a matching developer field, which a package can copy, as it can copy a `key`. The review's choice, which starts on joining only for packages whose checks complement each other, and Separate Versions are the safeguards. Whether a matching name alone should pair two packages whose manifests name no developer is open; until then the user joins them with Join With… or Install \<Engine> Version….
 - Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site must use a page script on that site.
 - A plugin with `ai` but no bus events has a feature that the user starts, although its page script values can start requests as pages load, and its `settingChanged` listeners can start them as the user edits its settings, which is not asking for AI as running a command is. Those requests count as the user's: they use the default route until the feature has models of its own, take a provider's free slot ahead of waiting automatic requests, and do not count toward the daily limit for automatic requests. Whether such a plugin's feature should be automatic, so that it waits for a model of its own and counts toward that limit, or whether only a `settingChanged` listener's requests should count as automatic, is open.
+- A tab that a plugin opens takes the plugin's cause for its first load, as for its opening and selection, so the plugin hears neither its `tabOpened` nor that first `pageLoaded`, under the rule that a plugin never receives an event its own calls caused; a page script on its sites still sees the page. Whether that first load should reach the plugin, since the page's own loading follows the call, is open, and so is a limit on how many tabs a plugin opens, which a web extension's `tabs.create` does not have either.
 - A request that a hook listener starts without waiting for it belongs to the listener's step for the pause, but once the listener returns, the step ends while the request runs on: the scheduler no longer stops it, and it can run beside the plugin's next step. Whether a step should wait for such requests or end them is open.
 - Page script styles go in `<style>` elements, which the page sees and a strict content security policy may refuse. Constructed style sheets in `document.adoptedStyleSheets`, which the policy may not govern (needs verification), are the alternative, though a page that sets that list drops them. Whether to use them, or to fall back to them where the policy refuses an element, is open.
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.

@@ -17,13 +17,13 @@ enum TabCloseAction: Equatable {
     /// A live folder item's tab leaves its folder without a closed record, and the item stays out of the folder while the source lists it, until Show Dismissed Items (live folder rule 4).
     case dismiss
 
-    /// What a close for `reason` does to the tab: a pinned tab unloads, except that Delete Persona closes it into the closed list with the Persona's other tabs; a favorite's tab, the only tab outside a space's list, ends; and any other tab closes into the closed list, except one that only pointed at a file. Archiving reaches only unpinned tabs. A live folder item's tab is dismissed when the user, an extension, or the page closes it. It unloads and keeps its place, so that the next plan does not replace it, when it only pointed at a file or its page crashed, which the user did not choose, and it closes without a closed record when its Persona goes, so that the up to 1,000 item tabs of 20 live folders cannot push other records out of the closed list. An agent tab is forgotten on every path.
+    /// What a close for `reason` does to the tab: a pinned tab unloads, except that Delete Persona closes it into the closed list with the Persona's other tabs; a favorite's tab, the only tab outside a space's list, ends; and any other tab closes into the closed list, except one that only pointed at a file. Archiving reaches only unpinned tabs. A live folder item's tab is dismissed when the user, an extension, a plugin, or the page closes it. It unloads and keeps its place, so that the next plan does not replace it, when it only pointed at a file or its page crashed, which the user did not choose, and it closes without a closed record when its Persona goes, so that the up to 1,000 item tabs of 20 live folders cannot push other records out of the closed list. An agent tab is forgotten on every path.
     @MainActor static func of(_ tab: Tab, reason: TabCloseReason) -> TabCloseAction {
         if tab.agentOwnerID != nil { return .forget }
         if tab.spaceID == nil { return .end }
         if tab.liveItemID != nil {
             switch reason {
-            case .user, .page, .webExtension: return .dismiss
+            case .user, .page, .webExtension, .plugin: return .dismiss
             case .persona, .sync: return .close(remember: false)
             case .crash, .download, .archive: return .unload
             }

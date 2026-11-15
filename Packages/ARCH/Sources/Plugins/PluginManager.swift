@@ -1460,7 +1460,34 @@ public final class PluginManager: ObservableObject {
 
     /// Renames a tab of the Persona for `document`, or for the document it shows now when that is nil, with the plugin as the cause of the change.
     fileprivate func renameTab(_ id: UUID, to name: String?, showing document: URL?, by plugin: PluginID) -> Bool {
-        browserHost?.renameTab(id, to: name, showing: document, cause: BrowserEventCause(origin: .plugin(id: plugin.rawValue)), applying: true) ?? false
+        browserHost?.renameTab(id, to: name, showing: document, cause: Self.cause(plugin), applying: true) ?? false
+    }
+
+    /// The selected tab of the window that last became main, before the grant applies, while it is one of the Persona's tabs that `personaTabs()` lists.
+    fileprivate func selectedTab() -> PluginTab? {
+        guard let id = browserHost?.selectedTab(in: persona) else { return nil }
+        return personaTabs().first { $0.id == id }
+    }
+
+    /// Opens a tab of the Persona with the plugin as the cause of its events; nil for a space that is not the Persona's, or without the host.
+    fileprivate func openTab(_ url: URL, _ options: PluginOpenTabOptions, by plugin: PluginID) -> UUID? {
+        browserHost?.openTab(url, options, in: persona, cause: Self.cause(plugin))
+    }
+
+    /// Closes or selects one of the Persona's tabs that `personaTabs()` lists, with the plugin as the cause of its events. Throws `PluginError.notGranted` for any other tab.
+    fileprivate func closeTab(_ id: UUID, by plugin: PluginID) throws {
+        guard personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        browserHost?.closeTab(id, cause: Self.cause(plugin))
+    }
+
+    fileprivate func selectTab(_ id: UUID, by plugin: PluginID) throws {
+        guard personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        browserHost?.selectTab(id, cause: Self.cause(plugin))
+    }
+
+    /// The cause of a change that the plugin's call makes, by which the plugin hears of none of the events it posts.
+    private static func cause(_ plugin: PluginID) -> BrowserEventCause {
+        BrowserEventCause(origin: .plugin(id: plugin.rawValue))
     }
 
     /// `<plugin id>/storage.json` in the Persona's folder.
@@ -1747,6 +1774,37 @@ final class ScopedPluginContext: PluginPanelContext {
         try tabs().first { $0.id == id }
     }
 
+    func selectedTab() throws -> PluginTab? {
+        guard !hasEnded else { throw PluginError.stopped }
+        guard let manager, let tab = manager.selectedTab() else { return nil }
+        return manager.shown(tab, to: grant, of: pluginID)
+    }
+
+    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, and selecting do not belong to the running hook step: they act on the tab as it is when the call arrives.
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.manageTabs)
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host()?.isEmpty == false else {
+            throw PluginError.invalidAddress(url.absoluteString)
+        }
+        guard let manager, let id = manager.openTab(url, options, by: pluginID) else { throw options.spaceID.map(PluginError.notGranted) ?? PluginError.closed }
+        return id
+    }
+
+    func closeTab(_ id: PluginTab.ID) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.manageTabs)
+        guard let manager else { throw PluginError.notGranted(id) }
+        try manager.closeTab(id, by: pluginID)
+    }
+
+    func selectTab(_ id: PluginTab.ID) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.manageTabs)
+        guard let manager else { throw PluginError.notGranted(id) }
+        try manager.selectTab(id, by: pluginID)
+    }
+
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {
         try renameTab(id, to: name, inStep: true)
     }
@@ -1834,7 +1892,10 @@ final class ScopedPluginContext: PluginPanelContext {
         return aiRequests
     }
 
+    /// `tabs.manage` includes `tabs.rename`.
     private func require(_ permission: PluginPermission) throws {
-        guard grant.permissions.contains(permission) else { throw PluginError.permissionDenied(permission) }
+        guard grant.permissions.contains(permission) || (permission == .renameTabs && grant.permissions.contains(.manageTabs)) else {
+            throw PluginError.permissionDenied(permission)
+        }
     }
 }

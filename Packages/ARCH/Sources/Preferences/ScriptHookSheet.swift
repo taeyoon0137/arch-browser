@@ -318,8 +318,8 @@ struct ScriptHookDraft: Identifiable {
         return filter
     }
 
-    /// The close reasons When offers: every reason but closes by plugins and hooks, which cannot close tabs yet.
-    static let offeredCloseReasons = BrowserTabCloseReason.allCases.filter { $0 != .plugin && $0 != .hook }
+    /// The close reasons When offers: every reason but closes by hooks, which cannot close tabs yet.
+    static let offeredCloseReasons = BrowserTabCloseReason.allCases.filter { $0 != .hook }
 
     /// A close reason in words, as `TabCloseReason` describes the closes it stands for.
     static func label(of reason: BrowserTabCloseReason) -> String {

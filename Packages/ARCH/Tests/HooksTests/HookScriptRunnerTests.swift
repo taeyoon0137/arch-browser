@@ -58,6 +58,10 @@ final class FakePluginHost: PluginBrowserHost {
     }
 
     func webContents(forTab id: UUID) -> (any EngineWebContents)? { nil }
+    func selectedTab(in persona: PersonaID) -> UUID? { nil }
+    func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) -> UUID? { nil }
+    func closeTab(_ id: UUID, cause: BrowserEventCause) {}
+    func selectTab(_ id: UUID, cause: BrowserEventCause) {}
 }
 
 /// The real runner, recording each invocation and outcome, since the registry keeps only a failed run's first 200 characters.
