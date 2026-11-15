@@ -84,7 +84,6 @@ public struct AgentHookProposal: Sendable {
         guard let options = try? AgentJSON.object(fields).decode(as: AgentRunOptions.self) else { throw AgentHookRefusal("The agent options need prompt and model, as arch.agent.run takes them.") }
         for tool in options.tools where AgentToolCatalog.tool(named: tool) == nil { throw AgentHookRefusal("Arch has no tool named \(tool).") }
         if let reason = agentGrant(for: options).refusal(for: options) { throw AgentHookRefusal(reason) }
-        guard options.record >= record else { throw AgentHookRefusal("The agent run must keep at least what the hook keeps.") }
         proposal.agent = options
         return proposal
     }
