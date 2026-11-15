@@ -1,4 +1,4 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
+// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `events`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
 import AgentControl
 import Foundation
 
@@ -52,6 +52,8 @@ enum CLICommands {
             return runTool(call, json: request.json)
         case .screenshot(let call, let output):
             return screenshot(call, output: output, json: request.json)
+        case .events(let subscribe):
+            return events(subscribe, json: request.json)
         }
     }
 
@@ -186,6 +188,42 @@ enum CLICommands {
             if json { return printJSON(["released": .bool(released)]) }
             print(released ? "This client no longer has access to Arch. Its next command asks again." : "This client had no access to give up.")
             return .done
+        }
+    }
+
+    // MARK: - events
+
+    /// Subscribes to the grant's browser events and prints each as it arrives, one line each, or one JSON object per line in the outside view with `--json`, until interrupted. Events Arch dropped because this client read too slowly are counted on standard error. A grant without Watch Browser Events exits 6, and a filter Arch refuses, such as a space it does not know, exits 4.
+    private static func events(_ subscribe: AgentEventSubscribe, json: Bool) -> AgentExitCode {
+        withConnection { connection, _ in
+            let subscription: AgentEventSubscription
+            do {
+                subscription = try connection.call(AgentControlMethod.eventsSubscribe, params: AgentJSON(encoding: subscribe)) { printError($0) }.decode(as: AgentEventSubscription.self)
+            } catch AgentClientError.failed(let error) {
+                printError(error.message)
+                return .refused
+            }
+            if !json { printError("Following browser events in Arch after event \(subscription.sequence). Press Control-C to stop.") }
+            let id = AgentJSON.number(Double(subscription.subscription))
+            while true {
+                switch try connection.receive() {
+                case .notification(AgentControlMethod.eventNotification, let params):
+                    guard params?["subscription"] == id, let event = params?["event"] else { continue }
+                    if json {
+                        if printJSON(event) != .done { return .internalError }
+                    } else {
+                        print(terminalSafe(AgentEventLine.text(for: event)))
+                    }
+                    fflush(stdout)
+                case .notification(AgentControlMethod.eventsDroppedNotification, let params):
+                    guard params?["subscription"] == id, case .number(let count)? = params?["count"] else { continue }
+                    printError("Arch dropped \(Int(count)) events that this client did not read in time.")
+                case .notification(AgentControlMethod.revokedNotification, let params):
+                    throw AgentClientError.revoked(params?["message"]?.stringValue ?? "Your access to Arch ended.")
+                default:
+                    continue
+                }
+            }
         }
     }
 

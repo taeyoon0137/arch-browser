@@ -866,6 +866,14 @@ arch-cli events [--kind <kind>]… [--space <name>]… [--site <pattern>]… [--
 - The Persona is always the grant's, and `--space` names its spaces. `--after` first replays events after that sequence from the grant's buffer of the last 500 in memory, then follows new events.
 - Control methods: `events/subscribe` with `{"filter": {…}, "after": <seq>}` returns `{"subscription": …, "sequence": <last>}`; Arch then sends `events/event` with `{"subscription": …, "event": {…}}`, and `events/dropped` with a count when the connection's queue of 1,000 events overflows; `events/unsubscribe` ends one. A connection holds at most 4 subscriptions.
 
+What VII.30 decided while building events (`Agent/AgentEventBuffer.swift`):
+
+- A grant records events only while outside access is on and it has the scope, from the first event after that; `--after` and `watch_events` replay what it recorded.
+- In an outside program's filter, an empty tab kind list matches every kind, the client's own agent tabs included, since the outside view shows no other agent's tabs and a download reaches it only from its own; naming kinds narrows it. Spaces are named as `--space` names them, without regard to case. Site patterns match only addresses AI may read, so that a filter cannot tell an excluded event's host.
+- `events/subscribe` without the scope fails with -32001, which `arch-cli` exits 6 for, and a filter naming a kind, space, site, engine, or tab kind Arch does not know with -32602, which exits 4. A fifth subscription on one connection fails with -32002.
+- The connection's queue fills while one turn of the main queue posts events, as when a session restores many tabs, and the service writes it once that turn ends; past 1,000 the oldest drop.
+- `watch_events` without `after` starts after the grant's last event, so it returns only new events; `after: 0` replays the whole buffer. It counts toward the grant's 2,000 calls a day; subscriptions count toward none.
+
 ### arch-cli hooks
 
 ```

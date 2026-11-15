@@ -1,4 +1,4 @@
-// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): the in-app sessions' mode, history search, and Codex's copy of their conversations; Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the entry skill for Claude Code and Codex, the grants with Revoke and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
+// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): the in-app sessions' mode, history search, and Codex's copy of their conversations; Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the entry skill for Claude Code and Codex, the grants with their scopes, a Start Agent Tasks grant's agent runs a day, Revoke, and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
 import Agent
 import AgentControl
 import AI
@@ -115,6 +115,9 @@ struct AgentSettingsPage: View {
                     if grant.client.reachedThroughShell {
                         Text(AgentClientIdentity.shellNote).font(.caption).foregroundStyle(.secondary)
                     }
+                    if grant.scopes.startTasks {
+                        runsPerDayRow(of: grant)
+                    }
                 }
             }
             if service.grants.count > 1 {
@@ -130,6 +133,20 @@ struct AgentSettingsPage: View {
         }
     }
 
+    /// The agent runs `arch-cli agent run` may start a day under the grant, which the user can type or step.
+    private func runsPerDayRow(of grant: AgentGrant) -> some View {
+        let runs = Binding(get: { grant.runsPerDay }, set: { service.setRunsPerDay($0, for: grant.id) })
+        return LabeledContent("Agent runs a day") {
+            HStack(spacing: 6) {
+                TextField("Agent runs a day", value: runs, format: .number)
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 64)
+                Stepper("Agent runs a day", value: runs, in: AgentGrant.runsPerDayRange).labelsHidden()
+            }
+        }
+    }
+
     private func details(of grant: AgentGrant) -> String {
         let persona = service.host.personas.first { $0.id == grant.personaID }?.name ?? "Deleted Persona"
         let spaces = service.host.spaces(in: grant.personaID)
@@ -138,6 +155,7 @@ struct AgentSettingsPage: View {
         var parts = [grant.level.title, space.map { "\(persona) / \($0)" } ?? persona]
         if grant.scopes.searchHistory { parts.append("searches history") }
         if grant.scopes.startTasks { parts.append("starts agent tasks") }
+        if grant.scopes.watchEvents { parts.append("watches browser events") }
         switch grant.expiry {
         case .whenArchQuits: parts.append("until Arch quits")
         case .whenRevoked: parts.append("until revoked")

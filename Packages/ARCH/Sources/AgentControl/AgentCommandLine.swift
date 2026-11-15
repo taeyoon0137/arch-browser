@@ -38,6 +38,8 @@ public enum AgentCLICommand: Equatable, Sendable {
     case typeFromStandardInput(AgentToolCall)
     /// `screenshot`, whose image goes only to the file `-o` names, or to `arch-screenshot-<time>.jpg` in the current folder.
     case screenshot(AgentToolCall, output: String?)
+    /// Streams the grant's browser events in the outside view until interrupted (`events/subscribe`), after replaying the buffered ones after `after`.
+    case events(AgentEventSubscribe)
 }
 
 public enum AgentSessionsAction: Equatable, Sendable {
@@ -120,6 +122,8 @@ public enum AgentCommandLine {
         AgentCLICommandSpec(name: "downloads", arguments: "", summary: "Lists the downloads this client's agent tabs started.", needsArch: true),
         AgentCLICommandSpec(name: "history", arguments: "<query>", summary: "Searches the browsing history for the query's words, when this client's grant includes the history scope.", needsArch: true),
         AgentCLICommandSpec(name: "call", arguments: "<tool> [json]", summary: "Runs any tool, with its arguments as one JSON object.", needsArch: true),
+        AgentCLICommandSpec(name: "events", arguments: "[--kind k]... [--space name]... [--site pattern]... [--except-site pattern]... [--engine webkit|chromium] [--tab-kind open|pinned|favorite|small-window|agent]... [--after seq]",
+                            summary: "Prints the browser events of this client's Persona as they happen, one line each, until interrupted: tabs that open, load, change address or title, are selected, or close, downloads this client's tabs finished, and space switches. Your own tabs show a watch ID and their site only, never titles or pages. --after first replays the events Arch keeps after that sequence. It needs a grant with Watch Browser Events.", needsArch: true),
     ]
 
     /// The options that take a value, and the commands that take each option.
@@ -141,6 +145,7 @@ public enum AgentCommandLine {
 
     /// Parses `arch-cli`'s arguments without the program name. `--json`, `--help`, and `-h` may appear anywhere; `help` means `--help`. An option of `optionCommands` belongs to the commands it lists and takes the next argument when it takes a value; `--dir` takes the next argument and belongs to `links`; `--target` and `--path` each take the next argument, may repeat, and belong to `skills`; `--space`, `--mode`, and `--model` each take the next argument and, with `--deny-approvals`, belong to `task`.
     public static func parse(_ arguments: [String]) throws -> AgentCLIRequest {
+        if let request = try parseProgramCommand(arguments) { return request }
         var json = false
         var help = false
         var options: [String: String] = [:]
@@ -403,5 +408,69 @@ public enum AgentCommandLine {
 
     private static func expectNoOperands(_ operands: [String], for name: String) throws {
         if !operands.isEmpty { throw AgentUsageError(message: "\(name) takes no arguments.") }
+    }
+}
+
+// MARK: - Outside programs' commands
+
+extension AgentCommandLine {
+    /// The commands for outside programs' events (`docs/hooks.md`, arch-cli events), which take repeatable options of their own; nil for every other command. `--json`, `--help`, and `-h` may appear anywhere, as for the others.
+    static func parseProgramCommand(_ arguments: [String]) throws -> AgentCLIRequest? {
+        guard let name = arguments.first(where: { !$0.hasPrefix("-") }), ["events"].contains(name) else { return nil }
+        var json = false
+        var help = false
+        var values: [String: [String]] = [:]
+        var words: [String] = []
+        let valueOptions = programValueOptions[name] ?? []
+        var remaining = arguments[...]
+        while let argument = remaining.popFirst() {
+            switch argument {
+            case "--json": json = true
+            case "--help", "-h": help = true
+            case _ where valueOptions.contains(argument):
+                guard let value = remaining.popFirst() else { throw AgentUsageError(message: "\(argument) needs a value.") }
+                values[argument, default: []].append(value)
+            case _ where argument.hasPrefix("-") && argument != "-": throw AgentUsageError(message: "\(name) does not take \(argument).")
+            default: words.append(argument)
+            }
+        }
+        if help { return AgentCLIRequest(command: .help, json: json) }
+        let operands = Array(words.dropFirst())
+        switch name {
+        default:
+            try expectNoOperands(operands, for: name)
+            return AgentCLIRequest(command: .events(try eventSubscribe(values)), json: json)
+        }
+    }
+
+    private static let filterOptions: Set<String> = ["--space", "--site", "--except-site", "--engine", "--tab-kind"]
+    private static let programValueOptions: [String: Set<String>] = [
+        "events": filterOptions.union(["--kind", "--after"]),
+    ]
+
+    /// `events`'s subscription: its filter's lists, each value checked, and `--after`.
+    private static func eventSubscribe(_ values: [String: [String]]) throws -> AgentEventSubscribe {
+        let kinds = values["--kind"] ?? []
+        for kind in kinds where !AgentEventFilter.kinds.contains(kind) {
+            throw AgentUsageError(message: "--kind takes \(AgentEventFilter.kinds.joined(separator: ", ")).")
+        }
+        var subscribe = AgentEventSubscribe(filter: try eventFilter(values))
+        subscribe.filter.kinds = kinds
+        if let after = values["--after"] {
+            guard after.count == 1, let sequence = UInt64(after[0]) else { throw AgentUsageError(message: "--after takes one sequence number, a whole number.") }
+            subscribe.after = sequence
+        }
+        return subscribe
+    }
+
+    /// The places, sites, engines, and tab kinds that `events` and `hooks add` share.
+    static func eventFilter(_ values: [String: [String]]) throws -> AgentEventFilter {
+        let engines = values["--engine"] ?? []
+        guard engines.count <= 1, engines.allSatisfy(AgentEventFilter.engines.contains) else { throw AgentUsageError(message: "--engine takes webkit or chromium, once.") }
+        let tabKinds = values["--tab-kind"] ?? []
+        for kind in tabKinds where !AgentEventFilter.tabKinds.contains(kind) {
+            throw AgentUsageError(message: "--tab-kind takes \(AgentEventFilter.tabKinds.joined(separator: ", ")).")
+        }
+        return AgentEventFilter(spaces: values["--space"] ?? [], sites: values["--site"] ?? [], exceptSites: values["--except-site"] ?? [], engines: engines, tabKinds: tabKinds)
     }
 }

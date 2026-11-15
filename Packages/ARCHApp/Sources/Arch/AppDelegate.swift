@@ -140,6 +140,8 @@ import Terminal
         self.agents = agents
         PreferencesWindowController.agents = agents
         session.agents = agents
+        // Grants with Watch Browser Events read the session's events through the outside view.
+        agents.attach(events: session.events)
         session.signInToAgentTool = { PreferencesWindowController.signInToAgentTool($0) }
         // Before the windows open, so that it hears the first tabs' events once `hooks.json` is read. It shares the AI hook center's scheduler, so one event's hooks run in one chain. JavaScript hooks run in the plugin sandbox, and shell hooks run their trusted copies with the bundle's tools first on PATH, binding `arch-cli` through the agents' socket.
         let settings = AIService.shared.settings

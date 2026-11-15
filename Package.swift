@@ -86,7 +86,7 @@ let package = Package(
         .target(name: "Sync", dependencies: ["Browsing", "ARCHEngine"], path: "Packages/ARCH/Sources/Sync"),
         // libbsm reads process IDs from audit tokens.
         .target(name: "AgentControl", path: "Packages/ARCH/Sources/AgentControl", linkerSettings: [.linkedFramework("Security"), .linkedLibrary("bsm")]),
-        .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Agent"),
+        .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl", "Events"], path: "Packages/ARCH/Sources/Agent"),
         // `AI` gives site patterns and `AgentControl` the agent channel's address reduction and untrusted blocks, which the outside view uses.
         .target(name: "Events", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Events"),
         // `Agent` gives the agent run's values and the sealed file, `AgentControl` the JSON values that keep a later build's members of `hooks.json`, and `Plugins` the script runtime that JavaScript hooks run in.
@@ -109,7 +109,7 @@ let package = Package(
         .testTarget(name: "ARCHPrivateAPITests", dependencies: ["ARCHPrivateAPI"], path: "Packages/ARCHKit/Tests/ARCHPrivateAPITests"),
         .testTarget(name: "AgentControlTests", dependencies: ["AgentControl"], path: "Packages/ARCH/Tests/AgentControlTests"),
         // `Fixtures` holds the pages the snapshot and action scripts run on in WebKit.
-        .testTarget(name: "AgentTests", dependencies: ["Agent", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/AgentTests", resources: [.copy("Fixtures")]),
+        .testTarget(name: "AgentTests", dependencies: ["Agent", "ARCHEngineWebKit", "Events"], path: "Packages/ARCH/Tests/AgentTests", resources: [.copy("Fixtures")]),
         // Reads store pages from hosts that stand in for the Web Store's through `Extensions`.
         .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions", "Import", "LiveFolders"], path: "Packages/ARCH/Tests/BrowsingTests"),
         .testTarget(name: "EventsTests", dependencies: ["Events"], path: "Packages/ARCH/Tests/EventsTests"),

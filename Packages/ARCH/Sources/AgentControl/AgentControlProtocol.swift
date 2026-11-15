@@ -217,3 +217,129 @@ extension AgentHelloAnswer: Codable {
         }
     }
 }
+
+// MARK: - Outside programs' events
+
+/// What an outside program with Watch Browser Events reads (`docs/hooks.md`, arch-cli events): `events/subscribe` with a filter starts a subscription on the connection, whose events then come as `events/event` notifications in the outside view, and `events/unsubscribe` ends it. Arch keeps the grant's last 500 events in memory, which `after` replays.
+extension AgentControlMethod {
+    /// Params `AgentEventSubscribe`, answered with an `AgentEventSubscription`. Needs the grant's Watch Browser Events scope, and asks for a grant first as a tool call does.
+    public static let eventsSubscribe = "events/subscribe"
+    /// Params `{"subscription": <id>}`, answered with `{"unsubscribed": true}` or false.
+    public static let eventsUnsubscribe = "events/unsubscribe"
+    /// One event of a subscription: params `{"subscription": <id>, "event": {…}}`, the event in the outside view.
+    public static let eventNotification = "events/event"
+    /// Events the connection's queue of 1,000 dropped since the last it delivered: params `{"subscription": <id>, "count": <n>}`.
+    public static let eventsDroppedNotification = "events/dropped"
+}
+
+/// The events an outside program asks for, by the names `arch-cli events` takes. An empty list matches every value; the Persona is always the grant's.
+public struct AgentEventFilter: Codable, Equatable, Sendable {
+    /// The event kinds, such as `pageLoaded` (`AgentEventFilter.kinds`).
+    public var kinds: [String]
+    /// Spaces of the grant's Persona by name.
+    public var spaces: [String]
+    /// Site patterns, such as `example.org`, which match a host and its subdomains.
+    public var sites: [String]
+    public var exceptSites: [String]
+    /// `webkit` or `chromium`.
+    public var engines: [String]
+    /// `open`, `pinned`, `favorite`, `small-window`, or `agent`, the client's own agent tabs.
+    public var tabKinds: [String]
+
+    public init(kinds: [String] = [], spaces: [String] = [], sites: [String] = [], exceptSites: [String] = [], engines: [String] = [], tabKinds: [String] = []) {
+        self.kinds = kinds
+        self.spaces = spaces
+        self.sites = sites
+        self.exceptSites = exceptSites
+        self.engines = engines
+        self.tabKinds = tabKinds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kinds = try container.decodeIfPresent([String].self, forKey: .kinds) ?? []
+        spaces = try container.decodeIfPresent([String].self, forKey: .spaces) ?? []
+        sites = try container.decodeIfPresent([String].self, forKey: .sites) ?? []
+        exceptSites = try container.decodeIfPresent([String].self, forKey: .exceptSites) ?? []
+        engines = try container.decodeIfPresent([String].self, forKey: .engines) ?? []
+        tabKinds = try container.decodeIfPresent([String].self, forKey: .tabKinds) ?? []
+    }
+
+    /// The event kinds, as Arch's bus names them.
+    public static let kinds = ["tabOpened", "tabClosed", "pageLoaded", "addressChanged", "titleChanged", "tabSelected", "downloadFinished", "spaceSwitched"]
+    public static let engines = ["webkit", "chromium"]
+    public static let tabKinds = ["open", "pinned", "favorite", "small-window", "agent"]
+}
+
+/// `events/subscribe`'s params.
+public struct AgentEventSubscribe: Codable, Equatable, Sendable {
+    public var filter: AgentEventFilter
+    /// Replays the grant's buffered events after this sequence before new ones; nil starts with new events.
+    public var after: UInt64?
+
+    public init(filter: AgentEventFilter = AgentEventFilter(), after: UInt64? = nil) {
+        self.filter = filter
+        self.after = after
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        filter = try container.decodeIfPresent(AgentEventFilter.self, forKey: .filter) ?? AgentEventFilter()
+        after = try container.decodeIfPresent(UInt64.self, forKey: .after)
+    }
+}
+
+/// `events/subscribe`'s result: the subscription, and the sequence of the last event Arch had then.
+public struct AgentEventSubscription: Codable, Equatable, Sendable {
+    public var subscription: Int
+    public var sequence: UInt64
+
+    public init(subscription: Int, sequence: UInt64) {
+        self.subscription = subscription
+        self.sequence = sequence
+    }
+}
+
+/// One event as `arch-cli events` prints it without `--json`, from its outside view: `09:30:12 pageLoaded w4 example.org (chromium, open)`. A download's name is an untrusted block, since a page or a server chose it.
+public enum AgentEventLine {
+    public static func text(for event: AgentJSON, timeZone: TimeZone = .current) -> String {
+        var words: [String] = []
+        if let date = event["date"]?.stringValue.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = timeZone
+            formatter.dateFormat = "HH:mm:ss"
+            words.append(formatter.string(from: date))
+        }
+        words.append(event["kind"]?.stringValue ?? "event")
+        if let tab = event["tab"] {
+            words.append(tab["handle"]?.stringValue ?? tab["watch"]?.stringValue ?? "tab")
+            if tab["excluded"] == .bool(true) {
+                words.append("(excluded site)")
+            } else if let place = tab["url"]?.stringValue ?? tab["site"]?.stringValue {
+                words.append(place)
+            }
+            let details = [tab["engine"]?.stringValue, tab["kind"]?.stringValue].compactMap { $0 }
+            if !details.isEmpty { words.append("(" + details.joined(separator: ", ") + ")") }
+        }
+        if let download = event["download"] {
+            words.append(download["tab"]?.stringValue ?? "tab")
+            if download["excluded"] == .bool(true) {
+                words.append("(excluded site)")
+            } else {
+                if let name = download["name"]?.stringValue { words.append(name) }
+                if let site = download["site"]?.stringValue { words.append("from \(site)") }
+            }
+        }
+        if let window = event["window"]?.stringValue {
+            func side(_ value: AgentJSON?) -> String? {
+                guard let value else { return nil }
+                return value["space"]?.stringValue ?? (value["otherPersona"] == .bool(true) ? "another Persona" : nil)
+            }
+            words.append(window)
+            if let to = side(event["to"]) { words.append((side(event["from"]).map { "\($0) \u{2192} " } ?? "\u{2192} ") + to) }
+        }
+        if event["byThisClient"] == .bool(true) { words.append("[this client]") }
+        return words.joined(separator: " ")
+    }
+}

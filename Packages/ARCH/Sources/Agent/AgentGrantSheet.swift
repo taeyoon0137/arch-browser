@@ -103,7 +103,13 @@ struct AgentGrantSheetView: View {
                     ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 Toggle("Search history", isOn: $choice.scopes.searchHistory)
-                Toggle("Start agent tasks on your AI subscription", isOn: $choice.scopes.startTasks)
+                Toggle(isOn: $choice.scopes.startTasks) {
+                    labeled("Start agent tasks on your AI subscription",
+                            detail: choice.scopes.startTasks ? "Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change." : nil)
+                }
+                Toggle(isOn: $choice.scopes.watchEvents) {
+                    labeled("Watch browser events", detail: Self.watchSentence(persona: personaName))
+                }
                 Picker("Duration", selection: $choice.duration) {
                     ForEach(AgentGrantChoice.Duration.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
@@ -123,6 +129,24 @@ struct AgentGrantSheetView: View {
         .onChange(of: choice.persona) { choice.spaceID = nil }
     }
 
+    /// A toggle's title with a sentence below it, as the sheet's other captions show.
+    private func labeled(_ title: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            if let detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// What Watch Browser Events shows the client (`docs/hooks.md`, Grants).
+    static func watchSentence(persona: String) -> String {
+        "See when tabs open, load, change, and close in \(persona), with their sites. Never their titles or pages."
+    }
+
     /// The choice with the space the picker shows.
     private var normalized: AgentGrantChoice {
         var result = choice
@@ -138,6 +162,7 @@ struct AgentGrantSheetView: View {
             sentences.append("The client can read pages with your sign-ins in the \(personaName) Persona.")
         }
         if choice.scopes.searchHistory { sentences.append("It can search your browsing history, which every Persona shares.") }
+        if choice.scopes.watchEvents { sentences.append("It can follow which sites your tabs in the \(personaName) Persona visit, as they visit them.") }
         sentences.append("Pages it reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that.")
         sentences.append("Steps that need you still ask in Arch.")
         if choice.needsAuthentication { sentences.append("Allowing asks for Touch ID or your login password.") }

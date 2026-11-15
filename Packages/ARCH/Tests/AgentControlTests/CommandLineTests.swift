@@ -204,6 +204,35 @@ import Testing
         #expect(AgentClientError.protocolMismatch(arch: 2).message.contains("version 2") && AgentClientError.protocolMismatch(arch: 2).message.contains("version 1"))
     }
 
+    /// `events` takes repeatable filter options of its own, checks each value, and `--after`; `--space` there is not `task`'s.
+    @Test func eventsParseIntoASubscription() throws {
+        #expect(try AgentCommandLine.parse(["events"]) == AgentCLIRequest(command: .events(AgentEventSubscribe()), json: false))
+        let full = try AgentCommandLine.parse(["--json", "events", "--kind", "pageLoaded", "--kind", "tabClosed", "--space", "Home", "--site", "example.org", "--except-site", "mail.example.org",
+                                               "--engine", "chromium", "--tab-kind", "open", "--tab-kind", "small-window", "--after", "812"])
+        #expect(full == AgentCLIRequest(command: .events(AgentEventSubscribe(filter: AgentEventFilter(kinds: ["pageLoaded", "tabClosed"], spaces: ["Home"], sites: ["example.org"], exceptSites: ["mail.example.org"],
+                                                                                                      engines: ["chromium"], tabKinds: ["open", "small-window"]), after: 812)), json: true))
+        #expect(try AgentCommandLine.parse(["events", "--help"]).command == .help)
+        for wrong in [["events", "--kind", "tabMoved"], ["events", "--engine", "gecko"], ["events", "--engine", "webkit", "--engine", "chromium"], ["events", "--tab-kind", "window"],
+                      ["events", "--after", "-1"], ["events", "--after"], ["events", "now"], ["events", "--full"]] {
+            #expect(throws: AgentUsageError.self, "\(wrong)") { try AgentCommandLine.parse(wrong) }
+        }
+        // `task` keeps its own --space.
+        #expect(try AgentCommandLine.parse(["task", "read it", "--space", "Home"]).command == .task(AgentTaskStart(task: "read it", space: "Home")))
+    }
+
+    /// One event's line without `--json`: the time, the kind, the tab's handle or watch ID with its address or site, and the engine and tab kind; an excluded site shows neither.
+    @Test func eventLines() throws {
+        let event: AgentJSON = ["seq": 812, "kind": "pageLoaded", "date": "2026-11-14T09:30:12Z",
+                                "tab": ["watch": "w4", "space": "s1", "kind": "open", "engine": "chromium", "site": "example.org"], "isRestore": false, "isFirstLoadAfterOpen": true]
+        #expect(AgentEventLine.text(for: event, timeZone: TimeZone(identifier: "UTC")!) == "09:30:12 pageLoaded w4 example.org (chromium, open)")
+        let switched: AgentJSON = ["seq": 813, "kind": "spaceSwitched", "date": "2026-11-14T09:31:02Z", "window": "win1", "to": ["otherPersona": true], "from": ["space": "s1"]]
+        #expect(AgentEventLine.text(for: switched, timeZone: TimeZone(identifier: "UTC")!) == "09:31:02 spaceSwitched win1 s1 \u{2192} another Persona")
+        let excluded: AgentJSON = ["seq": 814, "kind": "addressChanged", "tab": ["handle": "t2", "kind": "agent", "engine": "webkit", "excluded": true], "byThisClient": true]
+        #expect(AgentEventLine.text(for: excluded) == "addressChanged t2 (excluded site) (webkit, agent) [this client]")
+        #expect(AgentToolCatalog.tool(named: "watch_events")?.toolClass == .reads)
+        #expect(!AgentToolCatalog.tools.contains { $0.name == "watch_events" })
+    }
+
     @Test func theGuideAndItsCLITopic() {
         #expect(AgentHarness.text(for: nil) == AgentHarness.instructions)
         #expect(AgentHarness.instructions.contains("session_info"))

@@ -158,7 +158,7 @@ The first `tools/call` asks for a grant; `hello` and `tools/list` do not, so a c
 | Persona | Agents (created on demand, empty, no sign-ins), or an existing Persona | Agents |
 | Space | A space of that Persona, where the client's agent folder goes | Its first space |
 | Access | Read Only; Ask Before Acting; Act in Agent Tabs | Read Only |
-| Extra scopes | Search history (history is shared by every Persona, Persona rule 6); Start agent tasks on your AI subscription (`task/start`) | Both off |
+| Extra scopes | Search history (history is shared by every Persona, Persona rule 6); Start agent tasks on your AI subscription (`task/start`, and `agent/run` up to the grant's runs a day, 200 by default, which the grant's row in Settings changes); Watch browser events (`events/subscribe` and `watch_events`, `docs/hooks.md`, Grants), which says "See when tabs open, load, change, and close in \<Persona>, with their sites. Never their titles or pages." | All off |
 | Duration | Until Arch quits; 24 hours; Until I revoke it | Until Arch quits |
 
 - Every grant asks for Touch ID or the login password through LocalAuthentication (`deviceOwnerAuthentication`), as Arch does for other sensitive settings, except a Read Only grant in the Agents Persona with no extra scope until Arch quits. A grant in one of the user's own Personas reads with their sign-ins, so it always asks.
@@ -610,6 +610,7 @@ Claude Code sessions read Arch's skills from a folder that only the session read
 | `arch-cli call <tool> '<json>'` | Any tool with raw JSON arguments |
 | `arch-cli task "<task>" [--space name] [--mode read\|ask\|act] [--model name] [--deny-approvals]` | Starts an in-app session on the user's `agent` route and streams its progress; requires the grant's Start Agent Tasks scope. The session runs in the grant's Persona, in the space `--space` names among that Persona's spaces (the grant's space by default), at most at the lower of the grant's level and the Settings default, so `--mode` can only lower it. Addresses in the client's task text do not join the site scope. Approvals happen in Arch and count as an outside client's, so sensitive ones ask for Touch ID; `--deny-approvals` denies each at once |
 | `arch-cli sessions [list\|show <id>\|stop <id>]` | Sessions this client started |
+| `arch-cli events [--kind k]… [--space name]… [--site pattern]… [--except-site pattern]… [--engine webkit\|chromium] [--tab-kind k]… [--after seq] [--json]` | The grant's browser events in the outside view as they happen, until interrupted; `--after` first replays the grant's last 500 in memory. Needs Watch Browser Events and exits 6 without it (`docs/hooks.md`, arch-cli events) |
 | `arch-cli skills list\|install\|remove [--target claude\|codex\|codex-home] [--path <folder>]` | The entry skill at each named place; `--target` and `--path` can repeat. `list` without a place lists the three targets (Skills for outside agents) |
 | `arch-cli links install [--dir <folder>]`, `links remove [--dir <folder>]` | PATH links |
 | `arch-cli mcp-config [claude\|codex\|json]` | Prints the configuration with the absolute path of `arch-mcp`: `claude mcp add --scope user arch -- <path>`, Codex's `[mcp_servers.arch]` table with `tool_timeout_sec = 645`, or the `mcpServers` JSON other clients read; all three without an argument |
@@ -812,7 +813,7 @@ No tool, command, control method, or MCP call exists for: Settings and `ai.json`
 
 | File | Contents | Protection |
 |---|---|---|
-| `~/Library/Application Support/Arch/agent.json` | Settings ▸ AI ▸ Agents (outside access, the new sessions' mode, in-app history search, Keep Codex's Copy), grants for 24 hours or until revoked (identity, Persona, space, level, scopes, expiry, last use, written with the next change or at quit), and the Agents Persona's ID | Sealed; no secrets |
+| `~/Library/Application Support/Arch/agent.json` | Settings ▸ AI ▸ Agents (outside access, the new sessions' mode, in-app history search, Keep Codex's Copy), grants for 24 hours or until revoked (identity, Persona, space, level, scopes, expiry, last use, written with the next change or at quit, and agent runs a day), and the Agents Persona's ID; a grant's Watch Browser Events scope and runs a day read with `decodeIfPresent`, so a file from before them keeps its grants | Sealed; no secrets |
 | `~/Library/Application Support/Arch/agent-activity.json` | Activity log, 90 days and at most 10,000 entries | No content |
 | `~/Library/Application Support/Arch/Agent/control.sock` | The socket, while it listens | 0700 folder, 0600 socket |
 | `$TMPDIR/Arch-Agent-<session UUID>/mcp.json` | Claude Code's MCP configuration with the ticket | 0700 folder, 0600 file, removed with the session |

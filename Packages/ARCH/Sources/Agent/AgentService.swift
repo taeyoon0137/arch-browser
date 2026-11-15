@@ -3,6 +3,7 @@ import AgentControl
 import AI
 import AppKit
 import Combine
+import Events
 import Foundation
 
 @MainActor public final class AgentService: ObservableObject {
@@ -33,6 +34,8 @@ import Foundation
     private var hookCLIs: [UUID: AgentHookCLIRun] = [:]
     /// Shell hook runs by their run's ID, whose `arch-cli` presents `ARCH_HOOK_TICKET` (`docs/hooks.md`, Shell scripts).
     private var shellHookRuns: [UUID: ShellHookRunAccess] = [:]
+    /// Outside programs' event buffers and subscriptions (`docs/hooks.md`, Outside programs).
+    let outsidePrograms = AgentOutsidePrograms()
     private var runObserver: AnyCancellable?
     private var runService: AgentRunner?
     public var runs: AgentRunner {
@@ -358,6 +361,7 @@ import Foundation
 
     /// Ends a closed connection's calls and cards and forgets it.
     private func dropConnection(_ id: UUID, because reason: String) {
+        outsidePrograms.connectionDidClose(id)
         for state in states.values { state.cancelCalls(onConnection: id) }
         approvals.end(connection: id, because: reason)
         connections.removeValue(forKey: id)?.cancelCalls()
@@ -423,6 +427,17 @@ import Foundation
         for grant in grants { end(grant, as: .revoked, telling: "The user revoked this client's access in Arch.") }
     }
 
+    /// Settings' agent runs a day for a grant with Start Agent Tasks, kept within 1 to 2,000.
+    public func setRunsPerDay(_ runs: Int, for grantID: UUID) {
+        let runs = min(max(runs, AgentGrant.runsPerDayRange.lowerBound), AgentGrant.runsPerDayRange.upperBound)
+        if let index = settings.grants.firstIndex(where: { $0.id == grantID }) {
+            settings.grants[index].runsPerDay = runs
+            save()
+        } else if let index = launchGrants.firstIndex(where: { $0.id == grantID }) {
+            launchGrants[index].runsPerDay = runs
+        }
+    }
+
     /// Ends a grant: its running calls stop, the client's connections get `revoked` and close, and its handles and events go. Its agent tabs stay in their folder, unsaved, until the user closes or keeps them or Arch quits.
     private func end(_ grant: AgentGrant, as event: AgentActivityEntry.Event, telling message: String, except connectionID: UUID? = nil) {
         let wasKept = settings.grants.contains { $0.id == grant.id }
@@ -430,6 +445,7 @@ import Foundation
         launchGrants.removeAll { $0.id == grant.id }
         states[grant.id]?.cancelCalls()
         states[grant.id] = nil
+        outsidePrograms.grantDidEnd(grant.id)
         approvals.end(owner: grant.id, because: message)
         if wasKept { save() }
         record(event, grant: grant)
@@ -1451,7 +1467,7 @@ import Foundation
             }
             let grant = connection.identity.flatMap(grant(for:))
             let tools = grant.map { AgentToolHost.tools(for: $0.level, scopes: $0.scopes) } ?? AgentToolHost.toolsBeforeGrant
-            reply(connection, requestID, Self.json(AgentToolList(tools: tools.map(\.name))))
+            reply(connection, requestID, Self.json(AgentToolList(tools: tools.map(\.name) + Self.programTools(for: grant))))
         case (.ready, AgentControlMethod.toolsCall):
             if let sessionID = connection.sessionID {
                 if let hook = hookCLIs[sessionID] { return callHook(hook, params: params, on: connection, requestID: requestID) }
@@ -1466,6 +1482,10 @@ import Foundation
             stopTask(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.sessionsList) where connection.sessionID == nil:
             listSessions(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.eventsSubscribe) where connection.sessionID == nil:
+            subscribeEvents(params, on: connection, requestID: requestID)
+        case (.ready, AgentControlMethod.eventsUnsubscribe) where connection.sessionID == nil:
+            unsubscribeEvents(params, on: connection, requestID: requestID)
         case (.ready, AgentControlMethod.grantShow):
             // A session's connection is bound; it has no grant to show.
             let answer = connection.identity.map(answer(for:)) ?? AgentHelloAnswer(version: version, status: .bound)
@@ -1543,7 +1563,7 @@ import Foundation
             if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
             touch(grant)
             describeInPanel(grant)
-            let outcome = await toolHost(connectionID: connection.id, callID: running.callID).run(call, for: grant, state: state(for: grant))
+            let outcome = await runOutsideCall(call, for: grant, connectionID: connection.id, callID: running.callID)
             let result = outcome.result
             if call.name == "approval_wait" {
                 // A plain read: the call it waited on records its own entry and step when it ends.
@@ -1817,5 +1837,118 @@ extension AgentService: AgentEndpointDelegate {
 
     func endpoint(_ endpoint: AgentEndpoint, didRefusePeer name: String, reason: String) {
         activity.record(AgentActivityEntry(date: dependencies.now(), event: .refusedPeer, clientName: name, outcome: reason))
+    }
+}
+
+// MARK: - Outside programs
+
+extension AgentService {
+    /// The session's bus, whose events reach the grants with Watch Browser Events through the outside view (`docs/hooks.md`, Outside programs). The app shell attaches it once both exist.
+    public func attach(events bus: BrowserEventBus) {
+        outsidePrograms.busSubscription?.cancel()
+        outsidePrograms.busSubscription = bus.subscribe(BrowserEventFilter(tabKinds: Set(BrowserTabKind.allCases))) { [weak self] event in self?.deliver(event) }
+    }
+
+    /// The tools of outside programs beside the tool host's: `watch_events` with Watch Browser Events, and before a grant, since the grant sheet may allow it.
+    static func programTools(for grant: AgentGrant?) -> [String] {
+        grant.map { $0.scopes.watchEvents } ?? true ? [AgentToolCatalog.watchEvents.name] : []
+    }
+
+    /// Records the event in each watching grant's buffer and queues it for that grant's subscriptions that take it. While outside access is off, no grant records anything.
+    private func deliver(_ event: BrowserEvent) {
+        guard acceptsOutsideClients else { return }
+        for grant in grants where grant.scopes.watchEvents {
+            let buffer = outsidePrograms.buffer(for: grant.id)
+            let reader = AgentEventReader(grant: grant, state: state(for: grant), buffer: buffer, ownTabs: Set(host.agentTabs(of: grant.id).map(\.id)), allowsAI: dependencies.allowsAI)
+            guard let view = reader.view(of: event) else {
+                buffer.passed(event.sequence)
+                continue
+            }
+            let buffered = AgentBufferedEvent(event: event, view: view)
+            buffer.append(buffered)
+            for (connectionID, events) in outsidePrograms.subscriptions where events.grantID == grant.id {
+                events.enqueue(buffered, allowsAI: dependencies.allowsAI)
+                scheduleFlush(of: connectionID, events)
+            }
+        }
+    }
+
+    /// `events/subscribe`: asks for a grant first, as a tool call does, needs Watch Browser Events, checks the filter against the grant's Persona, and answers with the subscription and the last sequence before replaying the buffered events after `after`.
+    private func subscribeEvents(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard let identity = connection.identity else { return }
+        guard let subscribe = try? (params ?? .object([:])).decode(as: AgentEventSubscribe.self) else {
+            return replyError(connection, requestID, .invalidParams("events/subscribe takes a filter object and an optional after."))
+        }
+        connection.runningCalls += 1
+        Task {
+            defer { connection.runningCalls -= 1 }
+            guard let grant = await grantForCall(from: connection, identity, requestID: requestID), connections[connection.id] != nil else { return }
+            guard grant.scopes.watchEvents else {
+                return replyError(connection, requestID, Self.noGrantError("This client's grant does not include Watch Browser Events. Revoke it in Settings \u{25B8} AI \u{25B8} Agents and allow it again with that scope."))
+            }
+            let match: AgentEventMatch
+            switch AgentEventMatch.make(subscribe.filter, spaces: host.spaces(in: grant.personaID)) {
+            case .success(let made): match = made
+            case .failure(let error): return replyError(connection, requestID, error)
+            }
+            let events = outsidePrograms.subscriptions[connection.id] ?? AgentConnectionEvents(grantID: grant.id)
+            guard events.grantID == grant.id, !events.isFull else {
+                return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "A connection holds at most \(AgentLimits.subscriptionsPerConnection) subscriptions."))
+            }
+            outsidePrograms.subscriptions[connection.id] = events
+            let id = events.add(match)
+            if usedThisLaunch.insert(grant.id).inserted { record(.firstUse, grant: grant) }
+            touch(grant)
+            let buffer = outsidePrograms.buffer(for: grant.id)
+            reply(connection, requestID, Self.json(AgentEventSubscription(subscription: id, sequence: buffer.lastSequence)))
+            guard let after = subscribe.after else { return }
+            for buffered in buffer.events(after: after, matching: { match.matches($0.event, allowsAI: dependencies.allowsAI) }) {
+                events.enqueue(buffered.view, for: id)
+            }
+            scheduleFlush(of: connection.id, events)
+        }
+    }
+
+    private func unsubscribeEvents(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
+        guard case .number(let number)? = params?["subscription"], let id = Int(exactly: number) else {
+            return replyError(connection, requestID, .invalidParams("events/unsubscribe takes the subscription's number."))
+        }
+        reply(connection, requestID, ["unsubscribed": .bool(outsidePrograms.subscriptions[connection.id]?.remove(id) ?? false)])
+    }
+
+    /// Writes the connection's queued events after the current event has reached every subscriber, after saying how many each subscription dropped.
+    private func scheduleFlush(of connectionID: UUID, _ events: AgentConnectionEvents) {
+        guard !events.flushScheduled else { return }
+        events.flushScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let events = self.outsidePrograms.subscriptions[connectionID] else { return }
+                events.flushScheduled = false
+                for (subscription, count) in events.dropped.sorted(by: { $0.key < $1.key }) {
+                    self.endpoint?.send(.notification(method: AgentControlMethod.eventsDroppedNotification, params: ["subscription": .number(Double(subscription)), "count": .number(Double(count))]), to: connectionID)
+                }
+                events.dropped = [:]
+                let queued = events.queue
+                events.queue = []
+                for item in queued {
+                    self.endpoint?.send(.notification(method: AgentControlMethod.eventNotification, params: ["subscription": .number(Double(item.subscription)), "event": item.view]), to: connectionID)
+                }
+            }
+        }
+    }
+
+    /// An outside client's call: `watch_events` reads the grant's event buffer here, with the tool host's argument check and daily count, and every other tool runs in the tool host.
+    private func runOutsideCall(_ call: AgentToolCall, for grant: AgentGrant, connectionID: UUID, callID: Int?) async -> AgentToolHost.Outcome {
+        guard call.name == AgentToolCatalog.watchEvents.name else {
+            return await toolHost(connectionID: connectionID, callID: callID).run(call, for: grant, state: state(for: grant))
+        }
+        if let problem = AgentToolHost.problem(with: call.arguments, for: AgentToolCatalog.watchEvents) { return AgentToolHost.error("invalidArguments", problem) }
+        guard grant.scopes.watchEvents else {
+            return AgentToolHost.Outcome(result: AgentToolResult(status: .refused, code: "eventsScope", text: "This client's grant does not include Watch Browser Events, so it cannot watch events."))
+        }
+        guard state(for: grant).countCall(at: dependencies.now()) else {
+            return AgentToolHost.error("limitReached", "This client made \(AgentToolHost.number(AgentLimits.toolCallsPerGrantPerDay)) tool calls today, the most for a day. Its calls work again tomorrow.")
+        }
+        return await AgentToolHost.watchEvents(call.arguments, buffer: outsidePrograms.buffer(for: grant.id))
     }
 }
