@@ -48,6 +48,8 @@ public struct PluginManifest: Hashable, Sendable {
     public var contributions: PluginContributions
     /// The browser events that reach the plugin's `handle(_:)` and start its code: none unless the manifest lists them.
     public var events: Set<BrowserEventKind>
+    /// Whether the changes the user makes to the plugin's settings reach its `handle(_:)` as `PluginEvent.settingChanged` and start its code, which `plugin.json` asks for with `settingChanged` in `events`. They come from Settings rather than the bus, so they are not among `events` and run no hooks.
+    public var receivesSettingChanges: Bool
     /// A web extension's `author`, as text or as the `email` of an author object, lowercased, by which a package matches an installed plugin as a version of the same extension. Nil for other kinds and without the field.
     public var author: String?
     /// A web extension's `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, lowercased, so that two projects on one hosting site differ. Nil for other kinds and without the field.
@@ -55,7 +57,7 @@ public struct PluginManifest: Hashable, Sendable {
 
     public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [],
                 sites: [MatchPattern] = [], siteAccess: SiteAccess = .listedSites, extensionPermissions: [String] = [], contributions: PluginContributions,
-                events: Set<BrowserEventKind> = [], author: String? = nil, homepage: String? = nil) {
+                events: Set<BrowserEventKind> = [], receivesSettingChanges: Bool = false, author: String? = nil, homepage: String? = nil) {
         self.id = id
         self.name = name
         self.version = version
@@ -67,6 +69,7 @@ public struct PluginManifest: Hashable, Sendable {
         self.extensionPermissions = extensionPermissions
         self.contributions = contributions
         self.events = events
+        self.receivesSettingChanges = receivesSettingChanges
         self.author = author
         self.homepage = homepage
     }

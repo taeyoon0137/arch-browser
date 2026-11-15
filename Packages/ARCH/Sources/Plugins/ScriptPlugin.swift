@@ -345,7 +345,7 @@ private struct EventDelivery: Encodable {
 }
 
 extension PluginEvent {
-    /// The event's kind and JSON as listeners receive it: the view's members, with its dates in ISO 8601, and the sender's.
+    /// The event's kind and JSON as listeners receive it: a browser event's view members, with its dates in ISO 8601, and the sender's; a setting change's kind and key.
     func scriptValue() throws -> (kind: String, value: PluginValue) {
         switch self {
         case .browser(let view, let extra):
@@ -355,6 +355,8 @@ extension PluginEvent {
             guard case .object(var members) = try JSONDecoder().decode(PluginValue.self, from: encoder.encode(view)) else { return (view.kind.rawValue, .object(extra)) }
             members.merge(extra) { _, added in added }
             return (view.kind.rawValue, .object(members))
+        case .settingChanged(let key):
+            return (Self.settingChangedKind, .object(["kind": .string(Self.settingChangedKind), "key": .string(key)]))
         }
     }
 }

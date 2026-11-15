@@ -35,7 +35,13 @@ struct ScriptManifest {
         let (permissions, aiDataKinds) = try Self.permissions(object.value("permissions"))
         let sites = try object.strings("sites").map(MatchPattern.init)
         let siteAccess = try Self.siteAccess(object.optionalString("siteAccess"))
-        let events = try object.strings("events").map { name in
+        // `events` lists the bus's kinds and `settingChanged`, the plugin's own setting changes.
+        var receivesSettingChanges = false
+        let events = try object.strings("events").compactMap { name -> BrowserEventKind? in
+            if name == PluginEvent.settingChangedKind {
+                receivesSettingChanges = true
+                return nil
+            }
             guard let kind = BrowserEventKind(rawValue: name) else { throw invalidManifest("events lists “\(name)”, which is not an event Arch sends") }
             return kind
         }
@@ -44,11 +50,13 @@ struct ScriptManifest {
         let contributions = try object.object("contributes").map { try Self.contributions($0, packageAt: root) } ?? PluginContributions()
         try object.finish()
         guard background != nil || contributions.commands.isEmpty else { throw invalidManifest("commands need a background script") }
-        guard background != nil || events.isEmpty else { throw invalidManifest("events need a background script") }
+        guard background != nil || (events.isEmpty && !receivesSettingChanges) else { throw invalidManifest("events need a background script") }
+        // Without settings, the user could change none.
+        guard !receivesSettingChanges || !contributions.settings.isEmpty else { throw invalidManifest("events lists settingChanged, which needs contributes.settings") }
         // Without a command to run, a plugin that reaches its sites only where the user runs one would reach none.
         guard siteAccess == .listedSites || !contributions.commands.isEmpty else { throw invalidManifest("siteAccess whenInvoked needs contributes.commands") }
         manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, sites: sites,
-                                  siteAccess: siteAccess, contributions: contributions, events: Set(events))
+                                  siteAccess: siteAccess, contributions: contributions, events: Set(events), receivesSettingChanges: receivesSettingChanges)
         self.background = background
     }
 

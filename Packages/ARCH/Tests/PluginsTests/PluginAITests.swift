@@ -11,9 +11,9 @@ import WebKit
 @MainActor
 private final class AIRecorder {
     static var shared = AIRecorder()
-    /// The events that reached the hook plugin, and those that reached the plugin without `ai`.
-    var hookEvents: [BrowserEventKind] = []
-    var plainEvents: [BrowserEventKind] = []
+    /// The kinds of the events that reached the hook plugin, and of those that reached the plugin without `ai`.
+    var hookEvents: [BrowserEventKind?] = []
+    var plainEvents: [BrowserEventKind?] = []
     /// How many of the hook plugin's listeners run at once, and the most that ever did.
     var running = 0
     var mostRunning = 0
