@@ -1105,10 +1105,8 @@ final class EngineRuntime {
     public func requestDeleteTab(_ tab: Tab) {
         guard tab.spaceID != nil, tab.liveItemID == nil else { return }
         whenPageAgreesToLeave(tab) { [weak self] tab in
-            guard let self else { return }
-            let action: TabCloseAction = tab.agentOwnerID == nil ? .close(remember: true) : .forget
-            guard self.perform(action, on: tab, reason: .user) else { return }
-            if action == .forget { self.forgetUndoableCloses() } else { self.undoableCloseCount += 1 }
+            guard let self, self.perform(.close(remember: true), on: tab, reason: .user) else { return }
+            self.undoableCloseCount += 1
         }
     }
 
@@ -1318,7 +1316,7 @@ final class EngineRuntime {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona, or in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona, in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), or in an agent folder that does not already hold the tab, since a tab reaches an agent only when the agent opens it, leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
     @discardableResult public func moveTab(_ id: UUID, to target: Tab, after: Bool? = nil) -> Bool {
         guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID), !folders.contains(where: { $0.id == target.folderID && $0.live != nil }),
               let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return false }
@@ -1338,7 +1336,7 @@ final class EngineRuntime {
         return true
     }
 
-    /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned.
+    /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned. It then removes each agent folder that the change emptied.
     private func movingItemTabs(_ change: () -> Void) {
         let left = LiveFolderTabs.itemTabsLeaving(tabs, during: change)
         if !left.isEmpty { itemTabsDidLeave(left) }
@@ -2019,28 +2017,15 @@ final class EngineRuntime {
     /// The session as `session.json` keeps it, without agent folders and their tabs, which are gone after quit unless the user kept them. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4). The tabs windows show are recorded as active now, as the archive timer counts them, so that the next launch does not archive a tab that was in view until the app quit.
     private func snapshot() -> SessionSnapshot {
         let mainWindows = windows.filter { $0.kind == .main }
-        let windowsToSave = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
+        let windowRecords = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
         let now = Date()
         let shownIDs = Set(windows.flatMap(\.paneTabs).map(\.id))
         let kept = SessionSnapshot.keptSidebar(tabs: tabs, folders: folders)
-        let favoriteRecords = favoriteTabRecords
-        let savedTabIDs = Set(kept.tabs.map(\.id)).union(favoriteRecords.compactMap(\.id))
-        let windowRecords = Self.windowsKeepingSelections(windowsToSave, among: savedTabIDs)
         let front = windowRecords[0]
         return SessionSnapshot(version: SessionSnapshot.currentVersion, needsFullSidebarSync: needsFullSidebarSync ? true : nil, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
                                tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) || $0.hasActivityToPreserve ? now : $0.lastActivatedAt) },
                                folders: kept.folders, selectedTabIndex: kept.tabs.firstIndex { $0.id == front.selectedTabID }, closedTabs: closedTabs,
-                               splitViews: splitViewRecords(among: kept.tabs), favoriteTabs: favoriteRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
-    }
-
-    /// A window can show an agent tab, or have closed on one. Only a tab saved with the session can be its saved selection.
-    static func windowsKeepingSelections(_ windows: [SessionSnapshot.WindowRecord], among savedTabIDs: Set<UUID>) -> [SessionSnapshot.WindowRecord] {
-        windows.map { record in
-            guard let id = record.selectedTabID, !savedTabIDs.contains(id) else { return record }
-            var record = record
-            record.selectedTabID = nil
-            return record
-        }
+                               splitViews: splitViewRecords(among: kept.tabs), favoriteTabs: favoriteTabRecords, selectedFavoriteID: favoriteTabs.first { $0.value.id == front.selectedTabID }?.key, windows: windowRecords)
     }
 
     /// The favorites' open tabs and the saved ones not opened since launch, in favorite order.
