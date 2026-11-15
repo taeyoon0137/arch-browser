@@ -207,14 +207,14 @@ private struct CommandDelivery: Encodable {
 
 /// What a listener of `arch.commands.onRun` receives. Absent values are left out.
 private struct ScriptInvocation: Encodable {
-    let tab: ScriptTab?
+    let tab: PluginValue?
     let spaceId: String?
     let linkUrl: String?
     let imageUrl: String?
     let selection: String?
 
     init(_ invocation: PluginInvocation) {
-        tab = invocation.tab.map(ScriptTab.init)
+        tab = invocation.tab?.scriptValue
         spaceId = invocation.spaceID?.uuidString
         linkUrl = invocation.linkURL?.absoluteString
         imageUrl = invocation.imageURL?.absoluteString
@@ -224,13 +224,13 @@ private struct ScriptInvocation: Encodable {
 
 /// What a listener of `arch.pages.onMessage` receives.
 private struct PageMessageDelivery: Encodable {
-    let tab: ScriptTab
+    let tab: PluginValue
     let frameUrl: String
     let isMainFrame: Bool
     let body: PluginValue
 
     init(_ message: PluginPageMessage) {
-        tab = ScriptTab(message.tab)
+        tab = message.tab.scriptValue
         frameUrl = message.frameURL.absoluteString
         isMainFrame = message.isMainFrame
         body = message.body
@@ -269,31 +269,8 @@ extension PluginEvent {
     }
 }
 
-/// A tab as script plugins see it, with its identifiers as text, its engine as `webKit` or `chromium`, and its kind as events name it. Absent values are left out.
-private struct ScriptTab: Encodable {
-    let id: String
-    let spaceId: String?
-    let title: String?
-    let url: String?
-    let engine: String
-    let kind: String
-    let isPinned: Bool
-    let isSelected: Bool
-
-    init(_ tab: PluginTab) {
-        id = tab.id.uuidString
-        spaceId = tab.spaceID?.uuidString
-        title = tab.title
-        url = tab.url?.absoluteString
-        engine = tab.engine.rawValue
-        kind = tab.kind.rawValue
-        isPinned = tab.isPinned
-        isSelected = tab.isSelected
-    }
-}
-
 extension PluginTab {
-    /// The tab as `arch.tabs` returns it.
+    /// The tab as scripts see it, in `arch.tabs`, a command's invocation, and a page message: its identifiers as text, its engine as `webKit` or `chromium`, and its kind as events name it. Absent values are left out.
     var scriptValue: PluginValue {
         var members: [String: PluginValue] = [
             "id": .string(id.uuidString), "engine": .string(engine.rawValue), "kind": .string(kind.rawValue),

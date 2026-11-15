@@ -1,6 +1,7 @@
 // What the built-in hooks' actions do to the browser: a downloaded file's new name is safe, keeps the extension, and avoids taken names, Restore Original Name undoes it, a tab's name is the first line of the reply, cut to length, and a tab takes one only while the user has neither named it nor turned the name down for its document.
 import ARCHEngine
 import Foundation
+import Plugins
 import Testing
 @testable import Browsing
 
@@ -102,9 +103,9 @@ import Testing
     @Test func aTabNameIsTheReplysFirstLineCutToLength() {
         #expect(BuiltInHooks.plainReply("\u{201C}Seoul Weather.\u{201D}\nIt names the forecast.") == "Seoul Weather")
         #expect(BuiltInHooks.plainReply("\n**Release Notes**") == "Release Notes")
-        #expect(BrowserHooks.tabName(from: "  Seoul Weather  \nmore") == "Seoul Weather")
-        #expect(BrowserHooks.tabName(from: String(repeating: "a", count: 100))?.count == BrowserHooks.maximumTabNameLength)
-        #expect(BrowserHooks.tabName(from: "   ") == nil)
+        #expect(PluginTab.name(from: "  Seoul Weather  \nmore") == "Seoul Weather")
+        #expect(PluginTab.name(from: String(repeating: "a", count: 100))?.count == PluginTab.maximumNameLength)
+        #expect(PluginTab.name(from: "   ") == nil)
     }
 
     @Test func aTabTakesAHooksNameUntilTheUserNamesItOrTurnsTheNameDown() {

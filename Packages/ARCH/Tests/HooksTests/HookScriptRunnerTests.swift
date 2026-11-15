@@ -336,6 +336,10 @@ extension PluginValue {
         for outside in [Probe.otherSpace, Probe.otherPersona, Probe.agent, Probe.excluded] {
             #expect(got[outside.uuidString] == .null)
         }
+        // While a WebKit navigation waits to commit, the tab gives the run's document, which its renames belong to, not the navigation's address.
+        plugins.shownURLs[Probe.covered] = URL(string: "https://example.net/next")
+        let waiting = try self.report(of: try await outcome(loading: covered))
+        #expect(waiting["list"]?.array?.first?["url"] == .string("https://example.org/covered"))
     }
 
     @Test func anAgentHookSeesNoTitleOrAddressOfATabOnAnExcludedSite() async throws {

@@ -31,6 +31,8 @@ struct ScriptHookDraft: Identifiable {
     var closeReasons: Set<BrowserTabCloseReason> = []
     var personaChangesOnly = false
     var isEverywhere = true
+    /// The stored scope that Where shows as Everywhere because it names the only Persona, which a save keeps, so that the hook does not reach a Persona added later.
+    var scopeShownAsEverywhere: BrowserEventScope?
     var chosenPlaces: Set<BrowserPlace> = []
     var siteChoice = SiteChoice.all
     var siteList = ""
@@ -109,6 +111,7 @@ struct ScriptHookDraft: Identifiable {
             // With one Persona, Where names no Persona (Persona rule 7), and the Persona's place covers every place, as Everywhere does.
             if places.count == 1, let only = places.first, chosenPlaces.contains(.persona(only.id)) {
                 isEverywhere = true
+                scopeShownAsEverywhere = hook.filter.scope
                 chosenPlaces = []
             }
         }
@@ -152,7 +155,8 @@ struct ScriptHookDraft: Identifiable {
         hook.trigger = trigger
         hook.filter = filter
         hook.grant.permissions = hook.grant.permissions.intersection([.agent])
-        if readsTabs { hook.grant.permissions.insert(.tabs) }
+        // An outside program's hook never reads other tabs' titles and addresses (`docs/hooks.md`, Hooks from outside programs).
+        if readsTabs, !origin.isOutsideProgram { hook.grant.permissions.insert(.tabs) }
         if renamesTabs { hook.grant.permissions.insert(.tabsRename) }
         if !hook.origin.isOutsideProgram { try configureAgent(in: &hook) }
         if guided, let model = agentModel {
@@ -215,7 +219,7 @@ struct ScriptHookDraft: Identifiable {
 
     var filter: BrowserEventFilter {
         var filter = stored?.filter ?? BrowserEventFilter()
-        filter.scope = isEverywhere ? .everywhere : .places(Self.ordered(chosenPlaces, in: places))
+        filter.scope = isEverywhere ? scopeShownAsEverywhere ?? .everywhere : .places(Self.ordered(chosenPlaces, in: places))
         let patterns = sitePatterns().patterns
         filter.sites = siteChoice == .only ? patterns : []
         filter.exceptSites = siteChoice == .except ? patterns : []
@@ -309,7 +313,7 @@ struct ScriptHookSheet: View {
                 whereSection
                 if !draft.guided || !draft.generated {
                     Section("Script permissions") {
-                        Toggle("Read Tab Titles and Addresses", isOn: $draft.readsTabs)
+                        if !draft.origin.isOutsideProgram { Toggle("Read Tab Titles and Addresses", isOn: $draft.readsTabs) }
                         Toggle("Rename Tabs", isOn: $draft.renamesTabs)
                     }
                 }
@@ -601,8 +605,7 @@ struct ScriptHookSheet: View {
     }
 }
 
-
-private extension HookOrigin {
+extension HookOrigin {
     var isOutsideProgram: Bool {
         if case .outsideClient = self { return true }
         return false

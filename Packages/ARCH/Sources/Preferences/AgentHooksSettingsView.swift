@@ -195,7 +195,11 @@ struct AgentHooksPage: View {
     // MARK: Actions
 
     private func edit(_ hook: Hook, reviewing: Bool) {
-        sheet = HookScriptActions.draft(editing: hook, file: registry.scriptFile(of: hook.id), places: registry.places, reviewing: reviewing)
+        do {
+            sheet = try HookScriptActions.draft(editing: hook, file: registry.scriptFile(of: hook.id), places: registry.places, reviewing: reviewing)
+        } catch {
+            message = error.localizedDescription
+        }
     }
 
     private func runOnCurrentTab(_ hook: Hook) {
@@ -249,15 +253,16 @@ enum HookScriptActions {
         var errorDescription: String? { sentence }
     }
 
-    /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest.
-    static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) -> ScriptHookDraft {
-        let script = file.flatMap { String(data: $0.contents, encoding: .utf8) } ?? ""
-        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || file?.matchesDigest == false)
+    /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest. Refused for a file that is missing or not text, which an empty editor would replace unseen.
+    static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) throws -> ScriptHookDraft {
+        guard let file, let script = String(data: file.contents, encoding: .utf8) else { throw Refusal(sentence: "Arch cannot read the script of \u{201C}\(hook.name)\u{201D}.") }
+        return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || !file.matchesDigest)
     }
 
-    /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch.
+    /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch, and for an outside program's hook, whose copy would lose the caps of its origin.
     static func copy(of hook: Hook, file: HookScriptFile?) throws -> (hook: Hook, script: Data) {
         let name = "\u{201C}\(hook.name)\u{201D}"
+        guard !hook.origin.isOutsideProgram else { throw Refusal(sentence: "Hooks that other programs added cannot be duplicated.") }
         guard let file else { throw Refusal(sentence: "Arch cannot read the script of \(name).") }
         guard file.matchesDigest else { throw Refusal(sentence: "The script of \(name) changed outside Arch. Review it before you duplicate the hook.") }
         var copy = hook

@@ -1,4 +1,5 @@
 // The texts of Settings ▸ AI ▸ Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, and Edit… and Duplicate on a script file changed outside Arch.
+import Agent
 import AI
 import Events
 import Foundation
@@ -117,9 +118,10 @@ import Testing
         #expect(draft.trigger == hook.trigger)
         #expect(draft.filter == filter)
         #expect(draft.renamesTabs && !draft.readsTabs)
-        // Where lists no Persona while there is one, so its place opens as Everywhere, which covers the same.
+        // Where lists no Persona while there is one, so its place opens as Everywhere, which covers the same; a save keeps the Persona, so a Persona added later stays out.
         let personaWide = Hook(name: "Persona", trigger: .tabOpened, filter: BrowserEventFilter(scope: .places([.persona(persona)])))
-        #expect(ScriptHookDraft(editing: personaWide, script: "", places: places, reviewing: false).filter.scope == .everywhere)
+        let personaDraft = ScriptHookDraft(editing: personaWide, script: "", places: places, reviewing: false)
+        #expect(personaDraft.isEverywhere && personaDraft.filter.scope == .places([.persona(persona)]))
         var new = ScriptHookDraft(new: places)
         #expect(new.script == ScriptHookDraft.template(for: .pageLoaded))
         new.siteChoice = .only
@@ -149,9 +151,17 @@ import Testing
         let hook = Hook(name: "Names", trigger: .tabOpened)
         let changed = HookScriptFile(contents: Data("changed".utf8), matchesDigest: false)
         let checked = HookScriptFile(contents: Data("checked".utf8), matchesDigest: true)
-        let review = HookScriptActions.draft(editing: hook, file: changed, places: places, reviewing: false)
+        let review = try HookScriptActions.draft(editing: hook, file: changed, places: places, reviewing: false)
         #expect(review.isReview && review.script == "changed")
-        #expect(!HookScriptActions.draft(editing: hook, file: checked, places: places, reviewing: false).isReview)
+        #expect(try !HookScriptActions.draft(editing: hook, file: checked, places: places, reviewing: false).isReview)
+        // A missing file or one that is not text opens no editor whose empty script a save would record.
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.draft(editing: hook, file: nil, places: places, reviewing: true) }
+        let binary = HookScriptFile(contents: Data([0xFF, 0xFE, 0xFD]), matchesDigest: false)
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.draft(editing: hook, file: binary, places: places, reviewing: true) }
+        // A copy of an outside program's hook would be the user's, without the caps of its origin.
+        var outside = hook
+        outside.origin = .outsideClient(.signed(identifier: "com.example.client", team: "TEAM"), name: "Codex")
+        #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: outside, file: checked) }
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: changed) }
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: hook, file: nil) }
         let copy = try HookScriptActions.copy(of: hook, file: checked)

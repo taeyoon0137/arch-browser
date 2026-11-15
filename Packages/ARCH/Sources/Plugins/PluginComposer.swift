@@ -104,7 +104,7 @@ public final class PluginComposer {
                 throw PluginError.invalidPackage("files names “\(name)”, which is not the manifest\u{2019}s background script. Only the background script runs, so put all the code in it.")
             }
             guard case let .string(source) = value else { throw PluginError.invalidPackage("files.\(name) must be text.") }
-            if let error = Self.syntaxError(in: source, context: context) {
+            if let error = ScriptPlugin.syntaxError(in: source, context: context) {
                 throw PluginError.invalidPackage("\(name) does not parse as a script: \(error).")
             }
             files[name] = source
@@ -118,11 +118,6 @@ public final class PluginComposer {
     /// Whether `name` is a plain file name that ends in `.js`: letters, digits, `-`, `_`, and `.`, starting with no dot.
     private static func isScriptName(_ name: String) -> Bool {
         name.hasSuffix(".js") && !name.hasPrefix(".") && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) }
-    }
-
-    /// The syntax error of `source` as a classic script, as the background document runs it (`ScriptPlugin.syntaxError(in:)`).
-    private static func syntaxError(in source: String, context: JSContext?) -> String? {
-        ScriptPlugin.syntaxError(in: source, context: context)
     }
 }
 
