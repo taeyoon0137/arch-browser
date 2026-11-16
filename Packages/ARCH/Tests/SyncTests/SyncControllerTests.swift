@@ -537,6 +537,35 @@ import Testing
         #expect(resumed.fetchCount == n + 1 && f.engines.count == 2 && resumed.pendingChanges.isEmpty)
     }
 
+    /// The crash-loop guard (`docs/sync.md`): the key is set while a fetch or a first sync applies and removed once that ends, also when the apply fails without a crash. A launch that finds it, as after a crash while applying, keeps sync off with the reason in Settings ▸ Sync's status, at that launch and later ones, so the same fetched changes cannot stop every launch; turning sync on again retries.
+    @Test func aLaunchAfterAQuitWhileApplyingKeepsSyncOffUntilTurnedOnAgain() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let key = SyncController.applyingKey
+        var whileSaving: [Bool] = []
+        f.sidebar.beforeSave = { whileSaving.append(f.defaults.bool(forKey: key)) }
+        _ = try await f.startAndSend()
+        #expect(whileSaving == [true] && !f.defaults.bool(forKey: key))
+        f.sidebar.failSave = true
+        await f.controller.refresh()
+        #expect(f.controller.lastError == "The incoming sidebar could not be applied and saved." && !f.defaults.bool(forKey: key))
+        f.sidebar.failSave = false
+        await f.controller.refresh()
+        #expect(f.controller.canSendRecords && whileSaving == [true, true, true])
+        // A quit while applying leaves the key behind.
+        f.defaults.set(true, forKey: key)
+        f.newController()
+        #expect(!f.controller.isEnabled && !f.defaults.bool(forKey: SyncController.enabledKey))
+        #expect(f.controller.lastError == SyncController.interruptedApplyMessage)
+        await f.controller.refreshIfRequested()
+        f.newController()
+        await f.controller.refreshIfRequested()
+        #expect(f.engines.count == 1 && !f.controller.isEnabled && f.controller.lastError == SyncController.interruptedApplyMessage)
+        await f.controller.setEnabled(true)
+        #expect(f.engines.count == 2 && f.controller.isEnabled && f.controller.canSendRecords && f.controller.lastError == nil)
+        #expect(!f.defaults.bool(forKey: key) && f.defaults.bool(forKey: SyncController.enabledKey))
+    }
+
     @Test func confirmedDeletionSendsOnlyTheZoneAndTurnsOffOnceTheServerAccepts() async throws {
         let f = Fixture()
         defer { f.clean() }

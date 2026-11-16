@@ -20,19 +20,16 @@ public enum IncomingSidebarRecords {
 
     /// Merges a completed fetch against base records from the mirror. Absent fetched records
     /// carry no implication of deletion. An explicit tombstone takes precedence over a local save.
-    /// A tab without an engine takes `defaultEngine`.
+    /// A tab without an engine takes `defaultEngine`. A record name that one input lists twice
+    /// counts once, as its first copy.
     public static func plan(local: [SyncRecord], fetched: [SyncRecord], mirror: [SyncRecord],
                             deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind) throws -> Plan {
-        func byName(_ records: [SyncRecord]) throws -> [String: SyncRecord] {
-            var result: [String: SyncRecord] = [:]
-            for item in records where item.recordType != .setting {
-                guard result.updateValue(item, forKey: item.recordName) == nil else { throw InvalidGraph.inconsistentIdentity(item.recordName) }
-            }
-            return result
+        func byName(_ records: [SyncRecord]) -> [String: SyncRecord] {
+            Dictionary(records.filter { $0.recordType != .setting }.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
         }
-        var combined = try byName(local)
-        let bases = try byName(mirror)
-        let fetchedByName = try byName(fetched)
+        var combined = byName(local)
+        let bases = byName(mirror)
+        let fetchedByName = byName(fetched)
         let held = heldRecords(server: Array(bases.merging(fetchedByName) { _, fetched in fetched }.values), local: local)
         var sends: [String: SyncRecord] = [:]
         for (name, server) in fetchedByName where held[name] == nil {
@@ -53,7 +50,7 @@ public enum IncomingSidebarRecords {
 
     /// Inputs contain all sidebar records after field merging, including unsent local records. An
     /// explicit deletion always wins. Settings use SyncedSettings independently of this graph.
-    /// A tab without an engine takes `defaultEngine`.
+    /// A tab without an engine takes `defaultEngine`. A record name listed twice counts once, as its first copy.
     public static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind) throws -> Plan {
         try plan(records: records, deleted: deleted, foundAt: foundAt, defaultEngine: defaultEngine, held: heldRecords(server: records, local: []))
     }
@@ -126,13 +123,15 @@ public enum IncomingSidebarRecords {
         var removed = deleted.filter { $0.value != .setting }
         // The fixed default profile owns the platform's default storage and cannot be removed.
         removed.removeValue(forKey: "default")
-        for item in records where item.recordType != .setting && held[item.recordName] == nil {
+        // A name listed twice counts by its first copy.
+        var listed = Set<String>()
+        for item in records where item.recordType != .setting && held[item.recordName] == nil && listed.insert(item.recordName).inserted {
             if let removal = removed[item.recordName] {
                 if removal == item.recordType { continue }
                 // A deletion of another type names some other record; it removes nothing here.
                 removed.removeValue(forKey: item.recordName)
             }
-            guard all.updateValue(item, forKey: item.recordName) == nil else { throw InvalidGraph.inconsistentIdentity(item.recordName) }
+            all[item.recordName] = item
         }
         let original = all
         let personas = SyncOrderKeys.sorted(all.values.filter { $0.recordType == .persona })

@@ -42,6 +42,18 @@ import Testing
         #expect(replay.sidebar == plan.sidebar)
     }
 
+    /// A name that one input lists twice counts by its first copy, so the sidebar it gives lists each ID once.
+    @Test func aNameListedTwiceCountsByItsFirstCopy() throws {
+        var renamed = space(1)
+        renamed[.name] = .text("Second copy")
+        let rows = [persona(), space(1), folder(10, 1), tab(20, 1, 10), renamed, folder(10, 1), tab(20, 1, nil)]
+        let plan = try IncomingSidebarRecords.plan(records: rows, deleted: [:], foundAt: now, defaultEngine: .webKit)
+        #expect(plan.sidebar.spaces.map(\.name) == ["Room"] && plan.sidebar.folders.count == 1)
+        #expect(plan.sidebar.pinnedTabs.map(\.folderID?.uuidString) == [name(10)])
+        let merged = try IncomingSidebarRecords.plan(local: rows, fetched: rows.reversed(), mirror: rows + rows, deleted: [:], foundAt: now, defaultEngine: .webKit)
+        #expect(merged.sidebar.spaces.count == 1 && merged.sidebar.folders.count == 1 && merged.sidebar.pinnedTabs.count == 1)
+    }
+
     @Test func missingOwnersAndCrossPersonaParentsNeverMoveItemsToAnotherPersona() throws {
         let other = name(50)
         let rows = [persona(), persona(other), space(1, order: 9), space(2, order: 1), space(51, other),

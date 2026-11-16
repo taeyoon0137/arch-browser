@@ -137,6 +137,29 @@ import Testing
         #expect(snapshot.spaces.map(\.personaID) == [Persona.defaultID, Persona.defaultID, Persona.defaultID, workPersona, homePersona])
     }
 
+    /// A file that lists a space or folder twice, as a hand-edited file can, keeps its first copy, with the tabs and folders that the file places in it by its ID, as a repeated Persona keeps its first place. A favorite listed twice keeps both, the later one with a new ID, as a repeated tab record does.
+    @Test func aRepeatedSpaceOrFolderKeepsItsFirstCopyAndARepeatedFavoriteGetsANewID() {
+        let space = Space(id: spaceA, name: "Personal"), other = Space(id: spaceB, name: "Other")
+        var laterSpace = space
+        laterSpace.name = "Later"
+        let folder = TabFolder(id: workFolder, spaceID: spaceA, name: "Work", isPinned: true)
+        var laterFolder = folder
+        laterFolder.name = "Later"
+        laterFolder.spaceID = spaceB
+        let child = TabFolder(id: docsFolder, spaceID: spaceA, name: "Docs", isPinned: true, parentID: workFolder)
+        let favorite = Favorite(id: favoriteID, url: URL(string: "https://example.org/")!, title: "Favorite")
+        var laterFavorite = favorite
+        laterFavorite.title = "Later"
+        let tab = SessionSnapshot.TabRecord(id: tab1, spaceID: spaceA, url: URL(string: "https://example.org/a"), title: "A", isPinned: true, folderID: docsFolder)
+        let snapshot = SessionSnapshot(spaces: [space, laterSpace, other], currentSpaceID: spaceA, favorites: [favorite, laterFavorite], tabs: [tab],
+                                       folders: [folder, laterFolder, child]).normalized()
+        #expect(snapshot.spaces.map(\.id) == [spaceA, spaceB] && snapshot.spaces.map(\.name) == ["Personal", "Other"])
+        #expect(snapshot.folders?.map(\.name) == ["Work", "Docs"] && snapshot.folders?.map(\.spaceID) == [spaceA, spaceA])
+        #expect(snapshot.folders?.map(\.parentID) == [nil, workFolder] && snapshot.tabs.map(\.folderID) == [docsFolder])
+        #expect(snapshot.favorites.map(\.title) == ["Favorite", "Later"] && snapshot.favorites.first?.id == favoriteID)
+        #expect(Set(snapshot.favorites.map(\.id)).count == 2)
+    }
+
     @Test func savedPersonasLoadUnchanged() throws {
         let folder = try SessionFolder()
         try folder.write(version9File)

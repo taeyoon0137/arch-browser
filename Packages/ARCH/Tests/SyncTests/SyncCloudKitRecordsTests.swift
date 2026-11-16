@@ -124,6 +124,30 @@ import Testing
         #expect(SyncCloudKitRecords.syncRecord(from: outgoing)?.fields == record.fields)
     }
 
+    /// A server record that another writer left with its metadata in the other kind of values, edit times plain and the time and version encrypted, converts without CloudKit's exception, which a debug or release build would not survive.
+    @Test func movesMetadataBetweenPlainAndEncryptedValuesWithoutAnException() throws {
+        let base = CKRecord(recordType: "Space", recordID: SyncCloudKitRecords.recordID(named: "space-1"))
+        base["fieldModifiedAt"] = "{}"
+        base.encryptedValues["modifiedAt"] = "yesterday"
+        base.encryptedValues["schemaVersion"] = "1"
+        let record = SyncRecord(recordType: .space, recordName: "space-1", fields: ["name": .text("Work")], fieldModifiedAt: ["name": date(5)], modifiedAt: date(6))
+        let outgoing = SyncCloudKitRecords.ckRecord(from: record, base: base)
+        #expect(plainKeys(of: outgoing) == ["modifiedAt", "schemaVersion"])
+        let back = try #require(SyncCloudKitRecords.syncRecord(from: outgoing))
+        #expect(back.fieldModifiedAt == ["name": date(5)] && back.modifiedAt == date(6) && back.schemaVersion == SyncRecord.currentSchemaVersion)
+    }
+
+    /// A base that is not a copy of the same record, by name or type, is left out instead of stopping the app on a debug build's assertion.
+    @Test(arguments: [("space-2", "Space"), ("space-1", "Folder")])
+    func ignoresABaseOfAnotherRecord(name: String, type: String) throws {
+        let base = CKRecord(recordType: type, recordID: SyncCloudKitRecords.recordID(named: name))
+        base["unknown"] = "kept only on its own record"
+        let record = SyncRecord(recordType: .space, recordName: "space-1", fields: ["name": .text("Work")], modifiedAt: date(1))
+        let outgoing = SyncCloudKitRecords.ckRecord(from: record, base: base)
+        #expect(outgoing.recordID.recordName == "space-1" && outgoing.recordType == "Space" && outgoing["unknown"] == nil)
+        #expect(SyncCloudKitRecords.syncRecord(from: outgoing)?.fields == record.fields)
+    }
+
     @Test func tellsRecordsOfTheZoneFromThoseOfOtherZones() {
         #expect(SyncCloudKitRecords.isInZone(SyncCloudKitRecords.recordID(named: "space-1")))
         #expect(SyncCloudKitRecords.isInZone(SyncCloudKitRecords.ckRecord(from: fullRecord(.space)).recordID))

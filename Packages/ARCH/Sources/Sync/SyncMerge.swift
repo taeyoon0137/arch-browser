@@ -27,8 +27,10 @@ public enum SyncMerge {
     /// - A field that this build does not know for the record type (`SyncRecordType.fields`) counts as unchanged on this Mac, which cannot edit it, so it keeps the server's value.
     ///
     /// A unit's edit time is the latest of its fields' times in `SyncRecord.fieldModifiedAt`, or the record's `modifiedAt` when none has one. Each unit keeps the edit times of the side whose values it takes. A merged record that must be sent takes the later `modifiedAt` of the two and the higher `schemaVersion`, since it can hold fields of the newer format.
+    ///
+    /// Two records that are not versions of one record, by name and type, do not merge: the result is the server's record, with nothing to send.
     public static func merge(local: SyncRecord, server: SyncRecord, base: Base) -> Result {
-        assert(local.recordName == server.recordName && local.recordType == server.recordType, "SyncMerge merges two versions of one record")
+        guard local.recordName == server.recordName, local.recordType == server.recordType else { return Result(record: server, needsSend: false) }
         let recordType = server.recordType
         let knownFields = recordType.fields
         var fieldNames = Set(local.fields.keys).union(server.fields.keys).union(local.fieldModifiedAt.keys).union(server.fieldModifiedAt.keys)

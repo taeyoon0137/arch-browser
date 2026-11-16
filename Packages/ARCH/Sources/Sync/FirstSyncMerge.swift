@@ -21,20 +21,20 @@ public enum FirstSyncMerge {
     }
 
     public enum InvalidRecords: Error, Equatable {
-        case duplicateName(String)
         case conflictingTypes(String)
     }
 
+    /// A record name that either input lists twice counts once, as its first copy, so the plan never names an item twice. A name that the two inputs give to records of different types fails the plan.
     public static func plan(local: [SyncRecord], server: [SyncRecord], samePage: (URL, URL) -> Bool) throws -> Plan {
         var serverByName: [String: SyncRecord] = [:]
-        for record in server {
-            guard serverByName.updateValue(record, forKey: record.recordName) == nil else {
-                throw InvalidRecords.duplicateName(record.recordName)
-            }
+        let server = server.filter { record in
+            guard serverByName[record.recordName] == nil else { return false }
+            serverByName[record.recordName] = record
+            return true
         }
         var localNames = Set<String>()
+        let local = local.filter { localNames.insert($0.recordName).inserted }
         for record in local {
-            guard localNames.insert(record.recordName).inserted else { throw InvalidRecords.duplicateName(record.recordName) }
             if let other = serverByName[record.recordName], other.recordType != record.recordType {
                 throw InvalidRecords.conflictingTypes(record.recordName)
             }

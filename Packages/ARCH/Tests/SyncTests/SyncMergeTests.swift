@@ -32,6 +32,16 @@ import Testing
         #expect(result.record == serverRecord)
     }
 
+    /// Two records that are not versions of one record keep the server's, with nothing to send, instead of stopping the app on a debug build's assertion.
+    @Test(arguments: [(name: "space-2", type: SyncRecordType.space), (name: "space-1", type: .folder)])
+    func recordsOfAnotherNameOrTypeDoNotMerge(name: String, type: SyncRecordType) {
+        var local = base
+        local["name"] = .text("Home")
+        let serverRecord = record(base, at: 10)
+        let result = SyncMerge.merge(local: record(type: type, name: name, local, at: 20), server: serverRecord, base: .firstWrite)
+        #expect(!result.needsSend && result.record == serverRecord)
+    }
+
     @Test func unchangedRecordNeedsNoSend() {
         let serverRecord = record(base, at: 10)
         let result = SyncMerge.merge(local: record(base, at: 10), server: serverRecord, base: .mirror(serverRecord))

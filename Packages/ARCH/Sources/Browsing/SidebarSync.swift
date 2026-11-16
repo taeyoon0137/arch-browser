@@ -4,7 +4,7 @@ import Foundation
 import LiveFolders
 
 public struct SidebarSyncState: Equatable {
-    public struct Folder: Equatable {
+    public struct Folder: Equatable, Identifiable {
         public let id: UUID
         public let personaID: UUID
         public let spaceID: UUID
@@ -22,7 +22,7 @@ public struct SidebarSyncState: Equatable {
         }
     }
 
-    public struct PinnedTab: Equatable {
+    public struct PinnedTab: Equatable, Identifiable {
         public let id: UUID
         public let personaID: UUID
         public let spaceID: UUID
@@ -57,13 +57,15 @@ public struct SidebarSyncState: Equatable {
     }
 
     /// Uses the captured session after migration or a successful save. A folder can only enter the
-    /// result through its own space and an ordinary pinned ancestor at every level.
+    /// result through its own space and an ordinary pinned ancestor at every level. A loaded session
+    /// holds each ID once (`SessionSnapshot.normalized()`); an item that a snapshot lists twice still
+    /// enters once, as its first copy (`docs/sync.md`, Mapping the session store to records).
     init(snapshot: SessionSnapshot, defaultEngine: EngineKind) {
-        personas = snapshot.personas ?? []
-        spaces = snapshot.spaces
-        favorites = snapshot.favorites
-        let owners = Dictionary(snapshot.spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })
-        let source = snapshot.folders ?? []
+        personas = Self.firstCopies(snapshot.personas ?? [])
+        spaces = Self.firstCopies(snapshot.spaces)
+        favorites = Self.firstCopies(snapshot.favorites)
+        let owners = Dictionary(spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })
+        let source = Self.firstCopies(snapshot.folders ?? [])
         let byParent = Dictionary(grouping: source, by: \.parentID)
         var allowed = Set<UUID>()
         var ordinary = Set<UUID>()
@@ -82,13 +84,25 @@ public struct SidebarSyncState: Equatable {
                           name: folder.name, live: folder.live)
         }
         let folderSpaces = Dictionary(folders.map { ($0.id, $0.spaceID) }, uniquingKeysWith: { first, _ in first })
-        pinnedTabs = snapshot.tabs.compactMap { tab in
+        pinnedTabs = Self.firstCopies(snapshot.tabs.compactMap { tab in
             guard tab.isPinned, tab.liveItemID == nil, let id = tab.id, let owner = owners[tab.spaceID],
                   tab.personaID == nil || tab.personaID == owner else { return nil }
             if let folder = tab.folderID, !ordinary.contains(folder) || folderSpaces[folder] != tab.spaceID { return nil }
             return PinnedTab(id: id, personaID: owner, spaceID: tab.spaceID, folderID: tab.folderID,
                              savedPage: tab.savedPage, customTitle: tab.customTitle, engine: tab.pendingSyncEngine ?? tab.engine ?? defaultEngine)
-        }
+        })
+    }
+
+    /// The state with each ID once in each list, as the first copy has it. Applying it never meets an ID twice, which a dictionary keyed by ID would trap on.
+    public var withFirstCopies: SidebarSyncState {
+        SidebarSyncState(personas: Self.firstCopies(personas), spaces: Self.firstCopies(spaces), folders: Self.firstCopies(folders),
+                         favorites: Self.firstCopies(favorites), pinnedTabs: Self.firstCopies(pinnedTabs))
+    }
+
+    /// `items` without each item whose ID an earlier item has.
+    static func firstCopies<Item: Identifiable>(_ items: [Item]) -> [Item] {
+        var seen = Set<Item.ID>()
+        return items.filter { seen.insert($0.id).inserted }
     }
 
     public static func canShare(_ live: LiveFolderConfiguration?) -> Bool {

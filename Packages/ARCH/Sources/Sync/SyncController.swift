@@ -46,6 +46,9 @@ import Foundation
     private static let discardStateKey = "ARCHSyncDiscardPreviousState"
     /// Set while a confirmed Delete iCloud Data waits for the server, so that a launch after a quit in that time can say the data is still there.
     private static let deletionRequestedKey = "ARCHSyncDeletionRequested"
+    /// Set while the controller applies a fetch or a first sync's plan, and removed once that ends (`docs/sync.md`, Crash-loop guard). A launch that finds it follows one that quit while applying, as a crash does. The next fetch would bring the same changes, so that launch keeps sync off until the user turns it on, which removes the key.
+    static let applyingKey = "ARCHSyncApplyingChanges"
+    static let interruptedApplyMessage = "Sync turned off because Arch quit while it applied changes from iCloud. Turn it on to try again."
     private var quitBeforeDeletion: (any SyncEngineClient)?
     private var first = false
     private var fetching = false
@@ -88,6 +91,12 @@ import Foundation
         settings = SyncedSettings(defaults: defaults)
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         offReason = defaults.string(forKey: Self.offReasonKey).flatMap(SyncOffReason.init(rawValue:))
+        if defaults.bool(forKey: Self.applyingKey) {
+            // Settings ▸ Sync shows the reason at every launch until sync is turned on again.
+            isEnabled = false
+            defaults.set(false, forKey: Self.enabledKey)
+            lastError = Self.interruptedApplyMessage
+        }
         observers.append(notifications.addObserver(forName: UserDefaults.didChangeNotification, object: defaults, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.settingsChanged() }
         })
@@ -109,6 +118,11 @@ import Foundation
 
     public func setEnabled(_ enabled: Bool) async {
         guard !isDeletingCloudData else { return }
+        if defaults.bool(forKey: Self.applyingKey) {
+            // The user's choice ends the hold: turning sync on applies the changes again.
+            defaults.removeObject(forKey: Self.applyingKey)
+            lastError = nil
+        }
         if enabled { recordOffReason(nil) }
         updateEnabled(enabled)
         if enabled { await refresh() } else {
@@ -477,6 +491,9 @@ import Foundation
 
     private func finishFetch() {
         guard let engine else { return }
+        // Set before the settings check below, so that a change notification this write delivers at once counts as one that came before the fetch ended.
+        defaults.set(true, forKey: Self.applyingKey)
+        defer { defaults.removeObject(forKey: Self.applyingKey) }
         applying = true
         do {
             let date = now()
@@ -563,8 +580,9 @@ import Foundation
         let held = IncomingSidebarRecords.heldOut(server: base, local: local)
         let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) }
         let differences = SyncDiff.changes(local: local.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
-        let changed = Dictionary(uniqueKeysWithValues: differences.saves.map { ($0.recordName, $0) })
-        let baseByName = Dictionary(uniqueKeysWithValues: base.map { ($0.recordName, $0) })
+        // A name listed twice counts by its first copy, as in the comparison itself.
+        let changed = Dictionary(differences.saves.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+        let baseByName = Dictionary(base.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
         let current = local.map { held.contains($0.recordName) ? $0 : changed[$0.recordName] ?? baseByName[$0.recordName] ?? $0 }
         // A record already deleted on this Mac must stay absent while its pending delete
         // is being sent. An edit of that same surviving server ID cannot restore it.

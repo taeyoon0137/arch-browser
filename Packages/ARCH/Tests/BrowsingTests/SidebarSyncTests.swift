@@ -33,6 +33,24 @@ import Testing
         #expect(state(snapshot([tab])).pinnedTabs.isEmpty)
     }
 
+    /// A snapshot that lists a space, folder, or favorite twice, which a loaded session never does (`SessionSnapshot.normalized()`), still syncs each ID once, as its first copy, so the first-sync plan and the sync apply never meet an ID twice.
+    @Test func anItemListedTwiceEntersOnceAsItsFirstCopy() {
+        let folder = TabFolder(spaceID: space.id, name: "First", isPinned: true)
+        var laterFolder = folder
+        laterFolder.name = "Later"
+        let favorite = Favorite(url: page, title: "First", personaID: Persona.defaultID)
+        var laterFavorite = favorite
+        laterFavorite.title = "Later"
+        var laterSpace = space
+        laterSpace.name = "Later"
+        var saved = snapshot(folders: [folder, laterFolder])
+        saved.spaces = [space, laterSpace]
+        saved.favorites = [favorite, laterFavorite]
+        let result = state(saved)
+        #expect(result.spaces.map(\.name) == ["Personal"] && result.folders.map(\.name) == ["First"] && result.favorites.map(\.title) == ["First"])
+        #expect(result.withFirstCopies == result)
+    }
+
     @Test func restoringOlderSnapshotsKeepsPrivateFeedsTheirItemsAndAgentTabsLocal() throws {
         let publicFeed = TabFolder(spaceID: space.id, name: "News", isPinned: true,
             live: LiveFolderConfiguration(source: .feed(address: page, isPrivate: false)))
