@@ -310,6 +310,39 @@ import Testing
         }
     }
 
+    /// A `session.json` that lists a favorite twice, as a hand-edited file can, loads both, the later copy with an ID of its own (`SessionSnapshot.normalized()`), so a reorder from another Mac moves each favorite once. Before, both copies kept one ID, and the reversed order put the other favorite in two places and lost the later copy.
+    @Test func aFavoriteListedTwiceInTheFileLoadsAsTwoThatASyncedReorderMovesOnce() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let first = Favorite(url: URL(string: "about:blank#first")!, title: "First", personaID: Persona.defaultID)
+        let other = Favorite(url: URL(string: "about:blank#other")!, title: "Other", personaID: Persona.defaultID)
+        do {
+            let session = try BrowserSession(testRegistry: registry, directory: directory)
+            session.addFavorites([first, other], in: Persona.defaultID)
+            try session.saveNow().get()
+        }
+        let file = directory.appendingPathComponent("session.json")
+        var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        var favorites = try #require(json["favorites"] as? [[String: Any]])
+        var later = favorites[0]
+        later["title"] = "Later"
+        favorites.insert(later, at: 1)
+        json["favorites"] = favorites
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let ids = session.favorites.map(\.id)
+        #expect(session.favorites.map(\.title) == ["First", "Later", "Other"])
+        #expect(ids.count == 3 && ids[0] == first.id && ids[2] == other.id && Set(ids).count == 3)
+        let state = session.sidebarSyncState
+        session.applySidebarSync(.init(personas: state.personas, spaces: state.spaces, folders: state.folders,
+                                       favorites: state.favorites.reversed(), pinnedTabs: state.pinnedTabs), deletions: .init())
+        #expect(session.favorites.map(\.id) == ids.reversed() && session.favorites.map(\.title) == ["Other", "Later", "First"])
+    }
+
     @Test func firstSyncMovesLocalChildrenAndSelectionToTheMatchedIDsOnlyOnce() async throws {
         try await temporarySession { session, directory in
             let original = session.sidebarSyncState

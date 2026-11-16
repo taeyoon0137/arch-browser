@@ -305,37 +305,70 @@ import Testing
         #expect(a.session.sidebarSyncState == b.session.sidebarSyncState && hasUniqueIDs(b.session))
     }
 
-    /// Lists the first item of each of `keys` twice in the session file, as a hand-edited file can.
-    private func listTwice(_ keys: [String], in file: URL) throws {
+    /// Lists the first item of `key` twice in the session file, as a hand-edited file can: a copy named "Later" follows it.
+    private func listTwice(_ key: String, in file: URL) throws {
         var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
-        for key in keys {
-            let list = try #require(json[key] as? [Any])
-            json[key] = list + list.prefix(1)
-        }
+        var list = try #require(json[key] as? [[String: Any]])
+        var later = list[0]
+        later[key == "favorites" ? "title" : "name"] = "Later"
+        list.insert(later, at: 1)
+        json[key] = list
         try JSONSerialization.data(withJSONObject: json).write(to: file)
     }
 
-    /// B's `session.json` lists a space, folder, or favorite twice. Its sidebar syncs the first copy, and the later copy stays on this Mac. Before, the first-sync plan refused the repeated name, so the first sync never finished; and with a newer build's default Persona on the server, which this build holds out with every item under it, the copies skipped that check and the session's apply trapped on them at every launch (`BrowserSession.applyFirstSidebarSync`).
-    @Test(arguments: [["spaces"], ["folders"], ["favorites"]], [false, true])
-    func aSessionThatListsAnItemTwiceSyncsItsFirstCopy(keys: [String], heldOut: Bool) async throws {
+    /// The names of the session's spaces, folders, and favorites, in that order.
+    private func names(_ session: BrowserSession) -> [String] {
+        session.spaces.map(\.name) + session.folders.map(\.name) + session.favorites.map(\.title)
+    }
+
+    /// What the zone holds when B turns sync on.
+    enum Server: CaseIterable, Sendable {
+        case empty
+        /// A's sidebar, filled as B's is.
+        case otherMac
+        /// A default Persona record that this build cannot apply, here one without a name, which holds out every item under it.
+        case heldOut
+    }
+
+    /// B's `session.json` lists a space, folder, or favorite twice, the later copy named "Later". The load keeps the first copy of a space or folder and gives the later favorite an ID of its own (`SessionSnapshot.normalized()`), so B syncs each ID once and loses or doubles nothing: into an empty zone; against A's items, which B's first sync joins by name and address and which A then reorders; and beside a held-out record. Before, the first-sync plan refused the repeated name, so the first sync never finished; with the held-out record the session's apply trapped on the copies (`BrowserSession.applyFirstSidebarSync`); and a reorder put another item in the later copy's place.
+    @Test(arguments: ["spaces", "folders", "favorites"], Server.allCases)
+    func aSessionThatListsAnItemTwiceLoadsAndSyncsEachIDOnce(key: String, server: Server) async throws {
         let zone = Zone()
-        let b = try Mac(zone: zone)
-        defer { b.clean() }
+        let a = try Mac(zone: zone), b = try Mac(zone: zone)
+        defer { a.clean(); b.clean() }
+        if server == .otherMac {
+            _ = try fill(a, page: "local")
+            await a.controller.setEnabled(true)
+            try await a.flush()
+        }
         _ = try fill(b, page: "local")
-        try listTwice(keys, in: b.file)
+        let filled = names(b.session)
+        try listTwice(key, in: b.file)
         try b.launch()
-        let counts = [b.session.spaces.count, b.session.folders.count, b.session.favorites.count]
-        if heldOut {
+        let loaded = key == "favorites" ? filled + ["Later"] : filled
+        #expect(names(b.session) == loaded && hasUniqueIDs(b.session))
+        if server == .heldOut {
             zone.records["default"] = SyncCloudKitRecords.ckRecord(from: SyncRecord(recordType: .persona, recordName: "default",
                                                                                    fields: ["title": .text("Newer")], modifiedAt: Date()))
         }
         await b.controller.setEnabled(true)
         try await b.flush()
-        #expect(b.controller.lastError == nil && b.controller.canSendRecords)
-        let synced = b.session.sidebarSyncState
-        #expect(Set(synced.spaces.map(\.id)).count == synced.spaces.count && Set(synced.folders.map(\.id)).count == synced.folders.count
-                && Set(synced.favorites.map(\.id)).count == synced.favorites.count)
-        #expect([b.session.spaces.count, b.session.folders.count, b.session.favorites.count] == counts)
-        #expect(zone.records.values.contains { $0.recordType == "Space" } && zone.records["default"] != nil)
+        #expect(b.controller.lastError == nil && b.controller.canSendRecords && hasUniqueIDs(b.session))
+        switch server {
+        case .empty:
+            #expect(names(b.session) == loaded)
+        case .heldOut:
+            #expect(names(b.session) == loaded)
+            #expect(zone.records.values.contains { $0.recordType == "Space" } && zone.records["default"] != nil)
+        case .otherMac:
+            await a.controller.refresh()
+            let favorites = a.session.favorites
+            if let last = favorites.last, let first = favorites.first { a.session.moveFavorite(last.id, to: first) }
+            try await a.flush()
+            await b.controller.refresh()
+            #expect(a.session.sidebarSyncState == b.session.sidebarSyncState && hasUniqueIDs(a.session) && hasUniqueIDs(b.session))
+            #expect(b.session.favorites.map(\.title) == (key == "favorites" ? ["Later", "Favorite"] : ["Favorite"]))
+            #expect(names(b.session).filter { $0 == "Later" }.count == (key == "favorites" ? 1 : 0))
+        }
     }
 }

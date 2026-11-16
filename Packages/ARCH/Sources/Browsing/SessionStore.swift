@@ -127,9 +127,17 @@ struct SessionSnapshot: Codable {
         snapshot.tabs = withUniqueIDs(tabs, at: \.id)
         snapshot.favoriteTabs = favoriteTabs.map { withUniqueIDs($0, at: \.id) }
         snapshot.closedTabs = closedTabs.map { withUniqueIDs($0, at: \.id) }
+        // A space or folder that repeats an earlier one's ID, as a hand-edited file can, keeps only its first copy, as a repeated Persona does: what the file places in it by that ID belongs to the first copy. A repeated favorite is an item of its own, so it gets a new ID, as a repeated tab record does. The session then holds each ID once (`docs/sync.md`, Mapping the session store to records ▸ IDs listed twice).
+        snapshot.spaces = SidebarSyncState.firstCopies(spaces)
+        var favoriteIDs: Set<UUID> = []
+        snapshot.favorites = favorites.map { favorite in
+            var favorite = favorite
+            if !favoriteIDs.insert(favorite.id).inserted { favorite.id = UUID() }
+            return favorite
+        }
         // Earlier builds kept an archived tab's page state and activation date in its closed record, and more records than the list keeps.
         snapshot.closedTabs = snapshot.closedTabs.map { $0.suffix(Self.maximumClosedTabs).map(\.closed) }
-        snapshot.folders = folders.map { LiveFolderTabs.repairingLiveFolders(FolderTree.repairingParents(of: LiveFolderTabs.pinningLiveFolders($0))) }
+        snapshot.folders = folders.map { LiveFolderTabs.repairingLiveFolders(FolderTree.repairingParents(of: LiveFolderTabs.pinningLiveFolders(SidebarSyncState.firstCopies($0)))) }
         snapshot.tabs = LiveFolderTabs.repairingItems(of: snapshot.tabs, in: snapshot.folders ?? [])
         snapshot.tabs = snapshot.tabs.map { $0.repairingSavedPage() }
         snapshot.closedTabs = snapshot.closedTabs.map { $0.map { $0.repairingSavedPage() } }

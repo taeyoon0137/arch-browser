@@ -33,7 +33,7 @@ import Testing
         #expect(state(snapshot([tab])).pinnedTabs.isEmpty)
     }
 
-    /// A session that lists a space, folder, or favorite twice, as a hand-edited file can, syncs each ID once, as its first copy, so the first-sync plan and the sync apply never meet an ID twice.
+    /// A snapshot that lists a space, folder, or favorite twice, which a loaded session never does (`SessionSnapshot.normalized()`), still syncs each ID once, as its first copy, so the first-sync plan and the sync apply never meet an ID twice.
     @Test func anItemListedTwiceEntersOnceAsItsFirstCopy() {
         let folder = TabFolder(spaceID: space.id, name: "First", isPinned: true)
         var laterFolder = folder

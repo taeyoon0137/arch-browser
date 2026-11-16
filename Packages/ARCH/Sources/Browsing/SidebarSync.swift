@@ -57,9 +57,9 @@ public struct SidebarSyncState: Equatable {
     }
 
     /// Uses the captured session after migration or a successful save. A folder can only enter the
-    /// result through its own space and an ordinary pinned ancestor at every level. An item that the
-    /// session lists twice, as a hand-edited file can, enters once, as its first copy; the later copy
-    /// stays on this Mac (`docs/sync.md`, Mapping the session store to records).
+    /// result through its own space and an ordinary pinned ancestor at every level. A loaded session
+    /// holds each ID once (`SessionSnapshot.normalized()`); an item that a snapshot lists twice still
+    /// enters once, as its first copy (`docs/sync.md`, Mapping the session store to records).
     init(snapshot: SessionSnapshot, defaultEngine: EngineKind) {
         personas = Self.firstCopies(snapshot.personas ?? [])
         spaces = Self.firstCopies(snapshot.spaces)
