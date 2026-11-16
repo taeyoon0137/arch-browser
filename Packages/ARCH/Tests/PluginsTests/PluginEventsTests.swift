@@ -1,11 +1,11 @@
-// Plugin events and tab calls (`docs/plugins.md`, Values, events, and storage; `docs/hooks.md`, Plugins): a manifest's `events` and `tabs.rename`, the bus's events of the manager's Persona reaching an enabled script plugin's `arch.events.on` in the script view its grant allows, only for the kinds it lists, never for the plugin's own renames and at most 10 for one tab a minute, the user's setting changes reaching a plugin that asks for them once they settle, each save of a secret among them, and none once the plugin is switched off, updated without the setting or the event, or removed, or its manager closes, and the context's tabs and renames through the browser host, under the grant, with the plugin as the rename's cause.
+// Plugin events and tab calls (`docs/plugins.md`, Values, events, and storage; `docs/hooks.md`, Plugins): a manifest's `events` and `tabs.rename`, the bus's events of the manager's Persona reaching an enabled script plugin's `arch.events.on` in the script view its grant allows, only for the kinds it lists, never for the plugin's own renames and at most 10 for one tab a minute, the user's setting changes reaching a plugin that asks for them once they settle, each save of a secret among them, and none once the plugin is switched off, updated without the setting or the event, or removed, or its manager closes, and the context's tabs, renames, opens, closes, selections, and moves through the browser host, under the grant, with the plugin as their cause.
 import ARCHEngine
 import Events
 import Foundation
 import Testing
 @testable import Plugins
 
-/// The tabs of each Persona as the session would give them, and the renames, opens, closes, and selections it was asked for.
+/// The tabs of each Persona as the session would give them, and the renames, opens, closes, selections, and moves it was asked for.
 @MainActor
 private final class FakeTabsHost: PluginBrowserHost {
     struct Rename: Equatable {
@@ -15,12 +15,13 @@ private final class FakeTabsHost: PluginBrowserHost {
         var cause: BrowserEventCause
     }
 
-    /// An open, close, or selection, with the tab it opened or acted on.
+    /// An open, close, selection, or move, with the tab it opened or acted on.
     struct Change: Equatable {
         enum Kind: Equatable {
             case opened(URL, PluginOpenTabOptions)
             case closed
             case selected
+            case moved(PluginTabPlace)
         }
 
         var kind: Kind
@@ -37,7 +38,7 @@ private final class FakeTabsHost: PluginBrowserHost {
     private(set) var changes: [Change] = []
     /// Called after each rename, as the session posts the rename's title change.
     var onRename: ((Rename) -> Void)?
-    /// Called after each open, close, and selection, as the session posts its event.
+    /// Called after each open, close, selection, and move, as the session posts its event.
     var onChange: ((Change) -> Void)?
 
     func tabs(in persona: PersonaID) -> [PluginTab] {
@@ -77,13 +78,35 @@ private final class FakeTabsHost: PluginBrowserHost {
         record(Change(kind: .selected, tab: id, cause: cause))
     }
 
+    /// The tab goes next to the other tab, taking its space, or last in its Persona's order, in the space named, which must be one of the Persona's.
+    func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool {
+        guard let persona = tabs.first(where: { $0.value.contains { $0.id == id } })?.key, var list = tabs[persona],
+              let index = list.firstIndex(where: { $0.id == id }) else { return false }
+        var tab = list.remove(at: index)
+        switch place {
+        case let .before(other), let .after(other):
+            guard let at = list.firstIndex(where: { $0.id == other }) else { return false }
+            tab.spaceID = list[at].spaceID
+            list.insert(tab, at: place == .after(other) ? at + 1 : at)
+        case let .end(ofSpace: space):
+            if let space {
+                guard spaces[persona]?.contains(space) == true else { throw PluginError.notGranted(space) }
+                tab.spaceID = space
+            }
+            list.append(tab)
+        }
+        tabs[persona] = list
+        record(Change(kind: .moved(place), tab: id, cause: cause))
+        return true
+    }
+
     private func record(_ change: Change) {
         changes.append(change)
         onChange?(change)
     }
 }
 
-/// Opens, closes, and selects tabs, and so renames them, with nothing to run; the sites cover example.org.
+/// Opens, closes, selects, and moves tabs, and so renames them, with nothing to run; the sites cover example.org.
 @MainActor
 private final class ManagingPlugin: BuiltInPlugin {
     static var manifest: PluginManifest {
@@ -396,7 +419,7 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(throws: PluginError.permissionDenied(.renameTabs)) { _ = try limited.renameTab(other.id, to: "Name") }
         host.selected[persona] = other.id
         #expect(try limited.selectedTab()?.id == other.id)
-        #expect(PluginGrant(requestedBy: installed.manifest).summaries.first == "Open any website in your tabs, signed in as you, and close, select, and suggest names for your tabs")
+        #expect(PluginGrant(requestedBy: installed.manifest).summaries.first == "Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs")
 
         context.end()
         #expect(throws: PluginError.stopped) { _ = try context.selectedTab() }
@@ -404,6 +427,45 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(throws: PluginError.stopped) { try context.closeTab(other.id) }
         #expect(throws: PluginError.stopped) { try context.selectTab(other.id) }
         #expect(host.changes.count == 3)
+    }
+
+    /// `tabs.manage` moves the Persona's tabs through the host with the plugin as the cause, next to another of its tabs or to one of its spaces, and neither a tab nor a neighbor outside the Persona's tabs, as another Persona's, which the host would move; the host's refusal of a space reaches the plugin, and `SessionPluginBrowserHostTests` checks the spaces and the agent tabs that the session refuses.
+    @Test func tabMovesGoThroughTheBrowserHostUnderTheGrant() async throws {
+        let manager = manager(builtIns: [ManagingPlugin.self])
+        let installed = try #require(manager.plugins.first)
+        let space = UUID(), side = UUID()
+        let first = PluginTab(id: UUID(), spaceID: space, title: "First", url: URL(string: "https://example.org/a"), engine: .webKit, isPinned: false, isSelected: true)
+        let second = PluginTab(id: UUID(), spaceID: space, title: "Second", url: URL(string: "https://example.org/b"), engine: .webKit, isPinned: false, isSelected: false)
+        host.tabs[persona] = [first, second]
+        host.spaces[persona] = [space, side]
+        let context = manager.makeContext(for: installed)
+        let cause = BrowserEventCause(origin: .plugin(id: "org.example.managing"))
+
+        #expect(try context.moveTab(first.id, to: .after(second.id)))
+        #expect(try context.tabs().map(\.id) == [second.id, first.id])
+        #expect(try context.moveTab(second.id, to: .end(ofSpace: side)))
+        #expect(try context.tab(second.id)?.spaceID == side)
+        #expect(host.changes == [
+            FakeTabsHost.Change(kind: .moved(.after(second.id)), tab: first.id, cause: cause),
+            FakeTabsHost.Change(kind: .moved(.end(ofSpace: side)), tab: second.id, cause: cause),
+        ])
+
+        // Only the Persona's tabs move or take a tab next to them, though the host would move another Persona's, and a space that the host refuses stays refused.
+        let elsewhere = PluginTab(id: UUID(), spaceID: UUID(), title: "Elsewhere", url: URL(string: "https://example.org/c"), engine: .webKit, isPinned: false, isSelected: false)
+        host.tabs[UUID()] = [elsewhere]
+        let foreign = UUID()
+        #expect(throws: PluginError.notGranted(elsewhere.id)) { _ = try context.moveTab(elsewhere.id, to: .end(ofSpace: nil)) }
+        #expect(throws: PluginError.notGranted(elsewhere.id)) { _ = try context.moveTab(first.id, to: .before(elsewhere.id)) }
+        #expect(throws: PluginError.notGranted(foreign)) { _ = try context.moveTab(foreign, to: .end(ofSpace: nil)) }
+        #expect(throws: PluginError.notGranted(foreign)) { _ = try context.moveTab(first.id, to: .end(ofSpace: foreign)) }
+        #expect(host.changes.count == 2)
+
+        var withoutManage = installed
+        withoutManage.grant.permissions = [.tabs, .renameTabs]
+        #expect(throws: PluginError.permissionDenied(.manageTabs)) { _ = try manager.makeContext(for: withoutManage).moveTab(first.id, to: .end(ofSpace: nil)) }
+        context.end()
+        #expect(throws: PluginError.stopped) { _ = try context.moveTab(first.id, to: .end(ofSpace: nil)) }
+        #expect(host.changes.count == 2)
     }
 
     /// A plugin opens at most 10 tabs within a minute, so that plugins that open a tab for each other's `tabOpened` stop, each tab being an event subject of its own; an open that the host refuses does not count, and another plugin's opens count for it alone.
@@ -426,14 +488,14 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(host.changes.count == PluginManager.tabOpenLimit + 1)
     }
 
-    /// A script plugin reaches the tab members through `arch.tabs`, and the events of its own opens and closes never reach its listeners, while another tab's do.
+    /// A script plugin reaches the tab members through `arch.tabs`, `move` with a place of exactly one key or none, each key read as its place, and the events of its own opens and closes never reach its listeners, while another tab's do.
     @Test func aScriptPluginManagesTabsThroughArchTabsWithoutHearingItsOwnChanges() async throws {
         let manager = manager()
         defer { manager.close() }
-        let space = UUID()
+        let space = UUID(), side = UUID()
         let shown = PluginTab(id: UUID(), spaceID: space, title: "Shown", url: URL(string: "https://example.org/a"), engine: .webKit, isPinned: false, isSelected: true)
         host.tabs[persona] = [shown]
-        host.spaces[persona] = [space]
+        host.spaces[persona] = [space, side]
         host.selected[persona] = shown.id
         host.onChange = { [bus, persona] change in
             let ref = BrowserTabRef(id: change.tab, personaID: persona, spaceID: space, kind: .open, engine: .webKit, url: nil)
@@ -441,6 +503,7 @@ private final class QuietSettingsPlugin: SettingsPlugin {
             case .opened: bus.post(.tabOpened(tab: ref, openerTabID: nil), cause: change.cause)
             case .closed: bus.post(.tabClosed(tab: ref, reason: .plugin), cause: change.cause)
             case .selected: bus.post(.tabSelected(tab: ref, windowID: UUID()), cause: change.cause)
+            case .moved: break
             }
         }
         let background = """
@@ -452,9 +515,23 @@ private final class QuietSettingsPlugin: SettingsPlugin {
           const selected = await arch.tabs.selected();
           const opened = await arch.tabs.open("https://example.org/new", { select: false, engine: "chromium", spaceId: null });
           await arch.tabs.select(opened);
+          const order = async () => (await arch.tabs.list()).map((tab) => tab.id);
+          const movedBefore = await arch.tabs.move(opened, { before: selected.id });
+          const orderBefore = await order();
+          const movedAfter = await arch.tabs.move(opened, { after: selected.id, before: null });
+          const orderAfter = await order();
+          const movedToSpace = await arch.tabs.move(opened, { spaceId: "\(side.uuidString)" });
+          const space = (await arch.tabs.get(opened)).spaceId;
+          const movedLast = await arch.tabs.move(opened);
           await arch.tabs.close(opened);
           await arch.storage.set("results", {
-            selected: selected.id, title: selected.title ?? null, opened,
+            selected: selected.id, title: selected.title ?? null, opened, movedBefore, orderBefore, movedAfter, orderAfter, movedToSpace, space, movedLast,
+            missingNeighbor: await fail(() => arch.tabs.move(selected.id, { before: undefined })),
+            nullSpace: await fail(() => arch.tabs.move(selected.id, { spaceId: null })),
+            twoPlaces: await fail(() => arch.tabs.move(selected.id, { before: opened, after: opened })),
+            unknownPlace: await fail(() => arch.tabs.move(selected.id, { index: 0 })),
+            notAPlace: await fail(() => arch.tabs.move(selected.id, "first")),
+            foreignNeighbor: await fail(() => arch.tabs.move(selected.id, { after: "00000000-0000-0000-0000-000000000000" })),
             fileAddress: await fail(() => arch.tabs.open("file:///etc/hosts")),
             relativeAddress: await fail(() => arch.tabs.open("example.org")),
             unknownOption: await fail(() => arch.tabs.open("https://example.org/", { window: 1 })),
@@ -479,10 +556,16 @@ private final class QuietSettingsPlugin: SettingsPlugin {
             Issue.record("The command stored no results.")
             return
         }
-        #expect(host.changes.map(\.kind) == [.opened(URL(string: "https://example.org/new")!, PluginOpenTabOptions(select: false, engine: .chromium)), .selected, .closed])
+        #expect(host.changes.map(\.kind) == [.opened(URL(string: "https://example.org/new")!, PluginOpenTabOptions(select: false, engine: .chromium)), .selected,
+                                              .moved(.before(shown.id)), .moved(.after(shown.id)), .moved(.end(ofSpace: side)), .moved(.end(ofSpace: nil)), .closed])
         #expect(host.changes.allSatisfy { $0.tab.uuidString == opened && $0.cause == BrowserEventCause(origin: .plugin(id: installed.id.rawValue)) })
         #expect(results == [
             "selected": .string(shown.id.uuidString), "title": .null, "opened": .string(opened),
+            "movedBefore": .bool(true), "orderBefore": .array([.string(opened), .string(shown.id.uuidString)]),
+            "movedAfter": .bool(true), "orderAfter": .array([.string(shown.id.uuidString), .string(opened)]),
+            "movedToSpace": .bool(true), "space": .string(side.uuidString), "movedLast": .bool(true),
+            "missingNeighbor": .string("invalidCall"), "nullSpace": .string("invalidCall"), "twoPlaces": .string("invalidCall"),
+            "unknownPlace": .string("invalidCall"), "notAPlace": .string("invalidCall"), "foreignNeighbor": .string("notGranted"),
             "fileAddress": .string("invalidAddress"), "relativeAddress": .string("invalidCall"), "unknownOption": .string("invalidCall"),
             "unknownEngine": .string("invalidCall"), "foreignSpace": .string("notGranted"), "unknownTab": .string("notGranted"), "notATab": .string("invalidCall"),
         ])

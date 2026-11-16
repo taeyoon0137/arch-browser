@@ -1,7 +1,8 @@
-// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions and Personas): a tab that a plugin opens goes to the preferred or the named space of its Persona in its engine, and its opening, selection, and first load carry the plugin's cause; a selection goes to the window of the tab's Persona that shows it, else the front main window on its space, else the front main window of its Persona, and never to a window of another Persona; a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; an open names a space of another Persona as not granted and a deleted Persona as closed; and a selection of the tab that a window has selected already leaves the window's internal page and palette.
+// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions and Personas): a tab that a plugin opens goes to the preferred or the named space of its Persona in its engine, and its opening, selection, and first load carry the plugin's cause; a selection goes to the window of the tab's Persona that shows it, else the front main window on its space, else the front main window of its Persona, and never to a window of another Persona; a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; a plugin's move keeps a tab pinned or open and in its Persona, takes it out of its split view to another space, where a window that selects the tab follows it with the plugin's cause, and leaves a live folder's item tabs in their folder; an open names a space of another Persona as not granted and a deleted Persona as closed; and a selection of the tab that a window has selected already leaves the window's internal page and palette.
 import ARCHEngine
 import Events
 import Foundation
+import LiveFolders
 import Plugins
 import Testing
 @testable import Browsing
@@ -160,6 +161,75 @@ import Testing
                 _ = try host.openTab(address, PluginOpenTabOptions(spaceID: research.id, select: false), in: work.id, cause: cause)
             }
             #expect(session.allTabs.count == count)
+        }
+    }
+
+    /// A plugin's move puts a tab next to another of its list, in that tab's space and folder, or last in a space's list, and keeps it pinned or open; a move to another space takes the tab out of its split view, whose other panes stay together, and has the window that selects the tab follow it there, with the space switch carrying the plugin's cause. A favorite's tab and the item tab of a live folder neither move nor take a tab next to them, nor does a tab of the other list, and a space of another Persona is not granted.
+    @Test func aPluginsMoveKeepsTheTabsListAndPersona() throws {
+        try withSession { session, host in
+            let home = try #require(session.spaces.first)
+            let side = session.makeSpace(in: home.resolvedPersonaID)
+            let work = session.addPersona(named: "Work")
+            let research = try #require(session.spaces(in: work.id).first)
+            let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: home.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            defer { session.windowWillClose(window) }
+            @MainActor func tab(in space: Space, pinned: Bool = false) -> Tab {
+                session.openTab(url: URL(string: "https://example.org/\(UUID())"), in: space.id, pinned: pinned, select: false, engine: .webKit)
+            }
+            let first = tab(in: home), second = tab(in: home), third = tab(in: home), pinned = tab(in: home, pinned: true)
+            @MainActor func open(in space: Space) -> [UUID] { session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) }
+            var events: [String] = []
+            let subscription = session.events.subscribe(BrowserEventFilter()) { event in events.append("\(event.kind.rawValue) \(event.cause == cause)") }
+            defer { subscription.cancel() }
+
+            #expect(try host.moveTab(third.id, to: .before(first.id), cause: cause))
+            #expect(open(in: home) == [third.id, first.id, second.id])
+            #expect(try host.moveTab(third.id, to: .end(ofSpace: nil), cause: cause))
+            #expect(open(in: home) == [first.id, second.id, third.id])
+            // The tab stays open beside a pinned tab, and a pinned tab stays pinned in another space.
+            #expect(try !host.moveTab(first.id, to: .after(pinned.id), cause: cause))
+            #expect(try host.moveTab(pinned.id, to: .end(ofSpace: side.id), cause: cause))
+            #expect(pinned.isPinned && pinned.spaceID == side.id && session.tabsOutsideFolders(in: side.id, pinned: true).map(\.id) == [pinned.id])
+            #expect(events.isEmpty)
+
+            // The window that selects the tab follows it to the space it moves to, out of its split view, and a move next to a tab in a folder takes its folder.
+            window.selectTab(first.id)
+            session.setSplitView([first.id, second.id, third.id], ofSpace: home.id)
+            let folder = session.makeFolder(in: side.id, pinned: false)
+            let filed = tab(in: side)
+            session.moveTab(filed.id, toFolder: folder.id)
+            events = []
+            #expect(try host.moveTab(first.id, to: .after(filed.id), cause: cause))
+            #expect(first.spaceID == side.id && first.folderID == folder.id && window.currentSpaceID == side.id && window.selectedTabID == first.id)
+            #expect(session.splitTabIDs[home.id] == [second.id, third.id] && session.splitTabIDs[side.id] == nil)
+            #expect(events == ["spaceSwitched true"])
+            #expect(try host.moveTab(second.id, to: .end(ofSpace: side.id), cause: cause))
+            #expect(open(in: side) == [second.id] && open(in: home) == [third.id] && session.splitTabIDs[home.id] == nil)
+
+            // Tabs without a place in a space's lists stay, and so does the item tab of a live folder, which keeps its source's order and which no tab enters.
+            let favorite = Favorite(url: URL(string: "https://example.org/favorite")!, title: "Favorite", personaID: home.resolvedPersonaID)
+            session.addFavorites([favorite], in: home.resolvedPersonaID)
+            let favoriteTab = session.openTab(for: favorite)
+            #expect(try !host.moveTab(favoriteTab.id, to: .end(ofSpace: home.id), cause: cause))
+            #expect(try !host.moveTab(third.id, to: .before(favoriteTab.id), cause: cause))
+            let news = TabFolder(spaceID: home.id, name: "News", isPinned: true,
+                                 live: LiveFolderConfiguration(source: .feed(address: URL(string: "https://fixture.invalid/feed")!, isPrivate: false)))
+            session.appendFolder(news)
+            let item = session.adopt(PageStub(engine: .webKit, url: URL(string: "about:blank#item")), spaceID: home.id, personaID: home.resolvedPersonaID,
+                                     pinned: true, select: false, folderID: news.id)
+            item.liveItemID = "item"
+            let homePinned = tab(in: home, pinned: true)
+            #expect(try !host.moveTab(item.id, to: .end(ofSpace: nil), cause: cause))
+            #expect(try !host.moveTab(item.id, to: .end(ofSpace: side.id), cause: cause))
+            #expect(try !host.moveTab(item.id, to: .after(homePinned.id), cause: cause))
+            #expect(try !host.moveTab(homePinned.id, to: .before(item.id), cause: cause))
+            #expect(try !host.moveTab(pinned.id, to: .after(item.id), cause: cause))
+            #expect(try !host.moveTab(third.id, to: .before(third.id), cause: cause))
+            #expect(item.spaceID == home.id && item.folderID == news.id && item.liveItemID == "item" && homePinned.folderID == nil)
+            #expect(pinned.spaceID == side.id && favoriteTab.spaceID == nil)
+            #expect(throws: PluginError.notGranted(research.id)) { _ = try host.moveTab(third.id, to: .end(ofSpace: research.id), cause: cause) }
+            #expect(throws: PluginError.notGranted(research.id)) { _ = try host.moveTab(favoriteTab.id, to: .end(ofSpace: research.id), cause: cause) }
+            #expect(third.spaceID == home.id)
         }
     }
 

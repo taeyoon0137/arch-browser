@@ -1497,6 +1497,14 @@ public final class PluginManager: ObservableObject {
         browserHost?.selectTab(id, cause: Self.cause(plugin))
     }
 
+    /// Moves one of the Persona's tabs that `personaTabs()` lists, next to another of them or to a space, with the plugin as the cause of its events. Throws `PluginError.notGranted` for any other tab, as the one moved or the one to go next to, and as the host does.
+    fileprivate func moveTab(_ id: UUID, to place: PluginTabPlace, by plugin: PluginID) throws -> Bool {
+        let reached = Set(personaTabs().map(\.id))
+        guard reached.contains(id) else { throw PluginError.notGranted(id) }
+        if let neighbor = place.neighbor, !reached.contains(neighbor) { throw PluginError.notGranted(neighbor) }
+        return try browserHost?.moveTab(id, to: place, cause: Self.cause(plugin)) ?? false
+    }
+
     /// The cause of a change that the plugin's call makes, by which the plugin hears of none of the events it posts.
     private static func cause(_ plugin: PluginID) -> BrowserEventCause {
         BrowserEventCause(origin: .plugin(id: plugin.rawValue))
@@ -1792,7 +1800,7 @@ final class ScopedPluginContext: PluginPanelContext {
         return manager.shown(tab, to: grant, of: pluginID)
     }
 
-    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, and selecting do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes and selects its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
+    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, selecting, and moving do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes, selects, and moves its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)
@@ -1819,13 +1827,21 @@ final class ScopedPluginContext: PluginPanelContext {
         try manageTab(id, inStep: false) { try $0.selectTab(id, by: pluginID) }
     }
 
-    /// A close or a selection of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
-    private func manageTab(_ id: PluginTab.ID, inStep: Bool, _ change: (PluginManager) throws -> Void) throws {
+    func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool {
+        try manageTab(id, inStep: true) { try $0.moveTab(id, to: place, by: pluginID) }
+    }
+
+    func panelMoveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool {
+        try manageTab(id, inStep: false) { try $0.moveTab(id, to: place, by: pluginID) }
+    }
+
+    /// A close, a selection, or a move of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
+    private func manageTab<Value>(_ id: PluginTab.ID, inStep: Bool, _ change: (PluginManager) throws -> Value) throws -> Value {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)
         guard let manager else { throw PluginError.notGranted(id) }
         if inStep, let step = hookStep, step.tab == id, step.isStopped { throw PluginError.stopped }
-        try change(manager)
+        return try change(manager)
     }
 
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool {

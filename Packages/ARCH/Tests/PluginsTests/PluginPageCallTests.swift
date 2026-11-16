@@ -136,6 +136,7 @@ final class PageHost: PluginBrowserHost {
     func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID { throw PluginError.closed }
     func closeTab(_ id: UUID, cause: BrowserEventCause) {}
     func selectTab(_ id: UUID, cause: BrowserEventCause) {}
+    func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool { false }
 
     /// A tab whose engine committed a document at `address` and whose page runs scripts there.
     @discardableResult

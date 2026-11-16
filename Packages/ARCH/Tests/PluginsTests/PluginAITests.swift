@@ -1,4 +1,4 @@
-// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws, and ending as `AIClient.reply(_:)` does; a panel's requests, renames, closes, and selections outside the plugin's hook steps, and its requests stopped when it closes; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document and its closes and selections of its event's tab refused once it stops; and the setting changes of such a plugin reaching it outside the scheduler, also before its feature has a model.
+// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws, and ending as `AIClient.reply(_:)` does; a panel's requests, renames, closes, selections, and moves outside the plugin's hook steps, and its requests stopped when it closes; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document and its closes, selections, and moves of its event's tab refused once it stops; and the setting changes of such a plugin reaching it outside the scheduler, also before its feature has a model.
 import AI
 import ARCHEngine
 import Events
@@ -203,6 +203,11 @@ private final class RecordingHost: PluginBrowserHost {
     func openTab(_ url: URL, _ options: PluginOpenTabOptions, in persona: PersonaID, cause: BrowserEventCause) throws -> UUID { throw PluginError.closed }
     func closeTab(_ id: UUID, cause: BrowserEventCause) { changes.append("close \(id)") }
     func selectTab(_ id: UUID, cause: BrowserEventCause) { changes.append("select \(id)") }
+
+    func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool {
+        changes.append("move \(id)")
+        return true
+    }
 }
 
 @MainActor
@@ -742,8 +747,8 @@ extension PluginAITests {
         #expect(host.renames.map(\.name) == ["During", "After"] && host.renames.last?.document == nil)
     }
 
-    /// Once the scheduler stops a step, whose listener still runs, the listener closes and selects the step's tab no more, since the tab can show the user's next document by then, while it still reaches another tab and a panel reaches the step's tab.
-    @Test func aStoppedStepClosesAndSelectsItsTabNoMore() async throws {
+    /// Once the scheduler stops a step, whose listener still runs, the listener closes, selects, and moves the step's tab no more, since the tab can show the user's next document by then, while it still reaches another tab and a panel reaches the step's tab.
+    @Test func aStoppedStepClosesSelectsAndMovesItsTabNoMore() async throws {
         let manifest = #"{"id": "org.example.close-panel", "name": "Close Panel", "version": "1", "apiVersion": 1, "summary": "Closes.", "permissions": ["ai", "tabs.manage"], "events": ["pageLoaded"], "background": "b.js", "contributes": {"sidebarItems": [{"id": "panel", "title": "Close", "symbol": "xmark", "panel": "panel.html"}]}}"#
         let background = """
         arch.events.on("pageLoaded", async (event) => {
@@ -752,7 +757,8 @@ extension PluginAITests {
           const fail = async (call) => { try { await call(); return "resolved"; } catch (error) { return error.message; } };
           const other = (await arch.tabs.list()).find((tab) => tab.id !== event.tab.id).id;
           await arch.storage.set("step", {
-            select: await fail(() => arch.tabs.select(event.tab.id)), close: await fail(() => arch.tabs.close(event.tab.id)), other: await fail(() => arch.tabs.select(other)),
+            select: await fail(() => arch.tabs.select(event.tab.id)), move: await fail(() => arch.tabs.move(event.tab.id)), close: await fail(() => arch.tabs.close(event.tab.id)),
+            other: await fail(() => arch.tabs.select(other)),
           });
           await new Promise((resolve) => setTimeout(resolve, 3000));
         });
@@ -780,11 +786,13 @@ extension PluginAITests {
         #expect(await eventually { storage.value(forKey: "ready") == .bool(true) })
         service.hooks.scheduler.cancel(subject: page.id)
         #expect(await eventually { storage.value(forKey: "step") != nil })
-        #expect(storage.value(forKey: "step") == .object(["select": .string("stopped"), "close": .string("stopped"), "other": .string("resolved")]))
+        #expect(storage.value(forKey: "step") == .object(["select": .string("stopped"), "move": .string("stopped"), "close": .string("stopped"), "other": .string("resolved")]))
         #expect(host.changes == ["select \(other.id)"])
         // The listener still runs, and the panel's calls belong to no step.
-        _ = try await webView.callAsyncJavaScript("await arch.tabs.select(id); await arch.tabs.close(id);", arguments: ["id": page.id.uuidString], contentWorld: .page)
-        #expect(host.changes == ["select \(other.id)", "select \(page.id)", "close \(page.id)"])
+        let moved = try await webView.callAsyncJavaScript("await arch.tabs.select(id); const moved = await arch.tabs.move(id); await arch.tabs.close(id); return moved;",
+                                                          arguments: ["id": page.id.uuidString], contentWorld: .page)
+        #expect(moved as? Bool == true)
+        #expect(host.changes == ["select \(other.id)", "select \(page.id)", "move \(page.id)", "close \(page.id)"])
     }
 
     /// Closing a panel stops the requests of its document.

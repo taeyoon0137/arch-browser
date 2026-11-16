@@ -69,6 +69,32 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         session.events.withCause(cause) { select(tab, in: session) }
     }
 
+    /// The tab moves as a drag to a tab's row (`BrowserSession.moveTab(_:to:after:)`) or a drop on a space's symbol (`moveTab(_:toSpace:)`) moves it, or to the end of its own list (`moveTabToListEnd(_:pinned:)`), and keeps its list, so that it stays pinned or open. A move next to a tab of another space first goes to that space, which takes the tab out of its split view and has each window that selects it follow it there, with the `spaceSwitched` carrying the cause. A tab that a space's lists do not show, a favorite's or a small window's, and a live folder's tab, which keeps its source's order (live folder rule 4) and which nothing else enters, neither move nor take a tab next to them.
+    public func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool {
+        guard let session, let tab = pluginTab(id) else { return false }
+        switch place {
+        case let .before(neighborID), let .after(neighborID):
+            guard let neighbor = pluginTab(neighborID), neighbor.id != tab.id, Self.isMovable(tab, in: session), Self.isMovable(neighbor, in: session),
+                  neighbor.isPinned == tab.isPinned, let spaceID = neighbor.spaceID, session.canMoveTab(tab.id, toSpace: spaceID) else { return false }
+            session.events.withCause(cause) {
+                if tab.spaceID != spaceID { session.moveTab(tab.id, toSpace: spaceID) }
+                session.moveTab(tab.id, to: neighbor, after: place == .after(neighborID))
+            }
+        case let .end(ofSpace: named):
+            if let named, session.spaces.first(where: { $0.id == named })?.resolvedPersonaID != tab.personaID { throw PluginError.notGranted(named) }
+            guard Self.isMovable(tab, in: session), let spaceID = named ?? tab.spaceID else { return false }
+            session.events.withCause(cause) {
+                if tab.spaceID == spaceID { session.moveTabToListEnd(tab.id, pinned: tab.isPinned) } else { session.moveTab(tab.id, toSpace: spaceID) }
+            }
+        }
+        return true
+    }
+
+    /// Whether a plugin moves the tab and puts a tab next to it: a space's tab that its lists show, outside live folders.
+    private static func isMovable(_ tab: Tab, in session: BrowserSession) -> Bool {
+        tab.spaceID != nil && tab.isListedInSidebar && tab.liveItemID == nil && !session.folderTree.isLive(tab.folderID)
+    }
+
     /// Selects the tab in a window of its Persona only, so that a window of another Persona keeps its Persona / Space, which selecting a favorite's tab of another Persona would change: the window of the Persona that shows it, else the front main window on its space, else the front main window of its Persona, which then shows the tab's space, or for a favorite's tab stays on its own. None selects it without such a window. A window that has the tab selected already stays as it is, so that the internal page, palette, or find bar that the user has open there stays.
     private func select(_ tab: Tab, in session: BrowserSession) {
         let window = session.windows.first { $0.personaID == tab.personaID && $0.shows(tab) }
