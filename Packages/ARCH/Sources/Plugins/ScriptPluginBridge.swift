@@ -476,16 +476,15 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         return options
     }
 
-    /// The place of `arch.tabs.move(id, place)`: `{before}` or `{after}` with a tab's identifier, or `{spaceId}` with a space's, at most one of them, where a missing or null value counts as none. Without one, the tab goes last in its own space's list.
+    /// The place of `arch.tabs.move(id, place)`: `{before}` or `{after}` with a tab's identifier, or `{spaceId}` with a space's, exactly one of them, where a null value counts as missing. Without a place, or with null, the tab goes last in its own space's list.
     private static func tabPlace(_ value: PluginValue?) throws -> PluginTabPlace {
         guard let value, value != .null else { return .end(ofSpace: nil) }
         guard case let .object(fields) = value else { throw BridgeFailure.invalidCall }
         let known: Set = ["before", "after", "spaceId"]
         let given = fields.filter { $0.value != .null }
-        // A key the bridge does not read would go without effect, and two places name none.
-        guard fields.keys.allSatisfy(known.contains), given.count <= 1 else { throw BridgeFailure.invalidCall }
-        guard let (key, field) = given.first else { return .end(ofSpace: nil) }
-        guard case let .string(text) = field, let id = UUID(uuidString: text) else { throw BridgeFailure.invalidCall }
+        // A key the bridge does not read would go without effect, and two places name none. An object without one is a neighbor or a space that the script did not find, as `{before: undefined}`, whose key JSON leaves out, so it is refused rather than taking the tab out of its folder to the end of the list.
+        guard fields.keys.allSatisfy(known.contains), given.count == 1, let (key, field) = given.first,
+              case let .string(text) = field, let id = UUID(uuidString: text) else { throw BridgeFailure.invalidCall }
         switch key {
         case "before": return .before(id)
         case "after": return .after(id)

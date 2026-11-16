@@ -485,14 +485,14 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(host.changes.count == PluginManager.tabOpenLimit + 1)
     }
 
-    /// A script plugin reaches the tab members through `arch.tabs`, `move` with a place of one key at most, and the events of its own opens and closes never reach its listeners, while another tab's do.
+    /// A script plugin reaches the tab members through `arch.tabs`, `move` with a place of exactly one key or none, each key read as its place, and the events of its own opens and closes never reach its listeners, while another tab's do.
     @Test func aScriptPluginManagesTabsThroughArchTabsWithoutHearingItsOwnChanges() async throws {
         let manager = manager()
         defer { manager.close() }
-        let space = UUID()
+        let space = UUID(), side = UUID()
         let shown = PluginTab(id: UUID(), spaceID: space, title: "Shown", url: URL(string: "https://example.org/a"), engine: .webKit, isPinned: false, isSelected: true)
         host.tabs[persona] = [shown]
-        host.spaces[persona] = [space]
+        host.spaces[persona] = [space, side]
         host.selected[persona] = shown.id
         host.onChange = { [bus, persona] change in
             let ref = BrowserTabRef(id: change.tab, personaID: persona, spaceID: space, kind: .open, engine: .webKit, url: nil)
@@ -512,11 +512,19 @@ private final class QuietSettingsPlugin: SettingsPlugin {
           const selected = await arch.tabs.selected();
           const opened = await arch.tabs.open("https://example.org/new", { select: false, engine: "chromium", spaceId: null });
           await arch.tabs.select(opened);
+          const order = async () => (await arch.tabs.list()).map((tab) => tab.id);
           const movedBefore = await arch.tabs.move(opened, { before: selected.id });
-          const movedLast = await arch.tabs.move(opened, { spaceId: null, after: undefined });
+          const orderBefore = await order();
+          const movedAfter = await arch.tabs.move(opened, { after: selected.id, before: null });
+          const orderAfter = await order();
+          const movedToSpace = await arch.tabs.move(opened, { spaceId: "\(side.uuidString)" });
+          const space = (await arch.tabs.get(opened)).spaceId;
+          const movedLast = await arch.tabs.move(opened);
           await arch.tabs.close(opened);
           await arch.storage.set("results", {
-            selected: selected.id, title: selected.title ?? null, opened, movedBefore, movedLast,
+            selected: selected.id, title: selected.title ?? null, opened, movedBefore, orderBefore, movedAfter, orderAfter, movedToSpace, space, movedLast,
+            missingNeighbor: await fail(() => arch.tabs.move(selected.id, { before: undefined })),
+            nullSpace: await fail(() => arch.tabs.move(selected.id, { spaceId: null })),
             twoPlaces: await fail(() => arch.tabs.move(selected.id, { before: opened, after: opened })),
             unknownPlace: await fail(() => arch.tabs.move(selected.id, { index: 0 })),
             notAPlace: await fail(() => arch.tabs.move(selected.id, "first")),
@@ -546,11 +554,15 @@ private final class QuietSettingsPlugin: SettingsPlugin {
             return
         }
         #expect(host.changes.map(\.kind) == [.opened(URL(string: "https://example.org/new")!, PluginOpenTabOptions(select: false, engine: .chromium)), .selected,
-                                              .moved(.before(shown.id)), .moved(.end(ofSpace: nil)), .closed])
+                                              .moved(.before(shown.id)), .moved(.after(shown.id)), .moved(.end(ofSpace: side)), .moved(.end(ofSpace: nil)), .closed])
         #expect(host.changes.allSatisfy { $0.tab.uuidString == opened && $0.cause == BrowserEventCause(origin: .plugin(id: installed.id.rawValue)) })
         #expect(results == [
-            "selected": .string(shown.id.uuidString), "title": .null, "opened": .string(opened), "movedBefore": .bool(true), "movedLast": .bool(true),
-            "twoPlaces": .string("invalidCall"), "unknownPlace": .string("invalidCall"), "notAPlace": .string("invalidCall"), "foreignNeighbor": .string("notGranted"),
+            "selected": .string(shown.id.uuidString), "title": .null, "opened": .string(opened),
+            "movedBefore": .bool(true), "orderBefore": .array([.string(opened), .string(shown.id.uuidString)]),
+            "movedAfter": .bool(true), "orderAfter": .array([.string(shown.id.uuidString), .string(opened)]),
+            "movedToSpace": .bool(true), "space": .string(side.uuidString), "movedLast": .bool(true),
+            "missingNeighbor": .string("invalidCall"), "nullSpace": .string("invalidCall"), "twoPlaces": .string("invalidCall"),
+            "unknownPlace": .string("invalidCall"), "notAPlace": .string("invalidCall"), "foreignNeighbor": .string("notGranted"),
             "fileAddress": .string("invalidAddress"), "relativeAddress": .string("invalidCall"), "unknownOption": .string("invalidCall"),
             "unknownEngine": .string("invalidCall"), "foreignSpace": .string("notGranted"), "unknownTab": .string("notGranted"), "notATab": .string("invalidCall"),
         ])
