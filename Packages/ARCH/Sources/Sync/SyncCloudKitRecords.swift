@@ -33,9 +33,11 @@ public enum SyncCloudKitRecords {
     ///
     /// With `base`, the mirror's copy of the record or the server's record of a refused save, the result starts from a copy of it, so it keeps the system fields that hold the change tag, and the fields this build does not know for the record type keep the base's values and edit times, whatever their CloudKit type (`docs/sync.md`, Schema versions). The fields this build knows, and their edit times, come from `record`; a known field that `record` lacks is removed. Without `base`, every field of `record` is written. `base` itself is left unchanged.
     ///
-    /// Each value is placed by its kind: text in `encryptedValues`, and numbers and references as plain values. A reference points to a record of the zone and has no delete action, because the Mac that deletes a parent also deletes or moves its children in the same batch.
+    /// Each value is placed by its kind: text in `encryptedValues`, and numbers and references as plain values. A reference points to a record of the zone and has no delete action, because the Mac that deletes a parent also deletes or moves its children in the same batch. A metadata key that the base holds in the other kind of values, as another writer could leave it, moves too, since CloudKit raises an exception for a write to one kind while the other holds the key.
+    ///
+    /// A base that is not a copy of the same record in the zone, by name and type, is not used.
     public static func ckRecord(from record: SyncRecord, base: CKRecord? = nil) -> CKRecord {
-        assert(base.map { isInZone($0.recordID) && $0.recordID.recordName == record.recordName && $0.recordType == record.recordType.rawValue } ?? true, "The base is a copy of the same record in the zone")
+        let base = base.flatMap { isInZone($0.recordID) && $0.recordID.recordName == record.recordName && $0.recordType == record.recordType.rawValue ? $0 : nil }
         let ckRecord = (base?.copy() as? CKRecord) ?? CKRecord(recordType: record.recordType.rawValue, recordID: recordID(named: record.recordName))
         let knownFields = Set(record.recordType.fields.map(\.rawValue))
         let writtenFields = base == nil ? knownFields.union(record.fields.keys) : knownFields
@@ -54,6 +56,7 @@ public enum SyncCloudKitRecords {
         if let base {
             times = fieldModifiedAt(of: base).filter { !knownFields.contains($0.key) }.merging(times.filter { knownFields.contains($0.key) }) { $1 }
         }
+        for key in MetadataKey.all { remove(key, from: ckRecord) }
         ckRecord.encryptedValues[MetadataKey.fieldModifiedAt] = fieldModifiedAtText(times)
         ckRecord[MetadataKey.modifiedAt] = record.modifiedAt
         ckRecord[MetadataKey.schemaVersion] = record.schemaVersion
