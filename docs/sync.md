@@ -88,7 +88,7 @@ Code comments and documents cite these as "sync decision 4".
 - Open tabs and open folders, the closed-tab list, the selected tab, the current space, folders' collapsed state, window frames, small windows, and the sidebar width.
 - A live folder's items, read state, and fetch state (`live-folders.json`). Each Mac fetches its own items.
 - Browsing history (`history.sqlite`), downloads, captures, and favicons.
-- Private API flags (`ARCHPrivateAPIs`, `ARCHPrivateAPI.*`, `ARCHPrivateAPIFeature.*`), whose availability depends on each Mac's macOS version, per-Mac prompts such as `ARCHAskedDefaultBrowser`, and the sync toggle itself (`ARCHSyncEnabled`).
+- Private API flags (`ARCHPrivateAPIs`, `ARCHPrivateAPI.*`, `ARCHPrivateAPIFeature.*`), whose availability depends on each Mac's macOS version, per-Mac prompts such as `ARCHAskedDefaultBrowser`, and sync's own keys, such as the toggle (`ARCHSyncEnabled`) and the key of the crash-loop guard (`ARCHSyncApplyingChanges`).
 - Installed plugins and extensions and their storage (rows 44 and 50).
 
 ## Container, database, and zone
@@ -231,6 +231,13 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
   - `.purged`: the user removed Arch's data in the system's iCloud settings. Same as `.deleted`.
   - `.encryptedDataReset`: the user reset the end-to-end encryption keys, so the encrypted fields are gone. Sync drops the mirror's records, keeps the pending saves, creates the zone again, and uploads this Mac's items, as in a first sync with an empty zone. Without mirror copies, the comparisons save every item without a base, and no local item is deleted.
 
+## Crash-loop guard
+
+- While the controller applies a fetch or a first sync's plan, from the merge to the checkpoint of `sync.json`, it keeps `ARCHSyncApplyingChanges` set in `UserDefaults`. It removes the key once the apply ends, also when the apply fails with an error, which leaves sync on to try again at the next fetch.
+- A launch that finds the key followed one that quit while applying, as a crash does. `sync.json` lacks what that apply would have checkpointed, so the next fetch would bring the same changes and could stop the app again at every launch. That launch therefore turns sync off (`ARCHSyncEnabled`) before any account check or engine starts, and Settings ▸ Sync's Sync status says "Sync turned off because Arch quit while it applied changes from iCloud. Turn it on to try again." The key stays, so later launches keep sync off and say the same.
+- Turning sync on removes the key and starts the engine from `sync.json` as before, which fetches and applies the same changes again. Turning sync off removes it too. The local sidebar, iCloud data, and `sync.json` stay as they were.
+- A quit while applying that is no crash, such as a forced quit, turns sync off the same way.
+
 ## Schema versions
 
 - In the CloudKit Development environment, CloudKit creates record types and fields when a record first uses them. The Production environment needs the schema deployed from CloudKit Console. A save that uses an undeployed type or field fails there. Deployed record types and fields can never be removed or change type. Schema changes are additive in both environments. Each is deployed before a Production build writes it (decision 6).
@@ -258,6 +265,7 @@ Every record also has `modifiedAt`, `fieldModifiedAt`, and `schemaVersion`.
   - With a temporarily unavailable account or an unknown status: "iCloud isn't available right now. Arch checks again when it becomes active."
 - After a sign-out, an account switch, or a deleted zone, the toggle is off. While the availability check finds that sync cannot run, its reason and the disabled toggle above win: after a sign-out, Settings shows "Sign in to iCloud in System Settings to sync." Once the check finds an available account, as after an account switch, signing in again, or a deleted zone, the toggle is enabled, and the reason says what happened: "Sync turned off because the iCloud account changed. Turn it on to merge this Mac's sidebar into the current account." or "Sync turned off because Arch's iCloud data was deleted. Turn it on to upload this Mac's sidebar again."
 - Turning sync off stops the engine and keeps local data, iCloud data, and `sync.json`. Turning it on again resumes from the saved change token.
+- After a launch that followed a quit while sync applied changes, the toggle is off and Sync status says why until sync is turned on again (Crash-loop guard).
 - After a confirmation sheet, Delete iCloud Data deletes the zone, turns sync off, and deletes `sync.json`. The controller holds record uploads while the confirmed request is pending. Temporary failures retry on the live engine. A refusal resumes syncing with a new engine from the pre-deletion file, which fetches again what the wait dropped, and the user can retry. A relaunch after a quit while the request waits uses the pre-deletion file, fetches the zone’s current state, and asks the user to delete again. Success or an already missing zone ends sync. This removes iCloud data for every Mac. Local data stays. Other Macs turn sync off at their next fetch.
 - While sync is on, the Delete Persona sheet adds: "It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too." (decision 8).
 - The section names no Persona. Labels naming a space with its Persona use the existing `BrowserSession.displayedPlace(ofPersona:space:among:)` formatter.
