@@ -129,10 +129,21 @@ import Testing
         #expect(result.recordsToApply["live"] == live)
     }
 
-    @Test func invalidIdentitiesFailBeforeProducingAnyPlan() {
+    /// A name listed twice, as a session that lists an item twice gives it, counts by its first copy instead of stopping every later first sync; the plan names it once.
+    @Test func aNameListedTwiceCountsByItsFirstCopy() throws {
+        let first = space("collision", "Personal"), second = space("collision", "Work")
+        let pin = tab("pin", space: "collision", url: "https://example.test/a")
+        let uploads = try plan([first, pin, second, pin], [])
+        #expect(uploads.recordsToUpload.map(\.recordName) == ["collision", "pin"])
+        #expect(uploads.recordsToUpload.first?[.name] == .text("Personal"))
+        let applied = try plan([], [first, second])
+        #expect(applied.recordsToApply["collision"] == first && applied.recordsToApply.count == 1)
+        let joined = try plan([space("local", "Personal"), space("local", "Personal")], [space("remote", "Personal")])
+        #expect(joined.replacements.map { "\($0.localName)>\($0.serverName)" } == ["local>remote"] && joined.recordsToUpload.isEmpty)
+    }
+
+    @Test func aNameOfTwoTypesFailsBeforeProducingAnyPlan() {
         let s = space("collision", "Personal")
-        #expect(throws: FirstSyncMerge.InvalidRecords.duplicateName("collision")) { try plan([s, s], []) }
-        #expect(throws: FirstSyncMerge.InvalidRecords.duplicateName("collision")) { try plan([], [s, s]) }
         #expect(throws: FirstSyncMerge.InvalidRecords.conflictingTypes("collision")) {
             try plan([s], [record(.persona, "collision", [:])])
         }

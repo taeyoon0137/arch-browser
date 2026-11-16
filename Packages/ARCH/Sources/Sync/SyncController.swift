@@ -563,8 +563,9 @@ import Foundation
         let held = IncomingSidebarRecords.heldOut(server: base, local: local)
         let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) }
         let differences = SyncDiff.changes(local: local.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
-        let changed = Dictionary(uniqueKeysWithValues: differences.saves.map { ($0.recordName, $0) })
-        let baseByName = Dictionary(uniqueKeysWithValues: base.map { ($0.recordName, $0) })
+        // A name listed twice counts by its first copy, as in the comparison itself.
+        let changed = Dictionary(differences.saves.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+        let baseByName = Dictionary(base.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
         let current = local.map { held.contains($0.recordName) ? $0 : changed[$0.recordName] ?? baseByName[$0.recordName] ?? $0 }
         // A record already deleted on this Mac must stay absent while its pending delete
         // is being sent. An edit of that same surviving server ID cannot restore it.

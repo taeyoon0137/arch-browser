@@ -288,6 +288,28 @@ import Testing
         }
     }
 
+    /// A state that lists a Persona, space, folder, favorite, and pinned tab twice applies each once, as its first copy. Before, the first sync's apply trapped on the repeated space (`Dictionary(uniqueKeysWithValues:)`), and the pin's two copies made two tabs with one ID.
+    @Test func aStateThatListsAnIDTwiceAppliesItsFirstCopy() async throws {
+        try await temporarySession { session, _ in
+            let original = session.sidebarSyncState
+            let persona = Persona(name: "Work")
+            let space = Space(name: "Room", personaID: persona.id)
+            var laterSpace = space
+            laterSpace.name = "Later"
+            let folder = SidebarSyncState.Folder(id: UUID(), personaID: persona.id, spaceID: space.id, parentID: nil, name: "Folder", live: nil)
+            let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Favorite", personaID: persona.id)
+            let pin = SidebarSyncState.PinnedTab(id: UUID(), personaID: persona.id, spaceID: space.id, folderID: folder.id,
+                                                 savedPage: SavedPage(url: URL(string: "about:blank#pin")!, title: "Pin"), customTitle: nil, engine: .webKit)
+            let twice = SidebarSyncState(personas: original.personas + [persona, persona], spaces: original.spaces + [space, laterSpace],
+                                         folders: [folder, folder], favorites: [favorite, favorite], pinnedTabs: [pin, pin])
+            session.applyFirstSidebarSync(twice, replacements: .init())
+            session.applySidebarSync(twice, deletions: .init())
+            #expect(session.sidebarSyncState == twice.withFirstCopies)
+            #expect(session.tabs.filter { $0.id == pin.id }.count == 1 && session.spaces.filter { $0.id == space.id }.map(\.name) == ["Room"])
+            #expect(session.personas.filter { $0.id == persona.id }.count == 1 && session.folders.filter { $0.id == folder.id }.count == 1)
+        }
+    }
+
     @Test func firstSyncMovesLocalChildrenAndSelectionToTheMatchedIDsOnlyOnce() async throws {
         try await temporarySession { session, directory in
             let original = session.sidebarSyncState

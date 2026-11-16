@@ -13,6 +13,8 @@ import Testing
         let database = SyncDatabase(containerIdentifier: "fixture.two-macs", environment: "Test")
         var records: [String: CKRecord] = [:]
         var pages: [SyncFetchedChanges] = []
+        /// Each fetch brings every record twice, as a server that held a record twice would.
+        var bringsRecordsTwice = false
 
         func accept(_ batch: FakeSyncEngine.Batch) {
             var page = SyncFetchedChanges(records: batch.records)
@@ -91,12 +93,13 @@ import Testing
                     self.engine = engine
                     var cursor = engine.startedFrom.flatMap { try? JSONDecoder().decode(Int.self, from: $0) }
                     engine.onFetch = { [unowned self, unowned engine] in
-                        let changes: [SyncFetchedChanges]
+                        var changes: [SyncFetchedChanges]
                         if let cursor { changes = Array(zone.pages.dropFirst(cursor)) }
                         else {
                             firstFetches += 1
                             changes = [.init(records: Array(zone.records.values))]
                         }
+                        if zone.bringsRecordsTwice { changes = changes.map { .init(records: $0.records + $0.records, deletions: $0.deletions) } }
                         cursor = zone.pages.count
                         engine.fetchToken = try? JSONEncoder().encode(cursor)
                         return changes.map(SyncEvent.fetchedChanges)
@@ -201,5 +204,138 @@ import Testing
         await a.controller.refresh()
         #expect(a.session.tabs.contains { $0.id == pin.id && !$0.isPinned })
         #expect(a.session.sidebarSyncState.favorites.map(\.id) == [favorite.id])
+    }
+
+    /// Puts a second Persona, a pinned folder with a pinned tab of `page` in it, and a favorite in the Mac's sidebar, as a Mac in use has them.
+    private func fill(_ mac: Mac, page: String) throws -> (folder: TabFolder, pin: SidebarSyncState.PinnedTab, favorite: Favorite) {
+        _ = mac.session.addPersona(named: "Work")
+        let space = try #require(mac.session.spaces.first { $0.resolvedPersonaID == Persona.defaultID })
+        let folder = mac.session.makeFolder(in: space.id, pinned: true)
+        let favorite = Favorite(url: URL(string: "about:blank#\(page)-favorite")!, title: "Favorite", personaID: Persona.defaultID)
+        mac.session.addFavorites([favorite], in: Persona.defaultID)
+        let pin = SidebarSyncState.PinnedTab(id: UUID(), personaID: Persona.defaultID, spaceID: space.id, folderID: folder.id,
+                                             savedPage: .init(url: URL(string: "about:blank#\(page)")!, title: "Saved"), customTitle: nil, engine: .webKit)
+        let state = mac.session.sidebarSyncState
+        mac.session.applySidebarSync(.init(personas: state.personas, spaces: state.spaces, folders: state.folders, favorites: state.favorites,
+                                           pinnedTabs: state.pinnedTabs + [pin]), deletions: .init())
+        try mac.session.saveNow().get()
+        return (folder, pin, favorite)
+    }
+
+    /// Whether each Persona, space, folder, favorite, and tab of the session has an ID of its own.
+    private func hasUniqueIDs(_ session: BrowserSession) -> Bool {
+        Set(session.personas.map(\.id)).count == session.personas.count && Set(session.spaces.map(\.id)).count == session.spaces.count
+            && Set(session.folders.map(\.id)).count == session.folders.count && Set(session.favorites.map(\.id)).count == session.favorites.count
+            && Set(session.allTabs.map(\.id)).count == session.allTabs.count
+    }
+
+    /// B's data folder came from A, so B's Personas, spaces, folder, pinned tab, and favorite have the record names of A's records, and both Macs changed them before B turned sync on. Each ID joins its record once, the server's values win where both have one (sync decision 4), and B's own space of a name A uses joins A's.
+    @Test func aSecondMacThatSharesIDsWithTheServerJoinsWithoutDuplicates() async throws {
+        let zone = Zone()
+        let a = try Mac(zone: zone), b = try Mac(zone: zone)
+        defer { a.clean(); b.clean() }
+        let shared = try fill(a, page: "shared")
+        try? FileManager.default.removeItem(at: b.file)
+        try FileManager.default.copyItem(at: a.file, to: b.file)
+        try b.launch()
+        let later = a.session.makeSpace(in: Persona.defaultID, named: "Later")
+        a.session.moveFolder(shared.folder.id, toSpace: later.id)
+        await a.controller.setEnabled(true)
+        try await a.flush()
+        let renamed = try #require(b.session.tabs.first { $0.id == shared.pin.id })
+        renamed.customTitle = "Renamed on B"
+        b.session.moveFolder(shared.folder.id, toSpace: b.session.makeSpace(in: Persona.defaultID, named: "Later").id)
+        try b.session.saveNow().get()
+        await b.controller.setEnabled(true)
+        try await b.flush()
+        await a.controller.refresh()
+        #expect(b.controller.lastError == nil && b.controller.canSendRecords && b.firstFetches == 1)
+        #expect(a.session.sidebarSyncState == b.session.sidebarSyncState && hasUniqueIDs(a.session) && hasUniqueIDs(b.session))
+        #expect(b.session.spaces.filter { $0.name == "Later" }.map(\.id) == [later.id])
+        #expect(b.session.folders.map(\.spaceID) == [later.id] && b.session.favorites.map(\.id) == [shared.favorite.id])
+        #expect(b.session.tabs.filter { $0.id == shared.pin.id }.map(\.customTitle) == ["Renamed on B"])
+        #expect(zone.records.count == 8)
+    }
+
+    /// The usual case: each Mac made its own sidebar, so no ID is shared but the default Persona's. B's Personal space, folder, pinned tab, and favorite join A's by name, saved page, and address, and B's Work Persona stays apart from A's (sync decision 4).
+    @Test func aSecondMacWithItsOwnIDsJoinsTheServersItemsByName() async throws {
+        let zone = Zone()
+        let a = try Mac(zone: zone), b = try Mac(zone: zone)
+        defer { a.clean(); b.clean() }
+        let onA = try fill(a, page: "same")
+        _ = try fill(b, page: "same")
+        await a.controller.setEnabled(true)
+        try await a.flush()
+        await b.controller.setEnabled(true)
+        try await b.flush()
+        await a.controller.refresh()
+        #expect(b.controller.lastError == nil && b.controller.canSendRecords)
+        #expect(a.session.sidebarSyncState == b.session.sidebarSyncState && hasUniqueIDs(b.session))
+        #expect(b.session.folders.map(\.id) == [onA.folder.id] && b.session.favorites.map(\.id) == [onA.favorite.id])
+        #expect(b.session.sidebarSyncState.pinnedTabs.map(\.id) == [onA.pin.id])
+        #expect(b.session.personas.filter { $0.name == "Work" }.count == 2)
+    }
+
+    /// A first fetch that brings every record twice, and a `sync.json` whose mirror lists a record twice, apply each record once.
+    @Test func recordsFetchedOrMirroredTwiceApplyOnce() async throws {
+        let zone = Zone()
+        let a = try Mac(zone: zone), b = try Mac(zone: zone)
+        defer { a.clean(); b.clean() }
+        let onA = try fill(a, page: "twice")
+        await a.controller.setEnabled(true)
+        try await a.flush()
+        zone.bringsRecordsTwice = true
+        await b.controller.setEnabled(true)
+        try await b.flush()
+        #expect(b.controller.lastError == nil && a.session.sidebarSyncState == b.session.sidebarSyncState && hasUniqueIDs(b.session))
+        zone.bringsRecordsTwice = false
+        var file = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: b.syncFile)) as? [String: Any])
+        let text = try #require(file["records"] as? String)
+        let archive = try #require(Data(base64Encoded: text))
+        let rows = try #require(NSKeyedUnarchiver.unarchivedObject(ofClasses: [NSArray.self, CKRecord.self], from: archive) as? [CKRecord])
+        file["records"] = try NSKeyedArchiver.archivedData(withRootObject: (rows + rows) as NSArray, requiringSecureCoding: true).base64EncodedString()
+        try JSONSerialization.data(withJSONObject: file).write(to: b.syncFile)
+        try b.launch()
+        let edited = try #require(a.session.tabs.first { $0.id == onA.pin.id })
+        edited.customTitle = "After the copy"
+        try await a.flush()
+        await b.controller.refreshIfRequested()
+        try await b.flush()
+        #expect(b.controller.lastError == nil && b.firstFetches == 1)
+        #expect(a.session.sidebarSyncState == b.session.sidebarSyncState && hasUniqueIDs(b.session))
+    }
+
+    /// Lists the first item of each of `keys` twice in the session file, as a hand-edited file can.
+    private func listTwice(_ keys: [String], in file: URL) throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        for key in keys {
+            let list = try #require(json[key] as? [Any])
+            json[key] = list + list.prefix(1)
+        }
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+    }
+
+    /// B's `session.json` lists a space, folder, or favorite twice. Its sidebar syncs the first copy, and the later copy stays on this Mac. Before, the first-sync plan refused the repeated name, so the first sync never finished; and with a newer build's default Persona on the server, which this build holds out with every item under it, the copies skipped that check and the session's apply trapped on them at every launch (`BrowserSession.applyFirstSidebarSync`).
+    @Test(arguments: [["spaces"], ["folders"], ["favorites"]], [false, true])
+    func aSessionThatListsAnItemTwiceSyncsItsFirstCopy(keys: [String], heldOut: Bool) async throws {
+        let zone = Zone()
+        let b = try Mac(zone: zone)
+        defer { b.clean() }
+        _ = try fill(b, page: "local")
+        try listTwice(keys, in: b.file)
+        try b.launch()
+        let counts = [b.session.spaces.count, b.session.folders.count, b.session.favorites.count]
+        if heldOut {
+            zone.records["default"] = SyncCloudKitRecords.ckRecord(from: SyncRecord(recordType: .persona, recordName: "default",
+                                                                                   fields: ["title": .text("Newer")], modifiedAt: Date()))
+        }
+        await b.controller.setEnabled(true)
+        try await b.flush()
+        #expect(b.controller.lastError == nil && b.controller.canSendRecords)
+        let synced = b.session.sidebarSyncState
+        #expect(Set(synced.spaces.map(\.id)).count == synced.spaces.count && Set(synced.folders.map(\.id)).count == synced.folders.count
+                && Set(synced.favorites.map(\.id)).count == synced.favorites.count)
+        #expect([b.session.spaces.count, b.session.folders.count, b.session.favorites.count] == counts)
+        #expect(zone.records.values.contains { $0.recordType == "Space" } && zone.records["default"] != nil)
     }
 }

@@ -2124,12 +2124,14 @@ final class EngineRuntime {
 extension BrowserSession {
     /// Applies both sides of the first-sync plan before saving. Only IDs captured as syncable
     /// can be replaced; an open tab or a private/agent folder cannot be claimed by a remote match.
+    /// An ID listed twice, in `state` or in this session, counts by its first copy.
     public func applyFirstSidebarSync(_ state: SidebarSyncState, replacements: SidebarSyncReplacements) {
+        let state = state.withFirstCopies
         let before = sidebarSyncState
         let selections = windows.compactMap { window in window.selectedTabID.flatMap { replacements.tabs[$0] }.map { (window, $0) } }
         applySidebarSync(state, deletions: SidebarSyncDeletions())
-        let oldSpaceOwners = Dictionary(uniqueKeysWithValues: before.spaces.map { ($0.id, $0.resolvedPersonaID) })
-        let newSpaceOwners = Dictionary(uniqueKeysWithValues: state.spaces.map { ($0.id, $0.resolvedPersonaID) })
+        let oldSpaceOwners = Dictionary(before.spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })
+        let newSpaceOwners = Dictionary(state.spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })
         var changedSpaces: [UUID: UUID] = [:]
         for (old, new) in replacements.spaces {
             guard old != new, let owner = oldSpaceOwners[old], newSpaceOwners[new] == owner,
@@ -2141,7 +2143,7 @@ extension BrowserSession {
             for index in windowsToReopen.indices where windowsToReopen[index].currentSpaceID == old { windowsToReopen[index].currentSpaceID = new }
             changedSpaces[old] = new
         }
-        let oldFolders = Dictionary(uniqueKeysWithValues: before.folders.map { ($0.id, $0) })
+        let oldFolders = Dictionary(before.folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for (old, new) in replacements.folders {
             guard old != new, let source = oldFolders[old], let target = state.folders.first(where: { $0.id == new }),
                   target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder && SidebarSyncState.canShare($0.live) }) else { continue }
@@ -2190,7 +2192,9 @@ extension BrowserSession {
 
     /// Applies a complete, repaired sidebar and its explicit tombstones. Items kept on this Mac
     /// retain their slots among the synced rows. A replay makes no additional closed records.
+    /// An ID that `state` lists twice applies once, as its first copy, so no pass adds it twice.
     public func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) {
+        let state = state.withFirstCopies
         let current = sidebarSyncState
         guard state != current || !deletions.personas.isDisjoint(with: personas.map(\.id))
                 || !deletions.spaces.isDisjoint(with: current.spaces.map(\.id))
