@@ -429,7 +429,7 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(host.changes.count == 3)
     }
 
-    /// `tabs.manage` moves the Persona's tabs through the host with the plugin as the cause, next to another of its tabs or to one of its spaces, and nothing else: neither a tab nor a neighbor outside the Persona, as an agent tab or another Persona's, nor a space of another Persona.
+    /// `tabs.manage` moves the Persona's tabs through the host with the plugin as the cause, next to another of its tabs or to one of its spaces, and neither a tab nor a neighbor outside the Persona's tabs, as another Persona's, which the host would move; the host's refusal of a space reaches the plugin, and `SessionPluginBrowserHostTests` checks the spaces and the agent tabs that the session refuses.
     @Test func tabMovesGoThroughTheBrowserHostUnderTheGrant() async throws {
         let manager = manager(builtIns: [ManagingPlugin.self])
         let installed = try #require(manager.plugins.first)
@@ -450,10 +450,13 @@ private final class QuietSettingsPlugin: SettingsPlugin {
             FakeTabsHost.Change(kind: .moved(.end(ofSpace: side)), tab: second.id, cause: cause),
         ])
 
-        // Only the Persona's tabs move or take a tab next to them, and only to its spaces.
+        // Only the Persona's tabs move or take a tab next to them, though the host would move another Persona's, and a space that the host refuses stays refused.
+        let elsewhere = PluginTab(id: UUID(), spaceID: UUID(), title: "Elsewhere", url: URL(string: "https://example.org/c"), engine: .webKit, isPinned: false, isSelected: false)
+        host.tabs[UUID()] = [elsewhere]
         let foreign = UUID()
+        #expect(throws: PluginError.notGranted(elsewhere.id)) { _ = try context.moveTab(elsewhere.id, to: .end(ofSpace: nil)) }
+        #expect(throws: PluginError.notGranted(elsewhere.id)) { _ = try context.moveTab(first.id, to: .before(elsewhere.id)) }
         #expect(throws: PluginError.notGranted(foreign)) { _ = try context.moveTab(foreign, to: .end(ofSpace: nil)) }
-        #expect(throws: PluginError.notGranted(foreign)) { _ = try context.moveTab(first.id, to: .before(foreign)) }
         #expect(throws: PluginError.notGranted(foreign)) { _ = try context.moveTab(first.id, to: .end(ofSpace: foreign)) }
         #expect(host.changes.count == 2)
 
