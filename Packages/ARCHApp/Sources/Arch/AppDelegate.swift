@@ -178,6 +178,7 @@ import Terminal
         installFullscreenEscape()
         installTabSwitcher()
         installShortcuts()
+        installDoubleFindShortcut()
         installPluginsMenu()
         // Set after the shortcut settings list the menu bar, so that the window list AppKit adds to the Window menu, the services it lists in the Services menu, and the search field it puts in the Help menu stay out of Settings ▸ Shortcuts.
         NSApp.windowsMenu = windowMenu
@@ -371,7 +372,7 @@ import Terminal
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
         closingItems = [closeTabItem, closeOthersItem, reopenItem]
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "New Agent Task", action: #selector(newAgentTask), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "New Agent Task (⌘F twice)", action: #selector(newAgentTask), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Stop All Agents", action: #selector(stopAllAgents), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
@@ -589,8 +590,20 @@ import Terminal
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
-    @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
-    @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
+    @objc private func newAgentTask() {
+        guard agents?.agentModels().isEmpty == false else {
+            PreferencesWindowController.shared.showAgentModelSettings(.providers)
+            return
+        }
+        (session.activeWindow ?? frontSidebarTarget()).showAgentComposer()
+    }
+    @objc private func toggleAgentPanel() {
+        guard agents?.agentModels().isEmpty == false else {
+            PreferencesWindowController.shared.showAgentModelSettings(.providers)
+            return
+        }
+        (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel()
+    }
     /// The agents' service pauses the agent hooks too (`AgentService.didStopAll`).
     @objc private func stopAllAgents() {
         agents?.stopAllAgents()
@@ -879,12 +892,12 @@ import Terminal
         if item.action == #selector(toggleAgentPanel) {
             let window = activeWindow ?? session?.lastMainWindow
             item.title = window?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
-            item.isHidden = !(window?.canToggleAgentPanel ?? (agents?.agentModels().isEmpty == false))
-            return !item.isHidden
+            item.isHidden = false
+            return agents?.agentModels().isEmpty != false || window?.canToggleAgentPanel == true
         }
         if item.action == #selector(newAgentTask) {
-            item.isHidden = agents?.agentModels().isEmpty ?? true
-            return !item.isHidden
+            item.isHidden = false
+            return true
         }
         if item.action == #selector(stopAllAgents) {
             return agents?.isAnyAgentActing ?? false
@@ -943,6 +956,25 @@ import Terminal
             } else if let tab = windowModel.tabOnScreen(at: event) {
                 if tab === windowModel.selectedTab, event.type != .otherMouseDown { session.forgetUndoableCloses() }
                 tab.userDidActInPage()
+            }
+            return event
+        }
+    }
+
+    private var lastCommandFindAt: TimeInterval?
+
+    private func installDoubleFindShortcut() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            guard event.keyCode == 3, modifiers == .command, !event.isARepeat else { return event }
+            let now = ProcessInfo.processInfo.systemUptime
+            let secondPress = lastCommandFindAt.map { now - $0 <= 0.35 } == true
+            lastCommandFindAt = secondPress ? nil : now
+            if secondPress {
+                session.activeWindow?.hideFindBar()
+                newAgentTask()
+                return nil
             }
             return event
         }
