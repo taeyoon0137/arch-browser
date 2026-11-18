@@ -707,11 +707,16 @@ The earlier work was done fast and without review. Each commit is checked once m
     - ok
   - [x] G1.10 `03e9e6d8` Feat: Redesign the agent panel: transcript
     - fixed source links to stack and truncate within the panel
-  - [ ] G1.11 `409a4952` Feat: Redesign the agent panel: approval card
-  - [ ] G1.12 `7e12dd71` Feat: Redesign the agent panel: column and documentation
-  - [ ] G1.13 `2e0a7aa8` Fix: Name Personas with their spaces wherever the interface knows the space
-  - [ ] G1.14 `6c70ac2a` Refactor: Build the page question popover and the live folder sheet from the site settings parts
-  - [ ] G1.15 `d13c0e2d` Task(V.11): Identify the source of plugin commands
+  - [x] G1.11 `409a4952` Feat: Redesign the agent panel: approval card
+    - ok
+  - [x] G1.12 `7e12dd71` Feat: Redesign the agent panel: column and documentation
+    - ok
+  - [x] G1.13 `2e0a7aa8` Fix: Name Personas with their spaces wherever the interface knows the space
+    - ok
+  - [x] G1.14 `6c70ac2a` Refactor: Build the page question popover and the live folder sheet from the site settings parts
+    - ok
+  - [x] G1.15 `d13c0e2d` Task(V.11): Identify the source of plugin commands
+    - fixed shortcut source detection to match the actual key equivalent and modifiers
   - [ ] G1.16 `45820578` Task(V.11): Pass palette command arguments
   - [ ] G1.17 `76bf0dbd` Task(V.11): Let plugins enable or disable their commands
   - [ ] G1.18 `c02ebf1d` Task(V.11): Open an owned sidebar panel from a plugin command

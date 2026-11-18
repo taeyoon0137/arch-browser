@@ -68,7 +68,12 @@ final class PluginsMenu: NSObject, NSMenuItemValidation {
     /// A page command: it runs on the active window's selected tab.
     @objc private func runCommand(_ sender: NSMenuItem) {
         guard let identifier = sender.representedObject as? String, let command = commands[identifier] else { return }
-        session.activeWindow?.runPluginCommand(command, source: NSApp.currentEvent?.type == .keyDown ? .shortcut : .menu)
+        let event = NSApp.currentEvent
+        let shortcutModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        let isShortcut = event?.type == .keyDown && !sender.keyEquivalent.isEmpty
+            && event?.charactersIgnoringModifiers?.lowercased() == sender.keyEquivalent.lowercased()
+            && event?.modifierFlags.intersection(shortcutModifiers) == sender.keyEquivalentModifierMask.intersection(shortcutModifiers)
+        session.activeWindow?.runPluginCommand(command, source: isShortcut ? .shortcut : .menu)
     }
 
     /// Plugin commands need a browser window.
