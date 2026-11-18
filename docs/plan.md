@@ -803,11 +803,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 1
   - [x] B1.15 Packages/ARCH/Sources/History/HistoryWindowController.swift
     - changed: 1
-  - [ ] B1.16 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
-  - [ ] B1.17 Packages/ARCH/Sources/Import/BookmarkFile.swift
-  - [ ] B1.18 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
-  - [ ] B1.19 Packages/ARCH/Sources/Plugins/MatchPattern.swift
-  - [ ] B1.20 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
+  - [x] B1.16 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
+    - changed: 0
+  - [x] B1.17 Packages/ARCH/Sources/Import/BookmarkFile.swift
+    - changed: 0
+  - [x] B1.18 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
+    - changed: 0
+  - [x] B1.19 Packages/ARCH/Sources/Plugins/MatchPattern.swift
+    - changed: 0
+  - [x] B1.20 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
+    - changed: 0
   - [ ] B1.21 Packages/ARCH/Sources/Plugins/PluginEngineVersions.swift
   - [ ] B1.22 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
   - [ ] B1.23 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
