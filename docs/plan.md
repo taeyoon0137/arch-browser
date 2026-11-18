@@ -706,6 +706,10 @@ Group G, the end:
 
 Left for Claude, not for this queue: the review and merge of `work/plugins-step-8`; the cause of the second Mac's sync crash, which needs that Mac's crash report; the remaining items of V.11; the checks that need the running app; and the prose pass.
 
+### Plugin continuation blockers
+
+- K7 blocked: `arch.net.fetch` has no documented JavaScript response shape, host entry grammar, or redirect policy. Defining these would invent a public API and security policy.
+
 ### Integration handoff
 
 After that, the user reported that turning on iCloud sync on their second Mac crashes Arch at every launch there; the `sync-crash` lane is merged: a session that lists an ID twice loads its first copy (a favorite's later copy gets an ID of its own), sync's merge and record conversion no longer trap on remote records, and a guard keeps sync off, with the reason in Settings ▸ Sync, after a launch that quit while sync applied changes, until the user turns it on. The cause on that Mac is not found yet: the tests reproduce traps only with input that no build writes, so the crash report from that Mac (`~/Library/Logs/DiagnosticReports/Arch-*.ips`) is what the next session reads first. The guard does not see a crash while sync sends records, after an apply, or while the next launch loads the session, as docs/sync.md says. On that Mac, `defaults write xyz.taeyoon.arch ARCHSyncEnabled -bool false` lets Arch start. The user's sidebar reports of the same day are rows III.28 to III.32, and the agent requests VII.33 and VII.34, all to do later.
