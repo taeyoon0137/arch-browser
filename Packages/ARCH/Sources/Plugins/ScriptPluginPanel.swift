@@ -8,6 +8,7 @@ final class ScriptPluginPanel: NSViewController, PluginEndingPanel, WKNavigation
     static let size = NSSize(width: 300, height: 400)
 
     private let page: URL
+    private let panelSize: NSSize
     private let configuration: WKWebViewConfiguration
     private let bridge: ScriptPluginBridge
     /// Told true as the panel starts to show and false once it has closed or its instance has stopped.
@@ -19,13 +20,14 @@ final class ScriptPluginPanel: NSViewController, PluginEndingPanel, WKNavigation
     private var hasStartedPage = false
 
     /// The page at `page`, in a web view of `configuration`, whose message handler is `bridge`.
-    init(title: String, page: URL, configuration: WKWebViewConfiguration, bridge: ScriptPluginBridge) {
+    init(title: String, page: URL, configuration: WKWebViewConfiguration, bridge: ScriptPluginBridge, size: NSSize) {
         self.page = page
+        panelSize = size
         self.configuration = configuration
         self.bridge = bridge
         super.init(nibName: nil, bundle: nil)
         self.title = title
-        preferredContentSize = Self.size
+        preferredContentSize = size
     }
 
     @available(*, unavailable)
@@ -34,7 +36,7 @@ final class ScriptPluginPanel: NSViewController, PluginEndingPanel, WKNavigation
     }
 
     override func loadView() {
-        let webView = WKWebView(frame: NSRect(origin: .zero, size: Self.size), configuration: configuration)
+        let webView = WKWebView(frame: NSRect(origin: .zero, size: panelSize), configuration: configuration)
         webView.navigationDelegate = self
         view = webView
     }

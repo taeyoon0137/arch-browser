@@ -1,5 +1,6 @@
 // Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from the Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store…. A web extension that may reach native apps lists them with what they need of Arch (`NativeAppGuide`).
 import AI
+import AppKit
 import ARCHEngine
 import Browsing
 import Extensions
@@ -251,6 +252,7 @@ private struct PluginSection: View {
     @State private var failure: String?
     @State private var isConfirmingRemoval = false
     @State private var isJoining = false
+    @State private var settingsPage: SettingsPageSheet?
     /// The version whose removal the user confirms.
     @State private var removingVersion: InstalledPlugin?
     /// The registered AI features, whose triggers the note on a plugin's models follows, and the providers, without which the note does not show.
@@ -293,8 +295,16 @@ private struct PluginSection: View {
             }
             .disabled(!plugin.isEnabled)
             // The plugin's commands share one row at its trailing end, as the AI pages' commands do, each at its whole title, and those that do not fit continue on a line below. The row shows only with a command, since an empty one would still take a row in the form.
-            if reloadable || !versionEngines.isEmpty || canJoin || separable || removable {
+            if reloadable || !versionEngines.isEmpty || canJoin || separable || removable || plugin.manifest.settingsPage != nil {
                 CommandRowLayout {
+                    if plugin.kind == .script, plugin.manifest.settingsPage != nil {
+                        Button("Open Settings…") {
+                            Task {
+                                if let controller = await plugins.settingsPage(for: plugin.id) { settingsPage = SettingsPageSheet(controller: controller) }
+                            }
+                        }
+                        .disabled(!plugin.isEnabled)
+                    }
                     if reloadable {
                         Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
                     }
@@ -372,6 +382,22 @@ private struct PluginSection: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sheet(item: $settingsPage) { page in
+            VStack(spacing: 0) {
+                SettingsPageController(controller: page.controller)
+                    .frame(width: 480, height: 480)
+                HStack {
+                    Spacer()
+                    Button("Done") { settingsPage = nil }
+                        .keyboardShortcut(.defaultAction)
+                        .padding(.trailing, 16)
+                }
+                .frame(height: 40)
+            }
+            .frame(width: 480, height: 520)
+            .onAppear { (page.controller as? PluginEndingPanel)?.onEnd = { settingsPage = nil } }
+            .onDisappear { (page.controller as? PluginEndingPanel)?.onEnd = nil }
+        }
         .confirmationDialog(removingVersion.map { "Remove the \($0.pairEngine?.displayName ?? "") Version of \u{201C}\(plugin.manifest.name)\u{201D}?" } ?? "",
                             isPresented: Binding(get: { removingVersion != nil }, set: { if !$0 { removingVersion = nil } })) {
             Button("Remove Version", role: .destructive) {
@@ -395,6 +421,18 @@ private struct PluginSection: View {
             failure = error.localizedDescription
         }
     }
+}
+
+private struct SettingsPageSheet: Identifiable {
+    let id = UUID()
+    let controller: NSViewController
+}
+
+private struct SettingsPageController: NSViewControllerRepresentable {
+    let controller: NSViewController
+
+    func makeNSViewController(context: Context) -> NSViewController { controller }
+    func updateNSViewController(_ controller: NSViewController, context: Context) {}
 }
 
 /// The commands of a plugin's row at the row's trailing end, each at its ideal width, so that no title is cut, with the system's spacing between neighbors as an `HStack` gives it; a command that does not fit after the others on a line starts the next line, also at the trailing end.

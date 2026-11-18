@@ -87,7 +87,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     /// Compiles the sandbox's rule list for a plugin with a background script or a panel, then loads the background document in a new web view and waits, at most for the hang limit, until the background script has run and set its listeners.
     public func activate(in context: any PluginContext) async throws {
         self.context = context
-        let hasPanels = package.manifest.contributions.sidebarItems.contains { Self.page(of: $0) != nil }
+        let hasPanels = package.manifest.settingsPage != nil || package.manifest.contributions.sidebarItems.contains { Self.page(of: $0) != nil }
         guard package.background != nil || hasPanels else { return }
         let rules: WKContentRuleList
         do {
@@ -128,9 +128,19 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     public func panel(for sidebarItemID: String) -> NSViewController? {
         guard let context, let rules, let item = package.manifest.contributions.sidebarItems.first(where: { $0.id == sidebarItemID }),
               let page = Self.page(of: item) else { return nil }
+        return makePanel(title: item.title, page: page, context: context, rules: rules, size: ScriptPluginPanel.size)
+    }
+
+    /// The package's settings page, with its own bridge and the same lifetime rules as a sidebar panel.
+    public func settingsPage() -> NSViewController? {
+        guard let context, let rules, let page = package.manifest.settingsPage else { return nil }
+        return makePanel(title: package.manifest.name, page: page, context: context, rules: rules, size: NSSize(width: 480, height: 480))
+    }
+
+    private func makePanel(title: String, page: String, context: any PluginContext, rules: WKContentRuleList, size: NSSize) -> NSViewController {
         let bridge = ScriptPluginBridge(context: context, role: .panel)
-        let panel = ScriptPluginPanel(title: item.title, page: PluginSandbox.url(of: page, in: package.manifest.id),
-                                      configuration: PluginSandbox.configuration(for: package, bridge: bridge, rules: rules), bridge: bridge)
+        let panel = ScriptPluginPanel(title: title, page: PluginSandbox.url(of: page, in: package.manifest.id),
+                                      configuration: PluginSandbox.configuration(for: package, bridge: bridge, rules: rules), bridge: bridge, size: size)
         panel.onShow = { [weak self] isShown in
             guard let self else { return }
             if isShown {
@@ -231,7 +241,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     /// Stops the instance once it has gone without calls for the idle limit, unless it is held, waits for Arch's answer to an AI request or a page call, or has a panel that shows.
     private func stopWhenIdle() {
         idleStop?.cancel()
-        guard waitingCalls.isEmpty, archWaits == 0, webView != nil, !isHeld, !panels.allObjects.contains(where: \.isShown) else { return }
+        guard waitingCalls.isEmpty, archWaits == 0, context != nil, !isHeld, !panels.allObjects.contains(where: \.isShown) else { return }
         idleStop = Task { [weak self, idle = limits.idle] in
             try? await Task.sleep(for: .seconds(idle))
             guard let self, !Task.isCancelled else { return }

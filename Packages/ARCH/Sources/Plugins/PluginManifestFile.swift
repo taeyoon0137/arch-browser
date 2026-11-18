@@ -33,6 +33,13 @@ struct ScriptManifest {
         let version = try object.string("version")
         let summary = try object.string("summary")
         let (permissions, aiDataKinds, network) = try Self.permissions(object.value("permissions"))
+        let settingsPage = try object.optionalString("settingsPage")
+        if let settingsPage {
+            _ = try packageFile(settingsPage, in: root, named: "settingsPage")
+            guard UTType(filenameExtension: (settingsPage as NSString).pathExtension)?.conforms(to: .html) == true else {
+                throw invalidManifest("settingsPage names “\(settingsPage)”, which is not an HTML file")
+            }
+        }
         let sites = try object.strings("sites").map(MatchPattern.init)
         let siteAccess = try Self.siteAccess(object.optionalString("siteAccess"))
         // `events` lists the bus's kinds and `settingChanged`, the plugin's own setting changes.
@@ -55,7 +62,7 @@ struct ScriptManifest {
         guard !receivesSettingChanges || !contributions.settings.isEmpty else { throw invalidManifest("events lists settingChanged, which needs contributes.settings") }
         // Without a command to run, a plugin that reaches its sites only where the user runs one would reach none.
         guard siteAccess == .listedSites || !contributions.commands.isEmpty else { throw invalidManifest("siteAccess whenInvoked needs contributes.commands") }
-        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, network: network, sites: sites,
+        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, network: network, settingsPage: settingsPage, sites: sites,
                                   siteAccess: siteAccess, contributions: contributions, events: Set(events), receivesSettingChanges: receivesSettingChanges)
         self.background = background
     }

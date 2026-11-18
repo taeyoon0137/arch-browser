@@ -39,6 +39,8 @@ public struct PluginManifest: Hashable, Sendable {
     public var permissions: Set<PluginPermission>
     /// Hosts named by the script plugin's `network` permission.
     public var network: [PluginNetworkHost]
+    /// An HTML file in the package that Settings opens in the plugin sandbox.
+    public var settingsPage: String?
     /// The data kinds beyond text that the plugin's AI requests carry, which its `ai` permission lists: `page` for page parts, such as of the text that its page calls read, and `selection` for selected text. They name the parts' kinds, not what can reach a model: a plugin with sites can also put the text of their pages into a text part. They come with `ai`, as a web extension's other API permissions come with its install, and the install sheet and Settings state them in one sentence (`aiDataSummary`). Empty without `ai`.
     public var aiDataKinds: Set<AIDataKind>
     /// The pages the plugin may reach. Without `tabs`, the plugin still sees the title and address of a tab whose page they cover.
@@ -57,7 +59,7 @@ public struct PluginManifest: Hashable, Sendable {
     /// A web extension's `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, lowercased, so that two projects on one hosting site differ. Nil for other kinds and without the field.
     public var homepage: String?
 
-    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [], network: [PluginNetworkHost] = [],
+    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [], network: [PluginNetworkHost] = [], settingsPage: String? = nil,
                 sites: [MatchPattern] = [], siteAccess: SiteAccess = .listedSites, extensionPermissions: [String] = [], contributions: PluginContributions,
                 events: Set<BrowserEventKind> = [], receivesSettingChanges: Bool = false, author: String? = nil, homepage: String? = nil) {
         self.id = id
@@ -66,6 +68,7 @@ public struct PluginManifest: Hashable, Sendable {
         self.summary = summary
         self.permissions = permissions
         self.network = permissions.contains(.network) ? network : []
+        self.settingsPage = settingsPage
         self.aiDataKinds = permissions.contains(.ai) ? aiDataKinds : []
         self.sites = sites
         self.siteAccess = siteAccess

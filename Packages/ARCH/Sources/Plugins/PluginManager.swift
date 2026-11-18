@@ -1085,6 +1085,12 @@ public final class PluginManager: ObservableObject {
         return nil
     }
 
+    /// Starts an enabled script plugin and opens its package's settings page in a panel controller for Settings.
+    public func settingsPage(for id: PluginID) async -> NSViewController? {
+        guard let installed = enabledPlugin(id), installed.kind == .script, installed.manifest.settingsPage != nil else { return nil }
+        return (try? await start(installed) as? ScriptPlugin)?.settingsPage()
+    }
+
     /// The badge the item's plugin set on it, if any.
     public func badge(on item: Attributed<PluginSidebarItem>) -> String? {
         badges[item.plugin]?[item.item.id]
