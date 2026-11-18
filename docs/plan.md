@@ -709,6 +709,7 @@ Left for Claude, not for this queue: the review and merge of `work/plugins-step-
 ### Plugin continuation blockers
 
 - K7 blocked: `arch.net.fetch` has no documented JavaScript response shape, host entry grammar, or redirect policy. Defining these would invent a public API and security policy.
+- K8 blocked: The design names `settingsPage` but leaves the settings-page sandbox, `arch` bridge access, lifecycle, and navigation behavior unspecified. The existing panel host is a sidebar popover, not a Settings page.
 
 ### Integration handoff
 
