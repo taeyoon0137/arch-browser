@@ -163,7 +163,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `history` | Search browsing history | Calls throw `permissionDenied` |
 | `downloads` | `downloadFinished` events with file names and addresses; renaming finished downloads | No download events |
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
-| `notifications` | Local notifications through UserNotifications | Calls throw `permissionDenied` |
+| `notifications` | Local notifications under the plugin’s name through UserNotifications, at most one per plugin every 10 seconds | Calls throw `permissionDenied` |
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own feature, `plugin.<id>`, with text, and with the data kinds beyond text that it lists, `page` and `selection`, as `{"ai": ["page"]}` in `permissions`; with bus kinds in `events`, its listeners run as hooks on the shared hook scheduler (see AI hooks and plugins that AI writes) | Calls throw `permissionDenied` |
 | `agent` | Agent runs through `arch.agent.run` within the grant's tools, tab access, record level, limits, and daily count (`docs/hooks.md`, Agent run API). Hook scripts get it from their hook's grant; staging refuses it for installed plugins until their install sheet states that grant | No agent runs |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
@@ -1302,3 +1302,5 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, limit of 10 tabs that a plugin opens within a minute, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.
 
 The `downloads` permission lets `arch.downloads.list()` read the current Persona’s download names, states, completed bytes, and total bytes. The result contains no file path, folder, or contents.
+
+`arch.ui.notify(title, body)` posts a local notification under the plugin’s name when the app has notification authorization. Calls within 10 seconds of the previous post from that plugin are ignored.

@@ -121,6 +121,10 @@ final class EngineRuntime {
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
     private let downloadNotifier: DownloadNotifier
+
+    func postPluginNotification(pluginName: String, title: String, body: String) {
+        downloadNotifier.pluginNotification(name: pluginName, title: title, body: body)
+    }
     /// The prompts that tabs asked for, which a window shows as cards over their tabs' panes.
     let prompts = TabPromptQueue()
     /// Set while the app quits. Every prompt ends at once without the user, so that a page's next dialog cannot hold the quit and every engine callback has its answer before the engines shut down. A quit that does not happen, as when a window's own sheet holds it, opens the prompt queue again.

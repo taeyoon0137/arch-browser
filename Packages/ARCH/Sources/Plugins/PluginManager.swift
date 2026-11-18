@@ -139,6 +139,7 @@ public final class PluginManager: ObservableObject {
     @Published private var badges: [PluginID: [String: String]] = [:]
     @Published public private(set) var panelRequest: (plugin: PluginID, item: String, nonce: UUID)?
     private var disabledCommands: [PluginID: Set<String>] = [:]
+    private var lastNotification: [PluginID: Date] = [:]
     private let builtIns: [PluginID: any BuiltInPlugin.Type]
     /// The runtimes of the installed kinds that the manager does not run itself, which read their packages and run their plugins, by kind.
     private let runtimes: [PluginKind: any PluginRuntime]
@@ -1456,6 +1457,14 @@ public final class PluginManager: ObservableObject {
         browserHost?.downloads(in: persona) ?? []
     }
 
+    fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
+        let now = Date()
+        guard lastNotification[plugin].map({ now.timeIntervalSince($0) >= 10 }) ?? true,
+              let name = plugins.first(where: { $0.id == plugin && $0.isEnabled })?.manifest.name else { return }
+        lastNotification[plugin] = now
+        browserHost?.postNotification(pluginName: name, title: title, body: body)
+    }
+
     /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
     fileprivate func page(of id: UUID, for grant: PluginGrant, of plugin: PluginID) throws -> (tab: PluginTab, contents: any EngineWebContents) {
         guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
@@ -1829,6 +1838,12 @@ final class ScopedPluginContext: PluginPanelContext {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.downloads)
         return manager?.personaDownloads() ?? []
+    }
+
+    func notify(title: String, body: String) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.notifications)
+        manager?.notify(pluginID, title: title, body: body)
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {

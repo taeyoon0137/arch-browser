@@ -74,6 +74,8 @@ public protocol PluginContext: AnyObject {
     func selectedTab() throws -> PluginTab?
     /// Names, states, and byte counts of this Persona's downloads. Needs `downloads`.
     func downloads() throws -> [PluginDownload]
+    /// Posts a local notification under this plugin's name. Needs `notifications`.
+    func notify(title: String, body: String) throws
     /// Needs `tabs.manage`. Opens a tab at the web address, `http` or `https`, in the space the options name, which must be one of the Persona's, or else in the last main window's space while it is the Persona's, or the Persona's first space, in the engine they name or the default engine, where a new tab that the user opens goes, and selects it unless they say not to, as `selectTab(_:)` does. Returns its identifier. The tab's opening, its selection with the space switch that the selection brings, and its first address and first load come with the plugin as their cause, so the plugin does not hear of them. Until the user acts in the tab's page, as with a click there, or loads an address in it, it downloads no file without asking, and at a file's address it closes without downloading. Throws `PluginError.invalidAddress` for any other address, `notGranted` for a space that is not the Persona's, `tooManyTabs` once the plugin has opened 10 tabs within the last minute, and `closed` once the Persona is gone.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
     /// Needs `tabs.manage`. Closes one of the tabs the plugin reaches without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads and keeps its place, a favorite's tab ends, a live folder item's tab is dismissed, and any other tab joins the closed list, from which Reopen Last Closed Tab and the Library reopen it; ⌘Z then reopens none of the tabs that the user closed before it, as after a page's own close. The close, and the selection of another tab in each window that had the tab selected, come with the plugin as their cause, so the plugin does not hear of them. Throws `PluginError.notGranted` for any other tab, and `stopped` for the event's tab of a hook step of the plugin once the scheduler has stopped the step, since the tab can show another document by then; a script plugin's panel closes outside any step.
@@ -98,6 +100,7 @@ extension PluginContext {
     /// A context that offers no selected tab, such as a hook script's, which acts on its run's tabs, gives none.
     public func selectedTab() throws -> PluginTab? { nil }
     public func downloads() throws -> [PluginDownload] { throw PluginError.permissionDenied(.downloads) }
+    public func notify(title: String, body: String) throws { throw PluginError.permissionDenied(.notifications) }
 
     /// A context that changes no tabs, such as a hook script's, refuses to open, close, select, and move them.
     public func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
@@ -152,6 +155,7 @@ public protocol PluginBrowserHost: AnyObject {
     /// The Persona's open tabs in sidebar order, with titles and addresses before any grant applies; never agent tabs.
     func tabs(in persona: PersonaID) -> [PluginTab]
     func downloads(in persona: PersonaID) -> [PluginDownload]
+    func postNotification(pluginName: String, title: String, body: String)
     /// Sets the tab's suggested name under the AI hooks' rules (`docs/hooks.md`, hook decision 13): the name's first line, trimmed and cut to `PluginTab.maximumNameLength` characters, while the tab still shows `document`, ignoring the fragment, the user has not named it, and the user has not turned down a suggested name for that document. Nil removes a suggested name for the document. A nil `document` stands for the tab's committed address now. The change's events carry `cause`. With `applying` false, nothing changes and the answer says whether the tab would take it. False for a favorite's tab, which goes by its favorite's name, for an agent tab, and for a tab that is gone.
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
     /// The page of a tab that `tabs(in:)` lists, through which plugins run scripts in it and post to its page scripts; nil for an agent tab and for a tab that is gone.
@@ -170,6 +174,7 @@ public protocol PluginBrowserHost: AnyObject {
 
 extension PluginBrowserHost {
     public func downloads(in persona: PersonaID) -> [PluginDownload] { [] }
+    public func postNotification(pluginName: String, title: String, body: String) {}
 }
 
 public struct PluginDownload: Identifiable, Hashable, Sendable {

@@ -27,6 +27,10 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         } ?? []
     }
 
+    public func postNotification(pluginName: String, title: String, body: String) {
+        session?.postPluginNotification(pluginName: pluginName, title: title, body: body)
+    }
+
     /// Only a space's tab takes a suggested name; a favorite's tab goes by its favorite's name. The rename's title change posts inside `withCause`, so it names its cause.
     public func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool {
         guard let session, let tab = session.tabs.first(where: { $0.id == id }), BrowserEventSource.kind(of: tab) != .agent,
