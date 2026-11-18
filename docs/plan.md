@@ -637,6 +637,73 @@ Rules for every tier:
 4. Finish by updating this file (remove the row, update Current State) and the feature row in `docs/features.md` in the same commit, then go through the After each task list in `AGENTS.md`.
 5. Verification steps use a fresh Application Support folder unless the step says otherwise.
 
+### Codex handoff queue
+
+Written on November 18 for the session that takes over while Claude is out of usage. It is the user's latest instruction, so where it differs from `AGENTS.md` (tests, verification, the After each task list), this section wins. Work through the steps in order, one at a time. Each step names its files and what done means; do nothing a step does not name.
+
+Rules for every step:
+
+- Work on the branch `work/codex-handoff`, made once from `main` with `git switch -c work/codex-handoff`. Never commit to, merge into, or push `main`. Push only this branch, and only at the steps marked **Push**.
+- Write no test code: do not add, change, or delete any file under a `Tests` folder. If a change breaks a test's compilation, stop and write the blocker under that step here.
+- Do not run `swift test`, `scripts/bundle_app.sh`, `scripts/install_app.sh`, `scripts/setup_cef.sh`, any release or signing script, or the app itself. Do not open apps, windows, or menus. The only checks to run are `swift build`, `./scripts/check_markdown.py`, and `git diff --check`.
+- Do not touch `arch-chromium`, `Package.swift`, `session.json`'s schema, `history.sqlite`'s tables, the engine protocols in `Packages/ARCHKit/Sources/ARCHEngine`, or `resources/assets/sym_arch_rounded.png`, unless a step says so. Do not commit the build links (`Frameworks`, `cefroot`, `wrapper_src`).
+- Read each file a step names in full before editing it. Keep the sizes, weights, and color roles of the neighboring views. Wherever the interface names a Persona, write it as "Persona / Space".
+- If a step needs a decision, a file, or an API it does not name, do not guess: write `blocked: <reason>` under the step in this section, commit that note with the step's commit, and go on to the next step.
+- Commit only at the steps marked **Commit**, staging by explicit path, with the subject the step gives and no trailers. After each commit, tick the step here (`[x]`) in the same commit.
+- Never write the code-signing identity, the team ID, or the signed bundle into any file, commit, or reply.
+
+Group A, favorites in the sidebar (the user's reports of November 16; rows III.29 to III.31):
+
+- [ ] A1. In `Packages/ARCH/Sources/Browsing/FavoritesGridView.swift`, remove the dot under an open favorite's tile: the `.overlay(alignment: .bottom)` that draws a 4-point `Circle()` while `isOpen`, with its comment. Keep the tile's selected fill, the dimming of unopened favorites, and the prompt mark on the corner. Update the sentence in Current State (Favorites) of this file and in `docs/bookmarks.md` that describes the dot. Run `swift build`.
+- [ ] A2. In the same file, make the favorite's icon smaller while the tile keeps its size (`FavoriteTileLayout.height` stays 44). Add `static let iconSize: CGFloat = 16` to `FavoriteTileLayout`, use it for the frame of the tile's `TabIconView` or favicon image, and change the fallback symbol's font from 16 to 13 points, medium. Keep the icon centered. Run `swift build`.
+- [ ] A3. Add space between the favorites grid and the space header below it: in `Packages/ARCH/Sources/Browsing/SpaceTabsView.swift`, find where the grid is laid out above the header, add `static let gridHeaderSpacing: CGFloat = 10` to `FavoriteTileLayout`, and apply it as bottom padding of the grid only while the grid shows at least one favorite. Run `swift build`.
+- [ ] A4. **Commit** `Fix: Drop the open favorite's dot, shrink the favorite's icon, and space the grid from the space header` with the files of A1 to A3 and this file. **Push** the branch.
+
+Group B, pinning to the favorites and the drop areas (rows III.28 and III.32):
+
+- [ ] B1. Read only, no edits: in `SidebarDragState.swift`, `SpaceTabsView.swift` (`updateDropTargets`), `FavoritesGridView.swift`, and `BrowserSession.swift`, find every path that makes a favorite from a tab: the drop of a dragged tab on the favorites grid, and any command that adds the tab to the favorites. Under this step, write the function names and whether each one copies the tab (the tab stays in the list and a favorite is added) or moves it.
+- [ ] B2. Make the drop of a dragged tab on the favorites grid move the tab: the favorite takes the tab's own web contents, with its page and engine, through `session.favoriteTabs`, and the tab leaves the pinned or open list, so one tab remains. A tab that cannot become a favorite (an agent tab, a live folder's item tab, a small window's tab) is refused as now. If an existing regression record in Current State says a drop "adds one shortcut and preserves the live tab", replace that sentence with the new behavior. If the move needs a new stored field, stop with `blocked:`. Run `swift build`.
+- [ ] B3. Make the command paths found in B1 move the tab in the same way. Run `swift build`.
+- [ ] B4. **Commit** `Fix: Move a tab into the favorites when it is pinned there, instead of adding a copy` with the files of B2 and B3, `docs/bookmarks.md` where it describes the drop, and this file.
+- [ ] B5. While a tab or folder row is dragged, the space header gives way to the favorites drop area and the pinned area. Keep both areas at a fixed room during the drag even while the space has no favorites or no pinned tabs: one tile row (`FavoriteTileLayout.height`) for the favorites area and one row (36 points) for the pinned area, so that the rows below do not move as the drag starts or as the pointer enters an area. Change only `SpaceTabsView.swift` and `FavoritesGridView.swift`. Run `swift build`.
+- [ ] B6. **Commit** `Fix: Keep the favorites and pinned drop areas at their room during a drag when they are empty` with those files and this file. **Push** the branch.
+
+Group C, opening the agent quickly (row VII.33):
+
+- [ ] C1. In `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`, give File ▸ New Agent Task a shortcut that the menu shows. The user asked for ⌘ held with F pressed twice. Implement it in the existing local key monitor: on a ⌘F key down, record the time; a second ⌘F key down within 0.35 seconds, not a key repeat, calls `newAgentTask()` and is consumed, and also closes the find bar that the first press opened (`BrowserWindowModel`'s find bar state). A single ⌘F opens Find as now, at once, without waiting for the interval. Set the menu item's title to `New Agent Task (⌘F twice)` since a menu cannot show a double press as a key equivalent. Run `swift build`.
+- [ ] C2. While no agent-capable model is connected (`agents?.agentModels().isEmpty`), keep New Agent Task and Show Agent Panel in their menus instead of hiding them, and make both, and the double press, open Settings ▸ AI ▸ Providers. Use the function that Settings ▸ AI's own entry points call to show that page; if none takes a page, stop with `blocked:`. Run `swift build`.
+- [ ] C3. Add one sentence on the shortcut to `docs/agents.md` where it lists how a session starts, and to Current State (App shell) of this file. Run `./scripts/check_markdown.py`.
+- [ ] C4. **Commit** `Feat: Open the agent composer with ⌘F pressed twice, and lead to Providers while no model is connected` with those files and this file. **Push** the branch.
+
+Group D, downloads from the context menu and of the current page (reported on November 18):
+
+- [ ] D1. Read only: in `PageContextMenuSections.swift`, `Tab.swift` (the context menu section, near `newTabItem` and `copyToPasteboard`), and both adapters (`ARCHEngineWebKit`, `ARCHEngineChromium`), find how an image's context menu is built and which download call the engines offer (`EngineWebContents` members with `download` in their names). Under this step, write whether an image item to download exists, what it calls, and why it does nothing: the item is missing, the call is not implemented on an engine, or `PageDownloadGate` refuses a download that the user asked for.
+- [ ] D2. Make the image context menu's Download Image work on both engines with the existing engine download call, so that the file appears in the Library's downloads as any download does. A download that the user picks from a menu is the user's own act: tell the tab's gate first (`tab.pageDownloads.userDidAct()` or the session function that calls it), so it does not ask. Add Download Linked File for a link in the same way if the menu lacks it. If an engine has no download call for an address, stop with `blocked:` and name the engine. Run `swift build`.
+- [ ] D3. Add File ▸ Save Page As… (⌘S) for the selected tab: it starts a download of the tab's committed address through the same call as D2, with the save panel that downloads already use when the user names a file. Disable it without a tab, on an internal page, and on a page that is not `http` or `https`. Run `swift build`.
+- [ ] D4. Update row 21 of `docs/features.md` and Current State (Library and downloads) of this file with the two commands. Run `./scripts/check_markdown.py`.
+- [ ] D5. **Commit** `Fix: Download an image or a linked file from the page's context menu, and add Save Page As` with those files and this file. **Push** the branch.
+
+Group E, picture in picture (reported on November 18: it works on neither engine):
+
+- [ ] E1. Read only: `docs/features.md` (the Platform integration table and the picture in picture row), every use of `pictureInPicture` in `BrowserSession.swift`, `TabUnloading.swift`, `UnloadedWebContents.swift`, `CEFBridge.h`, and `CEFBridgeBrowser.mm`, and the WebKit adapter's configuration in `WebKitEngine.swift`. Under this step, write for each engine: which entry points exist (a menu item, a tab row button, the Now Playing controls, the page's own button), what each calls, and where the chain ends without starting picture in picture.
+- [ ] E2. WebKit: if the configuration does not allow it, set `allowsPictureInPictureMediaPlayback` on the web view's preferences where the adapter builds its `WKWebViewConfiguration`, and make the entry points found in E1 reach the page's video (the design uses AVKit and the page's `requestPictureInPicture()`; run the page call through the existing page script path, not a new private API). Run `swift build`.
+- [ ] E3. Chromium: connect the entry points to the bridge's existing picture in picture members. Do not change `arch-chromium`, the helper, or `wrapper_src`; if the bridge lacks a call that E1 shows is needed, stop with `blocked:` and write the missing call.
+- [ ] E4. If no entry point exists in the interface at all, add View ▸ Picture in Picture for the selected tab, enabled while the tab plays or holds a video as the Now Playing code already knows. Run `swift build`.
+- [ ] E5. Update the picture in picture row of `docs/features.md` and Current State of this file with what now works and what is blocked. Run `./scripts/check_markdown.py`.
+- [ ] E6. **Commit** `Fix: Start picture in picture from Arch's entry points on both engines` with those files and this file. **Push** the branch.
+
+Group F, the agent panel's design (row VII.34). Design first; no code until the user approves:
+
+- [ ] F1. Read `AgentPanelColumn.swift`, `AgentPanel.swift`, `AgentComposer.swift`, `AgentApprovalCard.swift`, `AgentTranscript.swift`, and `SiteSettingsParts.swift` (the model for reusable parts). Write `docs/agent-panel-design.md`: for each state (empty, composing, running, waiting on a card, taken over, ended, failed), what the user sees now, which text is technical (identifiers, modes, rule names, provider details), and the proposed layout: the one main action of the state, what moves behind a disclosure or into help, and the reusable parts with their sizes, weights, and color roles taken from existing views. Add the file to the docs list in `resources/README.preset.md` and run `./scripts/readme_update.sh`.
+- [ ] F2. **Commit** `Docs: Propose the agent panel's redesign by state` with the new document, the README files, and this file. **Push** the branch. Stop here for this group: the user reads the proposal before any view changes.
+
+Group G, the end:
+
+- [ ] G1. Run `swift build`, `./scripts/check_markdown.py`, and `git diff --check main...HEAD` once more. Write under this step, in a short list: each group's commits, every `blocked:` note, and every place where the build warned. **Commit** `Docs: Record what the handoff queue finished and what it left` with this file. **Push** the branch.
+- [ ] G2. Stop. Do not merge. Claude reviews `work/codex-handoff` part by part, runs the tests, and merges what holds.
+
+Left for Claude, not for this queue: the review and merge of `work/plugins-step-8`; the cause of the second Mac's sync crash, which needs that Mac's crash report; the remaining items of V.11; the checks that need the running app; and the prose pass.
+
 ### Integration handoff
 
 After that, the user reported that turning on iCloud sync on their second Mac crashes Arch at every launch there; the `sync-crash` lane is merged: a session that lists an ID twice loads its first copy (a favorite's later copy gets an ID of its own), sync's merge and record conversion no longer trap on remote records, and a guard keeps sync off, with the reason in Settings ▸ Sync, after a launch that quit while sync applied changes, until the user turns it on. The cause on that Mac is not found yet: the tests reproduce traps only with input that no build writes, so the crash report from that Mac (`~/Library/Logs/DiagnosticReports/Arch-*.ips`) is what the next session reads first. The guard does not see a crash while sync sends records, after an apply, or while the next launch loads the session, as docs/sync.md says. On that Mac, `defaults write xyz.taeyoon.arch ARCHSyncEnabled -bool false` lets Arch start. The user's sidebar reports of the same day are rows III.28 to III.32, and the agent requests VII.33 and VII.34, all to do later.
