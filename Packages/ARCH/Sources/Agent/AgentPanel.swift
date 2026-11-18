@@ -375,13 +375,16 @@ private struct AgentTranscriptRow: View {
             let title = tab.title.isEmpty ? (page.url.host ?? "") : tab.title
             return (page, title)
         }
-        return HStack(spacing: 8) {
+        return VStack(alignment: .leading, spacing: 4) {
             ForEach(available, id: \.page) { row in
                 Button(row.label) {
                     if let current = readTab(row.page) { actions.showReadTab(current.id) }
                 }
                 .buttonStyle(.link)
                 .font(.system(size: 11))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(row.label)
             }
         }
     }

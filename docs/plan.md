@@ -697,11 +697,16 @@ The earlier work was done fast and without review. Each commit is checked once m
     - ok
   - [x] G1.5 `092d7173` Fix: Download an image, a linked file, or the page itself through a download call on both engines
     - ok
-  - [ ] G1.6 `5c5007de` Feat: Start picture in picture on both engines from the View menu and a tab's menu
-  - [ ] G1.7 `84303ce1` Feat: Redesign the agent panel: reusable parts
-  - [ ] G1.8 `52e4394e` Feat: Redesign the agent panel: composer
-  - [ ] G1.9 `faac73f7` Feat: Redesign the agent panel: session states
-  - [ ] G1.10 `03e9e6d8` Feat: Redesign the agent panel: transcript
+  - [x] G1.6 `5c5007de` Feat: Start picture in picture on both engines from the View menu and a tab's menu
+    - ok
+  - [x] G1.7 `84303ce1` Feat: Redesign the agent panel: reusable parts
+    - ok
+  - [x] G1.8 `52e4394e` Feat: Redesign the agent panel: composer
+    - ok
+  - [x] G1.9 `faac73f7` Feat: Redesign the agent panel: session states
+    - ok
+  - [x] G1.10 `03e9e6d8` Feat: Redesign the agent panel: transcript
+    - fixed source links to stack and truncate within the panel
   - [ ] G1.11 `409a4952` Feat: Redesign the agent panel: approval card
   - [ ] G1.12 `7e12dd71` Feat: Redesign the agent panel: column and documentation
   - [ ] G1.13 `2e0a7aa8` Fix: Name Personas with their spaces wherever the interface knows the space
