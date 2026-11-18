@@ -769,14 +769,23 @@ final class EngineRuntime {
 
     /// Whether the tab shows a page that is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
     public func canAddFavorite(_ tab: Tab) -> Bool {
-        guard let url = tab.url else { return false }
+        guard let url = tab.url, tab.spaceID != nil, tab.isListedInSidebar,
+              tab.agentOwnerID == nil, !tab.isInSmallWindow,
+              !folderTree.isLive(tab.folderID), tabs.contains(where: { $0 === tab }) else { return false }
         return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
     }
 
-    /// Adds the tab's page to the favorites of the tab's Persona, unless it is one of them already, with the title the tab's row shows (`Tab.shownTitle`).
+    /// Moves the tab and its live page into the favorites of its Persona.
     public func addFavorite(_ tab: Tab) {
         guard canAddFavorite(tab), let url = tab.url else { return }
-        favorites.append(Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID))
+        let favorite = Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID)
+        leaveSplitView(tab)
+        tabs.removeAll { $0 === tab }
+        tab.spaceID = nil
+        tab.folderID = nil
+        tab.isPinned = false
+        favoriteTabs[favorite.id] = tab
+        favorites.append(favorite)
     }
 
     /// Appends, in order, the favorites whose addresses are not favorites of the Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
