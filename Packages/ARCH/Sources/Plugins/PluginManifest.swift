@@ -153,6 +153,8 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case ai
     /// Read download names, states, and sizes without file locations or contents.
     case downloads
+    /// Suggest a safe name for a completed download in the plugin's Persona.
+    case renameDownloads = "downloads.rename"
     /// Post local notifications under the plugin's name.
     case notifications
     /// Send requests to the listed HTTPS hosts without Persona cookies.
@@ -168,6 +170,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         case .nativeMessaging: return "Exchange messages with apps on this Mac"
         case .ai: return "Send text to the AI models you connected"
         case .downloads: return "Read the names, states, and sizes of your downloads"
+        case .renameDownloads: return "Rename completed downloads in this Persona"
         case .notifications: return "Show notifications under the plugin's name"
         case .network: return "Send requests to the listed hosts"
         }

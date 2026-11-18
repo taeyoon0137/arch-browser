@@ -74,6 +74,8 @@ public protocol PluginContext: AnyObject {
     func selectedTab() throws -> PluginTab?
     /// Names, states, and byte counts of this Persona's downloads. Needs `downloads`.
     func downloads() throws -> [PluginDownload]
+    /// Needs `downloads.rename`; returns false when the completed file cannot take the suggested name.
+    func renameDownload(_ id: UUID, to name: String) throws -> Bool
     /// Posts a local notification under this plugin's name. Needs `notifications`.
     func notify(title: String, body: String) throws
     /// Sends one bounded HTTPS request to a host in the `network` grant, without browser cookies or credentials.
@@ -102,6 +104,7 @@ extension PluginContext {
     /// A context that offers no selected tab, such as a hook script's, which acts on its run's tabs, gives none.
     public func selectedTab() throws -> PluginTab? { nil }
     public func downloads() throws -> [PluginDownload] { throw PluginError.permissionDenied(.downloads) }
+    public func renameDownload(_ id: UUID, to name: String) throws -> Bool { throw PluginError.permissionDenied(.renameDownloads) }
     public func notify(title: String, body: String) throws { throw PluginError.permissionDenied(.notifications) }
     public func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw PluginError.permissionDenied(.network) }
 
@@ -158,6 +161,7 @@ public protocol PluginBrowserHost: AnyObject {
     /// The Persona's open tabs in sidebar order, with titles and addresses before any grant applies; never agent tabs.
     func tabs(in persona: PersonaID) -> [PluginTab]
     func downloads(in persona: PersonaID) -> [PluginDownload]
+    func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool
     func postNotification(pluginName: String, title: String, body: String)
     /// Sets the tab's suggested name under the AI hooks' rules (`docs/hooks.md`, hook decision 13): the name's first line, trimmed and cut to `PluginTab.maximumNameLength` characters, while the tab still shows `document`, ignoring the fragment, the user has not named it, and the user has not turned down a suggested name for that document. Nil removes a suggested name for the document. A nil `document` stands for the tab's committed address now. The change's events carry `cause`. With `applying` false, nothing changes and the answer says whether the tab would take it. False for a favorite's tab, which goes by its favorite's name, for an agent tab, and for a tab that is gone.
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
@@ -177,6 +181,7 @@ public protocol PluginBrowserHost: AnyObject {
 
 extension PluginBrowserHost {
     public func downloads(in persona: PersonaID) -> [PluginDownload] { [] }
+    public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool { false }
     public func postNotification(pluginName: String, title: String, body: String) {}
 }
 

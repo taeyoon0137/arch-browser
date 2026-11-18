@@ -1493,6 +1493,10 @@ public final class PluginManager: ObservableObject {
         browserHost?.downloads(in: persona) ?? []
     }
 
+    fileprivate func renameDownload(_ id: UUID, to name: String) -> Bool {
+        browserHost?.renameDownload(id, to: name, in: persona) ?? false
+    }
+
     fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
         let now = Date()
         guard lastNotification[plugin].map({ now.timeIntervalSince($0) >= 10 }) ?? true,
@@ -1888,6 +1892,13 @@ final class ScopedPluginContext: PluginPanelContext {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.downloads)
         return manager?.personaDownloads() ?? []
+    }
+
+    func renameDownload(_ id: UUID, to name: String) throws -> Bool {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.renameDownloads)
+        guard let manager, manager.personaDownloads().contains(where: { $0.id == id }) else { return false }
+        return manager.renameDownload(id, to: name)
     }
 
     func notify(title: String, body: String) throws {

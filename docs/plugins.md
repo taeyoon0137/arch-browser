@@ -163,6 +163,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) and the pages of the tabs that a plugin with `tabs.manage` opens, whose addresses can carry what it knows to any host |
 | `history` | Search browsing history | Calls throw `permissionDenied` |
 | `downloads` | Read download names, states, and byte counts with `arch.downloads.list()`; no paths or contents | Calls throw `permissionDenied` |
+| `downloads.rename` | Rename one completed download in the Persona to a safe unused name, keeping its extension | Calls throw `permissionDenied` |
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
 | `notifications` | Local notifications under the plugin’s name through UserNotifications, at most one per plugin every 10 seconds | Calls throw `permissionDenied` |
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own feature, `plugin.<id>`, with text, and with the data kinds beyond text that it lists, `page` and `selection`, as `{"ai": ["page"]}` in `permissions`; with bus kinds in `events`, its listeners run as hooks on the shared hook scheduler (see AI hooks and plugins that AI writes) | Calls throw `permissionDenied` |
@@ -699,6 +700,7 @@ public protocol PluginContext: AnyObject {
     // Data.
     func history(matching text: String, limit: Int) throws -> [PluginHistoryEntry]
     func downloads() throws -> [PluginDownload]
+    func renameDownload(_ id: UUID, to name: String) throws -> Bool
     /// Uses an ephemeral session without cookies. The host must be in the grant's `network`.
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 
@@ -1208,7 +1210,7 @@ public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) 
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `downloads.list`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `downloads.list`, `downloads.rename`, `net.fetch`, `ui.setBadge`, `ui.notify`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
@@ -1222,7 +1224,7 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
 | `arch.settings.get(key)` | `setting(_:)` |
 | `arch.net.fetch(url, options)` | `fetch(_:)` |
-| `arch.history.search(text, limit)`, `arch.downloads.list()` | `history(matching:limit:)`, `downloads()` |
+| `arch.history.search(text, limit)`, `arch.downloads.list()`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `downloads()`, `renameDownload(_:to:)` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
 - A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.selected()` with the tab or `null`, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out.
@@ -1297,6 +1299,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) are built. Script plugin panels and `arch.ai.stream` are built. The page members, `runPageScript(_:in:)` and `postMessage(_:toTab:)` with `arch.pages.run` and `post`, are built, and so are the data kinds that the `ai` permission lists, `page` and `selection`, with page and selection parts in `arch.ai.reply` and `arch.ai.stream`.
 7. Site access modes, `siteAccess` with `whenInvoked` in the manifest, the grant, the review, and Settings, are built, and so are page script styles, a page script's `css`, the plugin's own `settingChanged` event, and the tab members, `selectedTab()` and, with `tabs.manage`, `openTab(_:_:)`, `closeTab(_:)`, `selectTab(_:)`, and `moveTab(_:to:)`, with `arch.tabs.selected`, `open`, `close`, `select`, and `move`. The rest of what the plan's V.11 row lists as not built follows in the row's order.
 8. Network access uses `PluginNetworkHost` to parse the manifest's host entries and a bounded ephemeral fetcher. The context checks the grant and rate limit, and the bridge returns text only after the fetcher checks the final response.
+9. Script plugin settings pages use the panel sandbox in a Settings sheet. An unpaired plugin can stage its package in another Persona for a fresh review. A sidebar item can show its panel in place of the tab list. The `downloads.rename` permission reaches the existing safe rename path.
 
 ## Open decisions
 

@@ -27,6 +27,11 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         } ?? []
     }
 
+    public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool {
+        guard let entry = session?.downloads.first(where: { $0.id == id && $0.personaID == persona }) else { return false }
+        return entry.rename(to: name)
+    }
+
     public func postNotification(pluginName: String, title: String, body: String) {
         session?.postPluginNotification(pluginName: pluginName, title: title, body: body)
     }
