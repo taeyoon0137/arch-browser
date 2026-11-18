@@ -120,7 +120,7 @@ public final class PluginManager: ObservableObject {
     /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them, where the remaining version of a pair takes the place of the pair. Each version of a pair has its counterpart and its engine.
     @Published public private(set) var plugins: [InstalledPlugin] {
         didSet {
-            contributions = PluginContributionIndex(plugins)
+            contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
             pruneSiteAccess()
             runEnabledPlugins()
             registerAIFeatures()
@@ -137,6 +137,9 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var listWriteFailure: String?
     /// The badges the plugins set, by plugin and sidebar item.
     @Published private var badges: [PluginID: [String: String]] = [:]
+    @Published public private(set) var panelRequest: (plugin: PluginID, item: String, nonce: UUID)?
+    private var disabledCommands: [PluginID: Set<String>] = [:]
+    private var lastNotification: [PluginID: Date] = [:]
     private let builtIns: [PluginID: any BuiltInPlugin.Type]
     /// The runtimes of the installed kinds that the manager does not run itself, which read their packages and run their plugins, by kind.
     private let runtimes: [PluginKind: any PluginRuntime]
@@ -268,7 +271,7 @@ public final class PluginManager: ObservableObject {
         self.choices = choices
         self.installs = installs
         self.pairRecords = pairRecords
-        contributions = PluginContributionIndex(paired)
+        contributions = PluginContributionIndex(paired, disabledCommands: disabledCommands)
         // Packages that were under review when the app last quit cannot be installed any more.
         try? FileManager.default.removeItem(at: stagingDirectory)
         if !restored.isEmpty { saveList() }
@@ -385,6 +388,28 @@ public final class PluginManager: ObservableObject {
     /// Records the choice in `plugins.json`. Switching a plugin off removes its contributions, so its page scripts stop at each tab's next load and their values no longer reach it, drops its badges, and stops its code. Either version of a pair switches both.
     public func setEnabled(_ isEnabled: Bool, for id: PluginID) {
         setEnabled(isEnabled, for: [id] + [plugins.first { $0.id == id }?.counterpart].compactMap { $0 }, failure: nil)
+    }
+
+    /// Removes one part of an installed plugin's grant and stops its old context immediately.
+    public func revoke(_ permission: PluginPermission, from id: PluginID) {
+        updateGrant(of: id) { $0.permissions.remove(permission) }
+    }
+
+    public func revoke(_ site: MatchPattern, from id: PluginID) {
+        updateGrant(of: id) { $0.sites.removeAll { $0 == site } }
+    }
+
+    private func updateGrant(of id: PluginID, _ change: (inout PluginGrant) -> Void) {
+        guard !isClosed, let index = plugins.firstIndex(where: { $0.id == id && $0.origin != .bundled }),
+              let entryIndex = installs.firstIndex(where: { $0.id == id.rawValue }),
+              case var .readable(entry) = installs[entryIndex] else { return }
+        var next = plugins
+        change(&entry.grant)
+        next[index].grant = entry.grant
+        installs[entryIndex] = .readable(entry)
+        stop(id)
+        saveList()
+        setPlugins(next)
     }
 
     /// `failure` says why the manager switches the plugins off, for Settings. The manager switches off one version of a pair alone, so that its counterpart keeps running.
@@ -1003,10 +1028,13 @@ public final class PluginManager: ObservableObject {
 
     /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
-        guard let installed = enabledPlugin(command.plugin), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
+        guard let installed = enabledPlugin(command.plugin), !disabledCommands[command.plugin, default: []].contains(command.command), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
         guard grantSiteAccess(to: installed, for: invocation) else { return NSSound.beep() }
         do {
-            try await start(installed)?.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
+            guard let plugin = try await start(installed), let context = running[installed.id]?.context else { return }
+            context.userCommandCount += 1
+            defer { context.userCommandCount -= 1 }
+            try await plugin.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
         } catch {
             NSSound.beep()
         }
@@ -1065,6 +1093,21 @@ public final class PluginManager: ObservableObject {
     fileprivate func setBadge(_ text: String?, onSidebarItem id: String, of plugin: PluginID) {
         guard let installed = enabledPlugin(plugin), installed.manifest.contributions.sidebarItems.contains(where: { $0.id == id }) else { return }
         badges[plugin, default: [:]][id] = text?.isEmpty == false ? text : nil
+    }
+
+    fileprivate func setEnabled(_ isEnabled: Bool, command id: String, of plugin: PluginID) {
+        guard let installed = enabledPlugin(plugin), installed.commands(among: plugins).contains(where: { $0.id == id }) else { return }
+        if isEnabled { disabledCommands[plugin, default: []].remove(id) }
+        else { disabledCommands[plugin, default: []].insert(id) }
+        contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
+    }
+
+    fileprivate func showPanel(_ item: String, of plugin: PluginID) {
+        guard let installed = enabledPlugin(plugin), installed.manifest.contributions.sidebarItems.contains(where: {
+            guard $0.id == item, case .panel = $0.action else { return false }
+            return true
+        }) else { return }
+        panelRequest = (plugin, item, UUID())
     }
 
     // MARK: Page scripts
@@ -1432,6 +1475,18 @@ public final class PluginManager: ObservableObject {
         browserHost?.tabs(in: persona) ?? []
     }
 
+    fileprivate func personaDownloads() -> [PluginDownload] {
+        browserHost?.downloads(in: persona) ?? []
+    }
+
+    fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
+        let now = Date()
+        guard lastNotification[plugin].map({ now.timeIntervalSince($0) >= 10 }) ?? true,
+              let name = plugins.first(where: { $0.id == plugin && $0.isEnabled })?.manifest.name else { return }
+        lastNotification[plugin] = now
+        browserHost?.postNotification(pluginName: name, title: title, body: body)
+    }
+
     /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
     fileprivate func page(of id: UUID, for grant: PluginGrant, of plugin: PluginID) throws -> (tab: PluginTab, contents: any EngineWebContents) {
         guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
@@ -1719,6 +1774,7 @@ struct PluginListFile: Codable {
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.
 @MainActor
 final class ScopedPluginContext: PluginPanelContext {
+    var userCommandCount = 0
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
@@ -1777,6 +1833,16 @@ final class ScopedPluginContext: PluginPanelContext {
         manager?.setBadge(text, onSidebarItem: id, of: pluginID)
     }
 
+    func setEnabled(_ isEnabled: Bool, command id: String) {
+        guard !hasEnded else { return }
+        manager?.setEnabled(isEnabled, command: id, of: pluginID)
+    }
+
+    func showPanel(_ sidebarItemID: String) {
+        guard !hasEnded, userCommandCount > 0 else { return }
+        manager?.showPanel(sidebarItemID, of: pluginID)
+    }
+
     func copyToClipboard(_ text: String) throws {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.clipboard)
@@ -1788,6 +1854,18 @@ final class ScopedPluginContext: PluginPanelContext {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { return [] }
         return manager.personaTabs().map { manager.shown($0, to: grant, of: pluginID) }
+    }
+
+    func downloads() throws -> [PluginDownload] {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.downloads)
+        return manager?.personaDownloads() ?? []
+    }
+
+    func notify(title: String, body: String) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.notifications)
+        manager?.notify(pluginID, title: title, body: body)
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {

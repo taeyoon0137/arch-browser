@@ -110,6 +110,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             move: (id, place) => call("tabs.move", [id, ...given(place)]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
+          downloads: Object.freeze({ list: () => call("downloads.list", []) }),
           storage: Object.freeze({
             get: (key) => call("storage.get", [key]),
             set: (key, value) => call("storage.set", [key, ...given(value)]),
@@ -122,6 +123,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           settings: Object.freeze({ get: (key) => call("settings.get", [key]) }),
           ui: Object.freeze({
             setBadge: (itemId, text) => call("ui.setBadge", [itemId, ...given(text)]),
+            setEnabled: (commandId, flag) => call("ui.setEnabled", [commandId, flag]),
+            showPanel: (itemId) => call("ui.showPanel", [itemId]),
+            notify: (title, body) => call("ui.notify", [title, body]),
             copy: (text) => call("ui.copy", [text]),
           }),
         }),
@@ -424,10 +428,18 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return context.setting(try call.text(0))
         case "ui.setBadge":
             context.setBadge(try call.optionalText(1), onSidebarItem: try call.text(0))
+        case "ui.setEnabled":
+            context.setEnabled(try call.bool(1), command: try call.text(0))
+        case "ui.showPanel":
+            context.showPanel(try call.text(0))
+        case "ui.notify":
+            try context.notify(title: try call.text(0), body: try call.text(1))
         case "ui.copy":
             try context.copyToClipboard(try call.text(0))
         case "tabs.list":
             return .array(try context.tabs().map(\.scriptValue))
+        case "downloads.list":
+            return .array(try context.downloads().map(\.scriptValue))
         case "tabs.get":
             // A tab the script does not reach is null, as is text that names no tab.
             return try UUID(uuidString: try call.text(0)).flatMap { try context.tab($0) }?.scriptValue ?? .null
@@ -518,6 +530,11 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         func text(_ index: Int) throws -> String {
             guard case let .string(text)? = value(index) else { throw BridgeFailure.invalidCall }
             return text
+        }
+
+        func bool(_ index: Int) throws -> Bool {
+            guard case let .bool(value)? = value(index) else { throw BridgeFailure.invalidCall }
+            return value
         }
 
         /// Text, or nil where the script passed none or null.

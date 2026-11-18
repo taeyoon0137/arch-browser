@@ -161,9 +161,9 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | Sites (`sites` with `siteAccess`) | Page scripts, page messages, and running package scripts in matching pages | No page access |
 | `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) and the pages of the tabs that a plugin with `tabs.manage` opens, whose addresses can carry what it knows to any host |
 | `history` | Search browsing history | Calls throw `permissionDenied` |
-| `downloads` | `downloadFinished` events with file names and addresses; renaming finished downloads | No download events |
+| `downloads` | Read download names, states, and byte counts with `arch.downloads.list()`; no paths or contents | Calls throw `permissionDenied` |
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
-| `notifications` | Local notifications through UserNotifications | Calls throw `permissionDenied` |
+| `notifications` | Local notifications under the plugin’s name through UserNotifications, at most one per plugin every 10 seconds | Calls throw `permissionDenied` |
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own feature, `plugin.<id>`, with text, and with the data kinds beyond text that it lists, `page` and `selection`, as `{"ai": ["page"]}` in `permissions`; with bus kinds in `events`, its listeners run as hooks on the shared hook scheduler (see AI hooks and plugins that AI writes) | Calls throw `permissionDenied` |
 | `agent` | Agent runs through `arch.agent.run` within the grant's tools, tab access, record level, limits, and daily count (`docs/hooks.md`, Agent run API). Hook scripts get it from their hook's grant; staging refuses it for installed plugins until their install sheet states that grant | No agent runs |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
@@ -173,7 +173,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 - Granting access to all sites as listed, which a pattern for every host under a top-level domain such as `*://*.com/*` counts as, or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
 - The data kinds that `ai` lists come with it, as a web extension's other API permissions come with its install: the install sheet and Settings state them in one sentence after the permissions, such as "Send the text of pages and selected text to the AI models you connected" (`PluginManifest.aiDataSummary`), and the review of an update marks it New when the update lists a kind the installed version did not. The kinds name the parts that a request may carry, not what can reach a model: a plugin with `ai` and sites can also put what its page calls read into a text part, so the sentence of `ai` with those of the sites already says that the text of those pages can reach the models.
 - A web extension's `tabs`, `clipboardWrite`, and `nativeMessaging` are Arch's `tabs`, `clipboard`, and `nativeMessaging`. Its other API permissions, such as `storage` or `cookies`, come with the install, as in other browsers: the install sheet and Settings list them in one sentence (`PluginManifest.extensionPermissions`), and only its sites can be left out.
-- Settings ▸ Plugins lists each grant. Revoking any part of it is not built yet; once it is, calls that need a revoked permission get `permissionDenied`, and contributions that need it are hidden.
+- Settings ▸ Plugins lists each grant. Revoke beside an installed plugin’s permission or site removes that part of its grant in its Persona and ends its running instance; later calls that need it refuse. Built-in plugins keep their compiled grants.
 - An update shows the sheet again, with the permissions and sites that the installed version did not ask for marked New. A site that the installed version asked for starts as the user left it, and a new site starts on. The new grant keeps only what the new manifest asks for, so an update that asks for less narrows it.
 - Built-in plugins declare permissions the same way. The app does not sandbox their code, but `PluginContext` checks their grant like any other. Settings shows the grant, and the user can switch the plugin off.
 - A plugin never sees cookies, passwords, or API keys. Its fetches carry no Persona cookies, so its own requests cannot act as the user on a site. The tabs that a plugin with `tabs.manage` opens are the user's tabs, though: they load with the Persona's cookies, from any host, the local network's among them, so an address that the plugin opens acts as the user there, as a sign-out link does, which the install sheet's sentence for `tabs.manage` states. Site data stays in the engines.
@@ -520,7 +520,7 @@ public struct PluginCommand: Identifiable, Hashable, Codable, Sendable {
     public var keywords: [String]
     /// The shortcut of the command's first item in the Plugins menu. The user can change it in Settings ▸ Shortcuts.
     public var shortcut: PluginShortcut?
-    /// Not built yet.
+    /// The palette places the command title before the argument field and passes its text on invocation.
     public var takesArgument: Bool
 }
 
@@ -687,12 +687,14 @@ public protocol PluginContext: AnyObject {
 
     // Data.
     func history(matching text: String, limit: Int) throws -> [PluginHistoryEntry]
-    func renameDownload(_ id: PluginDownload.ID, to filename: String) throws
+    func downloads() throws -> [PluginDownload]
     /// Uses an ephemeral session without cookies. The host must be in the grant's `network`.
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 
     // Interface.
+    /// A running plugin can hide or restore one of its commands in the palette and menus.
     func setEnabled(_ isEnabled: Bool, command id: String)
+    /// During a user-started command, opens an owned sidebar item's panel.
     func showPanel(_ sidebarItemID: String)
     func notify(title: String, body: String) throws
 }
@@ -747,12 +749,12 @@ public enum PluginTabPlace: Hashable, Sendable {
     case end(ofSpace: UUID?)
 }
 
-// Not built yet.
 public struct PluginDownload: Identifiable, Hashable, Sendable {
-    public let id: String
-    public var fileURL: URL
-    public var sourceURL: URL?
-    public var tabID: UUID?
+    public let id: UUID
+    public let name: String
+    public let state: String
+    public let completedBytes: Int64
+    public let totalBytes: Int64
 }
 
 // Not built yet.
@@ -779,7 +781,6 @@ public struct PluginInvocation: Sendable {
     public var linkURL: URL?
     public var imageURL: URL?
     public var selection: String?
-    // Not built yet.
     public enum Source: String, Sendable { case palette, menu, contextMenu, shortcut, sidebar }
     public var source: Source
     public var argument: String?
@@ -1196,7 +1197,7 @@ public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) 
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `downloads.list`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
@@ -1210,7 +1211,7 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
 | `arch.settings.get(key)` | `setting(_:)` |
 | `arch.net.fetch(url, init)` | `fetch(_:)` |
-| `arch.history.search(text, limit)`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `renameDownload(_:to:)` |
+| `arch.history.search(text, limit)`, `arch.downloads.list()` | `history(matching:limit:)`, `downloads()` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
 - A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.selected()` with the tab or `null`, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out.
@@ -1299,3 +1300,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - A file that a link of a web extension's popup or options page opens in a new tab, or that a `tabs.create` from its action's click opens, downloads nothing and its tab closes at once, as for any tab that a plugin opens, since Arch cannot tell the user's click there from the extension's own call. Whether such a tab should instead stay open and ask with its card, which would keep the user's file, is open.
 - A plugin's move keeps a tab pinned or open, so no plugin pins or unpins tabs, which would let one turn a pinned tab, which its close only unloads, into an open tab that its close removes, with the tab's saved page. Whether `tabs.manage` should pin and unpin tabs, or a permission of its own should, is open.
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, limit of 10 tabs that a plugin opens within a minute, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.
+
+The `downloads` permission lets `arch.downloads.list()` read the current Persona’s download names, states, completed bytes, and total bytes. The result contains no file path, folder, or contents.
+
+`arch.ui.notify(title, body)` posts a local notification under the plugin’s name when the app has notification authorization. Calls within 10 seconds of the previous post from that plugin are ignored.

@@ -728,15 +728,15 @@ public enum BrowserWindowKind {
     }
 
     /// Runs a plugin command on the selected tab through the plugins of the window's Persona, as the palette, the Plugins menu, and sidebar items do.
-    public func runPluginCommand(_ command: PluginCommandRef) {
-        let invocation = PluginInvocation(tab: selectedPluginTab(of: personaID))
+    public func runPluginCommand(_ command: PluginCommandRef, source: PluginInvocation.Source = .menu, argument: String? = nil) {
+        let invocation = PluginInvocation(tab: selectedPluginTab(of: personaID), source: source, argument: argument)
         let plugins = self.plugins
         Task { await plugins.run(command, invocation) }
     }
 
     /// Runs a plugin command from a tab row's context menu on that tab, with the plugins of the tab's Persona.
     func runPluginCommand(_ command: PluginCommandRef, onTab tab: Tab) {
-        let invocation = PluginInvocation(tab: session.pluginTab(tab))
+        let invocation = PluginInvocation(tab: session.pluginTab(tab), source: .contextMenu)
         Task { await session.plugins(in: tab.personaID).run(command, invocation) }
     }
 

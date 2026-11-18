@@ -285,7 +285,7 @@ private struct PluginSection: View {
                     UpdateRow(webStore: session.webStore, plugins: plugins, plugin: version) { reviewUpdate(version.id) }
                 }
             } else {
-                AccessRow(plugin: plugin)
+                AccessRow(plugins: plugins, plugin: plugin)
                 UpdateRow(webStore: session.webStore, plugins: plugins, plugin: plugin) { reviewUpdate(plugin.id) }
             }
             ForEach(plugin.manifest.contributions.settings) { setting in
@@ -508,6 +508,7 @@ private struct UpdateRow: View {
 
 /// What the plugin's grant lets it do: a sentence for each permission and each site, or, with more than `InstalledPlugin.listedSiteLimit` sites, one sentence for the sites that names the broadest (`InstalledPlugin.accessBrief`), with every site's sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down while each permission stays in view.
 private struct AccessRow: View {
+    let plugins: PluginManager
     let plugin: InstalledPlugin
 
     var body: some View {
@@ -530,6 +531,18 @@ private struct AccessRow: View {
                 let summaries = plugin.accessSummaries
                 Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
                     .multilineTextAlignment(.trailing)
+            }
+        }
+        if plugin.origin != .bundled {
+            ForEach(PluginPermission.allCases.filter(plugin.grant.permissions.contains), id: \.self) { permission in
+                LabeledContent(permission.summary) {
+                    Button("Revoke") { plugins.revoke(permission, from: plugin.id) }
+                }
+            }
+            ForEach(plugin.grant.sites, id: \.self) { site in
+                LabeledContent(site.accessSummary) {
+                    Button("Revoke") { plugins.revoke(site, from: plugin.id) }
+                }
             }
         }
     }
@@ -584,7 +597,7 @@ private struct VersionRow: View {
             Text("\(version.pairEngine?.displayName ?? "") version")
             Text(["Version \(version.manifest.version), \(origin(of: version)).", plugins.enginesNote(of: version.id)].compactMap { $0 }.joined(separator: " "))
         }
-        AccessRow(plugin: version)
+        AccessRow(plugins: plugins, plugin: version)
         // Each failure is a red row of its own. A container would take a row in the form even without a failure.
         FailureNotes(plugin: version)
             .font(.callout)

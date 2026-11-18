@@ -28,10 +28,12 @@ struct CommandPaletteView: View {
     @State private var historySuggestions: [HistoryEntry] = []
     /// The row that Up and Down selected. Its identity selects a matching row on redraw. Nil, or a row that has left the list, selects the first row; typing selects it again.
     @State private var selectedRow: PaletteItem?
+    @State private var argumentCommand: Attributed<PluginCommand>?
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
-        Array(windowModel.plugins.contributions.paletteCommands(matching: text).prefix(5))
+        if argumentCommand != nil { return [] }
+        return Array(windowModel.plugins.contributions.paletteCommands(matching: text).prefix(5))
     }
 
     /// The listed tabs of the window's Persona to switch to. A small window shows only its own tab, so its palette offers none.
@@ -124,7 +126,7 @@ struct CommandPaletteView: View {
     static let fieldRadius: CGFloat = 18
 
     /// The results appear once there is something to act on, as in Spotlight.
-    private var showsResults: Bool { !text.trimmingCharacters(in: .whitespaces).isEmpty }
+    private var showsResults: Bool { argumentCommand == nil && !text.trimmingCharacters(in: .whitespaces).isEmpty }
 
     /// The results panel's rows in the order it lists them, the order Up and Down move through.
     private var rows: [PaletteItem] {
@@ -152,6 +154,11 @@ struct CommandPaletteView: View {
 
     /// Return runs the selected row while the results show, and otherwise acts on the text as before.
     private func submit(in items: [PaletteItem]) {
+        if let argumentCommand {
+            windowModel.dismissCommandPalette()
+            windowModel.runPluginCommand(argumentCommand.ref, source: .palette, argument: text)
+            return
+        }
         guard showsResults else { return windowModel.submitCommandPalette(text) }
         // Keep the reviewed document when Return runs a highlighted Ask Agent row after a redraw.
         if case .askAgent(let offer) = selectedRow, offer.task == text.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -175,8 +182,14 @@ struct CommandPaletteView: View {
             windowModel.dismissCommandPalette()
             windowModel.showAgentSession(agentSession.id)
         case .command(let command):
+            if command.item.takesArgument {
+                argumentCommand = command
+                text = ""
+                selectedRow = nil
+                return
+            }
             windowModel.dismissCommandPalette()
-            windowModel.runPluginCommand(command.ref)
+            windowModel.runPluginCommand(command.ref, source: .palette)
         case .askAboutPage:
             windowModel.dismissCommandPalette()
             windowModel.askAboutPage()
@@ -224,7 +237,13 @@ struct CommandPaletteView: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
-                TextField(mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address", text: $text)
+                if let argumentCommand {
+                    Text(argumentCommand.item.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .padding(6)
+                        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                }
+                TextField(argumentCommand == nil ? (mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address") : "Command argument", text: $text)
                     .textFieldStyle(.plain)
                     .font(.system(size: 22))
                     .focused($isFocused)

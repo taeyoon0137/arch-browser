@@ -68,7 +68,7 @@ final class PluginsMenu: NSObject, NSMenuItemValidation {
     /// A page command: it runs on the active window's selected tab.
     @objc private func runCommand(_ sender: NSMenuItem) {
         guard let identifier = sender.representedObject as? String, let command = commands[identifier] else { return }
-        session.activeWindow?.runPluginCommand(command)
+        session.activeWindow?.runPluginCommand(command, source: NSApp.currentEvent?.type == .keyDown ? .shortcut : .menu)
     }
 
     /// Plugin commands need a browser window.
