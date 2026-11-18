@@ -765,7 +765,7 @@ The contracts below are decided; paste each into `docs/plugins.md` at the place 
   - History contract: `history` grants a search of visited page titles and addresses in the plugin's Persona, returning at most 100 entries with URL, title, last visit, and visit count. `arch.history.search(text, limit)` rejects an empty or excessive limit and returns no page body or cross-Persona visits. The search uses the existing history store without changing its tables.
   - blocked: The existing `history.sqlite` visits table has no Persona field, and changing its tables is forbidden; the current store cannot return only one Persona's visits.
   - Download rename contract: A separate `downloads.rename` permission lets a plugin suggest a name for one completed download in its Persona by entry ID. `arch.downloads.rename(id, name)` returns whether the file was renamed, keeps the file's extension, uses an unused safe filename, and refuses a missing or unfinished item. The call uses the existing `DownloadEntry.rename(to:)` path and returns no file path.
-- [ ] A16. **Preview** 2.
+- [x] A16. **Preview** 2.
 
 #### Group B: crash traps in every module
 
