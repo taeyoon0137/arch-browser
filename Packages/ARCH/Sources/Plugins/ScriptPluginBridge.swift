@@ -110,6 +110,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             move: (id, place) => call("tabs.move", [id, ...given(place)]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
+          downloads: Object.freeze({ list: () => call("downloads.list", []) }),
           storage: Object.freeze({
             get: (key) => call("storage.get", [key]),
             set: (key, value) => call("storage.set", [key, ...given(value)]),
@@ -434,6 +435,8 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             try context.copyToClipboard(try call.text(0))
         case "tabs.list":
             return .array(try context.tabs().map(\.scriptValue))
+        case "downloads.list":
+            return .array(try context.downloads().map(\.scriptValue))
         case "tabs.get":
             // A tab the script does not reach is null, as is text that names no tab.
             return try UUID(uuidString: try call.text(0)).flatMap { try context.tab($0) }?.scriptValue ?? .null

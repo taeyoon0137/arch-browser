@@ -20,6 +20,13 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         return session.tabsInSidebarOrder.filter { $0.personaID == persona && BrowserEventSource.kind(of: $0) != .agent }.map(session.pluginTab)
     }
 
+    public func downloads(in persona: PersonaID) -> [PluginDownload] {
+        session?.downloads.filter { $0.personaID == persona }.map {
+            PluginDownload(id: $0.id, name: $0.filename, state: $0.state.rawValue,
+                           completedBytes: $0.completedBytes, totalBytes: $0.totalBytes)
+        } ?? []
+    }
+
     /// Only a space's tab takes a suggested name; a favorite's tab goes by its favorite's name. The rename's title change posts inside `withCause`, so it names its cause.
     public func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool {
         guard let session, let tab = session.tabs.first(where: { $0.id == id }), BrowserEventSource.kind(of: tab) != .agent,

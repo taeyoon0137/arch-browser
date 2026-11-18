@@ -145,6 +145,8 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case nativeMessaging
     /// Requests through the AI interface under the plugin's own feature, `plugin.<id>`, with text and the data kinds that the manifest lists for it (`PluginManifest.aiDataKinds`), through `PluginContext.ai()`. With `events`, the plugin's listeners run as hooks on the shared hook scheduler, which makes that feature automatic (`InstalledPlugin.runsHooks`).
     case ai
+    /// Read download names, states, and sizes without file locations or contents.
+    case downloads
 
     /// What the permission lets a plugin do, as a sentence that Settings shows.
     public var summary: String {
@@ -155,6 +157,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         case .clipboard: return "Write text to the clipboard"
         case .nativeMessaging: return "Exchange messages with apps on this Mac"
         case .ai: return "Send text to the AI models you connected"
+        case .downloads: return "Read the names, states, and sizes of your downloads"
         }
     }
 }

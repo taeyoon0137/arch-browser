@@ -1452,6 +1452,10 @@ public final class PluginManager: ObservableObject {
         browserHost?.tabs(in: persona) ?? []
     }
 
+    fileprivate func personaDownloads() -> [PluginDownload] {
+        browserHost?.downloads(in: persona) ?? []
+    }
+
     /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
     fileprivate func page(of id: UUID, for grant: PluginGrant, of plugin: PluginID) throws -> (tab: PluginTab, contents: any EngineWebContents) {
         guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
@@ -1819,6 +1823,12 @@ final class ScopedPluginContext: PluginPanelContext {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { return [] }
         return manager.personaTabs().map { manager.shown($0, to: grant, of: pluginID) }
+    }
+
+    func downloads() throws -> [PluginDownload] {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.downloads)
+        return manager?.personaDownloads() ?? []
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {

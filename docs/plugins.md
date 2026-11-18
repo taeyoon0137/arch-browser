@@ -687,7 +687,7 @@ public protocol PluginContext: AnyObject {
 
     // Data.
     func history(matching text: String, limit: Int) throws -> [PluginHistoryEntry]
-    func renameDownload(_ id: PluginDownload.ID, to filename: String) throws
+    func downloads() throws -> [PluginDownload]
     /// Uses an ephemeral session without cookies. The host must be in the grant's `network`.
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 
@@ -749,12 +749,12 @@ public enum PluginTabPlace: Hashable, Sendable {
     case end(ofSpace: UUID?)
 }
 
-// Not built yet.
 public struct PluginDownload: Identifiable, Hashable, Sendable {
-    public let id: String
-    public var fileURL: URL
-    public var sourceURL: URL?
-    public var tabID: UUID?
+    public let id: UUID
+    public let name: String
+    public let state: String
+    public let completedBytes: Int64
+    public let totalBytes: Int64
 }
 
 // Not built yet.
@@ -1197,7 +1197,7 @@ public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) 
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `downloads.list`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
@@ -1211,7 +1211,7 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
 | `arch.settings.get(key)` | `setting(_:)` |
 | `arch.net.fetch(url, init)` | `fetch(_:)` |
-| `arch.history.search(text, limit)`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `renameDownload(_:to:)` |
+| `arch.history.search(text, limit)`, `arch.downloads.list()` | `history(matching:limit:)`, `downloads()` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
 - A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.selected()` with the tab or `null`, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out.
@@ -1300,3 +1300,5 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - A file that a link of a web extension's popup or options page opens in a new tab, or that a `tabs.create` from its action's click opens, downloads nothing and its tab closes at once, as for any tab that a plugin opens, since Arch cannot tell the user's click there from the extension's own call. Whether such a tab should instead stay open and ask with its card, which would keep the user's file, is open.
 - A plugin's move keeps a tab pinned or open, so no plugin pins or unpins tabs, which would let one turn a pinned tab, which its close only unloads, into an open tab that its close removes, with the tab's saved page. Whether `tabs.manage` should pin and unpin tabs, or a permission of its own should, is open.
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, limit of 10 tabs that a plugin opens within a minute, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.
+
+The `downloads` permission lets `arch.downloads.list()` read the current Persona’s download names, states, completed bytes, and total bytes. The result contains no file path, folder, or contents.
