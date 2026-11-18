@@ -32,7 +32,7 @@ final class ScriptPluginPanel: NSViewController, PluginEndingPanel, WKNavigation
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("A panel is made in code.")
+        return nil
     }
 
     override func loadView() {

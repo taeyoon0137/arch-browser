@@ -27,7 +27,7 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("TerminalView is created with a screen")
+        return nil
     }
 
     override var isFlipped: Bool { true }

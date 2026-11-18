@@ -37,7 +37,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("TerminalWindowController is created through shared")
+        return nil
     }
 
     /// Brings the terminal to the front, starting a login shell when none runs.

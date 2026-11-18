@@ -118,7 +118,7 @@ public final class PreferencesWindowController: NSWindowController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("PreferencesWindowController is created through shared")
+        return nil
     }
 
     /// Brings the Settings window to the front, centering it if it was hidden.

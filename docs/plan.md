@@ -813,11 +813,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0
   - [x] B1.20 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
     - changed: 0
-  - [ ] B1.21 Packages/ARCH/Sources/Plugins/PluginEngineVersions.swift
-  - [ ] B1.22 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
-  - [ ] B1.23 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
-  - [ ] B1.24 Packages/ARCH/Sources/Terminal/TerminalView.swift
-  - [ ] B1.25 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
+  - [x] B1.21 Packages/ARCH/Sources/Plugins/PluginEngineVersions.swift
+    - changed: 0
+  - [x] B1.22 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
+    - changed: 1
+  - [x] B1.23 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
+    - changed: 1
+  - [x] B1.24 Packages/ARCH/Sources/Terminal/TerminalView.swift
+    - changed: 1
+  - [x] B1.25 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
+    - changed: 1
   - [ ] B1.26 Packages/ARCHApp/Sources/Arch/AppDelegate.swift
   - [ ] B1.27 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
   - [ ] B1.28 Packages/ARCHKit/Sources/ARCHEngineChromium/ChromiumEngine.swift
