@@ -11,6 +11,8 @@ public enum FavoriteTileLayout {
     public static let choices = 1...4
     static let spacing: CGFloat = 6
     static let height: CGFloat = 44
+    static let iconSize: CGFloat = 16
+    static let gridHeaderSpacing: CGFloat = 10
 
     public static func columnCount(_ stored: Int) -> Int {
         min(max(stored, choices.lowerBound), choices.upperBound)
@@ -146,7 +148,7 @@ struct FavoriteTileView: View {
     let favorite: Favorite
     /// Set while the favorite's tab is selected.
     let isActive: Bool
-    /// Set while the favorite's page is open, which a dot below the tile shows, as the Dock does for an open app. Otherwise, as before the favorite's first click or after its tab unloaded, the icon is dimmed, as the row of a tab without its page is.
+    /// Set while the favorite's page is open. An unopened favorite's icon is dimmed.
     let isOpen: Bool
     /// Observed for the waiting mark, since the session does not republish the queue's changes.
     @ObservedObject var prompts: TabPromptQueue
@@ -172,26 +174,17 @@ struct FavoriteTileView: View {
                     Image(nsImage: icon)
                         .resizable()
                         .interpolation(.high)
-                        .frame(width: 22, height: 22)
+                        .frame(width: FavoriteTileLayout.iconSize, height: FavoriteTileLayout.iconSize)
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                         .opacity(isOpen ? 1 : SidebarDimming.unopened)
                 } else {
                     Image(systemName: "globe")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                         .opacity(isOpen ? 1 : SidebarDimming.unopened)
                 }
             }
             .animation(.easeOut(duration: 0.2), value: isOpen)
-            // The dot sits in the gap below the tile, nearer the tile than the row below it; a short tile has no room for it under the icon.
-            .overlay(alignment: .bottom) {
-                if isOpen {
-                    Circle()
-                        .fill(.secondary)
-                        .frame(width: 4, height: 4)
-                        .offset(y: 5)
-                }
-            }
             // The favorite's tab waits for the user's answer to a prompt. The mark sits on the tile's corner, as the Library button's count does, clear of the icon even in the narrowest sidebar.
             .overlay(alignment: .topTrailing) {
                 TabPromptIndicator(prompts: prompts, tabID: tabID)
@@ -200,7 +193,7 @@ struct FavoriteTileView: View {
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .help(favorite.title)
-            // One element for VoiceOver, whose value says what the dot and the mark show.
+            // One element for VoiceOver, whose value says whether its page is open and whether a prompt waits.
             .accessibilityElement()
             .accessibilityLabel(favorite.title)
             .accessibilityValue([isOpen ? "Open" : nil, prompts.hasPrompt(for: tabID) ? "Waiting for your answer" : nil].compactMap { $0 }.joined(separator: ", "))

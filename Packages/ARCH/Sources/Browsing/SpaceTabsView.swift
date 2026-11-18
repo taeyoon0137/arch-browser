@@ -147,6 +147,7 @@ struct SpaceTabsView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                             .modifier(FavoriteDropArea(spaceID: space.id, viewport: listFrame))
+                        .padding(.bottom, FavoriteTileLayout.gridHeaderSpacing)
                             .allowsHitTesting(false)
                     }
                 }
