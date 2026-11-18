@@ -717,11 +717,16 @@ The earlier work was done fast and without review. Each commit is checked once m
     - ok
   - [x] G1.15 `d13c0e2d` Task(V.11): Identify the source of plugin commands
     - fixed shortcut source detection to match the actual key equivalent and modifiers
-  - [ ] G1.16 `45820578` Task(V.11): Pass palette command arguments
-  - [ ] G1.17 `76bf0dbd` Task(V.11): Let plugins enable or disable their commands
-  - [ ] G1.18 `c02ebf1d` Task(V.11): Open an owned sidebar panel from a plugin command
-  - [ ] G1.19 `4bfae93e` Task(V.11): Read download metadata for a plugin Persona
-  - [ ] G1.20 `07370610` Task(V.11): Post rate limited plugin notifications
+  - [x] G1.16 `45820578` Task(V.11): Pass palette command arguments
+    - ok
+  - [x] G1.17 `76bf0dbd` Task(V.11): Let plugins enable or disable their commands
+    - ok
+  - [x] G1.18 `c02ebf1d` Task(V.11): Open an owned sidebar panel from a plugin command
+    - ok
+  - [x] G1.19 `4bfae93e` Task(V.11): Read download metadata for a plugin Persona
+    - ok
+  - [x] G1.20 `07370610` Task(V.11): Post rate limited plugin notifications
+    - fixed the composer reference, which still claimed notifications were unavailable
   - [ ] G1.21 `442567cc` Task(V.11): Revoke installed plugin grants in Settings
 - [ ] G2. The user's seven reports, verified by reading the code path end to end, fixing what does not hold: pinning a tab to the favorites leaves exactly one tab (drag and command); no dot under an open favorite; favorite icon 16 points in a 44-point tile; spacing between the grid and the space header; the favorites and pinned drop areas keep their room during a drag when empty; ⌘F twice within 0.35 seconds opens the agent composer and a single ⌘F opens Find at once; Download Image, Download Linked File, and File ▸ Save Page As… (⌘S) reach `webContents.download`; View ▸ Picture in Picture and the tab menu's command reach `startPictureInPicture` on both adapters. Write one line per report under this step.
 - [ ] G3. **Commit** `Fix: Hold the user's November reports to their code paths` with the changed files and this file. **Push**.
