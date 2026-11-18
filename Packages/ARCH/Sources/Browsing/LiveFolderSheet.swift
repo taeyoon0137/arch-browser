@@ -500,26 +500,38 @@ struct LiveFolderSheetView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(model.title)
                 .font(.headline)
-            Form {
-                Picker("Source:", selection: $model.sourceKind) {
-                    Text("Feed").tag(LiveFolderSheetModel.SourceKind.feed)
-                    Text("GitHub").tag(LiveFolderSheetModel.SourceKind.gitHub)
+            SiteSettingsGroup("Folder") {
+                SiteSettingsRow(symbol: "square.stack", title: "Source") {
+                    Picker("Source", selection: $model.sourceKind) {
+                        Text("Feed").tag(LiveFolderSheetModel.SourceKind.feed)
+                        Text("GitHub").tag(LiveFolderSheetModel.SourceKind.gitHub)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
+                SiteSettingsDivider()
+                SiteSettingsRow(symbol: "textformat", title: "Name") {
+                    TextField("Name", text: $model.name, prompt: Text(model.namePlaceholder))
+                }
+                SiteSettingsDivider()
+                SiteSettingsRow(symbol: "number", title: "Items") {
+                    Picker("Items", selection: $model.itemLimit) {
+                        ForEach(LiveFolderConfiguration.itemLimits, id: \.self) { Text("\($0)").tag($0) }
+                    }.labelsHidden().fixedSize()
+                }
+                SiteSettingsDivider()
+                SiteSettingsRow(symbol: "arrow.clockwise", title: "Refresh") {
+                    Picker("Refresh", selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
+                        ForEach(LiveFolderConfiguration.refreshIntervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
+                    }.labelsHidden().fixedSize()
+                }
+            }
+            .disabled(model.isWorking)
+            Form {
                 switch model.sourceKind {
                 case .feed: feedRows
                 case .gitHub: gitHubRows
                 }
-                TextField("Name:", text: $model.name, prompt: Text(model.namePlaceholder))
-                Picker("Items:", selection: $model.itemLimit) {
-                    ForEach(LiveFolderConfiguration.itemLimits, id: \.self) { Text("\($0)").tag($0) }
-                }
-                .fixedSize()
-                Picker("Refresh:", selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
-                    ForEach(LiveFolderConfiguration.refreshIntervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
-                }
-                .fixedSize()
             }
             .formStyle(.columns)
             .disabled(model.isWorking)
