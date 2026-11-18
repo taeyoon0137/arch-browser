@@ -312,14 +312,17 @@ private struct AgentTranscriptRow: View {
         switch item.kind {
         case .user(let text):
             Text(text)
-                .font(.system(size: 13, weight: .medium))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        case .reply(let text):
-            Text(actions.formatReply(text))
                 .font(.system(size: 13))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+        case .reply(let text):
+            VStack(alignment: .leading, spacing: 6) {
+                Text(actions.formatReply(text))
+                    .font(.system(size: 13))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                sources
+            }
         case .thinking(let text):
             DisclosureGroup("Thinking") {
                 Text(text)
@@ -330,19 +333,14 @@ private struct AgentTranscriptRow: View {
             }
             .font(.system(size: 11))
         case .step(let step):
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: step.status == .ok ? "checkmark.circle" : "exclamationmark.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(step.status == .ok ? Color.secondary : Color.orange)
-                Text(step.sentence)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let handle = step.tabHandle, let tabID = step.tabID {
-                    Button(handle) { actions.showTab(tabID) }
-                        .buttonStyle(.link)
-                        .font(.system(size: 11))
-                        .help("Show \(handle)")
+            AgentTechnicalDetails(title: step.sentence) {
+                HStack(spacing: 6) {
+                    Text(step.tool + " · " + String(describing: step.status))
+                    if let handle = step.tabHandle, let tabID = step.tabID {
+                        Button(handle) { actions.showTab(tabID) }
+                            .buttonStyle(.link)
+                            .help("Show \(handle)")
+                    }
                 }
             }
         case .notice(let text):
@@ -366,23 +364,24 @@ private struct AgentTranscriptRow: View {
                 Text(footer(model: model, usage: usage))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                let available = item.pagesRead.compactMap { page -> (page: AgentReadPage, label: String)? in
-                    guard let tab = readTab(page) else { return nil }
-                    let title = tab.title.isEmpty ? (page.url.host ?? "") : tab.title
-                    return (page, page.handle + " · " + title)
+                sources
+            }
+        }
+    }
+
+    private var sources: some View {
+        let available = item.pagesRead.compactMap { page -> (page: AgentReadPage, label: String)? in
+            guard let tab = readTab(page) else { return nil }
+            let title = tab.title.isEmpty ? (page.url.host ?? "") : tab.title
+            return (page, title)
+        }
+        return HStack(spacing: 8) {
+            ForEach(available, id: \.page) { row in
+                Button(row.label) {
+                    if let current = readTab(row.page) { actions.showReadTab(current.id) }
                 }
-                if !available.isEmpty {
-                    DisclosureGroup("Pages read this turn") {
-                        ForEach(available, id: \.page) { row in
-                            Button(row.label) {
-                                if let current = readTab(row.page) { actions.showReadTab(current.id) }
-                            }
-                            .buttonStyle(.link)
-                            .font(.system(size: 11))
-                        }
-                    }
-                    .font(.system(size: 11))
-                }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
             }
         }
     }

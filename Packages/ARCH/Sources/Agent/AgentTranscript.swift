@@ -61,6 +61,7 @@ struct AgentTranscript: Equatable {
     /// The current turn's usage and whether its reply or thinking is still growing.
     private var turnUsage: AIUsage?
     private var turnPages: [AgentReadPage] = []
+    private var turnStartIndex = 0
     private var growing: Growing?
 
     private enum Growing: Equatable {
@@ -77,6 +78,7 @@ struct AgentTranscript: Equatable {
     }
 
     mutating func beginTurn(_ text: String, isRetry: Bool) {
+        turnStartIndex = items.count
         retryableErrorID = nil
         turnUsage = nil
         turnPages = []
@@ -118,7 +120,14 @@ struct AgentTranscript: Equatable {
     /// The footer under a turn that ended, with the model that held it.
     mutating func endTurn(model: AIModelRef?) {
         append(.turnFooter(model: model, usage: turnUsage))
-        items[items.count - 1].pagesRead = turnPages
+        if let index = (turnStartIndex..<items.count - 1).reversed().first(where: {
+            if case .reply = items[$0].kind { return true }
+            return false
+        }) {
+            items[index].pagesRead = turnPages
+        } else {
+            items[items.count - 1].pagesRead = turnPages
+        }
         turnPages = []
         turnUsage = nil
     }
