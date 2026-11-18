@@ -707,8 +707,8 @@ Group E, picture in picture (reported on November 18: it works on neither engine
 
 Group F, the agent panel's design (row VII.34). Design first; no code until the user approves:
 
-- [ ] F1. Read `AgentPanelColumn.swift`, `AgentPanel.swift`, `AgentComposer.swift`, `AgentApprovalCard.swift`, `AgentTranscript.swift`, and `SiteSettingsParts.swift` (the model for reusable parts). Write `docs/agent-panel-design.md`: for each state (empty, composing, running, waiting on a card, taken over, ended, failed), what the user sees now, which text is technical (identifiers, modes, rule names, provider details), and the proposed layout: the one main action of the state, what moves behind a disclosure or into help, and the reusable parts with their sizes, weights, and color roles taken from existing views. Add the file to the docs list in `resources/README.preset.md` and run `./scripts/readme_update.sh`.
-- [ ] F2. **Commit** `Docs: Propose the agent panel's redesign by state` with the new document, the README files, and this file. **Push** the branch. Stop here for this group: the user reads the proposal before any view changes.
+- [x] F1. Read `AgentPanelColumn.swift`, `AgentPanel.swift`, `AgentComposer.swift`, `AgentApprovalCard.swift`, `AgentTranscript.swift`, and `SiteSettingsParts.swift` (the model for reusable parts). Write `docs/agent-panel-design.md`: for each state (empty, composing, running, waiting on a card, taken over, ended, failed), what the user sees now, which text is technical (identifiers, modes, rule names, provider details), and the proposed layout: the one main action of the state, what moves behind a disclosure or into help, and the reusable parts with their sizes, weights, and color roles taken from existing views. Add the file to the docs list in `resources/README.preset.md` and run `./scripts/readme_update.sh`.
+- [x] F2. **Commit** `Docs: Propose the agent panel's redesign by state` with the new document, the README files, and this file. **Push** the branch. Stop here for this group: the user reads the proposal before any view changes.
 
 Group G, the end:
 
