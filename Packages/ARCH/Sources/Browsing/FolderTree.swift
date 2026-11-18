@@ -378,7 +378,10 @@ import Foundation
         for folder in folders {
             while level(of: folder.id) > maximumLevel {
                 var ancestor = folder.id
-                for _ in 0..<(level(of: folder.id) - maximumLevel - 1) { ancestor = parents[ancestor]! }
+                for _ in 0..<(level(of: folder.id) - maximumLevel - 1) {
+                    guard let parent = parents[ancestor] else { break }
+                    ancestor = parent
+                }
                 parents[ancestor] = nil
             }
         }

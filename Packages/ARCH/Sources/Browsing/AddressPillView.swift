@@ -150,7 +150,7 @@ struct SiteControlAnchor: NSViewRepresentable {
 
         @available(*, unavailable)
         required init?(coder: NSCoder) {
-            fatalError("AnchorView is created with its button")
+            return nil
         }
 
         // Only joining the window registers the view, so an update of the other anchor does not take over.

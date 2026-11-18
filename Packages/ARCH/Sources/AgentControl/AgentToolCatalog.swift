@@ -121,7 +121,7 @@ public struct AgentTool: Sendable {
     public var inputSchema: AgentJSON {
         var schema: [String: AgentJSON] = [
             "type": "object",
-            "properties": .object(Dictionary(uniqueKeysWithValues: parameters.map { ($0.name, $0.schema) })),
+            "properties": .object(Dictionary(parameters.map { ($0.name, $0.schema) }, uniquingKeysWith: { first, _ in first })),
             "additionalProperties": false,
         ]
         let required = parameters.filter(\.isRequired).map { AgentJSON.string($0.name) }

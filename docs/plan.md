@@ -782,11 +782,17 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 2
   - [x] B1.5 Packages/ARCH/Sources/Agent/AgentSessionTicket.swift
     - changed: 1
-  - [ ] B1.6 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
-  - [ ] B1.7 Packages/ARCH/Sources/Browsing/AddressPillView.swift
-  - [ ] B1.8 Packages/ARCH/Sources/Browsing/BrowserSession.swift
-  - [ ] B1.9 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
-  - [ ] B1.10 Packages/ARCH/Sources/Browsing/FolderTree.swift
+  - [x] B1.6 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
+    - changed: 1
+  - [x] B1.7 Packages/ARCH/Sources/Browsing/AddressPillView.swift
+    - changed: 1
+  - [x] B1.8 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+    - changed: 0
+    - blocked: When both engines fail, the nonoptional runtime(for:in:) contract has no runtime to return; changing it requires a wider API and caller migration.
+  - [x] B1.9 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
+    - changed: 1
+  - [x] B1.10 Packages/ARCH/Sources/Browsing/FolderTree.swift
+    - changed: 1
   - [ ] B1.11 Packages/ARCH/Sources/Browsing/PromptState.swift
   - [ ] B1.12 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
   - [ ] B1.13 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
