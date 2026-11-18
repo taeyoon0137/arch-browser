@@ -20,7 +20,12 @@ struct WebExtensionActionsSection: View {
             let engines = Set(webExtensions.engines.keys)
             let engineRunsExtensions = engines.contains(tab.engineKind)
             SiteSettingsGroup("Extensions", footnote: items.isEmpty
-                ? storeRow?.note
+                ? storeRow.map { row in
+                    guard case .installed = row else { return row.note }
+                    let space = session.spaces.first { $0.id == tabSpace }
+                    let place = session.displayedPlace(ofPersona: tab.personaID, space: space) ?? space?.name ?? "this Persona"
+                    return "Manage it for \(place) in Settings ▸ Plugins."
+                }
                 : engineRunsExtensions
                 ? "Opens an extension\u{2019}s popup, or lets the extension act on this page."
                 : "Extensions run on \(Self.names(engines)) tabs. Switch this tab to \(Self.names(engines, joinedBy: "or")) to use them.") {
