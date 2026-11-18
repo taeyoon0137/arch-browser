@@ -647,6 +647,121 @@ Rules for every tier:
 4. Finish by updating this file (remove the row, update Current State) and the feature row in `docs/features.md` in the same commit, then go through the After each task list in `AGENTS.md`.
 5. Verification steps use a fresh Application Support folder unless the step says otherwise.
 
+### Codex week queue
+
+Written on November 18 for Codex, which works alone until Claude's usage returns on November 22 at 05:00 KST. This section is the user's latest instruction; where it differs from `AGENTS.md` or from the older "Codex handoff queue" below, this section wins.
+
+How to work:
+
+- Do every step that is not ticked, in order. A session that starts later continues from the first unticked step. No step waits for the user or for Claude. Never stop to ask.
+- The queue must last until November 22, 05:00 KST. Check the time with `date` at each **Commit** step. Work carefully, not quickly: read every file a step names in full before editing it. When every group through W is ticked and the time has not come, go to Group X, which repeats until the time comes.
+- A step whose text begins "List:" produces a work list: run its command, and write one sub-step per result under the step as `  - [ ] <step>.<n> <path>`. Then do each sub-step as the step's "For each" text says, ticking it when done. Commit after every 5 sub-steps with the subject the step gives, numbered `(part <k>)`.
+
+Rules (all earlier conditions hold):
+
+- Branch: `work/codex-week` only. Never commit to, merge into, or push `main`. Push only `work/codex-week`, at the steps marked **Push**.
+- No test code: never add, change, or delete a file under a `Tests` folder. Never run `swift test`. If a change breaks a test's compilation, give the changed API a default argument or a protocol extension default so the old call still compiles.
+- The only checks: `swift build`, `./scripts/check_markdown.py`, `git diff --check`. Run `swift build` after every step that changes Swift or Objective-C++ and fix what it reports before going on.
+- `scripts/bundle_app.sh` and `scripts/install_app.sh` run only inside the steps named **Preview**. Never run `scripts/setup_cef.sh`, a release script, or the app's windows; never operate the app's interface.
+- Never touch `arch-chromium`, the CEF helper, `wrapper_src`, `session.json`'s schema, `history.sqlite`'s tables, `resources/assets/sym_arch_rounded.png`, or the build links (`Frameworks`, `cefroot`, `wrapper_src`). When a step truly needs a new engine protocol member or bridge method, add the smallest one, give other conformers a default that does nothing, implement it on both adapters, and record it in one sentence in `docs/engine-protocol.md`.
+- Interface: keep the sizes, weights, and color roles of the neighboring views; build from shared parts (`SiteSettingsParts.swift`, `AgentPanelParts.swift`, `SidebarFill`); name a Persona as "Persona / Space" wherever the space is known. The app's strings are English.
+- Decisions: when a step leaves something open, decide the way its design document leans and write `decision: …` in one line under the step. Write `blocked: …` only when no public API can do it or a rule above forbids it, then go on. A blocked step never stops the queue.
+- Commits: only at **Commit** steps (and the every-5 rule of list steps), staged by explicit path, with the given subject and no trailers; tick the finished steps in the same commit. Documents, comments, and commit messages are English.
+- Never write the code-signing identity, the team ID, or the signed bundle's details into any file, commit, or reply. Send the output of `bundle_app.sh` to a file under `build/` and never print it.
+
+**Preview** procedure (used by the steps that name it), so the user can try the work while it goes on:
+
+1. `swift build` must pass.
+2. `./scripts/bundle_app.sh > build/bundle.log 2>&1`, then `codesign --verify --deep --strict build/Arch.app`. If either fails, write `blocked:` under the step and go on without installing.
+3. If `pgrep -x Arch` finds the app running, do not quit it and do not install; the bundle stays in `build/Arch.app`. If it is not running: back up with `ditto "$HOME/Library/Application Support/Arch" "$HOME/Library/Application Support/Arch Backups/$(date +%Y-%m-%d-%H%M)-before-preview"`, run `./scripts/install_app.sh`, and verify `/Applications/Arch.app` with `codesign --verify --deep --strict`. Do not open the app.
+4. Rewrite `build/PREVIEW-KO.md` in Korean (plain -함 register) for the user: the time, the branch's commit, whether it was installed or only bundled (and that quitting Arch and running `./scripts/install_app.sh` installs it), and a numbered list, newest work first, of what to try: for each item, where to go in the app, what to do, and what should be seen. Mark items that are `blocked` as not working. Keep earlier items below the new ones.
+5. Tick the step and commit this file with `Docs: Record preview <n> of the week queue` (the file under `build/` is not committed). **Push**.
+
+#### Group P: start
+
+- [ ] P1. `git fetch`, then `git switch work/codex-week` and `git pull`. If the branch has uncommitted changes from an earlier session, commit them as `Chore: Keep the interrupted step's changes` only if `swift build` passes; otherwise `git restore` them.
+- [ ] P2. Read `AGENTS.md`, this section, and the "Codex handoff queue" section below it (what was done on November 18, with its `blocked:` and decision notes).
+
+#### Group G: check the 44 commits of November 18 again
+
+The earlier work was done fast and without review. Each commit is checked once more against its step.
+
+- [ ] G1. List: `git log --reverse --format='%h %s' main..8fb0f49f --no-merges -- Packages`. For each commit: read its whole diff (`git show <hash>`) and the queue step it answers in "Codex handoff queue". Check, and fix in place what fails: (a) the step's done condition is fully met; (b) no force unwrap, `try!`, array index, or `Dictionary(uniqueKeysWithValues:)` on data from outside; (c) state changed on the main actor, no retain cycle in a stored closure (`[weak self]`); (d) sizes, weights, and color roles match the neighboring views, and shared parts are used instead of copies; (e) every user-visible string is English, ends without a period unless a sentence, uses "…" (one character) for commands that open something, and names Personas as "Persona / Space"; (f) the documents the step named describe the result. Write one line under the sub-step: `ok` or what was fixed. Subject: `Fix: Check the November 18 commits against their steps`.
+- [ ] G2. The user's seven reports, verified by reading the code path end to end, fixing what does not hold: pinning a tab to the favorites leaves exactly one tab (drag and command); no dot under an open favorite; favorite icon 16 points in a 44-point tile; spacing between the grid and the space header; the favorites and pinned drop areas keep their room during a drag when empty; ⌘F twice within 0.35 seconds opens the agent composer and a single ⌘F opens Find at once; Download Image, Download Linked File, and File ▸ Save Page As… (⌘S) reach `webContents.download`; View ▸ Picture in Picture and the tab menu's command reach `startPictureInPicture` on both adapters. Write one line per report under this step.
+- [ ] G3. **Commit** `Fix: Hold the user's November reports to their code paths` with the changed files and this file. **Push**.
+- [ ] G4. **Preview** 1.
+
+#### Group A: the plugin system's four blocked items, with their contracts
+
+The contracts below are decided; paste each into `docs/plugins.md` at the place the item is described (Permissions, Manifest keys, JavaScript API, Swift API, Build order) before building it. Build each in the pattern of `tabs.manage` and of the members added on November 18: the `PluginContext` member with a refusing default, the permission and its sentence, the manager's grant check, the session host, the bridge's `arch.` call, the composer reference line (`PluginComposerInstructions.swift`), and the documents (`docs/plugins.md`, row 50 of `docs/features.md`, Current State and row V.11 here).
+
+- [ ] A1. Contract for `arch.net.fetch`, into `docs/plugins.md`: the manifest's `network` permission is an object `{"network": ["api.example.com", "*.example.com"]}`; an entry is a host name, or `*.` and a host name for its subdomains; no IP literal, no `localhost`, no port, no path. `arch.net.fetch(url, options)` takes an `https` address whose host an entry covers, and `options` `{method, headers, body}`: methods GET, POST, PUT, PATCH, DELETE (default GET); headers an object of strings, where `Cookie`, `Host`, `Origin`, `Referer`, and `Content-Length` are refused; `body` a string of at most 1 MB. The request carries no cookies and stores none (an ephemeral session with cookies and caches off), and uses no credential storage. A redirect is followed, at most 5 times, only to an `https` address a listed entry covers; otherwise the call rejects with `redirectRefused`. A host that resolves to a loopback, private, or link-local address is refused with `hostRefused`. The response body is read as UTF-8 text of at most 5 MB (`responseTooLarge`, `invalidResponse`), within 30 seconds (`timedOut`). It resolves with `{status, headers, text}`. A plugin makes at most 60 requests a minute (`rateLimited`). Requests stop when the instance stops. Hook scripts and plugins that AI writes cannot ask for `network`.
+- [ ] A2. Build `PluginNetwork.swift` in `Packages/ARCH/Sources/Plugins`: the entry grammar and its matching (`PluginNetworkHost`), read from the manifest in `PluginManifestFile.swift` with the refusals above, and stored on `PluginManifest`. `swift build`.
+- [ ] A3. In the same file, the fetcher: an ephemeral `URLSession` with a delegate that applies the redirect rule, the size limits while reading, the timeout, the refused headers, and the address check (resolve with `getaddrinfo` before the request; refuse the listed ranges). `swift build`.
+- [ ] A4. `PluginContext.fetch(_:)` with a refusing default, the manager's check (permission, covered host, rate limit), `ScopedPluginContext`, the bridge call `arch.net.fetch` with the waiting time counted as Arch's (as `ai.reply` does), panel bridges included, the permission's sentence "Send requests to \<hosts>" in the install sheet and Settings, the composer's refusal of `network`, and the documents. `swift build`.
+- [ ] A5. **Commit** `Task(V.11): Let plugins with network fetch from their listed hosts without cookies` with those files and this file. **Push**.
+- [ ] A6. Contract for settings pages, into `docs/plugins.md`: a script plugin's manifest may name `"settingsPage": "<file>.html"`, a file of the package. Settings ▸ Plugins then shows Open Settings… in the plugin's command row; it opens a sheet, 480 by 520 points, with the page in a web view of the plugin sandbox, as a panel is: a bridge of its own that acts through the instance's context without `pages`, `commands`, or `events`; the page keeps to its document as a panel does; the instance does not stop for being idle while the sheet shows; closing the sheet ends the page's requests; the sheet closes when the instance stops. The sheet has one Done button below the page.
+- [ ] A7. Build it: the manifest key (refused for a file outside the package or not HTML), a `ScriptPluginPanel` made for the page (reuse the class; add a size parameter), `PluginManager.settingsPage(for:)`, and the sheet and button in `Preferences/PluginsSection.swift` beside the section's other commands (`CommandRowLayout`). Documents. `swift build`.
+- [ ] A8. **Commit** `Task(V.11): Open a script plugin's settings page in a sheet of Settings ▸ Plugins`. **Push**.
+- [ ] A9. Contract for Install in Another Persona, into `docs/plugins.md`: the command shows in the section of an installed, unpaired script plugin or web extension while another Persona exists; a pair shows none (the design for copying both versions is open). It lists the other Personas by name (a Persona-wide choice has no space); choosing one stages the installed package's folder in that Persona's manager through the same staging and review sheet as Install Plugin… from a folder, with a fresh grant review; settings, storage, and secrets are not copied. A plugin with the same identifier in the target shows the review's Update choice, as any install does.
+- [ ] A10. Build it in `PluginsSection.swift` and `PluginManager.swift` (a function that returns the installed package's folder for staging). Documents. `swift build`.
+- [ ] A11. **Commit** `Task(V.11): Install an unpaired plugin in another Persona through the install review`. **Push**.
+- [ ] A12. Contract for panels in the sidebar's place, into `docs/plugins.md`: a sidebar item with a panel may add `"presentation": "sidebar"` (default `"popover"`). Clicking it shows the panel in the sidebar column in place of the space's tab list, under a header row with a back button (chevron.left, the item's title in 13-point semibold) at the tab rows' insets; favorites and the address pill stay. Back, Escape, switching spaces, or the plugin going off returns the tab list. The panel is the same `ScriptPluginPanel`, sized to the column.
+- [ ] A13. Build it: the manifest key in `PluginManifestFile.swift` and `PluginContributions.swift`, a `sidebarPanel` state on `BrowserWindowModel`, the swap in `SpaceTabsView.swift` or `SidebarView.swift` where the tab list is placed, and `PluginViews.swift`'s row action. Documents. `swift build`.
+- [ ] A14. **Commit** `Task(V.11): Show a plugin panel in the sidebar's place when its item asks for it`. **Push**.
+- [ ] A15. Read row V.11 here and the Build order of `docs/plugins.md`; for each item still listed as not built, write a contract in two to five sentences under this step as the design leans, then build it as above with one commit `Task(V.11): …` each. Remove the built items from the row's list.
+- [ ] A16. **Preview** 2.
+
+#### Group B: crash traps in every module
+
+A second Mac crashed at every launch after sync was turned on; the cause is not found. Code that stops the app on unexpected data is removed everywhere.
+
+- [ ] B1. List: `grep -rlE 'uniqueKeysWithValues|try!|fatalError\(|preconditionFailure\(|precondition\(|\.first!|\.last!|as! |[A-Za-z_\)\]]!\.|[A-Za-z_\)\]]!$|[A-Za-z_\)\]]! ' Packages/ARCH/Sources Packages/ARCHApp/Sources Packages/ARCHKit/Sources --include='*.swift' | grep -v wrapper_src | sort`. For each file: read it in full; for every match decide whether the value can come from a file, the network, iCloud, an engine, a plugin, a page, a pasteboard, user defaults, or another process. If it can: replace `uniqueKeysWithValues:` with `Dictionary(_:uniquingKeysWith: { first, _ in first })`; replace a force unwrap, forced cast, or `try!` with `guard`/`if let` and the function's existing failure path (return, an empty value, or a thrown error the caller already handles); replace a trap with that failure path. If the code itself guarantees the value (a literal, a just-inserted key, an `init?` of a constant), leave it and write nothing. Never change behavior for valid data. Write under the sub-step the count changed. Subject: `Fix: Keep unexpected data from stopping the app`.
+- [ ] B2. List: `grep -rlE '\[[A-Za-z_\.]+\]' Packages/ARCH/Sources/Sync Packages/ARCH/Sources/Browsing/SidebarSync.swift Packages/ARCH/Sources/Browsing/SessionStore.swift Packages/ARCH/Sources/Browsing/BrowserSession.swift Packages/ARCH/Sources/Import Packages/ARCH/Sources/LiveFolders --include='*.swift' | sort`. For each file: check every array subscript by index and every `removeFirst()`, `removeLast()`, `dropFirst(n)` on arrays built from stored or remote data; guard the index or use `first`/`indices.contains`. Subject: `Fix: Guard indexes into stored and synced lists`.
+- [ ] B3. In `Packages/ARCH/Sources/Sync/SyncController.swift`, widen the crash-loop guard (`applyingKey`): also set it around the code that builds records to send (`record(toSave:)` and its caller) and clear it after; and in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`, where the session is created at launch, if the key `ARCHSyncApplyingChanges` is set, keep sync off as the controller does. Update the Crash-loop guard section of `docs/sync.md`. `swift build`.
+- [ ] B4. **Commit** `Fix: Hold sync's crash-loop guard while it builds records to send` with those files and this file. **Push**.
+- [ ] B5. **Preview** 3.
+
+#### Group C: accessibility and shared parts in every view
+
+- [ ] C1. List: `grep -rlE 'struct [A-Za-z]+: View|NSViewRepresentable|NSViewController' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift' | sort`. For each file, read it in full and fix only these, changing no behavior: (a) a `Button` or tappable view whose label is only an image gets `.accessibilityLabel` and `.help` with a short English name of its action; (b) a decorative `Image` gets `.accessibilityHidden(true)`; (c) a control under `.labelsHidden()` gets an `.accessibilityLabel`; (d) a title that can be long gets `.lineLimit(1)` with `.truncationMode(.middle)` for file names and addresses or `.tail` otherwise, and a sentence gets `.fixedSize(horizontal: false, vertical: true)`; (e) a literal color used for a hover, selected, or field fill becomes the matching `SidebarFill` case, and a row built by hand as a symbol, a label, and a control inside a popover or sheet becomes `SiteSettingsRow` in a `SiteSettingsGroup` when its sizes already match; (f) a Persona named without its space where the view knows the space becomes "Persona / Space". Write `ok` or what changed under the sub-step. Subject: `Fix: Label controls for VoiceOver and build views from the shared parts`.
+- [ ] C2. Menus: in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift` and every `.contextMenu` and `Menu` in `Packages/ARCH/Sources`, make titles consistent: title case; "…" (one character, never three periods) only where the command opens a sheet, panel, or dialog before acting; no trailing period; the same command has the same title everywhere (list the titles that differed under this step). `swift build`.
+- [ ] C3. **Commit** `Fix: Make menu titles consistent across the menu bar and context menus`. **Push**.
+- [ ] C4. **Preview** 4.
+
+#### Group D: documents against the code
+
+- [ ] D1. List: `ls docs/*.md resources/README.preset.md`. For each document, section by section (level-2 and level-3 headings): check every concrete claim (a type, function, file, key, menu title, number, default, or behavior) against the code on this branch with `grep`; where the document is wrong or stale, fix the document, never the code; where a claim cannot be checked without the running app, leave it. Do not rewrite style. Escape placeholders as AGENTS.md says and run `./scripts/check_markdown.py`. For `resources/README.preset.md`, also run `./scripts/readme_update.sh` and stage the regenerated files. Under the sub-step write how many claims were fixed. One commit per document: `Docs: Correct <document> against the code`.
+- [ ] D2. `docs/plan.md` itself: in Current State, each module's paragraphs against that module's sources, one module per commit: `Docs: Correct the plan's <module> state against the code`. Do not edit the Work Queue rows' meaning; only fix file and function names that no longer exist.
+- [ ] D3. **Push**.
+
+#### Group E: the prose pass
+
+- [ ] E1. List: collect every file named in a "prose pass" note in this file (`grep -n -i 'prose pass' docs/plan.md`), plus every file changed on this branch (`git diff --name-only main...HEAD -- Packages docs`), deduplicated and sorted. For each file: rewrite only prose, that is English comments, documentation comments, and Markdown sentences: short sentences, plain words, active voice, one fact per sentence, American spelling, no praise or filler; keep every fact, name, number, code span, and Markdown structure; change no code, identifier, or string literal. Skip a file whose prose already reads so. `swift build` after Swift files. Subject: `Docs: Rewrite prose for plain English`.
+- [ ] E2. Remove the "prose pass" notes from the rows whose files are all done. **Commit** `Docs: Drop the prose pass notes that are done`. **Push**.
+
+#### Group W: wrap-up of the first pass
+
+- [ ] W1. `swift build`, `./scripts/check_markdown.py`, `git diff --check main...HEAD`. Under this step write: each group's number of commits, every `decision:` and `blocked:` line with its step, and every build warning.
+- [ ] W2. **Commit** `Docs: Record what the week queue's first pass finished and left`. **Push**.
+- [ ] W3. **Preview** 5.
+
+#### Group X: rounds until November 22, 05:00 KST
+
+Run rounds in order, then start again at X1 with the next round number, until `date` shows the time has come. In each round after the first, a list step lists only files changed since that step's last round (`git diff --name-only <the round's first commit>...HEAD`); if a list is empty, write `none` and go on. Number each round's sub-steps `X<n>.r<round>.<k>`.
+
+- [ ] X1. Review of the round's own work: List the commits made since the last X1 (or since G1), and check each as G1 does.
+- [ ] X2. Documentation comments: List `grep -rLE '^// ' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift'` (files without a header comment) and files where a `public` or `internal` type has no `///` comment. For each, add a header comment that says what the file holds and a `///` sentence for each type and non-trivial function, stating what it does and any rule it keeps, from reading the code; never guess. Subject: `Docs: Say what each file and type is for`.
+- [ ] X3. Unused code: for each `private func`, `private var`, and `fileprivate` declaration in `Packages/ARCH/Sources` whose name appears nowhere else in its file (`grep -c`), remove it if `swift build` still passes; restore it otherwise. Subject: `Refactor: Remove private code that nothing calls`.
+- [ ] X4. Duplicates: find view code repeated in three or more files (the same modifier chain of five or more lines); move it into the nearest shared parts file and use it from each place, changing no look. Subject: `Refactor: Share repeated view code`.
+- [ ] X5. Open decisions: read the Open decisions lists of `docs/plugins.md`, `docs/agents.md`, `docs/hooks.md`, `docs/sync.md`, and `docs/bookmarks.md`; for each one that the surrounding text clearly leans on and that needs no engine change, decide it, record the decision in the document, and build it with one commit `Feat: …` or `Fix: …` each. Leave the others.
+- [ ] X6. Repeat B1, C1, and D1 for the files changed in this round.
+- [ ] X7. **Preview** (numbered on from 6), then `date`; if before November 22, 05:00 KST, start the next round at X1; otherwise go to Z.
+
+#### Group Z: the end
+
+- [ ] Z1. `swift build`, `./scripts/check_markdown.py`, `git diff --check main...HEAD`. Write under this step the totals: commits by group and round, all `decision:` and `blocked:` lines, and build warnings. **Commit** `Docs: Record what the week queue finished and left`. **Push**. Stop. Do not merge. Claude reviews `work/codex-week` part by part, runs the tests, and merges what holds.
+
 ### Codex handoff queue
 
 Written on November 18 for the session that takes over while Claude is out of usage. It is the user's latest instruction, so where it differs from `AGENTS.md` (tests, verification, the After each task list), this section wins. Do every step that is not ticked, in order, one at a time, through the last group; a session that starts later continues from the first unticked step. Each step names its files and what done means; do nothing a step does not name. No step waits for the user or for Claude.
