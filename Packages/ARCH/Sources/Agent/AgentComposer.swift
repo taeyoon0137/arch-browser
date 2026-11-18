@@ -125,6 +125,7 @@ public struct AgentComposer: View {
     private let permissionNote: String?
     let didStart: (AgentSession) -> Void
     @FocusState private var isTaskFocused: Bool
+    @State private var optionsExpanded = false
     @State private var loadedEffort: (source: EffortSource, levels: [String])?
 
     public init(service: AgentService, context: AgentComposerContext, actions: AgentPanelActions, permissionNote: String? = nil, didStart: @escaping (AgentSession) -> Void) {
@@ -150,7 +151,7 @@ public struct AgentComposer: View {
             if !models.isEmpty {
                 HStack {
                     Spacer()
-                    Button("Start", action: start)
+                    AgentPrimaryAction(title: "Start", action: start)
                         .keyboardShortcut(.defaultAction)
                         .disabled(selectedModel == nil || context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -158,6 +159,8 @@ public struct AgentComposer: View {
             }
         }
         .task(id: effortSource) { await loadEffortLevels() }
+        .onAppear { optionsExpanded = context.problem != nil || selectedModel == nil }
+        .onChange(of: context.problem) { if context.problem != nil { optionsExpanded = true } }
     }
 
     private var form: some View {
@@ -174,24 +177,6 @@ public struct AgentComposer: View {
                     context.attachesTab = false
                     context.sharesExcerpt = false
                 }
-                if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
-                    Toggle("Share reader excerpt", isOn: $context.sharesExcerpt)
-                        .toggleStyle(.checkbox)
-                    DisclosureGroup("Preview excerpt") {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 6) {
-                                if let selection = excerpt.selection {
-                                    Text("Selected text").fontWeight(.medium)
-                                    Text(verbatim: selection)
-                                }
-                                if let reply = excerpt.reply {
-                                    Text("Reader answer").fontWeight(.medium)
-                                    Text(verbatim: reply)
-                                }
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.frame(maxHeight: 120)
-                    }.font(.system(size: 12))
-                }
             } else if !context.attachesTab, !context.usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
                 HStack {
                     Button("Reattach Reviewed Tab") {
@@ -205,18 +190,35 @@ public struct AgentComposer: View {
                 }
                 .controlSize(.small)
             }
-            Divider()
-            if let selectedPermissionNote { note(selectedPermissionNote) }
+            Text(service.place(of: context))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
             if models.isEmpty {
                 modelSetup
             } else {
-                options
-                if selectedModel == nil {
-                    note("The selected model is no longer available. Choose another model to continue.")
+                DisclosureGroup("Options", isExpanded: $optionsExpanded) {
+                    AgentSectionBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            options
+                            if let tab = attachableTab, context.attachesTab,
+                               let excerpt = context.readerExcerpt, excerpt.matches(tab), !context.usesAgentsPersona {
+                                Toggle("Share reader excerpt", isOn: $context.sharesExcerpt).toggleStyle(.checkbox)
+                                AgentTechnicalDetails(title: "Preview excerpt") {
+                                    ScrollView {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            if let selection = excerpt.selection { Text("Selected text").fontWeight(.medium); Text(verbatim: selection) }
+                                            if let reply = excerpt.reply { Text("Reader answer").fontWeight(.medium); Text(verbatim: reply) }
+                                        }
+                                    }.frame(maxHeight: 120)
+                                }
+                            }
+                            if let selectedPermissionNote { note(selectedPermissionNote) }
+                            if selectedModel == nil { note("The selected model is no longer available. Choose another model to continue.") }
+                            if let warning = codexInstructionsWarning { note(warning) }
+                        }
+                    }
                 }
-                if let warning = codexInstructionsWarning {
-                    note(warning)
-                }
+                .font(.system(size: 12))
             }
             if let problem = context.problem {
                 Text(problem)
