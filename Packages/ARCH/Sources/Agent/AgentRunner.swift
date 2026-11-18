@@ -335,7 +335,7 @@ public final class AgentRunner: ObservableObject {
 
     private func performCLI(_ run: Execution, tools: [AgentTool], models: [AIModelRef]) async -> AgentRunResult {
         guard let startCLI, !Task.isCancelled else { return AgentRunResult(status: .cancelled) }
-        let binding = AgentHookCLIRun(tools: tools, limit: run.request.options.limits.toolCalls, knownProviders: run.request.knownProviders ?? [:]) { call in
+        guard let binding = AgentHookCLIRun(tools: tools, limit: run.request.options.limits.toolCalls, knownProviders: run.request.knownProviders ?? [:], dispatch: { call in
             guard let tool = tools.first(where: { $0.name == call.name }) else {
                 self.record(.refused, tool: nil, in: run)
                 return AgentToolResult(status: .refused, code: "notGranted", text: "This tool is outside the hook's grant.")
@@ -346,7 +346,7 @@ public final class AgentRunner: ObservableObject {
                 run.messages.append(AIMessage(role: .user, parts: [.text(result.text)]))
             }
             return result
-        }
+        }) else { return AgentRunResult(status: .failed, code: "startFailed", message: "The session ticket could not be created.") }
         let session: any AgentSessionRunning
         do { session = try startCLI(binding, run.request.feature, models, run.request.options.limits.rounds, Self.instructions) }
         catch { return AgentRunResult(status: .failed, code: "startFailed", message: error.localizedDescription) }

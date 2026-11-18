@@ -8,10 +8,10 @@ struct AgentSessionTicket: Sendable {
     let text: String
 
     /// A new ticket from the system's random number generator.
-    static func make() -> AgentSessionTicket {
+    static func make() -> AgentSessionTicket? {
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        precondition(status == errSecSuccess, "The system's random number generator failed.")
+        guard status == errSecSuccess else { return nil }
         return AgentSessionTicket(text: Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: ""))
     }
 

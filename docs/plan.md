@@ -772,6 +772,42 @@ The contracts below are decided; paste each into `docs/plugins.md` at the place 
 A second Mac crashed at every launch after sync was turned on; the cause is not found. Code that stops the app on unexpected data is removed everywhere.
 
 - [ ] B1. List: `grep -rlE 'uniqueKeysWithValues|try!|fatalError\(|preconditionFailure\(|precondition\(|\.first!|\.last!|as! |[A-Za-z_\)\]]!\.|[A-Za-z_\)\]]!$|[A-Za-z_\)\]]! ' Packages/ARCH/Sources Packages/ARCHApp/Sources Packages/ARCHKit/Sources --include='*.swift' | grep -v wrapper_src | sort`. For each file: read it in full; for every match decide whether the value can come from a file, the network, iCloud, an engine, a plugin, a page, a pasteboard, user defaults, or another process. If it can: replace `uniqueKeysWithValues:` with `Dictionary(_:uniquingKeysWith: { first, _ in first })`; replace a force unwrap, forced cast, or `try!` with `guard`/`if let` and the function's existing failure path (return, an empty value, or a thrown error the caller already handles); replace a trap with that failure path. If the code itself guarantees the value (a literal, a just-inserted key, an `init?` of a constant), leave it and write nothing. Never change behavior for valid data. Write under the sub-step the count changed. Subject: `Fix: Keep unexpected data from stopping the app`.
+  - [x] B1.1 Packages/ARCH/Sources/AI/AIAgentTool.swift
+    - changed: 0
+  - [x] B1.2 Packages/ARCH/Sources/AI/ClaudeCodeAgent.swift
+    - changed: 0
+  - [x] B1.3 Packages/ARCH/Sources/Agent/AgentPageScripts.swift
+    - changed: 0
+  - [x] B1.4 Packages/ARCH/Sources/Agent/AgentService.swift
+    - changed: 2
+  - [x] B1.5 Packages/ARCH/Sources/Agent/AgentSessionTicket.swift
+    - changed: 1
+  - [ ] B1.6 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
+  - [ ] B1.7 Packages/ARCH/Sources/Browsing/AddressPillView.swift
+  - [ ] B1.8 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+  - [ ] B1.9 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
+  - [ ] B1.10 Packages/ARCH/Sources/Browsing/FolderTree.swift
+  - [ ] B1.11 Packages/ARCH/Sources/Browsing/PromptState.swift
+  - [ ] B1.12 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
+  - [ ] B1.13 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+  - [ ] B1.14 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+  - [ ] B1.15 Packages/ARCH/Sources/History/HistoryWindowController.swift
+  - [ ] B1.16 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
+  - [ ] B1.17 Packages/ARCH/Sources/Import/BookmarkFile.swift
+  - [ ] B1.18 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
+  - [ ] B1.19 Packages/ARCH/Sources/Plugins/MatchPattern.swift
+  - [ ] B1.20 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
+  - [ ] B1.21 Packages/ARCH/Sources/Plugins/PluginEngineVersions.swift
+  - [ ] B1.22 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
+  - [ ] B1.23 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
+  - [ ] B1.24 Packages/ARCH/Sources/Terminal/TerminalView.swift
+  - [ ] B1.25 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
+  - [ ] B1.26 Packages/ARCHApp/Sources/Arch/AppDelegate.swift
+  - [ ] B1.27 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
+  - [ ] B1.28 Packages/ARCHKit/Sources/ARCHEngineChromium/ChromiumEngine.swift
+  - [ ] B1.29 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitEngine.swift
+  - [ ] B1.30 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitExtensions.swift
+  - [ ] B1.31 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitWebView.swift
 - [ ] B2. List: `grep -rlE '\[[A-Za-z_\.]+\]' Packages/ARCH/Sources/Sync Packages/ARCH/Sources/Browsing/SidebarSync.swift Packages/ARCH/Sources/Browsing/SessionStore.swift Packages/ARCH/Sources/Browsing/BrowserSession.swift Packages/ARCH/Sources/Import Packages/ARCH/Sources/LiveFolders --include='*.swift' | sort`. For each file: check every array subscript by index and every `removeFirst()`, `removeLast()`, `dropFirst(n)` on arrays built from stored or remote data; guard the index or use `first`/`indices.contains`. Subject: `Fix: Guard indexes into stored and synced lists`.
 - [ ] B3. In `Packages/ARCH/Sources/Sync/SyncController.swift`, widen the crash-loop guard (`applyingKey`): also set it around the code that builds records to send (`record(toSave:)` and its caller) and clear it after; and in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`, where the session is created at launch, if the key `ARCHSyncApplyingChanges` is set, keep sync off as the controller does. Update the Crash-loop guard section of `docs/sync.md`. `swift build`.
 - [ ] B4. **Commit** `Fix: Hold sync's crash-loop guard while it builds records to send` with those files and this file. **Push**.

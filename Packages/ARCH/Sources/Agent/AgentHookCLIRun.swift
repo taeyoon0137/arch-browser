@@ -6,7 +6,7 @@ import Foundation
 @MainActor
 final class AgentHookCLIRun {
     let id = UUID()
-    let ticket = AgentSessionTicket.make()
+    let ticket: AgentSessionTicket
     let ready = AgentGate(isOpen: false)
     let tools: [AgentTool]
     let limit: Int
@@ -18,7 +18,9 @@ final class AgentHookCLIRun {
     private var calls = 0
     private var executing: Task<AgentToolResult, Never>?
 
-    init(tools: [AgentTool], limit: Int, knownProviders: [AIProviderID: String], dispatch: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
+    init?(tools: [AgentTool], limit: Int, knownProviders: [AIProviderID: String], dispatch: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
+        guard let ticket = AgentSessionTicket.make() else { return nil }
+        self.ticket = ticket
         self.tools = tools
         self.limit = limit
         self.knownProviders = knownProviders

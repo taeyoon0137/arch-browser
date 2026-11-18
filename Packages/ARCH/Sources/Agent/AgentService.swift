@@ -569,7 +569,7 @@ import Foundation
         let agentsID = settings.agentsPersonaID.flatMap { id in host.personas.contains { $0.id == id } ? id : nil }
         let personas = host.personas.filter { $0.id != agentsID }
         let request = AgentGrantRequest(client: identity, personas: personas, agentsSpaces: agentsID.map(host.spaces(in:)) ?? [],
-                                        spacesByPersona: Dictionary(uniqueKeysWithValues: personas.map { ($0.id, host.spaces(in: $0.id)) }))
+                                        spacesByPersona: Dictionary(personas.map { ($0.id, host.spaces(in: $0.id)) }, uniquingKeysWith: { first, _ in first }))
         let answer = await dependencies.prompt.ask(request)
         // A sheet that closed because outside access went off records no decline and asks for no Touch ID.
         guard acceptsOutsideClients else { return nil }
@@ -876,7 +876,7 @@ import Foundation
             session.ticket = nil
             return AgentAPISession(client: dependencies.apiClient, tools: SessionTools(service: self, session: session), model: model, id: session.id)
         }
-        let ticket = AgentSessionTicket.make()
+        guard let ticket = AgentSessionTicket.make() else { throw SessionError(message: "The session ticket could not be created.") }
         session.ticket = ticket
         let folder = dependencies.sessionFolder(session.id)
         let skills = AgentSessionSkills.skills(inSessionFolder: folder)
@@ -1282,7 +1282,7 @@ import Foundation
                 return AgentReadPage(tabID: tab.id, handle: session.handles.tabs.handle(for: tab.id), documentID: tab.documentID,
                                      url: url, ownerID: tab.agentOwnerID)
             }
-            let sources = Dictionary(uniqueKeysWithValues: pages.map { ($0.handle, $0) })
+            let sources = Dictionary(pages.map { ($0.handle, $0) }, uniquingKeysWith: { first, _ in first })
             return { [weak service, weak session] result in
                 @MainActor func permits(_ handle: String) -> Bool {
                     guard let service, let session, let source = sources[handle] else { return false }
@@ -1869,7 +1869,7 @@ extension AgentHookRunChannel {
 /// A shell hook run as the service keeps it.
 @MainActor
 private final class ShellHookRunAccess {
-    let ticket = AgentSessionTicket.make()
+    let ticket: AgentSessionTicket
     let tools: [String]
     let call: @MainActor (AgentToolCall) async -> AgentToolResult
     /// The run's `agent/run`, when its hook may start agent runs.
@@ -1879,8 +1879,10 @@ private final class ShellHookRunAccess {
     /// The script process, as it was right after it started.
     var process: AgentProcessRecord?
 
-    init(tools: [String], handles: [UUID: String] = [:], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+    init?(tools: [String], handles: [UUID: String] = [:], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
          agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)? = nil) {
+        guard let ticket = AgentSessionTicket.make() else { return nil }
+        self.ticket = ticket
         self.tools = tools
         self.handles = handles
         self.call = call
@@ -1904,7 +1906,7 @@ extension AgentService: AgentHookRunChannel {
 
     public func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
                             agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
-        let access = ShellHookRunAccess(tools: tools, handles: handles, call: call, agentRun: agentRun)
+        guard let access = ShellHookRunAccess(tools: tools, handles: handles, call: call, agentRun: agentRun) else { return "" }
         shellHookRuns[run] = access
         if endpoint == nil { updateListening() }
         return access.ticket.text
