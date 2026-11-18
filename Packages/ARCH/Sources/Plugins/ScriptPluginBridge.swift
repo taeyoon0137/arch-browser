@@ -86,6 +86,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         value: Object.freeze({
           ...(\#(permitsAgent) ? { agent: Object.freeze({ run: (options) => call("agent.run", [options]) }) } : {}),
           ai: Object.freeze({ reply: (request) => call("ai.reply", [request]), stream }),
+          net: Object.freeze({ fetch: (url, options) => call("net.fetch", [url, ...given(options)]) }),
           ...(\#(listens) ? {
             commands: Object.freeze({ onRun: (id, listener) => { commandListeners.set(id, listener); } }),
             events: Object.freeze({
@@ -211,6 +212,29 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
                 do { Self.reply(.success(Self.value(of: try await client.reply(request))), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
+            }
+        case "net.fetch":
+            let request: URLRequest
+            do { request = try networkRequest(of: call) }
+            catch { return Self.reply(.failure(error), to: replyHandler) }
+            let number = nextRequestNumber
+            nextRequestNumber += 1
+            waitsForArch?(true)
+            replies[number] = Task {
+                defer {
+                    waitsForArch?(false)
+                    replies[number] = nil
+                }
+                do {
+                    let (data, response) = try await context.fetch(request)
+                    guard !hasEnded else { throw PluginError.stopped }
+                    guard let text = String(data: data, encoding: .utf8) else { throw PluginError.invalidResponse }
+                    var headers: [String: PluginValue] = [:]
+                    for (key, value) in response.allHeaderFields {
+                        if let key = key as? String, let value = value as? String { headers[key] = .string(value) }
+                    }
+                    Self.reply(.success(.object(["status": .number(Double(response.statusCode)), "headers": .object(headers), "text": .string(text)])), to: replyHandler)
+                } catch { Self.reply(.failure(error), to: replyHandler) }
             }
         case "pages.run":
             // A panel's `arch` has no `pages`, so a panel's document cannot make the call by posting to the handler itself either.
@@ -394,6 +418,32 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         // A key the bridge does not read, such as a model, would go without effect.
         guard fields.isEmpty else { throw BridgeFailure.invalidCall }
         return AIRequest(feature: .plugin(context.pluginID.rawValue), instructions: instructions, messages: messages, output: output, maxOutputTokens: maxOutputTokens)
+    }
+
+    private func networkRequest(of call: Call) throws -> URLRequest {
+        guard (1...2).contains(call.args.count), let url = URL(string: try call.text(0)) else { throw BridgeFailure.invalidCall }
+        var request = URLRequest(url: url)
+        guard call.args.count == 2 else { return request }
+        guard case .object(var fields)? = call.value(1) else { throw BridgeFailure.invalidCall }
+        if let method = fields.removeValue(forKey: "method") {
+            guard case let .string(name) = method, ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(name) else { throw PluginError.invalidRequest }
+            request.httpMethod = name
+        }
+        if let headers = fields.removeValue(forKey: "headers") {
+            guard case let .object(values) = headers else { throw PluginError.invalidRequest }
+            for (name, value) in values {
+                guard case let .string(text) = value, !name.isEmpty, !name.contains(where: { $0 == "\r" || $0 == "\n" || $0 == ":" }),
+                      !text.contains(where: { $0 == "\r" || $0 == "\n" }),
+                      !["cookie", "host", "origin", "referer", "content-length"].contains(name.lowercased()) else { throw PluginError.invalidRequest }
+                request.setValue(text, forHTTPHeaderField: name)
+            }
+        }
+        if let body = fields.removeValue(forKey: "body") {
+            guard case let .string(text) = body, text.utf8.count <= PluginNetworkFetch.requestLimit else { throw PluginError.invalidRequest }
+            request.httpBody = Data(text.utf8)
+        }
+        guard fields.isEmpty else { throw BridgeFailure.invalidCall }
+        return request
     }
 
     /// A message's part: `{type: "text", text}`, or `{type: "page", url, title, text}` and `{type: "selection", url, title, text}` with the page's address and title, which the plugin's `ai` permission must list.
@@ -611,6 +661,12 @@ private extension PluginError {
         case .pageRunUnavailable: return "pageRunUnavailable"
         case .invalidAddress: return "invalidAddress"
         case .tooManyTabs: return "tooManyTabs"
+        case .hostRefused: return "hostRefused"
+        case .redirectRefused: return "redirectRefused"
+        case .rateLimited: return "rateLimited"
+        case .responseTooLarge: return "responseTooLarge"
+        case .invalidResponse: return "invalidResponse"
+        case .invalidRequest: return "invalidRequest"
         }
     }
 }

@@ -37,6 +37,8 @@ public struct PluginManifest: Hashable, Sendable {
     /// What the plugin does, in one sentence.
     public var summary: String
     public var permissions: Set<PluginPermission>
+    /// Hosts named by the script plugin's `network` permission.
+    public var network: [PluginNetworkHost]
     /// The data kinds beyond text that the plugin's AI requests carry, which its `ai` permission lists: `page` for page parts, such as of the text that its page calls read, and `selection` for selected text. They name the parts' kinds, not what can reach a model: a plugin with sites can also put the text of their pages into a text part. They come with `ai`, as a web extension's other API permissions come with its install, and the install sheet and Settings state them in one sentence (`aiDataSummary`). Empty without `ai`.
     public var aiDataKinds: Set<AIDataKind>
     /// The pages the plugin may reach. Without `tabs`, the plugin still sees the title and address of a tab whose page they cover.
@@ -55,7 +57,7 @@ public struct PluginManifest: Hashable, Sendable {
     /// A web extension's `homepage_url` without its scheme, a leading `www.`, and a trailing `/`, lowercased, so that two projects on one hosting site differ. Nil for other kinds and without the field.
     public var homepage: String?
 
-    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [],
+    public init(id: PluginID, name: String, version: String, summary: String, permissions: Set<PluginPermission> = [], aiDataKinds: Set<AIDataKind> = [], network: [PluginNetworkHost] = [],
                 sites: [MatchPattern] = [], siteAccess: SiteAccess = .listedSites, extensionPermissions: [String] = [], contributions: PluginContributions,
                 events: Set<BrowserEventKind> = [], receivesSettingChanges: Bool = false, author: String? = nil, homepage: String? = nil) {
         self.id = id
@@ -63,6 +65,7 @@ public struct PluginManifest: Hashable, Sendable {
         self.version = version
         self.summary = summary
         self.permissions = permissions
+        self.network = permissions.contains(.network) ? network : []
         self.aiDataKinds = permissions.contains(.ai) ? aiDataKinds : []
         self.sites = sites
         self.siteAccess = siteAccess
@@ -149,6 +152,8 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case downloads
     /// Post local notifications under the plugin's name.
     case notifications
+    /// Send requests to the listed HTTPS hosts without Persona cookies.
+    case network
 
     /// What the permission lets a plugin do, as a sentence that Settings shows.
     public var summary: String {
@@ -161,6 +166,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         case .ai: return "Send text to the AI models you connected"
         case .downloads: return "Read the names, states, and sizes of your downloads"
         case .notifications: return "Show notifications under the plugin's name"
+        case .network: return "Send requests to the listed hosts"
         }
     }
 }
@@ -185,18 +191,21 @@ public enum SiteAccess: String, Hashable, Sendable {
 public struct PluginGrant: Hashable, Sendable {
     public var permissions: Set<PluginPermission>
     public var sites: [MatchPattern]
+    public var network: [PluginNetworkHost]
     /// How the plugin reaches `sites`: `whenInvoked` when its manifest asks for it or the user chose it at install.
     public var siteAccess: SiteAccess
 
-    public init(permissions: Set<PluginPermission>, sites: [MatchPattern], siteAccess: SiteAccess = .listedSites) {
+    public init(permissions: Set<PluginPermission>, sites: [MatchPattern], siteAccess: SiteAccess = .listedSites, network: [PluginNetworkHost] = []) {
         self.permissions = permissions
         self.sites = sites
         self.siteAccess = siteAccess
+        self.network = permissions.contains(.network) ? network : []
+        if self.network.isEmpty { self.permissions.remove(.network) }
     }
 
     /// Everything the manifest asks for. Built-in plugins get this grant.
     public init(requestedBy manifest: PluginManifest) {
-        self.init(permissions: manifest.permissions, sites: manifest.sites, siteAccess: manifest.siteAccess)
+        self.init(permissions: manifest.permissions, sites: manifest.sites, siteAccess: manifest.siteAccess, network: manifest.network)
     }
 
     /// What the review of a new plugin of `kind` with `manifest` offers at first: everything it asks for, and for a script plugin that asks for every website and has commands to run, its sites only where the user runs one of them, so that such a grant reaches pages one tab at a time unless the user chooses otherwise and confirms it.
@@ -209,7 +218,7 @@ public struct PluginGrant: Hashable, Sendable {
     public init(updating installed: InstalledPlugin, to manifest: PluginManifest) {
         let leftOut = Set(installed.manifest.sites).subtracting(installed.grant.sites)
         self.init(permissions: manifest.permissions, sites: manifest.sites.filter { !leftOut.contains($0) },
-                  siteAccess: manifest.siteAccess == .whenInvoked ? .whenInvoked : installed.grant.siteAccess)
+                  siteAccess: manifest.siteAccess == .whenInvoked ? .whenInvoked : installed.grant.siteAccess, network: manifest.network)
     }
 
     /// Whether the review, starting from this grant, offers the switch for `whenInvoked` to a plugin of `kind` with `manifest`: a script plugin with sites whose manifest asks for its sites as listed and has commands, without which the switch would leave it no page to reach, or whose grant starts with the switch on, as in an update of a plugin that the user limited and whose new version has no commands, so that the user can switch it off.
@@ -220,7 +229,8 @@ public struct PluginGrant: Hashable, Sendable {
     /// The grant without what the manifest of a plugin of `kind` does not ask for, so that a grant never exceeds the request: a manifest that asks for `whenInvoked` gets no more, and a plugin of a runtime's kind, such as a web extension, whose engines keep its site access, reaches its sites as listed.
     func limited(to manifest: PluginManifest, kind: PluginKind) -> PluginGrant {
         PluginGrant(permissions: permissions.intersection(manifest.permissions), sites: sites.filter(manifest.sites.contains),
-                    siteAccess: kind != .script ? .listedSites : manifest.siteAccess == .whenInvoked ? .whenInvoked : siteAccess)
+                    siteAccess: kind != .script ? .listedSites : manifest.siteAccess == .whenInvoked ? .whenInvoked : siteAccess,
+                    network: network.filter(manifest.network.contains))
     }
 
     /// Whether the granted sites cover the page at `url`. With `whenInvoked`, the plugin reaches it only in a tab where the user ran one of its commands on its host (`PluginManager`).
@@ -230,8 +240,10 @@ public struct PluginGrant: Hashable, Sendable {
 
     /// What the grant lets the plugin do, one sentence for each permission, in a fixed order, for each site, and, with `whenInvoked` and sites, for its site access.
     public var summaries: [String] {
-        PluginPermission.allCases.filter(permissions.contains).map(\.summary) + sites.map(\.accessSummary) + siteAccessSummaries
+        PluginPermission.allCases.filter(permissions.contains).map { $0 == .network ? networkSummary : $0.summary } + sites.map(\.accessSummary) + siteAccessSummaries
     }
+
+    public var networkSummary: String { "Send requests to \(network.map(\.description).joined(separator: ", "))" }
 
     /// The sentence of the site access after the sites' sentences, for `whenInvoked` with sites.
     var siteAccessSummaries: [String] {
@@ -250,16 +262,17 @@ public struct PluginGrant: Hashable, Sendable {
 /// A grant encodes as `plugins.json` keeps it: `{"permissions": […], "sites": […]}`, or with `whenInvoked` its sites under `sitesWhenInvoked` in place of `sites`, so that a build before site access modes, which needs `sites`, keeps such an entry as one it cannot read rather than run the plugin in every page of its sites.
 extension PluginGrant: Codable {
     private enum CodingKeys: String, CodingKey {
-        case permissions, sites, sitesWhenInvoked
+        case permissions, sites, sitesWhenInvoked, network
     }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let permissions = try container.decode(Set<PluginPermission>.self, forKey: .permissions)
+        let network = try container.decodeIfPresent([PluginNetworkHost].self, forKey: .network) ?? []
         if let sites = try container.decodeIfPresent([MatchPattern].self, forKey: .sites) {
-            self.init(permissions: permissions, sites: sites)
+            self.init(permissions: permissions, sites: sites, network: network)
         } else {
-            self.init(permissions: permissions, sites: try container.decode([MatchPattern].self, forKey: .sitesWhenInvoked), siteAccess: .whenInvoked)
+            self.init(permissions: permissions, sites: try container.decode([MatchPattern].self, forKey: .sitesWhenInvoked), siteAccess: .whenInvoked, network: network)
         }
     }
 
@@ -267,5 +280,6 @@ extension PluginGrant: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(permissions, forKey: .permissions)
         try container.encode(sites, forKey: siteAccess == .whenInvoked ? .sitesWhenInvoked : .sites)
+        if !network.isEmpty { try container.encode(network, forKey: .network) }
     }
 }

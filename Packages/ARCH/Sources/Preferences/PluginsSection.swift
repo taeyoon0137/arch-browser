@@ -535,7 +535,7 @@ private struct AccessRow: View {
         }
         if plugin.origin != .bundled {
             ForEach(PluginPermission.allCases.filter(plugin.grant.permissions.contains), id: \.self) { permission in
-                LabeledContent(permission.summary) {
+                LabeledContent(permission == .network ? plugin.grant.networkSummary : permission.summary) {
                     Button("Revoke") { plugins.revoke(permission, from: plugin.id) }
                 }
             }

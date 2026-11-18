@@ -32,7 +32,7 @@ struct ScriptManifest {
         let name = givenName.isEmpty ? id.rawValue : givenName
         let version = try object.string("version")
         let summary = try object.string("summary")
-        let (permissions, aiDataKinds) = try Self.permissions(object.value("permissions"))
+        let (permissions, aiDataKinds, network) = try Self.permissions(object.value("permissions"))
         let sites = try object.strings("sites").map(MatchPattern.init)
         let siteAccess = try Self.siteAccess(object.optionalString("siteAccess"))
         // `events` lists the bus's kinds and `settingChanged`, the plugin's own setting changes.
@@ -55,7 +55,7 @@ struct ScriptManifest {
         guard !receivesSettingChanges || !contributions.settings.isEmpty else { throw invalidManifest("events lists settingChanged, which needs contributes.settings") }
         // Without a command to run, a plugin that reaches its sites only where the user runs one would reach none.
         guard siteAccess == .listedSites || !contributions.commands.isEmpty else { throw invalidManifest("siteAccess whenInvoked needs contributes.commands") }
-        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, sites: sites,
+        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, network: network, sites: sites,
                                   siteAccess: siteAccess, contributions: contributions, events: Set(events), receivesSettingChanges: receivesSettingChanges)
         self.background = background
     }
@@ -71,19 +71,31 @@ struct ScriptManifest {
     static let aiDataKinds: [AIDataKind] = [.page, .selection]
 
     /// `permissions` lists names of `PluginPermission`, and the `ai` permission either by its name, for requests with text only, or as `{"ai": [kinds]}` with the data kinds beyond text that its requests carry.
-    private static func permissions(_ value: PluginValue?) throws -> (Set<PluginPermission>, Set<AIDataKind>) {
-        guard let value else { return ([], []) }
+    private static func permissions(_ value: PluginValue?) throws -> (Set<PluginPermission>, Set<AIDataKind>, [PluginNetworkHost]) {
+        guard let value else { return ([], [], []) }
         let malformed = invalidManifest("permissions must be an array of permission names, with ai also as an object such as {\"ai\": [\"page\"]}")
         guard case let .array(items) = value else { throw malformed }
         var permissions: Set<PluginPermission> = []
         var aiDataKinds: Set<AIDataKind> = []
+        var network: [PluginNetworkHost] = []
         for item in items {
             switch item {
             case let .string(name):
                 guard let permission = PluginPermission(rawValue: name) else { throw invalidManifest("permissions lists “\(name)”, which Arch does not grant") }
-                guard permission != .nativeMessaging else { throw invalidManifest("permissions lists “\(name)”, which only web extensions may ask for") }
+                guard permission != .nativeMessaging, permission != .network else { throw invalidManifest("permissions lists “\(name)”, which needs its host list") }
                 permissions.insert(permission)
             case let .object(fields):
+                if fields.count == 1, case let .array(hosts)? = fields[PluginPermission.network.rawValue] {
+                    guard !hosts.isEmpty, network.isEmpty else { throw invalidManifest("permissions.network needs a nonempty host list once") }
+                    network = try hosts.map { host in
+                        guard case let .string(name) = host, let parsed = PluginNetworkHost(name) else {
+                            throw invalidManifest("permissions.network needs DNS host names or wildcard subdomains, without IP addresses, localhost, ports, or paths")
+                        }
+                        return parsed
+                    }
+                    permissions.insert(.network)
+                    continue
+                }
                 guard fields.count == 1, case let .array(kinds)? = fields[PluginPermission.ai.rawValue] else { throw malformed }
                 for kind in kinds {
                     guard case let .string(name) = kind else { throw malformed }
@@ -97,7 +109,7 @@ struct ScriptManifest {
                 throw malformed
             }
         }
-        return (permissions, aiDataKinds)
+        return (permissions, aiDataKinds, network)
     }
 
     private static func contributions(_ object: ManifestObject, packageAt root: URL) throws -> PluginContributions {

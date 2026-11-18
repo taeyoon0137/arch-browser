@@ -76,6 +76,8 @@ public protocol PluginContext: AnyObject {
     func downloads() throws -> [PluginDownload]
     /// Posts a local notification under this plugin's name. Needs `notifications`.
     func notify(title: String, body: String) throws
+    /// Sends one bounded HTTPS request to a host in the `network` grant, without browser cookies or credentials.
+    func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
     /// Needs `tabs.manage`. Opens a tab at the web address, `http` or `https`, in the space the options name, which must be one of the Persona's, or else in the last main window's space while it is the Persona's, or the Persona's first space, in the engine they name or the default engine, where a new tab that the user opens goes, and selects it unless they say not to, as `selectTab(_:)` does. Returns its identifier. The tab's opening, its selection with the space switch that the selection brings, and its first address and first load come with the plugin as their cause, so the plugin does not hear of them. Until the user acts in the tab's page, as with a click there, or loads an address in it, it downloads no file without asking, and at a file's address it closes without downloading. Throws `PluginError.invalidAddress` for any other address, `notGranted` for a space that is not the Persona's, `tooManyTabs` once the plugin has opened 10 tabs within the last minute, and `closed` once the Persona is gone.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
     /// Needs `tabs.manage`. Closes one of the tabs the plugin reaches without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads and keeps its place, a favorite's tab ends, a live folder item's tab is dismissed, and any other tab joins the closed list, from which Reopen Last Closed Tab and the Library reopen it; ⌘Z then reopens none of the tabs that the user closed before it, as after a page's own close. The close, and the selection of another tab in each window that had the tab selected, come with the plugin as their cause, so the plugin does not hear of them. Throws `PluginError.notGranted` for any other tab, and `stopped` for the event's tab of a hook step of the plugin once the scheduler has stopped the step, since the tab can show another document by then; a script plugin's panel closes outside any step.
@@ -101,6 +103,7 @@ extension PluginContext {
     public func selectedTab() throws -> PluginTab? { nil }
     public func downloads() throws -> [PluginDownload] { throw PluginError.permissionDenied(.downloads) }
     public func notify(title: String, body: String) throws { throw PluginError.permissionDenied(.notifications) }
+    public func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw PluginError.permissionDenied(.network) }
 
     /// A context that changes no tabs, such as a hook script's, refuses to open, close, select, and move them.
     public func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
@@ -442,6 +445,18 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidAddress(String)
     /// The plugin has opened as many tabs within the last minute as it may, 10 (`PluginManager.tabOpenLimit`).
     case tooManyTabs
+    /// The network request names a host outside the grant or one resolving to a local address.
+    case hostRefused
+    /// A redirect leaves the grant, uses another scheme, or exceeds five hops.
+    case redirectRefused
+    /// A plugin started 60 network requests within a minute.
+    case rateLimited
+    /// The network response exceeds five megabytes.
+    case responseTooLarge
+    /// A network response has no HTTP status or is not UTF-8 text.
+    case invalidResponse
+    /// A network request has an unsupported method, refused header, or oversized body.
+    case invalidRequest
 }
 
 extension PluginError: LocalizedError {
@@ -468,6 +483,12 @@ extension PluginError: LocalizedError {
         case .pageRunUnavailable: return "Arch cannot reach this tab\u{2019}s page for the plugin without your gesture now."
         case let .invalidAddress(text): return "\u{201C}\(text)\u{201D} is not the address of a web page."
         case .tooManyTabs: return "The plugin opened as many tabs within a minute as it may."
+        case .hostRefused: return "The plugin may not reach this network host."
+        case .redirectRefused: return "The network redirect is outside the plugin's grant."
+        case .rateLimited: return "The plugin has made as many requests within a minute as it may."
+        case .responseTooLarge: return "The network response is too large."
+        case .invalidResponse: return "The network response is not UTF-8 text."
+        case .invalidRequest: return "The network request has an unsupported method, header, or body."
         }
     }
 }

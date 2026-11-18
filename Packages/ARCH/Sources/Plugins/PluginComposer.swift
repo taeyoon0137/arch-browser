@@ -91,12 +91,12 @@ public final class PluginComposer {
         for (key, value) in [("sites", manifest["sites"]), ("contributes.pageScripts", contributions["pageScripts"])] where !absent.contains(value) {
             throw PluginError.invalidPackage("plugin.json: \(key) is not offered to plugins that AI writes.")
         }
-        // Nor do they reach models, with text only or with data kinds as `{"ai": [kinds]}`.
+        // Nor do they reach models or hosts, with permission names or permission objects.
         if case let .array(permissions)? = manifest["permissions"], permissions.contains(where: { permission in
-            if case let .object(fields) = permission { return fields[PluginPermission.ai.rawValue] != nil }
-            return permission == .string(PluginPermission.ai.rawValue)
+            if case let .object(fields) = permission { return fields[PluginPermission.ai.rawValue] != nil || fields[PluginPermission.network.rawValue] != nil }
+            return permission == .string(PluginPermission.ai.rawValue) || permission == .string(PluginPermission.network.rawValue)
         }) {
-            throw PluginError.invalidPackage("plugin.json: permissions lists “ai”, which is not offered to plugins that AI writes.")
+            throw PluginError.invalidPackage("plugin.json: ai and network permissions are not offered to plugins that AI writes.")
         }
         manifest["id"] = .string(pluginID.rawValue)
         manifest["apiVersion"] = .number(Double(PluginManifest.apiVersion))

@@ -78,7 +78,7 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
 
     /// The sentence of each permission of the grant, in a fixed order.
     private var permissionSummaries: [String] {
-        PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary)
+        PluginPermission.allCases.filter(grant.permissions.contains).map { $0 == .network ? grant.networkSummary : $0.summary }
     }
 
     /// The sentences of what comes with the grant: the data kinds that its AI requests carry and a web extension's other API permissions.
@@ -173,6 +173,7 @@ public final class PluginManager: ObservableObject {
     private var eventLimiter = BrowserEventRateLimiter()
     /// When each plugin opened the tabs it opened in the last minute, which `tabOpenLimit` caps.
     private var tabOpenings: [PluginID: [Date]] = [:]
+    private var networkOpenings: [PluginID: [Date]] = [:]
     /// The AI interface that the plugins with `ai` send their requests through, whose hook scheduler runs their hooks; without one, they get no AI and their events arrive as for other plugins.
     private let ai: AIService?
     /// The features this manager registered in `ai`, those of its enabled plugins with `ai`, by identifier.
@@ -1487,6 +1488,17 @@ public final class PluginManager: ObservableObject {
         browserHost?.postNotification(pluginName: name, title: title, body: body)
     }
 
+    fileprivate func allowNetwork(_ plugin: PluginID, request: URLRequest, grant: PluginGrant) throws {
+        guard !isClosed, let installed = plugins.first(where: { $0.id == plugin && $0.isEnabled }),
+              installed.grant == grant, grant.permissions.contains(.network) else { throw PluginError.permissionDenied(.network) }
+        guard let url = request.url, url.scheme?.lowercased() == "https", let host = url.host,
+              grant.network.contains(where: { $0.covers(host) }) else { throw PluginError.hostRefused }
+        let now = Date()
+        let recent = (networkOpenings[plugin] ?? []).filter { now.timeIntervalSince($0) < 60 }
+        guard recent.count < 60 else { throw PluginError.rateLimited }
+        networkOpenings[plugin] = recent + [now]
+    }
+
     /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
     fileprivate func page(of id: UUID, for grant: PluginGrant, of plugin: PluginID) throws -> (tab: PluginTab, contents: any EngineWebContents) {
         guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
@@ -1786,6 +1798,7 @@ final class ScopedPluginContext: PluginPanelContext {
     /// The page calls' runs that wait for the page's reply, by number, which `end()` ends.
     private var pageRuns: [Int: CheckedContinuation<String?, any Error>] = [:]
     private var nextPageRun = 0
+    private var networkRuns: [UUID: Task<(Data, HTTPURLResponse), any Error>] = [:]
 
     init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: ScopedPluginStorage, secrets: ScopedPluginSecrets, ai: PluginAIRequests? = nil) {
         self.manager = manager
@@ -1812,6 +1825,8 @@ final class ScopedPluginContext: PluginPanelContext {
         scopedStorage.end()
         scopedSecrets.end()
         aiRequests?.end()
+        for task in networkRuns.values { task.cancel() }
+        networkRuns = [:]
         let runs = pageRuns.values
         pageRuns = [:]
         for run in runs {
@@ -1866,6 +1881,20 @@ final class ScopedPluginContext: PluginPanelContext {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.notifications)
         manager?.notify(pluginID, title: title, body: body)
+    }
+
+    func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.network)
+        guard let manager else { throw PluginError.stopped }
+        try manager.allowNetwork(pluginID, request: request, grant: grant)
+        let id = UUID()
+        let task = Task { try await PluginNetworkFetch(hosts: grant.network).run(request) }
+        networkRuns[id] = task
+        defer { networkRuns[id] = nil }
+        let response = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        guard !hasEnded else { throw PluginError.stopped }
+        return response
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {

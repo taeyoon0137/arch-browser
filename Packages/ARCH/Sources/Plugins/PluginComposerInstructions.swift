@@ -40,6 +40,7 @@ extension PluginComposer {
     - arch.tabs.rename(id, name) suggests the first line of name, at most 60 characters, as the tab's name, and without a name removes the suggestion. It needs the "tabs.rename" or "tabs.manage" permission. It resolves false when the tab keeps its name: the user named the tab or turned the suggestion down for its page.
     - arch.downloads.list() returns this Persona's downloads as {id, name, state, completedBytes, totalBytes}, without paths or contents. It needs "downloads".
     - arch.ui.notify(title, body) posts a local notification under the plugin's name, at most once every 10 seconds. It needs "notifications".
+    - Do not request the "network" permission or use arch.net.fetch. Plugins written here cannot send network requests.
     Nothing else is available: no other members of arch, and no browser APIs for pages or the network.
 
     When the user asks for a change, reply with the whole plugin again, changed.

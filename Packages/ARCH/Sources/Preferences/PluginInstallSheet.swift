@@ -253,7 +253,8 @@ private struct PluginReviewView: View {
                         Text("None")
                     }
                     ForEach(permissions, id: \.self) { permission in
-                        RequestRow(text: permission.summary, isNew: target.map { !$0.manifest.permissions.contains(permission) } ?? false)
+                        RequestRow(text: permission == .network ? "Send requests to \(manifest.network.map(\.description).joined(separator: ", "))" : permission.summary,
+                                   isNew: target.map { !$0.manifest.permissions.contains(permission) || (permission == .network && $0.manifest.network != manifest.network) } ?? false)
                     }
                     if let summary = manifest.aiDataSummary {
                         RequestRow(text: summary, isNew: target.map { !manifest.aiDataKinds.isSubset(of: $0.manifest.aiDataKinds) } ?? false)
@@ -424,7 +425,7 @@ private struct PluginReviewView: View {
         var package = package
         package.updates = target?.id
         let grant = PluginGrant(permissions: package.manifest.permissions, sites: package.manifest.sites.filter(sites.contains),
-                                siteAccess: package.kind == .script ? siteAccess : .listedSites)
+                                siteAccess: package.kind == .script ? siteAccess : .listedSites, network: package.manifest.network)
         let version = joined?.id
         let engine = choiceEngine
         let isNewPlugin = version == nil && target == nil
