@@ -193,6 +193,9 @@ public struct PluginOpenTabOptions: Hashable, Sendable {
 
 /// What a command runs on.
 public struct PluginInvocation: Sendable {
+    public enum Source: String, Sendable { case palette, menu, contextMenu, shortcut, sidebar }
+    public var source: Source
+    public var argument: String?
     /// The tab the command acts on: the selected tab, or the tab of the page or tab row the user chose the item on. Nil when there is none, when the selected tab belongs to another Persona, as a favorite's tab can, and while an internal page or the preview panel covers its page.
     public var tab: PluginTab?
     /// The space whose menu holds the item, for a space menu item.
@@ -202,7 +205,9 @@ public struct PluginInvocation: Sendable {
     public var imageURL: URL?
     public var selection: String?
 
-    public init(tab: PluginTab?, spaceID: UUID? = nil, linkURL: URL? = nil, imageURL: URL? = nil, selection: String? = nil) {
+    public init(tab: PluginTab?, spaceID: UUID? = nil, linkURL: URL? = nil, imageURL: URL? = nil, selection: String? = nil, source: Source = .menu, argument: String? = nil) {
+        self.source = source
+        self.argument = argument
         self.tab = tab
         self.spaceID = spaceID
         self.linkURL = linkURL

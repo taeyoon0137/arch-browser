@@ -297,6 +297,8 @@ private struct CommandDelivery: Encodable {
 
 /// What a listener of `arch.commands.onRun` receives. Absent values are left out.
 private struct ScriptInvocation: Encodable {
+    let source: String
+    let argument: String?
     let tab: PluginValue?
     let spaceId: String?
     let linkUrl: String?
@@ -304,6 +306,8 @@ private struct ScriptInvocation: Encodable {
     let selection: String?
 
     init(_ invocation: PluginInvocation) {
+        source = invocation.source.rawValue
+        argument = invocation.argument
         tab = invocation.tab?.scriptValue
         spaceId = invocation.spaceID?.uuidString
         linkUrl = invocation.linkURL?.absoluteString

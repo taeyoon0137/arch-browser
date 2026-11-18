@@ -779,9 +779,9 @@ public struct PluginInvocation: Sendable {
     public var linkURL: URL?
     public var imageURL: URL?
     public var selection: String?
-    // Not built yet.
     public enum Source: String, Sendable { case palette, menu, contextMenu, shortcut, sidebar }
     public var source: Source
+    // Not built yet.
     public var argument: String?
 }
 

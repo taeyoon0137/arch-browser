@@ -95,7 +95,7 @@ final class PluginPages {
     private func addMenuItems(for element: EngineContextMenuElement, in tab: Tab, to menu: NSMenu) {
         guard let session else { return }
         let plugins = session.plugins(in: tab.personaID)
-        let invocation = PluginInvocation(tab: session.pluginTab(tab), linkURL: element.linkURL, imageURL: element.imageURL, selection: element.selectedText)
+        let invocation = PluginInvocation(tab: session.pluginTab(tab), linkURL: element.linkURL, imageURL: element.imageURL, selection: element.selectedText, source: .contextMenu)
         for section in plugins.contributions.menuSections(at: .pageContextMenu(Set(element))) {
             if menu.numberOfItems > 0 { menu.addItem(.separator()) }
             menu.addItem(.sectionHeader(title: section.pluginName))

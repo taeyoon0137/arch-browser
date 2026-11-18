@@ -66,7 +66,7 @@ private struct PluginSidebarItemRow: View {
     private func open() {
         switch item.item.action {
         case let .command(id):
-            windowModel.runPluginCommand(PluginCommandRef(plugin: item.plugin, command: id))
+            windowModel.runPluginCommand(PluginCommandRef(plugin: item.plugin, command: id), source: .sidebar)
         case .panel:
             anchor.showPanel { await plugins.panel(for: item) }
         }

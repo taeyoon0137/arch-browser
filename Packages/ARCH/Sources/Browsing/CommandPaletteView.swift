@@ -176,7 +176,7 @@ struct CommandPaletteView: View {
             windowModel.showAgentSession(agentSession.id)
         case .command(let command):
             windowModel.dismissCommandPalette()
-            windowModel.runPluginCommand(command.ref)
+            windowModel.runPluginCommand(command.ref, source: .palette)
         case .askAboutPage:
             windowModel.dismissCommandPalette()
             windowModel.askAboutPage()
