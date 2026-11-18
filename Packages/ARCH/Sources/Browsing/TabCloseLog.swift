@@ -110,7 +110,7 @@ public final class TabCloseLogWindowController: NSWindowController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("TabCloseLogWindowController is created with a log")
+        return nil
     }
 
     public func show() {

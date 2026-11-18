@@ -22,7 +22,7 @@ final class PromptState: ObservableObject, Identifiable {
         self.content = content
         self.makeContent = makeContent
         self.panel = panel
-        fieldValues = Dictionary(uniqueKeysWithValues: content.fields.map { ($0.id, $0.initialValue) })
+        fieldValues = Dictionary(content.fields.map { ($0.id, $0.initialValue) }, uniquingKeysWith: { first, _ in first })
         arming = PromptArming(shownAt: now)
     }
 

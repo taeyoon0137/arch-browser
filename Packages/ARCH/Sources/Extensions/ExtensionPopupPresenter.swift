@@ -45,7 +45,7 @@ private final class PopupPageController: NSViewController, NSPopoverDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not used")
+        return nil
     }
 
     override func loadView() {

@@ -793,11 +793,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 1
   - [x] B1.10 Packages/ARCH/Sources/Browsing/FolderTree.swift
     - changed: 1
-  - [ ] B1.11 Packages/ARCH/Sources/Browsing/PromptState.swift
-  - [ ] B1.12 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
-  - [ ] B1.13 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
-  - [ ] B1.14 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
-  - [ ] B1.15 Packages/ARCH/Sources/History/HistoryWindowController.swift
+  - [x] B1.11 Packages/ARCH/Sources/Browsing/PromptState.swift
+    - changed: 1
+  - [x] B1.12 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
+    - changed: 0
+  - [x] B1.13 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+    - changed: 1
+  - [x] B1.14 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+    - changed: 1
+  - [x] B1.15 Packages/ARCH/Sources/History/HistoryWindowController.swift
+    - changed: 1
   - [ ] B1.16 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
   - [ ] B1.17 Packages/ARCH/Sources/Import/BookmarkFile.swift
   - [ ] B1.18 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift

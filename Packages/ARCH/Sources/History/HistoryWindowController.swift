@@ -41,7 +41,7 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("HistoryWindowController is created in code")
+        return nil
     }
 
     /// Brings the History window to the front with the store's current entries. Becoming key loads them; a window that is key already, or that does not become key while the app is in the background, loads here.
