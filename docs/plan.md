@@ -686,7 +686,7 @@ Rules (all earlier conditions hold):
 
 The earlier work was done fast and without review. Each commit is checked once more against its step.
 
-- [ ] G1. List: `git log --reverse --format='%h %s' main..8fb0f49f --no-merges -- Packages`. For each commit: read its whole diff (`git show <hash>`) and the queue step it answers in "Codex handoff queue". Check, and fix in place what fails: (a) the step's done condition is fully met; (b) no force unwrap, `try!`, array index, or `Dictionary(uniqueKeysWithValues:)` on data from outside; (c) state changed on the main actor, no retain cycle in a stored closure (`[weak self]`); (d) sizes, weights, and color roles match the neighboring views, and shared parts are used instead of copies; (e) every user-visible string is English, ends without a period unless a sentence, uses "…" (one character) for commands that open something, and names Personas as "Persona / Space"; (f) the documents the step named describe the result. Write one line under the sub-step: `ok` or what was fixed. Subject: `Fix: Check the November 18 commits against their steps`.
+- [x] G1. List: `git log --reverse --format='%h %s' main..8fb0f49f --no-merges -- Packages`. For each commit: read its whole diff (`git show <hash>`) and the queue step it answers in "Codex handoff queue". Check, and fix in place what fails: (a) the step's done condition is fully met; (b) no force unwrap, `try!`, array index, or `Dictionary(uniqueKeysWithValues:)` on data from outside; (c) state changed on the main actor, no retain cycle in a stored closure (`[weak self]`); (d) sizes, weights, and color roles match the neighboring views, and shared parts are used instead of copies; (e) every user-visible string is English, ends without a period unless a sentence, uses "…" (one character) for commands that open something, and names Personas as "Persona / Space"; (f) the documents the step named describe the result. Write one line under the sub-step: `ok` or what was fixed. Subject: `Fix: Check the November 18 commits against their steps`.
   - [x] G1.1 `7fe86db4` Fix: Drop the open favorite's dot, shrink the favorite's icon, and space the grid from the space header
     - fixed stale dot claims in Current State and regression check 35
   - [x] G1.2 `1a3090e4` Fix: Move a tab into the favorites when it is pinned there, instead of adding a copy
@@ -727,9 +727,18 @@ The earlier work was done fast and without review. Each commit is checked once m
     - ok
   - [x] G1.20 `07370610` Task(V.11): Post rate limited plugin notifications
     - fixed the composer reference, which still claimed notifications were unavailable
-  - [ ] G1.21 `442567cc` Task(V.11): Revoke installed plugin grants in Settings
-- [ ] G2. The user's seven reports, verified by reading the code path end to end, fixing what does not hold: pinning a tab to the favorites leaves exactly one tab (drag and command); no dot under an open favorite; favorite icon 16 points in a 44-point tile; spacing between the grid and the space header; the favorites and pinned drop areas keep their room during a drag when empty; ⌘F twice within 0.35 seconds opens the agent composer and a single ⌘F opens Find at once; Download Image, Download Linked File, and File ▸ Save Page As… (⌘S) reach `webContents.download`; View ▸ Picture in Picture and the tab menu's command reach `startPictureInPicture` on both adapters. Write one line per report under this step.
-- [ ] G3. **Commit** `Fix: Hold the user's November reports to their code paths` with the changed files and this file. **Push**.
+  - [x] G1.21 `442567cc` Task(V.11): Revoke installed plugin grants in Settings
+    - ok
+- [x] G2. The user's seven reports, verified by reading the code path end to end, fixing what does not hold: pinning a tab to the favorites leaves exactly one tab (drag and command); no dot under an open favorite; favorite icon 16 points in a 44-point tile; spacing between the grid and the space header; the favorites and pinned drop areas keep their room during a drag when empty; ⌘F twice within 0.35 seconds opens the agent composer and a single ⌘F opens Find at once; Download Image, Download Linked File, and File ▸ Save Page As… (⌘S) reach `webContents.download`; View ▸ Picture in Picture and the tab menu's command reach `startPictureInPicture` on both adapters. Write one line per report under this step.
+  - Favorite pinning: drag and command call `BrowserSession.addFavorite`, which moves the live tab into `favoriteTabs` and removes it from `tabs`.
+  - Open favorite indicator: `FavoriteTileView` has no bottom dot overlay.
+  - Favorite icon: the image frame is 16 points, fallback symbol 13 points, tile height 44 points.
+  - Grid spacing: `SpaceTabsView` adds 10 points below a nonempty favorites grid.
+  - Empty drag areas: the first-favorite overlay takes the header's 44-point room; the empty pinned divider takes 36 points.
+  - Double Find: the local monitor consumes the second non-repeat ⌘F within 0.35 seconds and hides Find; the first goes to Find immediately.
+  - Downloads: the image and link menu actions call `webContents.download` after `userDidAct`; Save Page As requests a destination for the selected committed web address.
+  - Picture in picture: View and tab-row commands call `startPictureInPicture`, with WebKit's page script and Chromium's user-gesture DevTools call.
+- [x] G3. **Commit** `Fix: Hold the user's November reports to their code paths` with the changed files and this file. **Push**.
 - [ ] G4. **Preview** 1.
 
 #### Group A: the plugin system's four blocked items, with their contracts
