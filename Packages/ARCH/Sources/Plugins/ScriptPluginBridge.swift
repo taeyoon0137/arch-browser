@@ -123,6 +123,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           ui: Object.freeze({
             setBadge: (itemId, text) => call("ui.setBadge", [itemId, ...given(text)]),
             setEnabled: (commandId, flag) => call("ui.setEnabled", [commandId, flag]),
+            showPanel: (itemId) => call("ui.showPanel", [itemId]),
             copy: (text) => call("ui.copy", [text]),
           }),
         }),
@@ -427,6 +428,8 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             context.setBadge(try call.optionalText(1), onSidebarItem: try call.text(0))
         case "ui.setEnabled":
             context.setEnabled(try call.bool(1), command: try call.text(0))
+        case "ui.showPanel":
+            context.showPanel(try call.text(0))
         case "ui.copy":
             try context.copyToClipboard(try call.text(0))
         case "tabs.list":

@@ -55,6 +55,11 @@ private struct PluginSidebarItemRow: View {
         }
         .buttonStyle(.plain)
         .background(PluginPanelAnchorView(anchor: anchor))
+        .onChange(of: plugins.panelRequest?.nonce) {
+            guard let request = plugins.panelRequest, request.plugin == item.plugin, request.item == item.item.id,
+                  windowModel.session.activeWindow === windowModel else { return }
+            anchor.showPanel { await plugins.panel(for: item) }
+        }
         .onHover { isHovering = $0 }
         // On a second line, as a tab row's address: parentheses in the sidebar's tooltips hold a shortcut.
         .help("\(item.item.title)\n\(item.pluginName)")

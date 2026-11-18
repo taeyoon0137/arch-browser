@@ -694,6 +694,7 @@ public protocol PluginContext: AnyObject {
     // Interface.
     /// A running plugin can hide or restore one of its commands in the palette and menus.
     func setEnabled(_ isEnabled: Bool, command id: String)
+    /// During a user-started command, opens an owned sidebar item's panel.
     func showPanel(_ sidebarItemID: String)
     func notify(title: String, body: String) throws
 }
