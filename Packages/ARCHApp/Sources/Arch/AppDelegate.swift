@@ -110,7 +110,8 @@ import Terminal
                                          chromiumNativeMessagingHosts: chromium?.systemNativeMessagingHosts,
                                          agentOnlyPersonaID: AgentService.recordedAgentsPersonaID(in: supportDirectory))
         } catch {
-            fatalError("The browser session could not start: \(error)")
+            NSApp.terminate(nil)
+            return
         }
         self.session = session
         let sync = SyncController(sidebar: session, directory: supportDirectory)

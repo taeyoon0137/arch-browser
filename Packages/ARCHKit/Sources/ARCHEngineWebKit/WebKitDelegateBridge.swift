@@ -208,7 +208,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
             delegate.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: disposition)
             return nil
         }
-        let child = WebKitWebContents(parentConfiguration: configuration, extensionBaseURL: owner.extensionBaseURL, context: owner.context)
+        guard let child = WebKitWebContents(parentConfiguration: configuration, extensionBaseURL: owner.extensionBaseURL, context: owner.context) else { return nil }
         delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: disposition)
         return child.webView
     }

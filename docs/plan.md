@@ -823,11 +823,18 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 1
   - [x] B1.25 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
     - changed: 1
-  - [ ] B1.26 Packages/ARCHApp/Sources/Arch/AppDelegate.swift
-  - [ ] B1.27 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
-  - [ ] B1.28 Packages/ARCHKit/Sources/ARCHEngineChromium/ChromiumEngine.swift
-  - [ ] B1.29 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitEngine.swift
-  - [ ] B1.30 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitExtensions.swift
+  - [x] B1.26 Packages/ARCHApp/Sources/Arch/AppDelegate.swift
+    - changed: 1
+  - [x] B1.27 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
+    - changed: 1
+  - [x] B1.28 Packages/ARCHKit/Sources/ARCHEngineChromium/ChromiumEngine.swift
+    - changed: 0
+    - blocked: createBrowser requires a browser result even for a context from the wrong engine; no valid Chromium browser can be returned from that context.
+  - [x] B1.29 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitEngine.swift
+    - changed: 2
+    - blocked: createBrowser requires a browser result even for a context from the wrong engine; no valid WebKit browser can be returned from that context.
+  - [x] B1.30 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitExtensions.swift
+    - changed: 1
   - [ ] B1.31 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitWebView.swift
 - [ ] B2. List: `grep -rlE '\[[A-Za-z_\.]+\]' Packages/ARCH/Sources/Sync Packages/ARCH/Sources/Browsing/SidebarSync.swift Packages/ARCH/Sources/Browsing/SessionStore.swift Packages/ARCH/Sources/Browsing/BrowserSession.swift Packages/ARCH/Sources/Import Packages/ARCH/Sources/LiveFolders --include='*.swift' | sort`. For each file: check every array subscript by index and every `removeFirst()`, `removeLast()`, `dropFirst(n)` on arrays built from stored or remote data; guard the index or use `first`/`indices.contains`. Subject: `Fix: Guard indexes into stored and synced lists`.
 - [ ] B3. In `Packages/ARCH/Sources/Sync/SyncController.swift`, widen the crash-loop guard (`applyingKey`): also set it around the code that builds records to send (`record(toSave:)` and its caller) and clear it after; and in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`, where the session is created at launch, if the key `ARCHSyncApplyingChanges` is set, keep sync off as the controller does. Update the Crash-loop guard section of `docs/sync.md`. `swift build`.

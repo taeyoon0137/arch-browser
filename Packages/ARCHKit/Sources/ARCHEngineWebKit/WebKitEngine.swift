@@ -331,9 +331,9 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     }
 
     /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller, page scripts, and web extensions, and loads the pages its opener loads: `extensionBaseURL` is the opener's.
-    init(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
+    init?(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
         guard let userContent = parentConfiguration.userContentController as? WebKitUserContentController else {
-            preconditionFailure("WebKit popups come from web views of WebKit web contents")
+            return nil
         }
         self.context = context
         self.userContent = userContent
@@ -521,7 +521,10 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             return
         }
         let job = PDFPrintJob(completion: completion)
-        let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
+        guard let printInfo = NSPrintInfo.shared.copy() as? NSPrintInfo else {
+            completion(.failure(CocoaError(.fileWriteUnknown)))
+            return
+        }
         printInfo.jobDisposition = .save
         printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = job.file
         let operation = webView.printOperation(with: printInfo)

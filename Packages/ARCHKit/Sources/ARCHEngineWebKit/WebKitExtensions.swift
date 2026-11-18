@@ -164,7 +164,7 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         let previousWindows = windows
         let previousFocus = focusedWindow
         let previousPlaces = Self.places(in: previousWindows)
-        let previousActiveTabs = Dictionary(uniqueKeysWithValues: previousWindows.map { ($0.id, $0.activeTab) })
+        let previousActiveTabs = Dictionary(previousWindows.map { ($0.id, $0.activeTab) }, uniquingKeysWith: { first, _ in first })
         var reportedIDs: Set<UUID> = []
         windows = reported.filter { reportedIDs.insert($0.id).inserted }.map { report in
             let window = previousWindows.first { $0.id == report.id } ?? WebKitExtensionWindow(id: report.id)

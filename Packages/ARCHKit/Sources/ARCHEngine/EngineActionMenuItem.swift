@@ -15,7 +15,9 @@ public final class EngineActionMenuItem: NSMenuItem {
 
     @available(*, unavailable)
     public required init(coder: NSCoder) {
-        fatalError("EngineActionMenuItem is created in code")
+        handler = {}
+        super.init(coder: coder)
+        isEnabled = false
     }
 
     @objc private func run() {
