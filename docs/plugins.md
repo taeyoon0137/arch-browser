@@ -520,7 +520,7 @@ public struct PluginCommand: Identifiable, Hashable, Codable, Sendable {
     public var keywords: [String]
     /// The shortcut of the command's first item in the Plugins menu. The user can change it in Settings ▸ Shortcuts.
     public var shortcut: PluginShortcut?
-    /// Not built yet.
+    /// The palette places the command title before the argument field and passes its text on invocation.
     public var takesArgument: Bool
 }
 
@@ -781,7 +781,6 @@ public struct PluginInvocation: Sendable {
     public var selection: String?
     public enum Source: String, Sendable { case palette, menu, contextMenu, shortcut, sidebar }
     public var source: Source
-    // Not built yet.
     public var argument: String?
 }
 

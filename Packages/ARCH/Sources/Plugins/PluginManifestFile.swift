@@ -118,7 +118,8 @@ struct ScriptManifest {
     private static func command(_ object: ManifestObject) throws -> PluginCommand {
         var object = object
         let command = PluginCommand(id: try object.string("id"), title: try object.string("title"), symbol: try object.optionalString("symbol"),
-                                    keywords: try object.strings("keywords"), shortcut: try object.optionalString("shortcut").map(PluginShortcut.init))
+                                    keywords: try object.strings("keywords"), shortcut: try object.optionalString("shortcut").map(PluginShortcut.init),
+                                    takesArgument: try object.bool("takesArgument") ?? false)
         try object.finish()
         return command
     }

@@ -60,13 +60,15 @@ public struct PluginCommand: Identifiable, Hashable, Sendable {
     public var keywords: [String]
     /// The shortcut of the command's first item in the Plugins menu, which the index adds when the manifest lists none there. The user can change it in Settings ▸ Shortcuts.
     public var shortcut: PluginShortcut?
+    public var takesArgument: Bool
 
-    public init(id: String, title: String, symbol: String? = nil, keywords: [String] = [], shortcut: PluginShortcut? = nil) {
+    public init(id: String, title: String, symbol: String? = nil, keywords: [String] = [], shortcut: PluginShortcut? = nil, takesArgument: Bool = false) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.keywords = keywords
         self.shortcut = shortcut
+        self.takesArgument = takesArgument
     }
 }
 
