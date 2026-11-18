@@ -118,6 +118,9 @@ public struct PluginMenuItem: Hashable, Sendable {
 
 /// A row below the favorites with a symbol, a title, and the badge the plugin sets.
 public struct PluginSidebarItem: Identifiable, Hashable, Sendable {
+    public enum Presentation: String, Hashable, Sendable {
+        case popover, sidebar
+    }
     public enum Action: Hashable, Sendable {
         /// Runs one of the plugin's commands on the window's selected tab.
         case command(String)
@@ -131,12 +134,14 @@ public struct PluginSidebarItem: Identifiable, Hashable, Sendable {
     /// An SF Symbols name.
     public var symbol: String
     public var action: Action
+    public var presentation: Presentation
 
-    public init(id: String, title: String, symbol: String, action: Action) {
+    public init(id: String, title: String, symbol: String, action: Action, presentation: Presentation = .popover) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.action = action
+        self.presentation = presentation
     }
 }
 

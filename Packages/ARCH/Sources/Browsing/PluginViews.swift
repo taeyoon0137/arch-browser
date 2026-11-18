@@ -6,12 +6,13 @@ import SwiftUI
 /// The sidebar items of the manager's enabled plugins, in the order the plugins registered. Without items it shows nothing and takes no space.
 struct PluginSidebarItemsView: View {
     @ObservedObject var plugins: PluginManager
+    let spaceID: UUID
 
     var body: some View {
         let items = plugins.contributions.sidebarItems
         if !items.isEmpty {
             VStack(spacing: 2) {
-                ForEach(items, id: \.id) { PluginSidebarItemRow(plugins: plugins, item: $0) }
+                ForEach(items, id: \.id) { PluginSidebarItemRow(plugins: plugins, item: $0, spaceID: spaceID) }
             }
         }
     }
@@ -22,6 +23,7 @@ private struct PluginSidebarItemRow: View {
     @ObservedObject var plugins: PluginManager
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let item: Attributed<PluginSidebarItem>
+    let spaceID: UUID
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
     @State private var anchor = PluginPanelAnchor()
@@ -58,7 +60,7 @@ private struct PluginSidebarItemRow: View {
         .onChange(of: plugins.panelRequest?.nonce) {
             guard let request = plugins.panelRequest, request.plugin == item.plugin, request.item == item.item.id,
                   windowModel.session.activeWindow === windowModel else { return }
-            anchor.showPanel { await plugins.panel(for: item) }
+            openPanel()
         }
         .onHover { isHovering = $0 }
         // On a second line, as a tab row's address: parentheses in the sidebar's tooltips hold a shortcut.
@@ -73,6 +75,18 @@ private struct PluginSidebarItemRow: View {
         case let .command(id):
             windowModel.runPluginCommand(PluginCommandRef(plugin: item.plugin, command: id), source: .sidebar)
         case .panel:
+            openPanel()
+        }
+    }
+
+    private func openPanel() {
+        guard windowModel.currentSpaceID == spaceID else { return }
+        if item.item.presentation == .sidebar {
+            Task {
+                guard let panel = await plugins.panel(for: item) else { return }
+                windowModel.showSidebarPanel(panel, for: item, in: spaceID, plugins: plugins)
+            }
+        } else {
             anchor.showPanel { await plugins.panel(for: item) }
         }
     }

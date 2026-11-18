@@ -32,7 +32,9 @@ public enum BrowserWindowKind {
     // MARK: State: what the window shows
 
     /// The space the sidebar shows. A small window has no sidebar; its current space is the space its tab moves to, whose tint it shows.
-    @Published public var currentSpaceID: UUID
+    @Published public var currentSpaceID: UUID {
+        didSet { if oldValue != currentSpaceID { closeSidebarPanel() } }
+    }
     /// The selected tab, or nil for the empty page. Only `selectTab(_:)` changes it, because a selection does more than show the tab.
     @Published public private(set) var selectedTabID: UUID?
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
@@ -50,8 +52,11 @@ public enum BrowserWindowKind {
     @Published public var isSidebarVisible = true
     /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
     @Published public var isLibraryVisible = false {
-        didSet { if isLibraryVisible { session.markDownloadsSeen() } }
+        didSet { if isLibraryVisible { session.markDownloadsSeen(); closeSidebarPanel() } }
     }
+    /// A plugin panel shown in place of the current space's tab list.
+    @Published private(set) var sidebarPanel: SidebarPluginPanel?
+    private var sidebarPanelObserver: AnyCancellable?
     /// Whether the page reader shows beside the page.
     @Published public private(set) var isPageReaderVisible = false
     /// What the agent panel shows in the trailing column in place of the page reader, or nil while it is hidden; only one of the two shows.
@@ -721,6 +726,29 @@ public enum BrowserWindowKind {
     }
 
     // MARK: Plugins
+
+    struct SidebarPluginPanel {
+        let spaceID: Space.ID
+        let title: String
+        let controller: NSViewController
+    }
+
+    func showSidebarPanel(_ controller: NSViewController, for item: Attributed<PluginSidebarItem>, in space: Space.ID, plugins: PluginManager) {
+        guard currentSpaceID == space else { return }
+        closeSidebarPanel()
+        sidebarPanel = SidebarPluginPanel(spaceID: space, title: item.item.title, controller: controller)
+        (controller as? any PluginEndingPanel)?.onEnd = { [weak self] in self?.closeSidebarPanel() }
+        sidebarPanelObserver = plugins.$plugins.sink { [weak self] installed in
+            guard let self, self.sidebarPanel?.controller === controller else { return }
+            if !installed.contains(where: { $0.id == item.plugin && $0.isEnabled }) { self.closeSidebarPanel() }
+        }
+    }
+
+    func closeSidebarPanel() {
+        (sidebarPanel?.controller as? any PluginEndingPanel)?.onEnd = nil
+        sidebarPanelObserver = nil
+        sidebarPanel = nil
+    }
 
     /// The plugins of the window's Persona, whose contributions the window shows.
     var plugins: PluginManager {

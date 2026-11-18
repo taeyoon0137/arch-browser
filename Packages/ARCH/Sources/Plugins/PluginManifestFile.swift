@@ -175,6 +175,10 @@ struct ScriptManifest {
         let id = try object.string("id")
         let title = try object.string("title")
         let symbol = try object.string("symbol")
+        let presentationName = try object.optionalString("presentation") ?? "popover"
+        guard let presentation = PluginSidebarItem.Presentation(rawValue: presentationName) else {
+            throw invalidManifest("\(object.path).presentation must be popover or sidebar")
+        }
         let action: PluginSidebarItem.Action
         if let page = try object.optionalString("panel") {
             guard object.value("command") == nil else { throw invalidManifest("\(object.path) takes a command or a panel, not both") }
@@ -184,10 +188,11 @@ struct ScriptManifest {
             }
             action = .panel(page: page)
         } else {
+            guard presentation == .popover else { throw invalidManifest("\(object.path).presentation sidebar needs a panel") }
             action = .command(try object.listedCommand(commands))
         }
         try object.finish()
-        return PluginSidebarItem(id: id, title: title, symbol: symbol, action: action)
+        return PluginSidebarItem(id: id, title: title, symbol: symbol, action: action, presentation: presentation)
     }
 
     /// `type` is `toggle`, `text`, `number` with an optional `min` and `max`, `choice` with its `options`, or `secret`. Each but a secret takes an optional `default`: false, empty text, the minimum or 0, and the first option without one.

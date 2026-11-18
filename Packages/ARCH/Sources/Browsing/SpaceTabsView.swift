@@ -10,6 +10,58 @@ private struct FavoriteBarFramesKey: PreferenceKey {
     }
 }
 
+/// A plugin's page in place of the tab list, with the row-sized return control.
+private struct SidebarPluginPanelContent: View {
+    let panel: BrowserWindowModel.SidebarPluginPanel
+    let windowModel: BrowserWindowModel
+    @State private var escapeMonitor: Any?
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Button { windowModel.closeSidebarPanel() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 18, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help("Back to Tabs")
+                .accessibilityLabel("Back to Tabs")
+                Text(panel.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(panel.title)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 36)
+            SidebarPluginPanelController(controller: panel.controller)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onExitCommand { windowModel.closeSidebarPanel() }
+        .onAppear { [windowModel] in
+            guard escapeMonitor == nil else { return }
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak windowModel] event in
+                guard event.keyCode == 53, event.window === windowModel?.nsWindow else { return event }
+                windowModel?.closeSidebarPanel()
+                return nil
+            }
+        }
+        .onDisappear {
+            if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+            escapeMonitor = nil
+        }
+    }
+}
+
+private struct SidebarPluginPanelController: NSViewControllerRepresentable {
+    let controller: NSViewController
+
+    func makeNSViewController(context: Context) -> NSViewController { controller }
+    func updateNSViewController(_ controller: NSViewController, context: Context) {}
+}
+
 /// Lays out one page per space side by side and shows the current space's page. During a swipe the pages follow the fingers; a change of space slides them into place.
 struct SpacePagesView: View {
     @ObservedObject var session: BrowserSession
@@ -208,11 +260,16 @@ struct SpaceTabsView: View {
                         .modifier(FavoriteDropArea(spaceID: space.id, viewport: listFrame))
                         .padding(.bottom, FavoriteTileLayout.gridHeaderSpacing)
                 }
-                if let plugins = windowModel.currentSpaceID == space.id ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
-                    PluginSidebarItemsView(plugins: plugins)
+                if let panel = windowModel.sidebarPanel, panel.spaceID == space.id {
+                    SidebarPluginPanelContent(panel: panel, windowModel: windowModel)
+                        .frame(height: max(320, listFrame.height - 80))
+                } else {
+                    if let plugins = windowModel.currentSpaceID == space.id ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
+                        PluginSidebarItemsView(plugins: plugins, spaceID: space.id)
+                    }
+                    if let agents = session.agents { ConnectedAgentRows(agents: agents) }
+                    tabRows
                 }
-                if let agents = session.agents { ConnectedAgentRows(agents: agents) }
-                tabRows
             }
             // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
             .padding(.horizontal, SidebarView.inset)
