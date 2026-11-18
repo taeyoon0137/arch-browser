@@ -29,6 +29,10 @@ public struct AgentSessionPanel: View {
             header
             Divider()
             transcript
+            if !pendingCards.isEmpty {
+                Divider()
+                pendingDecisions
+            }
             if !session.queuedMessages.isEmpty {
                 Divider()
                 queued
@@ -57,19 +61,21 @@ public struct AgentSessionPanel: View {
 
     // MARK: Header
 
+    private var statusSentence: String {
+        if !approvals.pending.filter({ $0.ownerID == session.id }).isEmpty { return "Waiting for your decision" }
+        if session.isTakenOver && !session.hasEnded { return "You are in control" }
+        if session.hasEnded { return "This task has ended" }
+        if session.items.last.map({ if case .error = $0.kind { return true }; return false }) == true { return "This task needs attention" }
+        return session.isTurnRunning ? "Working on your task" : "Ready for your next message"
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(session.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Spacer()
+        VStack(alignment: .leading, spacing: 0) {
+            AgentStateHeader(title: session.title, status: statusSentence) {
                 if session.isTakenOver && !session.hasEnded {
-                    Button("Hand Back", action: session.handBack).controlSize(.small)
-                }
-                if session.isTurnRunning {
-                    Button("Stop", action: session.stop)
-                        .controlSize(.small)
+                    AgentPrimaryAction(title: "Hand Back", action: session.handBack)
+                } else if session.isTurnRunning {
+                    AgentPrimaryAction(title: "Stop", action: session.stop)
                 }
                 Menu {
                     if !session.isTakenOver {
@@ -88,29 +94,28 @@ public struct AgentSessionPanel: View {
                 .help("Session")
                 .accessibilityLabel("Session actions")
             }
-            Text(details)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            HStack(spacing: 6) {
-                modeMenu
-                if service.canEditAttachments(of: session) {
-                    Button("Shared Tabs (\(session.handles.sharedTabIDs.count))") {
-                        sharingProblem = nil
-                        showsSharedTabs.toggle()
+            AgentTechnicalDetails(title: "Session details") {
+                AgentSectionBox {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(details).help(details)
+                        HStack(spacing: 6) {
+                            modeMenu
+                            if service.canEditAttachments(of: session) {
+                                Button("Shared Tabs (\(session.handles.sharedTabIDs.count))") {
+                                    sharingProblem = nil
+                                    showsSharedTabs.toggle()
+                                }
+                                .controlSize(.small)
+                                .popover(isPresented: $showsSharedTabs) { sharedTabs }
+                            }
+                        }
+                        Text(scopeText).help(scopeText)
                     }
-                    .controlSize(.small)
-                    .popover(isPresented: $showsSharedTabs) { sharedTabs }
                 }
-                Text(scopeText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .help(scopeText)
             }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 
     private var sharedTabs: some View {
@@ -178,9 +183,23 @@ public struct AgentSessionPanel: View {
 
     // MARK: Transcript
 
-    /// Every card the session waits on shows inline after the transcript: its steps, addresses (P13), questions, tab requests, and the downloads, links to other apps, and file choosers its pages start.
+    private var pendingCards: [AgentApproval] { approvals.pending.filter { $0.ownerID == session.id } }
+
+    private var pendingDecisions: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(pendingCards) { card in
+                    AgentApprovalCard(approval: card, approvals: approvals) {
+                        if let tabID = card.tabID { actions.showTab(tabID) }
+                    }
+                }
+            }
+            .padding(14)
+        }
+        .frame(maxHeight: 280)
+    }
+
     private var transcript: some View {
-        let cards = approvals.pending.filter { $0.ownerID == session.id }
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
@@ -192,29 +211,16 @@ public struct AgentSessionPanel: View {
                     if session.isTakenOver && !session.hasEnded {
                         note("You took over. The agent waits until you hand the session back.")
                     }
-                    ForEach(cards) { card in
-                        AgentApprovalCard(approval: card, approvals: approvals) {
-                            if let tabID = card.tabID { actions.showTab(tabID) }
-                        }
-                        .id(card.id)
-                    }
                 }
                 .padding(14)
             }
             // Row IDs become scroll targets after the transcript has a viewport.
             .onGeometryChange(for: Bool.self) { $0.size.height > 0 } action: { ready in
                 guard ready else { return }
-                if let card = cards.first {
-                    proxy.scrollTo(card.id, anchor: .top)
-                } else if let last = session.items.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
-            }
-            .onChange(of: cards.first?.id) {
-                if let card = cards.first { proxy.scrollTo(card.id, anchor: .top) }
+                if let last = session.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
             .onChange(of: session.items.last) {
-                if cards.isEmpty, let last = session.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                if let last = session.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
         }
     }
