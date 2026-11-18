@@ -122,6 +122,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           settings: Object.freeze({ get: (key) => call("settings.get", [key]) }),
           ui: Object.freeze({
             setBadge: (itemId, text) => call("ui.setBadge", [itemId, ...given(text)]),
+            setEnabled: (commandId, flag) => call("ui.setEnabled", [commandId, flag]),
             copy: (text) => call("ui.copy", [text]),
           }),
         }),
@@ -424,6 +425,8 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return context.setting(try call.text(0))
         case "ui.setBadge":
             context.setBadge(try call.optionalText(1), onSidebarItem: try call.text(0))
+        case "ui.setEnabled":
+            context.setEnabled(try call.bool(1), command: try call.text(0))
         case "ui.copy":
             try context.copyToClipboard(try call.text(0))
         case "tabs.list":
@@ -518,6 +521,11 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         func text(_ index: Int) throws -> String {
             guard case let .string(text)? = value(index) else { throw BridgeFailure.invalidCall }
             return text
+        }
+
+        func bool(_ index: Int) throws -> Bool {
+            guard case let .bool(value)? = value(index) else { throw BridgeFailure.invalidCall }
+            return value
         }
 
         /// Text, or nil where the script passed none or null.

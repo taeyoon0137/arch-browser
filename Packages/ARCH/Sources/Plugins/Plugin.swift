@@ -60,6 +60,8 @@ public protocol PluginContext: AnyObject {
     func setting(_ key: String) -> PluginValue?
     /// Shows `text` as the badge of one of the plugin's sidebar items, or no badge for nil or empty text. The badge stays until the plugin changes it or the user switches the plugin off, updates it, or removes it, also after a script plugin's instance stops on its own.
     func setBadge(_ text: String?, onSidebarItem id: String)
+    /// Enables or disables one of this plugin's own contributed commands for the current run.
+    func setEnabled(_ isEnabled: Bool, command id: String)
     /// Needs `clipboard`.
     func copyToClipboard(_ text: String) throws
     /// The tabs the plugin reaches, in sidebar order, each without what the grant does not cover: its Persona's open tabs, never agent tabs. Without `tabs`, a tab shows its title and address only where the granted sites cover its page, and for `whenInvoked` only where the plugin has access in it. A plugin with `ai` gets no title or address of a tab on a site excluded from AI. Needs no permission.
@@ -87,6 +89,7 @@ public protocol PluginContext: AnyObject {
 }
 
 extension PluginContext {
+    public func setEnabled(_ isEnabled: Bool, command id: String) {}
     /// A context that offers no selected tab, such as a hook script's, which acts on its run's tabs, gives none.
     public func selectedTab() throws -> PluginTab? { nil }
 

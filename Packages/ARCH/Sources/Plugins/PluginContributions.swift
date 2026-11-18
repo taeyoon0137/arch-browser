@@ -249,15 +249,15 @@ public struct PluginContributionIndex: Sendable {
 
     /// The plugins that are enabled and that their runtimes can run contribute, a pair once: through its version installed first while that one contributes, otherwise through the other, whose runtime runs each command with the version for the invocation's tab. The contributing version also brings the commands of the other version that its own lacks while the other is enabled (`InstalledPlugin.commands(among:)`), as an action that only the other has. Menu items and sidebar items whose commands the plugin does not contribute are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it. Of a command's items in the Plugins menu, only the first has the shortcut, since Settings ▸ Shortcuts lists and changes only that one.
     @MainActor
-    init(_ plugins: [InstalledPlugin]) {
+    init(_ plugins: [InstalledPlugin], disabledCommands: [PluginID: Set<String>] = [:]) {
         var enabled: [InstalledPlugin] = []
         for plugin in plugins where plugin.isEnabled && plugin.unavailability == nil && !enabled.contains(where: { $0.id == plugin.counterpart }) {
             enabled.append(plugin)
         }
-        commands = enabled.flatMap { plugin in plugin.commands(among: plugins).map { plugin.attributed($0) } }
+        commands = enabled.flatMap { plugin in plugin.commands(among: plugins).filter { !disabledCommands[plugin.id, default: []].contains($0.id) }.map { plugin.attributed($0) } }
         menuItems = enabled.flatMap { plugin in
             let contributions = plugin.manifest.contributions
-            let commands = plugin.commands(among: plugins)
+            let commands = plugin.commands(among: plugins).filter { !disabledCommands[plugin.id, default: []].contains($0.id) }
             var inPluginsMenu: Set<String> = []
             let listed = contributions.menuItems.compactMap { item -> LocatedEntry? in
                 guard let command = commands.first(where: { $0.id == item.command }) else { return nil }
@@ -271,7 +271,7 @@ public struct PluginContributionIndex: Sendable {
             return (listed + forShortcuts).map { plugin.attributed($0) }
         }
         sidebarItems = enabled.flatMap { plugin in
-            let commands = plugin.commands(among: plugins)
+            let commands = plugin.commands(among: plugins).filter { !disabledCommands[plugin.id, default: []].contains($0.id) }
             return plugin.manifest.contributions.sidebarItems.filter { item in
                 guard case let .command(id) = item.action else { return true }
                 return commands.contains { $0.id == id }

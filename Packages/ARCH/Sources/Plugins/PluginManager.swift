@@ -120,7 +120,7 @@ public final class PluginManager: ObservableObject {
     /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them, where the remaining version of a pair takes the place of the pair. Each version of a pair has its counterpart and its engine.
     @Published public private(set) var plugins: [InstalledPlugin] {
         didSet {
-            contributions = PluginContributionIndex(plugins)
+            contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
             pruneSiteAccess()
             runEnabledPlugins()
             registerAIFeatures()
@@ -137,6 +137,7 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var listWriteFailure: String?
     /// The badges the plugins set, by plugin and sidebar item.
     @Published private var badges: [PluginID: [String: String]] = [:]
+    private var disabledCommands: [PluginID: Set<String>] = [:]
     private let builtIns: [PluginID: any BuiltInPlugin.Type]
     /// The runtimes of the installed kinds that the manager does not run itself, which read their packages and run their plugins, by kind.
     private let runtimes: [PluginKind: any PluginRuntime]
@@ -268,7 +269,7 @@ public final class PluginManager: ObservableObject {
         self.choices = choices
         self.installs = installs
         self.pairRecords = pairRecords
-        contributions = PluginContributionIndex(paired)
+        contributions = PluginContributionIndex(paired, disabledCommands: disabledCommands)
         // Packages that were under review when the app last quit cannot be installed any more.
         try? FileManager.default.removeItem(at: stagingDirectory)
         if !restored.isEmpty { saveList() }
@@ -1003,7 +1004,7 @@ public final class PluginManager: ObservableObject {
 
     /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
-        guard let installed = enabledPlugin(command.plugin), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
+        guard let installed = enabledPlugin(command.plugin), !disabledCommands[command.plugin, default: []].contains(command.command), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
         guard grantSiteAccess(to: installed, for: invocation) else { return NSSound.beep() }
         do {
             try await start(installed)?.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
@@ -1065,6 +1066,13 @@ public final class PluginManager: ObservableObject {
     fileprivate func setBadge(_ text: String?, onSidebarItem id: String, of plugin: PluginID) {
         guard let installed = enabledPlugin(plugin), installed.manifest.contributions.sidebarItems.contains(where: { $0.id == id }) else { return }
         badges[plugin, default: [:]][id] = text?.isEmpty == false ? text : nil
+    }
+
+    fileprivate func setEnabled(_ isEnabled: Bool, command id: String, of plugin: PluginID) {
+        guard let installed = enabledPlugin(plugin), installed.commands(among: plugins).contains(where: { $0.id == id }) else { return }
+        if isEnabled { disabledCommands[plugin, default: []].remove(id) }
+        else { disabledCommands[plugin, default: []].insert(id) }
+        contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
     }
 
     // MARK: Page scripts
@@ -1775,6 +1783,11 @@ final class ScopedPluginContext: PluginPanelContext {
     func setBadge(_ text: String?, onSidebarItem id: String) {
         guard !hasEnded else { return }
         manager?.setBadge(text, onSidebarItem: id, of: pluginID)
+    }
+
+    func setEnabled(_ isEnabled: Bool, command id: String) {
+        guard !hasEnded else { return }
+        manager?.setEnabled(isEnabled, command: id, of: pluginID)
     }
 
     func copyToClipboard(_ text: String) throws {

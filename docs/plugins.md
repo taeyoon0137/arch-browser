@@ -692,6 +692,7 @@ public protocol PluginContext: AnyObject {
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 
     // Interface.
+    /// A running plugin can hide or restore one of its commands in the palette and menus.
     func setEnabled(_ isEnabled: Bool, command id: String)
     func showPanel(_ sidebarItemID: String)
     func notify(title: String, body: String) throws
