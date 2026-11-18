@@ -739,7 +739,7 @@ The earlier work was done fast and without review. Each commit is checked once m
   - Downloads: the image and link menu actions call `webContents.download` after `userDidAct`; Save Page As requests a destination for the selected committed web address.
   - Picture in picture: View and tab-row commands call `startPictureInPicture`, with WebKit's page script and Chromium's user-gesture DevTools call.
 - [x] G3. **Commit** `Fix: Hold the user's November reports to their code paths` with the changed files and this file. **Push**.
-- [ ] G4. **Preview** 1.
+- [x] G4. **Preview** 1.
 
 #### Group A: the plugin system's four blocked items, with their contracts
 
