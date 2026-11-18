@@ -390,6 +390,28 @@ public final class PluginManager: ObservableObject {
         setEnabled(isEnabled, for: [id] + [plugins.first { $0.id == id }?.counterpart].compactMap { $0 }, failure: nil)
     }
 
+    /// Removes one part of an installed plugin's grant and stops its old context immediately.
+    public func revoke(_ permission: PluginPermission, from id: PluginID) {
+        updateGrant(of: id) { $0.permissions.remove(permission) }
+    }
+
+    public func revoke(_ site: MatchPattern, from id: PluginID) {
+        updateGrant(of: id) { $0.sites.removeAll { $0 == site } }
+    }
+
+    private func updateGrant(of id: PluginID, _ change: (inout PluginGrant) -> Void) {
+        guard !isClosed, let index = plugins.firstIndex(where: { $0.id == id && $0.origin != .bundled }),
+              let entryIndex = installs.firstIndex(where: { $0.id == id.rawValue }),
+              case var .readable(entry) = installs[entryIndex] else { return }
+        var next = plugins
+        change(&entry.grant)
+        next[index].grant = entry.grant
+        installs[entryIndex] = .readable(entry)
+        stop(id)
+        saveList()
+        setPlugins(next)
+    }
+
     /// `failure` says why the manager switches the plugins off, for Settings. The manager switches off one version of a pair alone, so that its counterpart keeps running.
     private func setEnabled(_ isEnabled: Bool, for ids: [PluginID], failure: String?) {
         var next = plugins
