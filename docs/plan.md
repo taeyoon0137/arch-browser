@@ -712,7 +712,10 @@ Group F, the agent panel's design (row VII.34). Design first; no code until the 
 
 Group G, the end:
 
-- [ ] G1. Run `swift build`, `./scripts/check_markdown.py`, and `git diff --check main...HEAD` once more. Write under this step, in a short list: each group's commits, every `blocked:` note, and every place where the build warned. **Commit** `Docs: Record what the handoff queue finished and what it left` with this file. **Push** the branch.
+- [x] G1. Run `swift build`, `./scripts/check_markdown.py`, and `git diff --check main...HEAD` once more. Write under this step, in a short list: each group's commits, every `blocked:` note, and every place where the build warned. **Commit** `Docs: Record what the handoff queue finished and what it left` with this file. **Push** the branch.
+  - Commits: A `7fe86db4`; B `1a3090e4`, `b26f4273`; C `51b97d68`; D `29530095`; E `d39563dc`; F `d4939aac`.
+  - Blocked: D2 and D3 lack an address-download call in both engines; D4 cannot describe unavailable commands. E2 lacks the stated macOS WebKit configuration member; E3 lacks a Chromium bridge start call; E4 cannot make a working cross-engine menu command.
+  - Build warnings: none in the final `swift build`. The attempted WebKit property in E2 caused a compile error and was removed; the subsequent build passed.
 - [ ] G2. Stop. Do not merge. Claude reviews `work/codex-handoff` part by part, runs the tests, and merges what holds.
 
 Left for Claude, not for this queue: the review and merge of `work/plugins-step-8`; the cause of the second Mac's sync crash, which needs that Mac's crash report; the remaining items of V.11; the checks that need the running app; and the prose pass.
