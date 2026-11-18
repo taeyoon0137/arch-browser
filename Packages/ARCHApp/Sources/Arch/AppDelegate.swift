@@ -380,6 +380,7 @@ import Terminal
         fileMenu.addItem(withTitle: "Import from Browser\u{2026}", action: #selector(importFromBrowser), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Import Bookmarks and History\u{2026}", action: #selector(importBookmarksAndHistory), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Save Page As\u{2026}", action: #selector(savePageAs), keyEquivalent: "s")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
         mainMenu.addItem(submenu(fileMenu, title: "File"))
@@ -573,6 +574,7 @@ import Terminal
     // Not named `print(_:)`: windows and views answer that selector first in the responder chain.
     @objc private func printPage() { session.activeWindow?.printPage() }
     @objc private func exportAsPDF() { session.activeWindow?.exportPageAsPDF() }
+    @objc private func savePageAs() { session.activeWindow?.savePageAs() }
     @objc private func sharePage() { session.activeWindow?.shareSelectedPage() }
     @objc private func toggleSidebar() { frontSidebarTarget().toggleSidebar() }
     /// While the window of floating tools is key, ⌥⌘I closes those tools, whichever tab the active window shows.
@@ -799,6 +801,7 @@ import Terminal
         if item.action == #selector(printPage) || item.action == #selector(exportAsPDF) {
             return activeWindow?.canPrint == true
         }
+        if item.action == #selector(savePageAs) { return activeWindow?.canSavePageAs == true }
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
         }

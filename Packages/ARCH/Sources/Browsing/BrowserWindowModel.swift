@@ -1238,6 +1238,16 @@ public enum BrowserWindowKind {
         return nsWindow?.attachedSheet == nil
     }
 
+    public var canSavePageAs: Bool {
+        guard !isSelectedPageCovered, let url = selectedTab?.committedURL, let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    public func savePageAs() {
+        guard canSavePageAs, let tab = selectedTab, let url = tab.committedURL else { return }
+        session.savePageAs(tab, url: url)
+    }
+
     /// Prints the selected page through the system print panel, a sheet on the window. Both engines render the page as PDF first, so the panel and its preview work the same on either.
     public func printPage() {
         renderSelectedPageAsPDF(failureMessage: "The page could not be printed.") { tab, document, window in

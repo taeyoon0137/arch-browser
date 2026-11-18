@@ -94,6 +94,8 @@ public protocol EngineWebContents: AnyObject {
     func createPDF(completion: @escaping (Result<Data, Error>) -> Void)
     /// Ends the page's fullscreen. WebKit ends the page's other media presentations with it, picture in picture included.
     func exitFullscreen()
+    /// Starts a download of the address as if the page had started one, so it reaches the download delegate as any download does.
+    func download(_ url: URL)
     /// Whether closing this web contents now would stop downloads it started. Only Chromium ties downloads to the page that started them.
     var closingStopsDownloads: Bool { get }
     /// Runs the page's `beforeunload` handlers and reports whether the page agreed to close. An engine that cannot run them reports true at once.
@@ -105,6 +107,7 @@ public protocol EngineWebContents: AnyObject {
 }
 
 public extension EngineWebContents {
+    func download(_ url: URL) {}
     /// A web contents without trusted input, such as a stand-in that has no page yet, offers none.
     var input: (any EngineInput)? { nil }
     /// A web contents keeps its own page scripts unless its engine shares them.

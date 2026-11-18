@@ -32,6 +32,7 @@ final class UnloadedWebContents: EngineWebContents {
     var isCapturingMedia: Bool { false }
     var isInPictureInPicture: Bool { false }
     var closingStopsDownloads: Bool { false }
+    func download(_ url: URL) {}
     var devTools: (any EngineDevTools)? { nil }
 
     /// `icon` is the icon of the page that unloaded, which the tab's row keeps showing, or a live folder's icon.

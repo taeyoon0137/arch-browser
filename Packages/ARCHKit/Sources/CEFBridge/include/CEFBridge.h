@@ -473,6 +473,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)reload;
 - (void)reloadIgnoringCache;
 - (void)stopLoading;
+/// Starts a download in this browser's request context.
+- (void)startDownloadWithURL:(NSString *)url;
 - (void)goBack;
 - (void)goForward;
 /// Evaluates `script` in the main frame's page world and passes the string it evaluates to. CEF's `ExecuteJavaScript` returns nothing, so the page's renderer process runs the script and replies with a process message. Passes nil when the frame has no script context, the script throws or returns another type, the page's process quits, the browser goes, or no reply comes within ten seconds. Calls `completion` once on the main thread.

@@ -117,6 +117,17 @@ final class EngineRuntime {
     private var downloadOnlyTabIDs: Set<UUID> = []
     /// The downloads a page's `PageDownloadGate` let through. WebKit asks for a destination again when Resume starts a download over without resume data, which the gate does not count again.
     private let admittedDownloads = NSHashTable<AnyObject>.weakObjects()
+    private var pageSaveRequests: [ObjectIdentifier: URL] = [:]
+
+    public func savePageAs(_ tab: Tab, url: URL) {
+        let key = ObjectIdentifier(tab.webContents)
+        pageSaveRequests[key] = url
+        tab.pageDownloads.userDidAct()
+        tab.webContents.download(url)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            if self?.pageSaveRequests[key] == url { self?.pageSaveRequests.removeValue(forKey: key) }
+        }
+    }
     /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium, each with the runtime that created it. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
     /// Created with the session at launch, so that clicking a notification from an earlier run still reveals its file.
@@ -2564,7 +2575,14 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
             return completion(url)
         }
         let directory = downloadsDirectory(for: preferences)
-        guard preferences.promptForDownloadPath else {
+        let isPageSave: Bool
+        if let contents = item.webContents, pageSaveRequests[ObjectIdentifier(contents)] == item.sourceURL {
+            pageSaveRequests.removeValue(forKey: ObjectIdentifier(contents))
+            isPageSave = true
+        } else {
+            isPageSave = false
+        }
+        guard preferences.promptForDownloadPath || isPageSave else {
             let url = entry.unusedDestination(for: defaultFilename, in: directory)
             return completion(entry.reserveDestination(url) ? url : nil)
         }

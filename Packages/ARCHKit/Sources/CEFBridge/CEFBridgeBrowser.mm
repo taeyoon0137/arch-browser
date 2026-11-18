@@ -1629,6 +1629,12 @@ static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
     }
 }
 
+- (void)startDownloadWithURL:(NSString *)url {
+    if (_browser) {
+        _browser->GetHost()->StartDownload(CefString(url.UTF8String));
+    }
+}
+
 - (void)goBack {
     // Without an entry nothing loads, and the dialog would stay suppressed until another load ends.
     if (!_browser || !_browser->CanGoBack()) {

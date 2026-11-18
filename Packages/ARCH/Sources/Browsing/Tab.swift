@@ -518,10 +518,10 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         var sections = [handed.suggestions, handed.spelling]
         // WebKit puts a link's items before the selection's in a field; outside one, a click on a link or image gets no selection items.
         if let link = element.linkURL {
-            sections.append([newTabItem("Open Link in New Tab", for: link), EngineActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
+            sections.append([newTabItem("Open Link in New Tab", for: link), downloadItem("Download Linked File", for: link), EngineActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
         }
         if let image = element.imageURL {
-            sections.append([newTabItem("Open Image in New Tab", for: image), EngineActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
+            sections.append([newTabItem("Open Image in New Tab", for: image), downloadItem("Download Image", for: image), EngineActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
         }
         sections.append(handed.lookUp)
         if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
@@ -562,6 +562,15 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url, false) }
+    }
+
+    private func downloadItem(_ title: String, for url: URL) -> NSMenuItem? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return EngineActionMenuItem(title) { [weak self] in
+            guard let self else { return }
+            pageDownloads.userDidAct()
+            webContents.download(url)
+        }
     }
 
     /// Puts the address on the pasteboard as a URL and as text, for Copy Link, Copy Image Address, and Copy Address.

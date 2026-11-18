@@ -370,6 +370,13 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var isCapturingMedia: Bool { webView.cameraCaptureState != .none || webView.microphoneCaptureState != .none }
     /// WebKit has no public state for picture in picture, so the media script reports each document's (`WebKitAudibleScript`).
     public var isInPictureInPicture: Bool { !pictureInPictureDocuments.isEmpty }
+
+    public func download(_ url: URL) {
+        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in
+            guard let self else { download.cancel(); return }
+            self.context.webKitDownloads.add(download, from: self)
+        }
+    }
     public var zoomFactor: Double {
         get { webView.pageZoom }
         set { webView.pageZoom = newValue }
