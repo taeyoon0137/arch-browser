@@ -99,6 +99,7 @@ private struct PluginList: View {
         let id = UUID()
         let start: PluginInstallSheet.Start
         let personaSentence: String?
+        var target: PluginManager?
     }
 
     var body: some View {
@@ -146,7 +147,7 @@ private struct PluginList: View {
             }
         }
         .sheet(item: $sheet) { sheet in
-            PluginInstallSheet(plugins: plugins, start: sheet.start, personaSentence: sheet.personaSentence, webStore: session.webStore)
+            PluginInstallSheet(plugins: sheet.target ?? plugins, start: sheet.start, personaSentence: sheet.personaSentence, webStore: session.webStore)
         }
         // Each Persona's list is a view of its own, so this runs as the section first shows the Persona, which the installer checks once in the run. The installer records the outcome, which `UpdateCheckRow` shows.
         .onAppear {
@@ -157,7 +158,9 @@ private struct PluginList: View {
         .onChange(of: isBusy, initial: true) { listIsBusy = $1 }
         .onChange(of: isBusy) { answer(PluginsRequests.shared.pending) }
         ForEach(plugins.plugins.filter { plugins.leadVersion(of: $0.id)?.id == $0.id }) { plugin in
-            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin, reviewUpdate: reviewUpdate(of:)) { installVersion(of: $0, for: $1, from: $2, space: nil) }
+            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin, reviewUpdate: reviewUpdate(of:),
+                          installVersion: { installVersion(of: $0, for: $1, from: $2, space: nil) },
+                          installAnotherPersona: { copy($0, to: $1) })
                 .id(plugin.id)
         }
     }
@@ -185,6 +188,22 @@ private struct PluginList: View {
         let space = space.flatMap { id in session.spaces.first { $0.id == id } }
         sheet = InstallSheet(start: start, personaSentence: PluginInstallSheet.personaSentence(persona: personaID, space: space, among: session.personas))
         failure = nil
+    }
+
+    /// Stages only the package files in the chosen Persona, then opens that Persona's normal install review.
+    private func copy(_ plugin: InstalledPlugin, to persona: Persona.ID) {
+        guard let folder = plugins.packageFolderForCopy(of: plugin.id), session.personas.contains(where: { $0.id == persona }) else { return }
+        let target = session.plugins(in: persona)
+        isChoosing = true
+        Task {
+            do {
+                let package = try await target.stage(folder)
+                sheet = InstallSheet(start: .review(PluginReview(package: package)),
+                                     personaSentence: PluginInstallSheet.personaSentence(persona: persona, space: nil, among: session.personas), target: target)
+                failure = nil
+            } catch { failure = error.localizedDescription }
+            isChoosing = false
+        }
     }
 
     /// Review Update…: the store sheet downloads the update that the last check found and puts its review in its place.
@@ -248,6 +267,7 @@ private struct PluginSection: View {
     /// Review Update… of the plugin or of a version of the pair.
     let reviewUpdate: (PluginID) -> Void
     let installVersion: (InstalledPlugin, EngineKind, PackageSource) -> Void
+    let installAnotherPersona: (InstalledPlugin, Persona.ID) -> Void
     /// Why the last change to a setting, the removal, or a separation failed.
     @State private var failure: String?
     @State private var isConfirmingRemoval = false
@@ -276,6 +296,7 @@ private struct PluginSection: View {
         let canJoin = !isPair && plugin.kind == .webExtension && !joinCandidates.isEmpty
         let separable = versions.first { $0.id != plugin.id }.map { $0.manifest.id != plugin.manifest.id } ?? false
         let removable = plugin.origin != .bundled
+        let copyable = removable && !isPair && (plugin.kind == .script || plugin.kind == .webExtension) && session.personas.contains { $0.id != personaID }
         Section {
             Toggle(isOn: Binding(get: { versions.contains(where: \.isEnabled) }, set: { plugins.setEnabled($0, for: plugin.id) })) {
                 Text(plugin.manifest.name)
@@ -295,8 +316,15 @@ private struct PluginSection: View {
             }
             .disabled(!plugin.isEnabled)
             // The plugin's commands share one row at its trailing end, as the AI pages' commands do, each at its whole title, and those that do not fit continue on a line below. The row shows only with a command, since an empty one would still take a row in the form.
-            if reloadable || !versionEngines.isEmpty || canJoin || separable || removable || plugin.manifest.settingsPage != nil {
+            if reloadable || !versionEngines.isEmpty || canJoin || separable || removable || copyable || plugin.manifest.settingsPage != nil {
                 CommandRowLayout {
+                    if copyable {
+                        Menu("Install in Another Persona…") {
+                            ForEach(session.personas.filter { $0.id != personaID }) { target in
+                                Button(target.name) { installAnotherPersona(plugin, target.id) }
+                            }
+                        }
+                    }
                     if plugin.kind == .script, plugin.manifest.settingsPage != nil {
                         Button("Open Settings…") {
                             Task {
