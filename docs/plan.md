@@ -710,6 +710,7 @@ Left for Claude, not for this queue: the review and merge of `work/plugins-step-
 
 - K7 blocked: `arch.net.fetch` has no documented JavaScript response shape, host entry grammar, or redirect policy. Defining these would invent a public API and security policy.
 - K8 blocked: The design names `settingsPage` but leaves the settings-page sandbox, `arch` bridge access, lifecycle, and navigation behavior unspecified. The existing panel host is a sidebar popover, not a Settings page.
+- K10 blocked: The design requires a two-version engine pair to copy together, but gives no two-package review and approval sequence or way to stage the installed signed package while preserving its proof.
 
 ### Integration handoff
 
