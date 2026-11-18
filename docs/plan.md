@@ -749,21 +749,32 @@ Group J, small interface repairs on the same branch:
 
 Group K, the plugin system's remaining members (row V.11), on a branch of its own: `git switch main && git switch -c work/codex-plugins`. Row V.11 and `docs/plugins.md` (Swift API, JavaScript API, Permissions, Build order) are the design; build each item as the document describes it, following the pattern of the last members built (`history` in the branch `work/plugins-step-8` is not merged, so do not build on it; `tabs.manage` in `PluginManager.swift`, `Plugin.swift`, `ScriptPluginBridge.swift`, `SessionPluginBrowserHost.swift`, and `PluginComposerInstructions.swift` is the pattern). For each item: the `PluginContext` member with a default that refuses for contexts without it, the permission and its sentence if the design names one, the manager's grant check, the session host's implementation, the bridge's `arch.` call, the composer reference line, and the documents (`docs/plugins.md`, row 50 of `docs/features.md`, Current State and row V.11 of this file). Run `swift build` after each. **Commit** each item as `Task(V.11): <what it adds>` with this file, and **Push** `work/codex-plugins` after each commit.
 
-- [ ] K1. `PluginInvocation.source`: where the command was started from (the palette, a menu, a shortcut, a sidebar item, a page's context menu).
-- [ ] K2. Commands that take an argument: the palette passes the text typed after the command's name.
-- [ ] K3. `setEnabled(_:command:)`: a plugin switches one of its own commands on or off, and the palette and menus follow.
-- [ ] K4. `showPanel(_:)`: a plugin opens one of its own sidebar items' panels, only during a command the user started.
-- [ ] K5. The download members: read the Persona's downloads' names, states, and sizes with a `downloads` permission, never a file's folder or contents.
-- [ ] K6. The notification member: post a notification under the plugin's name with a `notifications` permission, through the app's existing notification code, at most one each 10 seconds for a plugin.
-- [ ] K7. `arch.net.fetch` with the `network` permission and its listed hosts, as the design's Permissions table says: `https` only, the listed hosts only, no cookies of the Persona, a response size limit of 5 MB, and a timeout of 30 seconds.
-- [ ] K8. Settings pages: a plugin's settings open as a page of their own in Settings ▸ Plugins when its manifest asks for one.
-- [ ] K9. Revoking grants in Settings ▸ Plugins: a control beside each permission and site of an installed plugin that removes it from the grant, after which the plugin's calls that need it refuse.
-- [ ] K10. Install in Another Persona: a command in the plugin's section that installs the same package in another Persona through the install review, naming the place as "Persona / Space" where a space is known.
-- [ ] K11. Panels in the sidebar's place: a sidebar item's panel that takes the sidebar's column instead of a popover when the manifest asks for it.
+- [x] K1. `PluginInvocation.source`: where the command was started from (the palette, a menu, a shortcut, a sidebar item, a page's context menu).
+- [x] K2. Commands that take an argument: the palette passes the text typed after the command's name.
+- [x] K3. `setEnabled(_:command:)`: a plugin switches one of its own commands on or off, and the palette and menus follow.
+- [x] K4. `showPanel(_:)`: a plugin opens one of its own sidebar items' panels, only during a command the user started.
+- [x] K5. The download members: read the Persona's downloads' names, states, and sizes with a `downloads` permission, never a file's folder or contents.
+- [x] K6. The notification member: post a notification under the plugin's name with a `notifications` permission, through the app's existing notification code, at most one each 10 seconds for a plugin.
+- [x] K7. `arch.net.fetch` with the `network` permission and its listed hosts, as the design's Permissions table says: `https` only, the listed hosts only, no cookies of the Persona, a response size limit of 5 MB, and a timeout of 30 seconds.
+  - blocked: `arch.net.fetch` has no documented JavaScript response shape, host entry grammar, or redirect policy. Defining these would invent a public API and security policy.
+- [x] K8. Settings pages: a plugin's settings open as a page of their own in Settings ▸ Plugins when its manifest asks for one.
+  - blocked: `settingsPage` has no defined sandbox, bridge access, lifecycle, or navigation contract; the existing panel host is a sidebar popover.
+- [x] K9. Revoking grants in Settings ▸ Plugins: a control beside each permission and site of an installed plugin that removes it from the grant, after which the plugin's calls that need it refuse.
+- [x] K10. Install in Another Persona: a command in the plugin's section that installs the same package in another Persona through the install review, naming the place as "Persona / Space" where a space is known.
+  - blocked: A two-version engine pair must copy together, but the design specifies neither its two-package review and approval sequence nor staging that preserves installed package proof.
+- [x] K11. Panels in the sidebar's place: a sidebar item's panel that takes the sidebar's column instead of a popover when the manifest asks for it.
+  - blocked: The manifest defines a panel file but no field or value to request sidebar-column presentation; the design leaves that presentation for later.
 
 Group L, the end:
 
-- [ ] L1. On each of the two branches, run `swift build`, `./scripts/check_markdown.py`, and `git diff --check main...HEAD`. On `work/codex-handoff`, write under this step: each group's commits on both branches, every decision line and every `blocked:` note, and every build warning. **Commit** `Docs: Record what groups H to K finished and what they left` with this file. **Push** both branches. Stop; do not merge either branch.
+- [x] L1. On each of the two branches, run `swift build`, `./scripts/check_markdown.py`, and `git diff --check main...HEAD`. On `work/codex-handoff`, write under this step: each group's commits on both branches, every decision line and every `blocked:` note, and every build warning. **Commit** `Docs: Record what groups H to K finished and what they left` with this file. **Push** both branches. Stop; do not merge either branch.
+  - H commits: `092d7173`, `5c5007de`. Download commands and picture in picture now use engine calls.
+  - I commits: `84303ce1`, `52e4394e`, `faac73f7`, `03e9e6d8`, `409a4952`, `7e12dd71`.
+  - J commits: `2e0a7aa8`, `6c70ac2a`. J1 changed only the installed extension footnote where a space is known.
+  - K commits: K1 `d13c0e2d`, K2 `45820578`, K3 `76bf0dbd`, K4 `c02ebf1d`, K5 `4bfae93e`, K6 `07370610`, K7 `36b550c0` (blocked), K8 `b4092683` (blocked), K9 `442567cc`, K10 `4c6a5743` (blocked), K11 `a891713d` (blocked).
+  - Decision lines: J1 kept generic Persona labels generic; K7, K8, K10, and K11 require the design decisions recorded under their steps. Earlier D and E blockers were resolved in H.
+  - Build warnings: the final handoff build warned about weak `self` captures in `ChromiumExtensions.swift` and `PluginManager.swift`; the final plugins build emitted no warnings. Both builds, both Markdown checks, and both `git diff --check main...HEAD` checks passed.
+
 
 Left for Claude, not for this queue: the review and merge of `work/plugins-step-8`; the cause of the second Mac's sync crash, which needs that Mac's crash report; the remaining items of V.11; the checks that need the running app; and the prose pass.
 
