@@ -139,6 +139,7 @@ struct SpaceTabsView: View {
                 .padding(.leading, 10)
                 .padding(.trailing, 4)
                 .padding(.bottom, 4)
+                .frame(height: FavoriteTileLayout.height)
                 .opacity(offersFirstFavorite ? 0 : 1)
                 .overlay {
                     if offersFirstFavorite {
@@ -147,7 +148,6 @@ struct SpaceTabsView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                             .modifier(FavoriteDropArea(spaceID: space.id, viewport: listFrame))
-                        .padding(.bottom, FavoriteTileLayout.gridHeaderSpacing)
                             .allowsHitTesting(false)
                     }
                 }
@@ -172,7 +172,7 @@ struct SpaceTabsView: View {
                             }
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: empty || (draggedHere && startedWithoutPins) ? 26 : 10)
+                        .frame(height: empty ? 36 : 10)
                         .background(frameReader(for: Self.pinnedListEndID))
                         .accessibilityHidden(true)
                     case .newTab:
@@ -206,6 +206,7 @@ struct SpaceTabsView: View {
                 if !session.favorites(in: space.resolvedPersonaID).isEmpty {
                     FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
                         .modifier(FavoriteDropArea(spaceID: space.id, viewport: listFrame))
+                        .padding(.bottom, FavoriteTileLayout.gridHeaderSpacing)
                 }
                 if let plugins = windowModel.currentSpaceID == space.id ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
                     PluginSidebarItemsView(plugins: plugins)
