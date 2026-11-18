@@ -643,16 +643,16 @@ Rules for every tier:
 
 ### Codex handoff queue
 
-Written on November 18 for the session that takes over while Claude is out of usage. It is the user's latest instruction, so where it differs from `AGENTS.md` (tests, verification, the After each task list), this section wins. Work through the steps in order, one at a time. Each step names its files and what done means; do nothing a step does not name.
+Written on November 18 for the session that takes over while Claude is out of usage. It is the user's latest instruction, so where it differs from `AGENTS.md` (tests, verification, the After each task list), this section wins. Do every step that is not ticked, in order, one at a time, through the last group; a session that starts later continues from the first unticked step. Each step names its files and what done means; do nothing a step does not name. No step waits for the user or for Claude.
 
 Rules for every step:
 
-- Work on the branch `work/codex-handoff`, made once from `main` with `git switch -c work/codex-handoff`. Never commit to, merge into, or push `main`. Push only this branch, and only at the steps marked **Push**.
+- Work on the branch `work/codex-handoff`, made once from `main` with `git switch -c work/codex-handoff`; groups A to J stay on it, and group K has a branch of its own, as it says. Never commit to, merge into, or push `main`. Push only this branch, and only at the steps marked **Push**.
 - Write no test code: do not add, change, or delete any file under a `Tests` folder. If a change breaks a test's compilation, stop and write the blocker under that step here.
 - Do not run `swift test`, `scripts/bundle_app.sh`, `scripts/install_app.sh`, `scripts/setup_cef.sh`, any release or signing script, or the app itself. Do not open apps, windows, or menus. The only checks to run are `swift build`, `./scripts/check_markdown.py`, and `git diff --check`.
-- Do not touch `arch-chromium`, `Package.swift`, `session.json`'s schema, `history.sqlite`'s tables, the engine protocols in `Packages/ARCHKit/Sources/ARCHEngine`, or `resources/assets/sym_arch_rounded.png`, unless a step says so. Do not commit the build links (`Frameworks`, `cefroot`, `wrapper_src`).
+- Do not touch `arch-chromium`, the CEF helper, `wrapper_src`, `session.json`'s schema, `history.sqlite`'s tables, or `resources/assets/sym_arch_rounded.png`. `Package.swift` changes only when a step adds a file that needs it. When a step cannot be done without a new member of an engine protocol in `Packages/ARCHKit/Sources/ARCHEngine` or a new method of the bridge (`CEFBridge.h`, `CEFBridgeBrowser.mm`), add the smallest one, give other conformers a default that does nothing, implement it on both adapters, and record it in one sentence in `docs/engine-protocol.md`. Do not commit the build links (`Frameworks`, `cefroot`, `wrapper_src`).
 - Read each file a step names in full before editing it. Keep the sizes, weights, and color roles of the neighboring views. Wherever the interface names a Persona, write it as "Persona / Space".
-- If a step needs a decision, a file, or an API it does not name, do not guess: write `blocked: <reason>` under the step in this section, commit that note with the step's commit, and go on to the next step.
+- If a step needs a decision it does not name, decide the way the design document the step points to leans, and write the decision in one line under the step. Write `blocked: <reason>` under a step only when no public API or bridge method can do it, or when it would break one of the rules above; then go on to the next step. A blocked step never stops the queue.
 - Commit only at the steps marked **Commit**, staging by explicit path, with the subject the step gives and no trailers. After each commit, tick the step here (`[x]`) in the same commit.
 - Never write the code-signing identity, the team ID, or the signed bundle into any file, commit, or reply.
 
@@ -708,7 +708,7 @@ Group E, picture in picture (reported on November 18: it works on neither engine
 Group F, the agent panel's design (row VII.34). Design first; no code until the user approves:
 
 - [x] F1. Read `AgentPanelColumn.swift`, `AgentPanel.swift`, `AgentComposer.swift`, `AgentApprovalCard.swift`, `AgentTranscript.swift`, and `SiteSettingsParts.swift` (the model for reusable parts). Write `docs/agent-panel-design.md`: for each state (empty, composing, running, waiting on a card, taken over, ended, failed), what the user sees now, which text is technical (identifiers, modes, rule names, provider details), and the proposed layout: the one main action of the state, what moves behind a disclosure or into help, and the reusable parts with their sizes, weights, and color roles taken from existing views. Add the file to the docs list in `resources/README.preset.md` and run `./scripts/readme_update.sh`.
-- [x] F2. **Commit** `Docs: Propose the agent panel's redesign by state` with the new document, the README files, and this file. **Push** the branch. Stop here for this group: the user reads the proposal before any view changes.
+- [x] F2. **Commit** `Docs: Propose the agent panel's redesign by state` with the new document, the README files, and this file. **Push** the branch. Group I builds it.
 
 Group G, the end:
 
@@ -716,7 +716,7 @@ Group G, the end:
   - Commits: A `7fe86db4`; B `1a3090e4`, `b26f4273`; C `51b97d68`; D `29530095`; E `d39563dc`; F `d4939aac`.
   - Blocked: D2 and D3 lack an address-download call in both engines; D4 cannot describe unavailable commands. E2 lacks the stated macOS WebKit configuration member; E3 lacks a Chromium bridge start call; E4 cannot make a working cross-engine menu command.
   - Build warnings: none in the final `swift build`. The attempted WebKit property in E2 caused a compile error and was removed; the subsequent build passed.
-- [ ] G2. Stop. Do not merge. Claude reviews `work/codex-handoff` part by part, runs the tests, and merges what holds.
+- [x] G2. Go on with groups H to L. Do not merge. Claude reviews `work/codex-handoff` part by part, runs the tests, and merges what holds.
 
 Group H, the engine calls that D and E lacked (added on November 18, after D2 to D4 and E2 to E4 stopped as blocked). For this group only, the rule against changing the engine protocols is lifted for exactly the two members below, and the bridge files `Packages/ARCHKit/Sources/CEFBridge/include/CEFBridge.h` and `CEFBridgeBrowser.mm` may change. `arch-chromium`, the helper, and `wrapper_src` stay untouched. Every other rule of this queue holds.
 
@@ -730,7 +730,41 @@ Group H, the engine calls that D and E lacked (added on November 18, after D2 to
 - [ ] H8. Chromium: a script run by the helper has no user activation, so `requestPictureInPicture()` would refuse. Add `- (void)evaluateWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion;` to `ARCHCEFBrowser`, implemented with `CefBrowserHost::ExecuteDevToolsMethod` and the method `Runtime.evaluate` with the parameters `expression`, `userGesture: true`, `awaitPromise: true`, and `returnByValue: true`, reading the boolean result in the way the file's existing DevTools method calls read theirs; if the file has no result path for DevTools methods, call `completion(YES)` once the method is sent and say so in a comment and under this step. Call it from `ARCHEngineChromium`'s `startPictureInPicture`. Run `swift build`.
 - [ ] H9. Add View ▸ Picture in Picture (no shortcut) in `AppDelegate.swift`, for the selected tab: it calls `tab.webContents.startPictureInPicture` and beeps (`NSSound.beep()`) on false. Enable it with a tab that shows an `http`, `https`, or `file` page and no internal page over it. Add the same command to the tab row's context menu in `TabRowView.swift`, after Duplicate.
 - [ ] H10. Remove the `blocked:` notes of E2 to E4, record the member in `docs/engine-protocol.md`, and update the picture in picture row of `docs/features.md` and Current State of this file. Run `swift build` and `./scripts/check_markdown.py`.
-- [ ] H11. **Commit** `Feat: Start picture in picture on both engines from the View menu and a tab's menu` with the files of H6 to H10 and this file. **Push** the branch. Stop; do not merge.
+- [ ] H11. **Commit** `Feat: Start picture in picture on both engines from the View menu and a tab's menu` with the files of H6 to H10 and this file. **Push** the branch. Go on with group I.
+
+Group I, the agent panel's redesign (row VII.34), built from `docs/agent-panel-design.md`, which group F wrote. Follow that document; where it leaves a size, weight, or color open, take the one `SiteSettingsParts.swift` or the sidebar's rows use. Keep every behavior: what each button does, the cards' rules, Touch ID, and the keyboard shortcuts.
+
+- [ ] I1. Add `Packages/ARCH/Sources/Agent/AgentPanelParts.swift` with the reusable parts the document names (a state header, a section box, a row, a primary action button, a disclosure for technical details). No view uses them yet. Run `swift build`.
+- [ ] I2. Rebuild the composer (`AgentComposer.swift`) from the parts: the task field and Start as the one main action; the model, mode, tab sharing, and permission notes in a disclosure that starts closed unless one of them holds a problem. Run `swift build`.
+- [ ] I3. Rebuild the session panel's header and states in `AgentPanel.swift` (running, waiting on a card, taken over, ended, failed): one sentence that says what is happening in plain words, one main action for the state, and the session menu for the rest. Move identifiers, rule names, and provider details into the disclosure or `.help`. Run `swift build`.
+- [ ] I4. Make the transcript rows (`AgentTranscript.swift` and the row view in `AgentPanel.swift`) readable: the user's and the agent's messages as body text, tool steps as one collapsed line each that opens to its detail, sources as links under the reply. Run `swift build`.
+- [ ] I5. Restyle the approval card (`AgentApprovalCard.swift`) with the same parts: what is asked in one sentence, the exact text or address in its box, the answer buttons in their present order. Change no rule and no button's meaning. Run `swift build`.
+- [ ] I6. Restyle `AgentPanelColumn.swift` (the column's frame, the connected programs' rows, the new task button) to match, and update `docs/agents.md` where it describes the panel, row 58 of `docs/features.md`, and Current State (Agent module) of this file. Run `./scripts/check_markdown.py`.
+- [ ] I7. **Commit** after each of I1 to I6 with the subject `Feat: Redesign the agent panel: <the step's part>`, each with this file. **Push** the branch after I6.
+
+Group J, small interface repairs on the same branch:
+
+- [ ] J1. Apply the "Persona / Space" rule to every user-visible string in `Packages/ARCH/Sources` and `Packages/ARCHApp/Sources` that names a Persona where a space is known (start from `grep -rn '"[^"]*Persona[^"]*"'`): show the Persona's and the space's names as "Persona / Space" through `BrowserSession`'s existing display function for places. Leave strings about Personas in general (Settings lists of Personas, "Delete Persona…") as they are. List the changed strings under this step. Run `swift build`.
+- [ ] J2. Untitled extension pages, the sidebar's long menus, and the Settings ▸ Plugins rows were redesigned on November 15 and 16; read `SiteSettingsParts.swift` and make `PageQuestionPopover.swift` and `LiveFolderSheet.swift` use the same group and row parts where they stack a title, a control, and a note. Change no behavior. Run `swift build`.
+- [ ] J3. **Commit** J1 as `Fix: Name Personas with their spaces wherever the interface knows the space` and J2 as `Refactor: Build the page question popover and the live folder sheet from the site settings parts`, each with this file. **Push** the branch.
+
+Group K, the plugin system's remaining members (row V.11), on a branch of its own: `git switch main && git switch -c work/codex-plugins`. Row V.11 and `docs/plugins.md` (Swift API, JavaScript API, Permissions, Build order) are the design; build each item as the document describes it, following the pattern of the last members built (`history` in the branch `work/plugins-step-8` is not merged, so do not build on it; `tabs.manage` in `PluginManager.swift`, `Plugin.swift`, `ScriptPluginBridge.swift`, `SessionPluginBrowserHost.swift`, and `PluginComposerInstructions.swift` is the pattern). For each item: the `PluginContext` member with a default that refuses for contexts without it, the permission and its sentence if the design names one, the manager's grant check, the session host's implementation, the bridge's `arch.` call, the composer reference line, and the documents (`docs/plugins.md`, row 50 of `docs/features.md`, Current State and row V.11 of this file). Run `swift build` after each. **Commit** each item as `Task(V.11): <what it adds>` with this file, and **Push** `work/codex-plugins` after each commit.
+
+- [ ] K1. `PluginInvocation.source`: where the command was started from (the palette, a menu, a shortcut, a sidebar item, a page's context menu).
+- [ ] K2. Commands that take an argument: the palette passes the text typed after the command's name.
+- [ ] K3. `setEnabled(_:command:)`: a plugin switches one of its own commands on or off, and the palette and menus follow.
+- [ ] K4. `showPanel(_:)`: a plugin opens one of its own sidebar items' panels, only during a command the user started.
+- [ ] K5. The download members: read the Persona's downloads' names, states, and sizes with a `downloads` permission, never a file's folder or contents.
+- [ ] K6. The notification member: post a notification under the plugin's name with a `notifications` permission, through the app's existing notification code, at most one each 10 seconds for a plugin.
+- [ ] K7. `arch.net.fetch` with the `network` permission and its listed hosts, as the design's Permissions table says: `https` only, the listed hosts only, no cookies of the Persona, a response size limit of 5 MB, and a timeout of 30 seconds.
+- [ ] K8. Settings pages: a plugin's settings open as a page of their own in Settings ▸ Plugins when its manifest asks for one.
+- [ ] K9. Revoking grants in Settings ▸ Plugins: a control beside each permission and site of an installed plugin that removes it from the grant, after which the plugin's calls that need it refuse.
+- [ ] K10. Install in Another Persona: a command in the plugin's section that installs the same package in another Persona through the install review, naming the place as "Persona / Space" where a space is known.
+- [ ] K11. Panels in the sidebar's place: a sidebar item's panel that takes the sidebar's column instead of a popover when the manifest asks for it.
+
+Group L, the end:
+
+- [ ] L1. On each of the two branches, run `swift build`, `./scripts/check_markdown.py`, and `git diff --check main...HEAD`. On `work/codex-handoff`, write under this step: each group's commits on both branches, every decision line and every `blocked:` note, and every build warning. **Commit** `Docs: Record what groups H to K finished and what they left` with this file. **Push** both branches. Stop; do not merge either branch.
 
 Left for Claude, not for this queue: the review and merge of `work/plugins-step-8`; the cause of the second Mac's sync crash, which needs that Mac's crash report; the remaining items of V.11; the checks that need the running app; and the prose pass.
 
