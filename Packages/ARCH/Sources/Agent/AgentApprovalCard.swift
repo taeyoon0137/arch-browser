@@ -15,7 +15,8 @@ struct AgentApprovalCard: View {
     @State private var chosenTab: UUID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        AgentSectionBox {
+            VStack(alignment: .leading, spacing: 8) {
             if approval.namesSecret {
                 Text(AgentPolicy.secretWarning)
                     .font(.callout.weight(.semibold))
@@ -25,18 +26,18 @@ struct AgentApprovalCard: View {
             Text(approval.action)
                 .font(.callout.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
+            AgentDetailRow(title: "Requested by") {
                 Text(approval.clientName)
                 if let handle = approval.tabHandle, approval.tabID != nil {
                     Button("Show \(handle)", action: showTab).buttonStyle(.link)
                 }
-                if !approval.rules.isEmpty {
-                    Text(approval.rules.map(\.rawValue).joined(separator: ", "))
-                        .help(approval.rules.map { AgentPolicy.entry($0).sentence }.joined(separator: " "))
+            }
+            if !approval.rules.isEmpty {
+                AgentTechnicalDetails(title: "Why Arch asks") {
+                    Text(approval.rules.map { AgentPolicy.entry($0).sentence }.joined(separator: " "))
+                        .help(approval.rules.map(\.rawValue).joined(separator: ", "))
                 }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
             if let capture = approval.capture {
                 Image(nsImage: capture)
                     .resizable()
@@ -71,9 +72,8 @@ struct AgentApprovalCard: View {
             }
             inputs
             buttons
+            }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(approval.isSensitive ? Color.orange.opacity(0.6) : Color.primary.opacity(0.1)))
     }
 
