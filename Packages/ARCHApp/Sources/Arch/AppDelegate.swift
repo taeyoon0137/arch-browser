@@ -413,6 +413,7 @@ import Terminal
         libraryItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(withTitle: "Show Page Reader", action: #selector(togglePageReader), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Show Agent Panel", action: #selector(toggleAgentPanel), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Picture in Picture", action: #selector(startPictureInPicture), keyEquivalent: "")
         viewMenu.addItem(.separator())
         // Targeted, so that a focused web view, which answers `reload:` itself, cannot take it past the window's rules.
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r").target = self
@@ -612,6 +613,11 @@ import Terminal
     }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func stopLoading() { session.activeWindow?.stopLoading() }
+    @objc private func startPictureInPicture() {
+        session.activeWindow?.selectedTab?.webContents.startPictureInPicture { started in
+            if !started { NSSound.beep() }
+        }
+    }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
     @objc private func resetZoom() { session.activeWindow?.resetZoom() }
@@ -802,6 +808,10 @@ import Terminal
             return activeWindow?.canPrint == true
         }
         if item.action == #selector(savePageAs) { return activeWindow?.canSavePageAs == true }
+        if item.action == #selector(startPictureInPicture) {
+            guard activeWindow?.canCapture == true, let scheme = activeWindow?.selectedTab?.url?.scheme?.lowercased() else { return false }
+            return scheme == "http" || scheme == "https" || scheme == "file"
+        }
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
         }

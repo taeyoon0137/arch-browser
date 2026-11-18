@@ -453,6 +453,10 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func download(_ url: URL) {
         browser?.startDownload(withURL: url.absoluteString)
     }
+    public func startPictureInPicture(completion: @escaping (Bool) -> Void) {
+        guard let browser else { return completion(false) }
+        browser.evaluate(withUserGesture: EnginePictureInPictureScript.start, completion: completion)
+    }
     /// The tools close with the page. CEF reports their close only once the browser has closed, when this object may be gone, so the app learns of it now. The engine ends the page's picture in picture as the browser closes, also unreported then, so the system's window closes now.
     func discard() {
         (devTools as? ChromiumDevTools)?.setView(nil)

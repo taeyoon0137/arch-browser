@@ -136,6 +136,10 @@ struct TabRowView: View {
         SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
         Button("Copy Address") { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
         Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
+        Button("Picture in Picture") {
+            tab.webContents.startPictureInPicture { started in if !started { NSSound.beep() } }
+        }
+        .disabled(!tab.isLoaded || !["http", "https", "file"].contains(tab.committedURL?.scheme?.lowercased() ?? ""))
         Divider()
         TabFolderItems(session: session, windowModel: windowModel, tab: tab)
         Divider()

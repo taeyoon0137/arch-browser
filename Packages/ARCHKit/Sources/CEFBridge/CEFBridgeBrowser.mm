@@ -844,6 +844,22 @@ private:
 // Runs the browser's screenshot requests through the DevTools protocol and passes each one's PNG, or nil, to its completion exactly once.
 class BridgeDevToolsObserver : public CefDevToolsMessageObserver {
 public:
+    void Evaluate(CefRefPtr<CefBrowserHost> host, CefRefPtr<CefDictionaryValue> params, void (^completion)(BOOL)) {
+        isSending_ = true;
+        isSendingBoolean_ = true;
+        int messageID = host->ExecuteDevToolsMethod(0, "Runtime.evaluate", params);
+        isSending_ = false;
+        isSendingBoolean_ = false;
+        std::map<int, bool> early;
+        early.swap(earlyBoolean_);
+        if (messageID == 0) {
+            completion(NO);
+        } else if (auto result = early.find(messageID); result != early.end()) {
+            completion(result->second);
+        } else {
+            pendingBoolean_[messageID] = completion;
+        }
+    }
     // Sends `Page.captureScreenshot` with `params`. A call that fails can answer before `ExecuteDevToolsMethod` returns, so results that come while the call is sent wait in `early_` for its message ID.
     void Capture(CefRefPtr<CefBrowserHost> host, CefRefPtr<CefDictionaryValue> params, void (^completion)(NSData *_Nullable)) {
         isSending_ = true;
@@ -867,22 +883,37 @@ public:
         for (auto &entry : pending) {
             entry.second(nil);
         }
+        std::map<int, void (^)(BOOL)> booleans;
+        booleans.swap(pendingBoolean_);
+        for (auto &entry : booleans) { entry.second(NO); }
     }
 
     void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void *result,
                                 size_t result_size) override {
         NSData *png = nil;
+        bool boolean = false;
         if (success && result_size > 0) {
             NSData *json = [NSData dataWithBytesNoCopy:const_cast<void *>(result) length:result_size freeWhenDone:NO];
-            id base64 = [[NSJSONSerialization JSONObjectWithData:json options:0 error:nil] objectForKey:@"data"];
+            NSDictionary *object = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
+            id base64 = [object objectForKey:@"data"];
             if ([base64 isKindOfClass:NSString.class]) {
                 png = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
             }
+            id value = [[object objectForKey:@"result"] objectForKey:@"value"];
+            boolean = [value isKindOfClass:NSNumber.class] && [value boolValue];
+        }
+        auto pendingBoolean = pendingBoolean_.find(message_id);
+        if (pendingBoolean != pendingBoolean_.end()) {
+            void (^completion)(BOOL) = pendingBoolean->second;
+            pendingBoolean_.erase(pendingBoolean);
+            completion(boolean);
+            return;
         }
         auto pending = pending_.find(message_id);
         if (pending == pending_.end()) {
             if (isSending_) {
-                early_[message_id] = png;
+                if (isSendingBoolean_) { earlyBoolean_[message_id] = boolean; }
+                else { early_[message_id] = png; }
             }
             return;
         }
@@ -897,7 +928,10 @@ public:
 private:
     std::map<int, void (^)(NSData *_Nullable)> pending_;
     std::map<int, NSData *> early_;
+    std::map<int, void (^)(BOOL)> pendingBoolean_;
+    std::map<int, bool> earlyBoolean_;
     bool isSending_ = false;
+    bool isSendingBoolean_ = false;
     IMPLEMENT_REFCOUNTING(BridgeDevToolsObserver);
 };
 
@@ -1869,6 +1903,21 @@ static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
     params->SetString("format", "png");
     params->SetBool("captureBeyondViewport", beyondViewport);
     _devToolsObserver->Capture(host, params, completion);
+}
+
+- (void)evaluateWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion {
+    if (!_browser) { completion(NO); return; }
+    CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+    if (!_devToolsObserver) {
+        _devToolsObserver = new BridgeDevToolsObserver;
+        _devToolsRegistration = host->AddDevToolsMessageObserver(_devToolsObserver);
+    }
+    CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+    params->SetString("expression", CefString(script.UTF8String));
+    params->SetBool("userGesture", true);
+    params->SetBool("awaitPromise", true);
+    params->SetBool("returnByValue", true);
+    _devToolsObserver->Evaluate(host, params, completion);
 }
 
 /// Ends every capture still waiting for its result, as when the page's process quits or the browser goes.

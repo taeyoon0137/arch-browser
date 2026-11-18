@@ -1,6 +1,7 @@
 // `WKWebView` adapter for the `ARCHEngine` protocols. This secondary engine prefers Apple APIs.
 import AppKit
 import ARCHEngine
+import ARCHPrivateAPI
 import Foundation
 import WebKit
 
@@ -23,6 +24,7 @@ public final class WebKitEngine: Engine {
         MainActor.assumeIsolated {
             WebKitInspectorAPI.register()
             WebKitFileChooserAPI.register()
+            WebKitPictureInPictureAPI.register()
         }
     }
 
@@ -289,6 +291,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         webConfiguration.applicationNameForUserAgent = Self.applicationNameForUserAgent
         // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
         webConfiguration.preferences.isElementFullscreenEnabled = true
+        WebKitPictureInPictureAPI.enable(in: webConfiguration.preferences)
         // A page opens a window only from the user's click or key, as Blink holds Chromium's pages to. WebKit on macOS lets a script open windows without one by default, so a page, or an extension's script in it, could open tab after tab, each with a first download of its own. Popups take this configuration, so the rule holds for them too.
         webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false
         if WebKitInspectorAPI.isAllowed { WebKitInspectorAPI.enableDeveloperExtras(in: webConfiguration.preferences) }
@@ -375,6 +378,14 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         webView.startDownload(using: URLRequest(url: url)) { [weak self] download in
             guard let self else { download.cancel(); return }
             self.context.webKitDownloads.add(download, from: self)
+        }
+    }
+
+    public func startPictureInPicture(completion: @escaping (Bool) -> Void) {
+        Task { @MainActor in
+            let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.start,
+                                                                arguments: [:], in: nil, contentWorld: .page)
+            completion(result as? Bool == true)
         }
     }
     public var zoomFactor: Double {
@@ -670,4 +681,23 @@ final class WebKitBackForwardListItem: EngineBackForwardListItem {
 
     var url: URL { item.url }
     var title: String { item.title ?? "" }
+}
+
+private enum WebKitPictureInPictureAPI {
+    static let apiID = "webkit.pictureInPicturePlayback"
+    static let featureID = "webkit.pictureInPicture"
+
+    @MainActor static func register() {
+        let flags = PrivateAPIFlags.shared
+        flags.register(PrivateAPI(id: apiID, name: "WKPreferences.allowsPictureInPictureMediaPlayback", framework: "WebKit") {
+            WKPreferences.instancesRespond(to: NSSelectorFromString("setAllowsPictureInPictureMediaPlayback:"))
+        })
+        flags.register(PrivateAPIFeature(id: featureID, name: "Picture in picture on WebKit", apiIDs: [apiID]))
+    }
+
+    static func enable(in preferences: WKPreferences) {
+        guard MainActor.assumeIsolated({ PrivateAPIFlags.shared.allows(featureID) }),
+              preferences.responds(to: NSSelectorFromString("setAllowsPictureInPictureMediaPlayback:")) else { return }
+        preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
+    }
 }

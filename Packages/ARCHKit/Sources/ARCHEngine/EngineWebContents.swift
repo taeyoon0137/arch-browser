@@ -96,6 +96,8 @@ public protocol EngineWebContents: AnyObject {
     func exitFullscreen()
     /// Starts a download of the address as if the page had started one, so it reaches the download delegate as any download does.
     func download(_ url: URL)
+    /// Asks the page's video to enter picture in picture as from the user's own act; false when the page has no video or refuses.
+    func startPictureInPicture(completion: @escaping (Bool) -> Void)
     /// Whether closing this web contents now would stop downloads it started. Only Chromium ties downloads to the page that started them.
     var closingStopsDownloads: Bool { get }
     /// Runs the page's `beforeunload` handlers and reports whether the page agreed to close. An engine that cannot run them reports true at once.
@@ -108,10 +110,24 @@ public protocol EngineWebContents: AnyObject {
 
 public extension EngineWebContents {
     func download(_ url: URL) {}
+    func startPictureInPicture(completion: @escaping (Bool) -> Void) { completion(false) }
     /// A web contents without trusted input, such as a stand-in that has no page yet, offers none.
     var input: (any EngineInput)? { nil }
     /// A web contents keeps its own page scripts unless its engine shares them.
     var pageScriptListID: ObjectIdentifier { ObjectIdentifier(self) }
+}
+
+public enum EnginePictureInPictureScript {
+    public static let start = """
+    (async () => {
+      const videos = [...document.querySelectorAll('video')].filter(video => video.readyState > 0);
+      const video = videos.find(video => !video.paused && !video.ended) ||
+        videos.sort((a, b) => b.getBoundingClientRect().width * b.getBoundingClientRect().height -
+          a.getBoundingClientRect().width * a.getBoundingClientRect().height)[0];
+      if (!video || !video.requestPictureInPicture) return false;
+      try { await video.requestPictureInPicture(); return true; } catch { return false; }
+    })()
+    """
 }
 
 public protocol EngineDevTools: AnyObject {
