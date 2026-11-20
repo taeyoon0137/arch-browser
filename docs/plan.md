@@ -2039,7 +2039,7 @@ Run rounds in order, then start again at X1 with the next round number, until `d
   - [x] X5.r1.2 Keep extension state separate across engines.
   - [x] X5.r1.3 Keep plugin fetches free of Persona cookies.
   - [x] X5.r1.4 Suppress a plugin's own first-load events.
-  - [ ] X5.r1.5 Keep plugin tab moves from changing pin status.
+  - [x] X5.r1.5 Keep plugin tab moves from changing pin status.
   - [ ] X5.r1.6 Keep current plugin resource limits as starting values.
   - [ ] X5.r1.7 Keep other live folder sources out for now.
   - [ ] X5.r1.8 Keep JSON Feed out for now.
