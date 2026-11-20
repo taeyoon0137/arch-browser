@@ -46,7 +46,7 @@ import Foundation
     private static let discardStateKey = "ARCHSyncDiscardPreviousState"
     /// Set while a confirmed Delete iCloud Data waits for the server, so that a launch after a quit in that time can say the data is still there.
     private static let deletionRequestedKey = "ARCHSyncDeletionRequested"
-    /// Set while the controller applies a fetch or a first sync's plan, and removed once that ends (`docs/sync.md`, Crash-loop guard). A launch that finds it follows one that quit while applying, as a crash does. The next fetch would bring the same changes, so that launch keeps sync off until the user turns it on, which removes the key.
+    /// Set while the controller applies incoming changes or builds an outgoing record (`docs/sync.md`, Crash-loop guard).
     static let applyingKey = "ARCHSyncApplyingChanges"
     static let interruptedApplyMessage = "Sync turned off because Arch quit while it applied changes from iCloud. Turn it on to try again."
     private var quitBeforeDeletion: (any SyncEngineClient)?
@@ -301,9 +301,18 @@ import Foundation
     var canSendRecords: Bool { engine != nil && !first && !fetching && !applying && !isDeletingCloudData }
     func record(toSave name: String) -> CKRecord? {
         guard canSendRecords, let save = mirror.pendingSaves.first(where: { $0.recordName == name }) else { return nil }
-        let base = mirror.records[name]
-        guard base.map({ $0.recordType == save.recordType.rawValue }) ?? true else { return nil }
-        return SyncCloudKitRecords.ckRecord(from: save, base: base)
+        return withCrashLoopGuard {
+            let base = mirror.records[name]
+            guard base.map({ $0.recordType == save.recordType.rawValue }) ?? true else { return nil }
+            return SyncCloudKitRecords.ckRecord(from: save, base: base)
+        }
+    }
+
+    private func withCrashLoopGuard<T>(_ body: () -> T) -> T {
+        let wasSet = defaults.bool(forKey: Self.applyingKey)
+        defaults.set(true, forKey: Self.applyingKey)
+        defer { if !wasSet { defaults.removeObject(forKey: Self.applyingKey) } }
+        return body()
     }
 
     private var bases: [SyncRecord] { mirror.records.values.compactMap(SyncCloudKitRecords.syncRecord(from:)) }
@@ -676,7 +685,7 @@ import Foundation
         }
         func record(toSave name: String) -> CKRecord? {
             guard canSendRecords else { return nil }
-            return owner?.record(toSave: name)
+            return owner?.withCrashLoopGuard { owner?.record(toSave: name) }
         }
         func handle(_ event: SyncEvent) {
             guard owner?.delegate === self else { return }
