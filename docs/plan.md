@@ -910,7 +910,7 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0; indexed positions are built from the same array, or the subscript is keyed.
 - [x] B3. In `Packages/ARCH/Sources/Sync/SyncController.swift`, widen the crash-loop guard (`applyingKey`): also set it around the code that builds records to send (`record(toSave:)` and its caller) and clear it after; and in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`, where the session is created at launch, if the key `ARCHSyncApplyingChanges` is set, keep sync off as the controller does. Update the Crash-loop guard section of `docs/sync.md`. `swift build`.
 - [x] B4. **Commit** `Fix: Hold sync's crash-loop guard while it builds records to send` with those files and this file. **Push**.
-- [ ] B5. **Preview** 3.
+- [x] B5. **Preview** 3.
 
 #### Group C: accessibility and shared parts in every view
 
