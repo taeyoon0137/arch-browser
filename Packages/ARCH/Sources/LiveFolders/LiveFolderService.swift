@@ -26,6 +26,7 @@ public struct LiveFolderFetchers: LiveFolderFetching {
     }
 }
 
+/// Schedules and runs bounded live folder fetches for a browser session.
 @MainActor
 public final class LiveFolderService {
     public static let feedFetchLimit = 4
@@ -142,6 +143,7 @@ public final class LiveFolderService {
         trigger(.activation, folders: folders)
     }
 
+    /// Whether the folder is fetching or waiting for a fetch slot.
     public func isRefreshing(_ folder: UUID) -> Bool {
         running[folder] != nil || waiting.contains(folder)
     }
@@ -180,6 +182,7 @@ public final class LiveFolderService {
 
     // MARK: Queue
 
+    /// Enqueues the named folders whose schedule admits the trigger.
     private func trigger(_ trigger: LiveFolderTrigger, folders ids: some Sequence<UUID>) {
         let lowPower = isLowPowerMode()
         for folder in ids {
@@ -189,10 +192,12 @@ public final class LiveFolderService {
         }
     }
 
+    /// Checks registered folders in stable order for a refresh trigger.
     private func refreshDueFolders(_ trigger: LiveFolderTrigger) {
         self.trigger(trigger, folders: folders.keys.sorted { $0.uuidString < $1.uuidString })
     }
 
+    /// Adds a folder to the fetch queue unless it is already waiting or running.
     private func enqueue(_ folder: UUID) {
         guard running[folder] == nil, !waiting.contains(folder) else { return }
         waiting.append(folder)
@@ -227,6 +232,7 @@ public final class LiveFolderService {
         enqueue(folder)
     }
 
+    /// Starts one fetch and reports its eventual result unless the task was cancelled.
     private func start(_ folder: UUID, _ configuration: LiveFolderConfiguration) {
         let validators = store[folder].validators
         let started = now()
@@ -247,11 +253,13 @@ public final class LiveFolderService {
         didChange?(folder)
     }
 
+    /// A source's new items or an unchanged feed response.
     private enum Fetched {
         case items([LiveItem], FeedValidators, title: String?, interval: TimeInterval?, isComplete: Bool)
         case notModified
     }
 
+    /// Fetches a feed or GitHub search, reading a private feed address when needed.
     private nonisolated static func fetch(_ configuration: LiveFolderConfiguration, folder: UUID, validators: FeedValidators, fetchers: any LiveFolderFetching, addresses: any LiveFolderAddressStore) async throws -> Fetched {
         switch configuration.source {
         case .feed(let address, let isPrivate):
@@ -317,6 +325,7 @@ public final class LiveFolderService {
         return task
     }
 
+    /// Collects the registered folder IDs whose feeds keep full addresses in the Keychain.
     private static func privateFeeds(in folders: [UUID: LiveFolderConfiguration]) -> Set<UUID> {
         Set(folders.compactMap { id, configuration -> UUID? in
             guard case .feed(_, isPrivate: true) = configuration.source else { return nil }
@@ -324,6 +333,7 @@ public final class LiveFolderService {
         })
     }
 
+    /// Removes a folder from the wait queue and cancels its running fetch.
     private func cancel(_ folder: UUID) {
         waiting.removeAll { $0 == folder }
         running.removeValue(forKey: folder)?.cancel()

@@ -72,6 +72,7 @@ public struct LiveFolderState: Codable, Equatable, Sendable {
         earliestNextAttempt = error.retryDate.flatMap { $0 > date ? $0 : nil }
     }
 
+    /// Marks a successful answer and clears failure backoff state.
     private mutating func recordAnswer(at date: Date) {
         lastSuccess = date
         failureCount = 0
@@ -80,6 +81,7 @@ public struct LiveFolderState: Codable, Equatable, Sendable {
     }
 }
 
+/// Loads and saves fetched live folder state on this Mac.
 @MainActor
 public final class LiveFolderStore {
     public static let fileName = "live-folders.json"
@@ -95,6 +97,7 @@ public final class LiveFolderStore {
         case state(LiveFolderState)
         case unreadable(JSONValue)
 
+        /// Preserves an entry as JSON when this build cannot decode its folder state.
         init(from decoder: any Decoder) throws {
             if let state = try? LiveFolderState(from: decoder) {
                 self = .state(state)
@@ -103,6 +106,7 @@ public final class LiveFolderStore {
             }
         }
 
+        /// Writes a readable state or the original unreadable JSON entry.
         func encode(to encoder: any Encoder) throws {
             switch self {
             case .state(let state): try state.encode(to: encoder)
@@ -115,6 +119,7 @@ public final class LiveFolderStore {
     private enum JSONValue: Codable {
         case null, bool(Bool), integer(Int64), number(Double), string(String), array([JSONValue]), object([String: JSONValue])
 
+        /// Decodes a JSON value while preserving whole numbers as integers.
         init(from decoder: any Decoder) throws {
             let container = try decoder.singleValueContainer()
             if container.decodeNil() {
@@ -134,6 +139,7 @@ public final class LiveFolderStore {
             }
         }
 
+        /// Encodes the preserved JSON value without changing its number kind.
         func encode(to encoder: any Encoder) throws {
             var container = encoder.singleValueContainer()
             switch self {
@@ -200,6 +206,7 @@ public final class LiveFolderStore {
         scheduleSave()
     }
 
+    /// Removes a folder's readable or unreadable state and schedules a save.
     public func remove(_ folder: UUID) {
         let removedState = folders.removeValue(forKey: folder) != nil
         let removedEntry = unreadableEntries.removeValue(forKey: folder) != nil
@@ -233,6 +240,7 @@ public final class LiveFolderStore {
         save(waiting: true)
     }
 
+    /// Encodes current entries and writes them on the serial queue, waiting when requested.
     private func save(waiting: Bool) {
         pendingSave?.cancel()
         pendingSave = nil

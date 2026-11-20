@@ -1991,11 +1991,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.95 Packages/ARCH/Sources/LiveFolders/LiveFolderReconciler.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.96 Packages/ARCH/Sources/LiveFolders/LiveFolderSchedule.swift
-  - [ ] X2.r1.97 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
-  - [ ] X2.r1.98 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
-  - [ ] X2.r1.99 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
-  - [ ] X2.r1.100 Packages/ARCH/Sources/LiveFolders/LiveItem.swift
+  - [x] X2.r1.96 Packages/ARCH/Sources/LiveFolders/LiveFolderSchedule.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.97 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.98 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.99 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.100 Packages/ARCH/Sources/LiveFolders/LiveItem.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.101 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
   - [ ] X2.r1.102 Packages/ARCH/Sources/Plugins/Plugin.swift
   - [ ] X2.r1.103 Packages/ARCH/Sources/Plugins/PluginComposer.swift

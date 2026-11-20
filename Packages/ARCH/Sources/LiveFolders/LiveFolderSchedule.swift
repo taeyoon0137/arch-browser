@@ -1,6 +1,7 @@
 // When a live folder refreshes (docs/bookmarks.md, Live folders ▸ Refreshing; live folder rule 6), as a pure function of the folder's state, its configuration, the trigger, the moment, and Low Power Mode, so tests drive every rule without timers.
 import Foundation
 
+/// An event that may make a live folder due for a refresh.
 public enum LiveFolderTrigger: Sendable {
     case refreshNow
     /// The check every 5 minutes.
@@ -9,6 +10,7 @@ public enum LiveFolderTrigger: Sendable {
     case activation
 }
 
+/// Calculates when a live folder should refresh from its source and fetch state.
 public enum LiveFolderSchedule {
     /// How often the service checks for due folders.
     public static let checkInterval: TimeInterval = 5 * 60

@@ -1,6 +1,7 @@
 // What fills a live folder and how often (docs/bookmarks.md, Live folders ▸ Sources; live folder rules 2, 6, 7, and 8): a feed address or a GitHub search, with the folder's item limit and refresh interval. `TabFolder.live` keeps a configuration in `session.json`.
 import Foundation
 
+/// A feed address or GitHub search that supplies a live folder's items.
 public enum LiveFolderSource: Codable, Hashable, Sendable {
     /// An RSS or Atom feed over HTTPS. `address` is what `session.json` keeps: the whole address, or for a private feed, whose whole address the Keychain keeps (live folder rule 8), the address without its query and fragment.
     case feed(address: URL, isPrivate: Bool)
@@ -44,6 +45,7 @@ public enum LiveFolderSource: Codable, Hashable, Sendable {
 
 /// A GitHub search on a host: github.com or a GitHub Enterprise Server host.
 public struct GitHubSearch: Codable, Hashable, Sendable {
+    /// The predefined or custom GitHub search to run.
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case myPullRequests, reviewRequests, assignedIssues, search
     }
@@ -112,6 +114,7 @@ public struct LiveFolderConfiguration: Codable, Hashable, Sendable {
         self.refreshMinutes = Self.nearest(to: refreshMinutes ?? (source.isGitHub ? 15 : 30), in: Self.refreshIntervals)
     }
 
+    /// Decodes a configuration while clamping its item limit and refresh interval.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(source: try container.decode(LiveFolderSource.self, forKey: .source),
@@ -123,6 +126,7 @@ public struct LiveFolderConfiguration: Codable, Hashable, Sendable {
         TimeInterval(refreshMinutes * 60)
     }
 
+    /// Chooses the allowed number closest to the supplied value.
     private static func nearest(to value: Int, in allowed: [Int]) -> Int {
         allowed.min { abs($0 - value) < abs($1 - value) } ?? value
     }
