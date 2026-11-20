@@ -106,6 +106,7 @@ struct PagePreviewPanel: View {
                     Image(systemName: AddressPillView.symbol(for: preview.url, internalPage: nil))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                 }
             }
             .frame(width: 18, height: 18)
@@ -121,6 +122,7 @@ struct PagePreviewPanel: View {
                 }
             }
             .lineLimit(1)
+            .truncationMode(showsSite ? .tail : .middle)
             .help(preview.url.absoluteString)
             Spacer(minLength: 8)
             Button("Open in Tab", action: windowModel.openPreviewInTab)

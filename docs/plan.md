@@ -965,11 +965,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Truncated long answer titles.
   - [x] C1.25 Packages/ARCH/Sources/Browsing/PageAuthoredTextView.swift
     - ok
-  - [ ] C1.26 Packages/ARCH/Sources/Browsing/PageFieldFocus.swift
-  - [ ] C1.27 Packages/ARCH/Sources/Browsing/PagePreview.swift
-  - [ ] C1.28 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
-  - [ ] C1.29 Packages/ARCH/Sources/Browsing/PageReaderPanel.swift
-  - [ ] C1.30 Packages/ARCH/Sources/Browsing/PanePromptLayer.swift
+  - [x] C1.26 Packages/ARCH/Sources/Browsing/PageFieldFocus.swift
+    - ok
+  - [x] C1.27 Packages/ARCH/Sources/Browsing/PagePreview.swift
+    - Hid the decorative site symbol and truncated long page titles and addresses.
+  - [x] C1.28 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
+    - Hid the decorative question symbol.
+  - [x] C1.29 Packages/ARCH/Sources/Browsing/PageReaderPanel.swift
+    - ok
+  - [x] C1.30 Packages/ARCH/Sources/Browsing/PanePromptLayer.swift
+    - ok
   - [ ] C1.31 Packages/ARCH/Sources/Browsing/PluginViews.swift
   - [ ] C1.32 Packages/ARCH/Sources/Browsing/PromptButtonRow.swift
   - [ ] C1.33 Packages/ARCH/Sources/Browsing/PromptCard.swift

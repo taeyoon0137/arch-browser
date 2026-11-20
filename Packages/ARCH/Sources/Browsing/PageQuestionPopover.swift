@@ -32,6 +32,7 @@ private struct PageQuestionPopover: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Text(question.selection == nil ? "Ask About This Page" : "Ask About Selection")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
