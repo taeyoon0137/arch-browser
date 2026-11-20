@@ -322,7 +322,7 @@ query($q: String!, $n: Int!) {
 - AI hooks: unloading posts nothing; item tabs post no `tabOpened`; Tab Names does not name item tabs.
 - The palette and the tab switcher list tabs without pages, as they list restored tabs, so the palette finds feed items and pull requests by title.
 - History: refreshing records no visits. A pinned or item tab records a visit when the user opens its page.
-- Split view: unloading or dismissing a pane's tab takes it out of the split view, as closing does.
+- Split view: closing or dismissing a pane's tab takes it out of the split view. Automatic unloading keeps the pane and loads its page again when shown.
 - ⌘-numbers, Next and Previous Tab, and Close Other Tabs treat item tabs as pinned tabs. Archiving never closes pinned tabs, so it leaves item tabs alone.
 - Small windows: a small window's tab is never pinned, so none of this applies there.
 
