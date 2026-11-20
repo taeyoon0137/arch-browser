@@ -1359,11 +1359,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the editor overview into short sentences.
   - [x] E1.100 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
     - Split the provider view overview into short sentences.
-  - [ ] E1.101 Packages/ARCH/Sources/Preferences/AISettingsView.swift
-  - [ ] E1.102 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
-  - [ ] E1.103 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift
-  - [ ] E1.104 Packages/ARCH/Sources/Preferences/PluginInstallSheet.swift
-  - [ ] E1.105 Packages/ARCH/Sources/Preferences/PluginsSection.swift
+  - [x] E1.101 Packages/ARCH/Sources/Preferences/AISettingsView.swift
+    - Split the AI settings overview into short sentences.
+  - [x] E1.102 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
+    - Split the hooks settings overview into short sentences.
+  - [x] E1.103 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift
+    - Split the agents settings overview into short sentences.
+  - [x] E1.104 Packages/ARCH/Sources/Preferences/PluginInstallSheet.swift
+    - Split the install review overview into short sentences.
+  - [x] E1.105 Packages/ARCH/Sources/Preferences/PluginsSection.swift
+    - Split the plugin settings overview into short sentences.
   - [ ] E1.106 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
   - [ ] E1.107 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
   - [ ] E1.108 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift

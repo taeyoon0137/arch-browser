@@ -1,4 +1,10 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from the Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store…. A web extension that may reach native apps lists them with what they need of Arch (`NativeAppGuide`).
+// Settings ▸ Plugins shows each Persona's plugins, including web extensions, with switches, grants, and settings forms.
+// Install Plugin… stages a folder, `.zip`, or `.crx` for review. Install from the Web Store… stages an extension through its store sheet.
+// Check for Updates appears for Personas with store extensions. The section checks once per Persona per run when shown and displays the time or failure.
+// A newer version offers Review Update… in its plugin section. New Feature with AI… appears when a provider can write a plugin for review.
+// Installed plugins can be removed. A failed `plugins.json` write shows its reason and Try Again. Grants are stated without controls to narrow them.
+// Two web extension versions of one extension share a section, with a row for each. An unpaired version offers Join With… and Install <Engine> Version….
+// The latter menu offers From a File… and From the Web Store…. Extensions that may reach native apps list those apps and their Arch requirements (`NativeAppGuide`).
 import AI
 import AppKit
 import ARCHEngine

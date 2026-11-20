@@ -1,4 +1,8 @@
-// Settings ▸ AI ▸ Agents (docs/agents.md, Settings ▸ AI ▸ Agents): the in-app sessions' mode, history search, and Codex's copy of their conversations; Allow Outside Clients with what it lets programs do, the command-line tools with their PATH links and MCP configurations, the entry skill for Claude Code and Codex, the grants with their scopes, a Start Agent Tasks grant's agent runs a day, Revoke, and Revoke All, and the activity log by day with filters by client and site and Clear Activity. It also says when `agent.json` was set aside or its key could not be read, and when the agent socket cannot listen.
+// Settings ▸ AI ▸ Agents controls in-app session mode, history search, and Codex's copy of conversations (`docs/agents.md`).
+// It explains Allow Outside Clients and shows command-line tools with their PATH links and MCP configurations.
+// It also shows the entry skill for Claude Code and Codex, scoped grants, daily Start Agent Tasks limits, and revocation controls.
+// The activity log groups entries by day and filters by client and site; Clear Activity removes them.
+// Notices explain when `agent.json` was set aside, its key could not be read, or the agent socket cannot listen.
 import Agent
 import AgentControl
 import AI

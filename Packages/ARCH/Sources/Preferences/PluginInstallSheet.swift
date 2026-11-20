@@ -1,4 +1,13 @@
-// The review sheet of a plugin package the user chose to install or update, a web extension's among them, or that AI wrote: its name, version, origin, where it runs and which engines refused it, with the native app gate's sentence as Chromium's line for a package that the gate would keep out of Chromium, the permissions and sites it asks for in plain sentences, and its files, with the source of each for a plugin that AI wrote, after the requests it came from. The user can leave sites out before installing, and granting every website or native apps asks for Touch ID or the login password. The subtitle names where the package came from: a file, the Web Store, or AI, and with two or more Personas the review names the Persona it installs in (Persona rule 7 in `docs/windows-personas.md`). A package from the Web Store comes from the store sheet, the sheet's first step, which the review replaces. An update from another place than the installed plugin's comes with a warning, as only the signatures of a `.crx` file prove an identifier and such a package takes over the plugin's data, and an unsigned update of a plugin whose package was signed adds another. A web extension that may be another engine's version of an installed plugin can join it as that version, with a warning when it comes from another place under the plugin's identifier and so takes over the plugin's extension data on that engine, and after a new web extension installs while it asks for another engine's version, the sheet's last step offers that version.
+// This sheet reviews a plugin package the user chose, a web extension, or a plugin written by AI.
+// It shows the package's name, version, origin, supported engines, refused engines, permissions, sites, and files.
+// For an AI-written plugin, it also shows each file's source after the requests. A package blocked by the native app gate shows its reason on Chromium's line.
+// The user may exclude sites before installing. Access to every website or native apps requires Touch ID or the login password.
+// The subtitle identifies a file, the Web Store, or AI as the source. With multiple Personas, it names the installation Persona (`docs/windows-personas.md`, Persona rule 7).
+// A Web Store package starts in the store sheet; this review replaces that first step.
+// Updates from a different source warn that the package takes over plugin data, since only a `.crx` signature proves an identifier.
+// An unsigned update of a signed package adds another warning. A web extension may join an installed plugin as its other engine version.
+// That join warns when the new version comes from another source under the same identifier and takes over extension data on that engine.
+// After a new web extension installs, the final step may offer to install its other engine version.
 import ARCHEngine
 import Browsing
 import Extensions
