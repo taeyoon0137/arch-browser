@@ -1107,7 +1107,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 3 stale mentions of the direct file reread button title.
   - [x] D1.11 docs/plugins.md
     - Corrected 1 stale claim about the other-Persona install menu title.
-  - [ ] D1.12 docs/sync.md
+  - [x] D1.12 docs/sync.md
+    - Corrected 2 stale claims about when appearance changes apply.
   - [ ] D1.13 docs/web-store.md
   - [ ] D1.14 docs/windows-personas.md
   - [ ] D1.15 resources/README.preset.md
