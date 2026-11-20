@@ -1320,6 +1320,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 - A plugin's move keeps a tab pinned or open, so no plugin pins or unpins tabs, which would let one turn a pinned tab, which its close only unloads, into an open tab that its close removes, with the tab's saved page. Whether `tabs.manage` should pin and unpin tabs, or a permission of its own should, is open.
   - Decided in X5: tab moves keep their pin status; tabs.manage does not pin or unpin.
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, limit of 10 tabs that a plugin opens within a minute, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.
+  - Decided in X5: keep these limits as starting values until a concrete plugin needs a change.
 
 The `downloads` permission lets `arch.downloads.list()` read the current Persona’s download names, states, completed bytes, and total bytes. The result contains no file path, folder, or contents.
 
