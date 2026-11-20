@@ -13,6 +13,7 @@ public enum SyncMerge {
         case firstSync
     }
 
+    /// A merged record and whether it needs to be sent to the server.
     public struct Result: Hashable, Sendable {
         /// The merged record, with the server's record type and record name. When `needsSend` is false, this is the server's record unchanged.
         public var record: SyncRecord

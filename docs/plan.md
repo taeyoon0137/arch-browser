@@ -1800,7 +1800,7 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - ok
   - [x] X1.r1.115 03d4ca4b Docs: Record preview 5 of the week queue
     - ok
-- [ ] X2. Documentation comments: List `grep -rLE '^// ' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift'` (files without a header comment) and files where a `public` or `internal` type has no `///` comment. For each, add a header comment that says what the file holds and a `///` sentence for each type and non-trivial function, stating what it does and any rule it keeps, from reading the code; never guess. Subject: `Docs: Say what each file and type is for`.
+- [x] X2. Documentation comments: List `grep -rLE '^// ' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift'` (files without a header comment) and files where a `public` or `internal` type has no `///` comment. For each, add a header comment that says what the file holds and a `///` sentence for each type and non-trivial function, stating what it does and any rule it keeps, from reading the code; never guess. Subject: `Docs: Say what each file and type is for`.
   - [x] X2.r1.1 Packages/ARCH/Sources/AI/AIAgentSession.swift
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.2 Packages/ARCH/Sources/AI/AIClient.swift
@@ -2021,10 +2021,14 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing file, type, and nontrivial function documentation.
   - [x] X2.r1.110 Packages/ARCH/Sources/Sync/SidebarRecords.swift
     - Added missing file, type, and nontrivial function documentation.
-  - [ ] X2.r1.111 Packages/ARCH/Sources/Sync/SyncController.swift
-  - [ ] X2.r1.112 Packages/ARCH/Sources/Sync/SyncMerge.swift
-  - [ ] X2.r1.113 Packages/ARCH/Sources/Sync/SyncOffReason.swift
-  - [ ] X2.r1.114 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
+  - [x] X2.r1.111 Packages/ARCH/Sources/Sync/SyncController.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.112 Packages/ARCH/Sources/Sync/SyncMerge.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.113 Packages/ARCH/Sources/Sync/SyncOffReason.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.114 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
+    - Added missing type and nontrivial function documentation.
 - [ ] X3. Unused code: for each `private func`, `private var`, and `fileprivate` declaration in `Packages/ARCH/Sources` whose name appears nowhere else in its file (`grep -c`), remove it if `swift build` still passes; restore it otherwise. Subject: `Refactor: Remove private code that nothing calls`.
 - [ ] X4. Duplicates: find view code repeated in three or more files (the same modifier chain of five or more lines); move it into the nearest shared parts file and use it from each place, changing no look. Subject: `Refactor: Share repeated view code`.
 - [ ] X5. Open decisions: read the Open decisions lists of `docs/plugins.md`, `docs/agents.md`, `docs/hooks.md`, `docs/sync.md`, and `docs/bookmarks.md`; for each one that the surrounding text clearly leans on and that needs no engine change, decide it, record the decision in the document, and build it with one commit `Feat: …` or `Fix: …` each. Leave the others.

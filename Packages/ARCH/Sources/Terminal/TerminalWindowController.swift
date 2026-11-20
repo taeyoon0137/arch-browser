@@ -3,6 +3,7 @@
 // Closing the window or quitting Arch ends the shell. Showing the terminal again starts a new shell.
 import AppKit
 
+/// Owns the built-in terminal window and its current login shell.
 public final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     /// The controller, created when the terminal first shows.
     public static var shared: TerminalWindowController {
@@ -128,6 +129,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         return false
     }
 
+    /// Cancels pending typing and closes the shell when the window closes.
     public func windowWillClose(_ notification: Notification) {
         closesWithRunningProgram = false
         typingWork?.cancel()
@@ -146,6 +148,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         instance?.window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Builds the confirmation alert shown before ending a foreground terminal program.
     private static func runningProgramAlert(message: String, action: String) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = message
