@@ -868,11 +868,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0; array accesses follow a count check or firstIndex lookup.
   - [x] B2.15 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
     - changed: 0; array accesses follow a count check or firstIndex lookup.
-  - [ ] B2.16 Packages/ARCH/Sources/LiveFolders/FeedParser.swift
-  - [ ] B2.17 Packages/ARCH/Sources/LiveFolders/GitHubCLI.swift
-  - [ ] B2.18 Packages/ARCH/Sources/LiveFolders/LiveFolderKeychain.swift
-  - [ ] B2.19 Packages/ARCH/Sources/LiveFolders/LiveFolderReconciler.swift
-  - [ ] B2.20 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
+  - [x] B2.16 Packages/ARCH/Sources/LiveFolders/FeedParser.swift
+    - changed: 0; indexed access follows a bounds check, or the key is a dictionary key.
+  - [x] B2.17 Packages/ARCH/Sources/LiveFolders/GitHubCLI.swift
+    - changed: 0; indexed access follows a bounds check, or the key is a dictionary key.
+  - [x] B2.18 Packages/ARCH/Sources/LiveFolders/LiveFolderKeychain.swift
+    - changed: 0; indexed access follows a bounds check, or the key is a dictionary key.
+  - [x] B2.19 Packages/ARCH/Sources/LiveFolders/LiveFolderReconciler.swift
+    - changed: 0; indexed access follows a bounds check, or the key is a dictionary key.
+  - [x] B2.20 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
+    - changed: 0; indexed access follows a bounds check, or the key is a dictionary key.
   - [ ] B2.21 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
   - [ ] B2.22 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
   - [ ] B2.23 Packages/ARCH/Sources/Sync/CloudKitSyncEngine.swift
