@@ -96,7 +96,7 @@ public final class PageAssistant: ObservableObject {
         ids.forEach { readerConversations[$0]?.cancel() }
     }
 
-    /// Returns the tab's existing reader conversation or creates one for its document.
+    /// Returns the tab's existing reader conversation or creates one for that tab.
     func readerConversation(for tab: Tab) -> PageConversation {
         if let conversation = readerConversations[tab.id] { return conversation }
         let conversation = PageConversation(feature: .pageReader, tabID: tab.id, instructions: Self.readerInstructions, pages: pages, client: AIService.shared, documentID: { [weak tab] in tab?.documentID })
