@@ -1128,7 +1128,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.6 History module
     - File and function names matched the sources.
-  - [ ] D2.7 Import module
+  - [x] D2.7 Import module
+    - File and function names matched the sources.
   - [ ] D2.8 Plugins module
   - [ ] D2.9 Extensions module
   - [ ] D2.10 AI module
