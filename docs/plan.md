@@ -1115,7 +1115,7 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 1 stale claim about the multiple-window design's implementation status.
   - [x] D1.15 resources/README.preset.md
     - Corrected 1 stale claim about the agent panel design's implementation status.
-- [ ] D2. `docs/plan.md` itself: in Current State, each module's paragraphs against that module's sources, one module per commit: `Docs: Correct the plan's <module> state against the code`. Do not edit the Work Queue rows' meaning; only fix file and function names that no longer exist.
+- [x] D2. `docs/plan.md` itself: in Current State, each module's paragraphs against that module's sources, one module per commit: `Docs: Correct the plan's <module> state against the code`. Do not edit the Work Queue rows' meaning; only fix file and function names that no longer exist.
   - [x] D2.1 Engine abstraction
     - File and function names matched the sources.
   - [x] D2.2 WebKit adapter
@@ -1152,7 +1152,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.18 Sync module
     - File and function names matched the sources.
-  - [ ] D2.19 App shell
+  - [x] D2.19 App shell
+    - File and function names matched the sources.
 - [ ] D3. **Push**.
 
 #### Group E: the prose pass
