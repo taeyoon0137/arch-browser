@@ -1,4 +1,6 @@
-// The sheet of File ▸ Import from Browser…: one section per browser found, with one row per profile that has a destination Persona and a checkbox per item, and the search engine section below them. Its model keeps the browsers read and the user's choices; the import controller reads the browsers and applies the selection.
+// File ▸ Import from Browser… shows one section per browser and one row per profile with a destination Persona.
+// Each item has a checkbox, and search engines appear below the profiles. The sheet model holds the read browsers and user choices.
+// The import controller reads the source browsers and applies the selection.
 import AppKit
 import Browsing
 import Combine

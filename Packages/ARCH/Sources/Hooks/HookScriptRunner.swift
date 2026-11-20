@@ -1,4 +1,7 @@
-// The JavaScript hook runner (`docs/hooks.md`, JavaScript scripts): runs a hook's `hook.js` in `Plugins`' script runtime, a `ScriptPlugin` in the plugin sandbox, from a package it makes in memory with the checked bytes, so the script that runs is the one whose digest the registry checked. The script sets its listener with `arch.events.on(kind, listener)` when it loads, and a run ends when the listener's promise settles. Each hook keeps at most two instances per Persona, each running one run at a time, which stop after 30 seconds without a run; the hook's timeout takes the place of the plugins' hang limit and ends the instance, as a cancel does.
+// A JavaScript hook runs `hook.js` in the `Plugins` sandbox as a `ScriptPlugin` (`docs/hooks.md`, JavaScript scripts).
+// Its in-memory package uses the bytes whose digest the registry checked. The script registers `arch.events.on(kind, listener)` when it loads; the run ends when the listener's promise settles.
+// Each hook keeps at most two instances per Persona, with one run in each. Idle instances stop after 30 seconds.
+// The hook timeout replaces the plugin hang limit and ends an instance, as cancellation does.
 import Agent
 import AI
 import Events

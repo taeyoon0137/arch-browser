@@ -1319,11 +1319,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the proposal-sheet overview into short sentences.
   - [x] E1.80 Packages/ARCH/Sources/Hooks/HookRegistry.swift
     - Split the registry overview into short sentences.
-  - [ ] E1.81 Packages/ARCH/Sources/Hooks/HookScriptContext.swift
-  - [ ] E1.82 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
-  - [ ] E1.83 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
-  - [ ] E1.84 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
-  - [ ] E1.85 Packages/ARCH/Sources/Plugins/Plugin.swift
+  - [x] E1.81 Packages/ARCH/Sources/Hooks/HookScriptContext.swift
+    - Split the hook context rules into short sentences.
+  - [x] E1.82 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
+    - Split the JavaScript runner behavior into short sentences.
+  - [x] E1.83 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
+    - Split the shell runner behavior and corrected the file reread button title.
+  - [x] E1.84 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
+    - Split the import sheet overview into short sentences.
+  - [x] E1.85 Packages/ARCH/Sources/Plugins/Plugin.swift
+    - ok
   - [ ] E1.86 Packages/ARCH/Sources/Plugins/PluginAI.swift
   - [ ] E1.87 Packages/ARCH/Sources/Plugins/PluginComposer.swift
   - [ ] E1.88 Packages/ARCH/Sources/Plugins/PluginComposerInstructions.swift

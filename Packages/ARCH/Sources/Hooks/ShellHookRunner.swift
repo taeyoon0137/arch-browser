@@ -1,4 +1,8 @@
-// The shell hook runner (`docs/hooks.md`, Shell scripts): runs Arch's copy of a script the user trusted, which the registry checked against its digest, only while its interpreter is still the one recorded at trust time, by path and SHA-256. It starts that interpreter directly with `posix_spawn` in a process group of its own, never through `env`, with the checked bytes on descriptor 3 and `/dev/fd/3` as the script's path, the event as JSON on standard input, only the listed environment, and a working folder of its own. Standard output is read and dropped, and the end of standard error stays in memory. At the hook's timeout the process group gets SIGTERM, then SIGKILL. While the script runs, `arch-cli` binds to the run with `ARCH_HOOK_TICKET` from the script's process tree and reaches the run's tabs under the hook's grant.
+// A shell hook runs Arch's checked copy of a trusted script (`docs/hooks.md`, Shell scripts).
+// The registry checks its digest, and the runner checks the interpreter's path and SHA-256 against the trusted version.
+// `posix_spawn` starts that interpreter directly in its own process group, never through `env`. The script's bytes arrive on descriptor 3 at `/dev/fd/3`; the event arrives as JSON on standard input.
+// The process gets only the listed environment and its own working folder. Standard output is dropped; the end of standard error stays in memory.
+// At timeout the group receives SIGTERM, then SIGKILL. While it runs, `arch-cli` uses `ARCH_HOOK_TICKET` within the script's process tree to reach the run tabs under the hook grant.
 import Agent
 import AgentControl
 import AI
@@ -160,7 +164,7 @@ public enum HookShellScript {
         return nil
     }
 
-    /// The lines of `new` that `old` does not hold in the same order, by index, and how many lines of `old` are gone, for Update from File….
+    /// The lines of `new` that `old` does not hold in the same order, by index, and how many lines of `old` are gone, for Update from File.
     public static func changes(from old: String, to new: String) -> (changed: Set<Int>, removed: Int) {
         let before = lines(of: old), after = lines(of: new)
         var changed = Set<Int>()
