@@ -1124,7 +1124,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.4 Private API flags
     - File and function names matched the sources.
-  - [ ] D2.5 Browsing module
+  - [x] D2.5 Browsing module
+    - File and function names matched the sources.
   - [ ] D2.6 History module
   - [ ] D2.7 Import module
   - [ ] D2.8 Plugins module
