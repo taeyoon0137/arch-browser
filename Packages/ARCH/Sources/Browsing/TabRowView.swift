@@ -1,4 +1,5 @@
-// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close or, for a pinned tab, unload, for a live folder item's tab, dismiss, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
+// A sidebar tab row holds its icon, inline name field, hover buttons, badges, shortcut numbers while Command is held, and the new-tab row.
+// Hover actions close, unload a pinned tab, dismiss a live-folder item, or return a pinned tab to its saved page. The inline field renames a tab or folder.
 import AI
 import AppKit
 import LiveFolders

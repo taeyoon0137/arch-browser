@@ -1289,11 +1289,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the split-view behavior into short sentences.
   - [x] E1.65 Packages/ARCH/Sources/Browsing/Tab.swift
     - ok
-  - [ ] E1.66 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
-  - [ ] E1.67 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
-  - [ ] E1.68 Packages/ARCH/Sources/Browsing/TabPromptContent.swift
-  - [ ] E1.69 Packages/ARCH/Sources/Browsing/TabRowView.swift
-  - [ ] E1.70 Packages/ARCH/Sources/Browsing/TabSwitcherView.swift
+  - [x] E1.66 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+    - ok
+  - [x] E1.67 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
+    - Split the folder-row overview into short sentences.
+  - [x] E1.68 Packages/ARCH/Sources/Browsing/TabPromptContent.swift
+    - ok
+  - [x] E1.69 Packages/ARCH/Sources/Browsing/TabRowView.swift
+    - Split the tab-row overview into short sentences.
+  - [x] E1.70 Packages/ARCH/Sources/Browsing/TabSwitcherView.swift
+    - Split the switcher overview into short sentences.
   - [ ] E1.71 Packages/ARCH/Sources/Browsing/TabUnloading.swift
   - [ ] E1.72 Packages/ARCH/Sources/Browsing/UnloadedWebContents.swift
   - [ ] E1.73 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
