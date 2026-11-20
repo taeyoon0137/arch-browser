@@ -1811,11 +1811,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.5 Packages/ARCH/Sources/AI/AIHookScheduler.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.6 Packages/ARCH/Sources/AI/AIHooks.swift
-  - [ ] X2.r1.7 Packages/ARCH/Sources/AI/AIPageSource.swift
-  - [ ] X2.r1.8 Packages/ARCH/Sources/AI/AIProviders.swift
-  - [ ] X2.r1.9 Packages/ARCH/Sources/AI/AIRouting.swift
-  - [ ] X2.r1.10 Packages/ARCH/Sources/AI/AIService.swift
+  - [x] X2.r1.6 Packages/ARCH/Sources/AI/AIHooks.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.7 Packages/ARCH/Sources/AI/AIPageSource.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.8 Packages/ARCH/Sources/AI/AIProviders.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.9 Packages/ARCH/Sources/AI/AIRouting.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.10 Packages/ARCH/Sources/AI/AIService.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.11 Packages/ARCH/Sources/AI/AISettingsStore.swift
   - [ ] X2.r1.12 Packages/ARCH/Sources/AI/AIUsage.swift
   - [ ] X2.r1.13 Packages/ARCH/Sources/AI/CommandLineProcess.swift
