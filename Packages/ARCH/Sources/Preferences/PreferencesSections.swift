@@ -1,4 +1,5 @@
-// The Settings sections: General for the default browser, links from other apps, new pages, and downloads; Sidebar for tab archiving; Appearance for the app's appearance.
+// Settings sections for General, Sidebar, and Appearance.
+// General controls the default browser, links from other apps, new pages, and downloads. Sidebar controls tab archiving. Appearance controls the app's appearance.
 import AppKit
 import ARCHEngine
 import Browsing

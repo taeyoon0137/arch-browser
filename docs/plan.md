@@ -1369,11 +1369,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the install review overview into short sentences.
   - [x] E1.105 Packages/ARCH/Sources/Preferences/PluginsSection.swift
     - Split the plugin settings overview into short sentences.
-  - [ ] E1.106 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
-  - [ ] E1.107 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
-  - [ ] E1.108 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift
-  - [ ] E1.109 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
-  - [ ] E1.110 Packages/ARCH/Sources/Sync/SyncController.swift
+  - [x] E1.106 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
+    - Split the settings sections overview into short sentences.
+  - [x] E1.107 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
+    - Split the settings storage overview into short sentences.
+  - [x] E1.108 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift
+    - Split the hook sheet overview and matched the Update from File button label.
+  - [x] E1.109 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
+    - Split the website settings overview into short sentences.
+  - [x] E1.110 Packages/ARCH/Sources/Sync/SyncController.swift
+    - ok
   - [ ] E1.111 Packages/ARCH/Sources/Terminal/TerminalView.swift
   - [ ] E1.112 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
   - [ ] E1.113 Packages/ARCH/Tests/AITests/AgentSessionTests.swift
