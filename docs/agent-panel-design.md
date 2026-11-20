@@ -1,10 +1,10 @@
-# Agent panel redesign proposal
+# Agent panel redesign record
 
-This proposal covers the panel in row VII.34. It changes no view or behavior yet. The panel remains a trailing column at `PageReaderColumn.width` in a main or small window. Every destination is named "Persona / Space".
+This design covers the panel in row VII.34. Its shared parts and view changes were implemented after this proposal. The panel remains a trailing column at `PageReaderColumn.width` in a main or small window. A destination with a known space is named "Persona / Space".
 
 ## States
 
-| State | What appears now | Technical text shown now | Proposed layout and main action |
+| State | Earlier layout | Earlier technical text | Proposed layout and main action |
 | --- | --- | --- | --- |
 | Empty | A new composer with a task field, destination, mode, model, and setup guidance when no model is available. | Provider and model choices, access mode, and sometimes tool setup instructions. | Put the task field first. When setup is required, make **Open Providers** or **Open Features** the main action. Keep the destination visible; put the explanation of model requirements in Help. |
 | Composing | A scrolling task field, attachment chip, optional excerpt and permissions note, destination, mode, model, effort, warnings, and a fixed Start button. | Mode, model, effort, provider setup, and instruction-file warning. | Keep the task and reviewed attachment above the fold, with **Start** fixed at the bottom. Show "Persona / Space" beside the attachment. Put mode, model, effort, and the excerpt preview in a collapsed Options section; preserve the permission and changed-page warnings beside the affected control. |
@@ -23,4 +23,4 @@ This proposal covers the panel in row VII.34. It changes no view or behavior yet
 
 ## Review before implementation
 
-Review the seven states at the narrow column width, with a long title, long task, multiple queued messages, a large capture, and VoiceOver. Confirm which options should start collapsed and the wording of the running progress sentence before changing views. No code change is proposed until the user approves this design.
+The initial review called for checking the seven states at the narrow column width, with a long title, long task, multiple queued messages, a large capture, and VoiceOver. The current implementation still needs an app-level review of those cases.
