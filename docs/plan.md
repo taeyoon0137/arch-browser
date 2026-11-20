@@ -1120,7 +1120,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.2 WebKit adapter
     - File and function names matched the sources.
-  - [ ] D2.3 Chromium adapter
+  - [x] D2.3 Chromium adapter
+    - File and function names matched the sources.
   - [ ] D2.4 Private API flags
   - [ ] D2.5 Browsing module
   - [ ] D2.6 History module
