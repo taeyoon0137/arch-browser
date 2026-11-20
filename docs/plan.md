@@ -1105,7 +1105,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 0 claims; code-checkable claims matched the host discovery and proof paths.
   - [x] D1.10 docs/plan.md
     - Corrected 3 stale mentions of the direct file reread button title.
-  - [ ] D1.11 docs/plugins.md
+  - [x] D1.11 docs/plugins.md
+    - Corrected 1 stale claim about the other-Persona install menu title.
   - [ ] D1.12 docs/sync.md
   - [ ] D1.13 docs/web-store.md
   - [ ] D1.14 docs/windows-personas.md
