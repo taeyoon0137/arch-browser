@@ -74,8 +74,7 @@ import Foundation
     /// Connected programs in the same order as their grants, shown in the sidebar and the agents menu.
     public var connectedGrants: [AgentGrant] { grants.filter { connectedGrantIDs.contains($0.id) } }
 
-    /// What the service reads and asks through, which tests replace.
-    /// The browser, identity, AI, and endpoint operations supplied to the service.
+    /// The browser, identity, AI, and endpoint operations supplied to the service; tests replace them.
     struct Dependencies {
         var location: AgentSocketLocation?
         var keys: any AgentSealKeyStore
