@@ -421,6 +421,7 @@ Regression checks 68 to 71 in `docs/plan.md` cover saved pages, unloading, neste
 Until the user decides otherwise, the implementation uses the option this note describes.
 
 1. Other sources, such as calendars and documents: none yet (this note); a later plugin contribution in `docs/plugins.md` could add sources that a plugin fetches.
+  - Decided in X5: ship no additional live folder source yet.
 2. JSON Feed: not read (this note); it can join `FeedParser` later.
 3. Notifications for new items: none (this note); the dots and counts are enough for now.
 4. Requests to the user's teams in Review Requests: left out (this note); a search with `review-requested:@me` includes them.
