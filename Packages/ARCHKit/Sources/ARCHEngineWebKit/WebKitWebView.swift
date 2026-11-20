@@ -62,7 +62,7 @@ final class WebKitPageView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("WebKitPageView is created in code")
+        return nil
     }
 
     // Focusing the page focuses its web view, which takes the keys.
