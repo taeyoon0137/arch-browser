@@ -2,6 +2,7 @@
 import Foundation
 import LiveFolders
 
+/// A named sidebar space with a symbol, tint, optional home page, and owning Persona.
 public struct Space: Identifiable, Codable, Hashable {
     public var id: UUID
     public var name: String
@@ -73,6 +74,7 @@ extension TabFolder {
     }
 }
 
+/// A Persona-wide site shortcut that opens its own tab when selected.
 public struct Favorite: Identifiable, Codable, Hashable {
     public var id: UUID
     public var url: URL

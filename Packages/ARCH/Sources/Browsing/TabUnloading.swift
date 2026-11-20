@@ -85,6 +85,7 @@ extension Tab {
 
 /// A loaded tab that no window shows, as automatic unloading weighs it: its ID, its kind, when a window last showed it, and what keeps it loaded. The session makes these, so tests can drive `TabUnloading.tabsToUnload` without one.
 struct UnloadCandidate {
+    /// The sidebar list that contains a candidate tab.
     enum Kind {
         case pinned
         case favorite
@@ -98,6 +99,7 @@ struct UnloadCandidate {
     var exclusions: Set<UnloadExclusion> = []
 }
 
+/// The settings, page script, and selection rules for unloading unseen tabs.
 public enum TabUnloading {
     /// Settings ▸ Sidebar saves under this key the hours after which pinned tabs and favorites' tabs that no window shows unload; 0 turns automatic unloading off, under memory pressure too.
     public static let unloadAfterHoursKey = "ARCHUnloadAfterHours"

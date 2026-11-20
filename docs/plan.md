@@ -1931,11 +1931,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.65 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.66 Packages/ARCH/Sources/Browsing/Space.swift
-  - [ ] X2.r1.67 Packages/ARCH/Sources/Browsing/Tab.swift
-  - [ ] X2.r1.68 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
-  - [ ] X2.r1.69 Packages/ARCH/Sources/Browsing/TabUnloading.swift
-  - [ ] X2.r1.70 Packages/ARCH/Sources/Events/BrowserEvent.swift
+  - [x] X2.r1.66 Packages/ARCH/Sources/Browsing/Space.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.67 Packages/ARCH/Sources/Browsing/Tab.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.68 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.69 Packages/ARCH/Sources/Browsing/TabUnloading.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.70 Packages/ARCH/Sources/Events/BrowserEvent.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.71 Packages/ARCH/Sources/Events/BrowserEventBus.swift
   - [ ] X2.r1.72 Packages/ARCH/Sources/Events/BrowserEventFilter.swift
   - [ ] X2.r1.73 Packages/ARCH/Sources/Events/BrowserEventRateLimiter.swift

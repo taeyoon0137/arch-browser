@@ -2,10 +2,12 @@
 import ARCHEngine
 import Foundation
 
+/// The kinds of tab, download, and window changes delivered on the event bus.
 public enum BrowserEventKind: String, Codable, Hashable, Sendable, CaseIterable {
     case tabOpened, tabClosed, pageLoaded, addressChanged, titleChanged, tabSelected, downloadFinished, spaceSwitched
 }
 
+/// The sidebar role of a tab named by a browser event.
 public enum BrowserTabKind: String, Codable, Hashable, Sendable, CaseIterable {
     /// A space's tab outside its pinned list.
     case open
@@ -17,6 +19,7 @@ public enum BrowserTabKind: String, Codable, Hashable, Sendable, CaseIterable {
     case agent
 }
 
+/// A tab's identity, place, engine, and committed address in an event.
 public struct BrowserTabRef: Codable, Hashable, Sendable {
     public var id: UUID
     public var personaID: UUID
@@ -46,6 +49,7 @@ public struct BrowserTabRef: Codable, Hashable, Sendable {
     }
 }
 
+/// A finished download's identity and file metadata without its destination path.
 public struct BrowserDownloadRef: Codable, Hashable, Sendable {
     public var id: UUID
     public var personaID: UUID
@@ -77,11 +81,13 @@ public struct BrowserDownloadRef: Codable, Hashable, Sendable {
     }
 }
 
+/// The reason a tab closed as reported to event consumers.
 public enum BrowserTabCloseReason: String, CaseIterable, Codable, Hashable, Sendable {
     /// `TabCloseReason`'s cases, then closes by code and with a deleted space or Persona.
     case user, page, crash, archive, download, webExtension, plugin, hook, agent, spaceDeleted, sync
 }
 
+/// Whether a title came from the page, user, or a suggested name.
 public enum BrowserTitleSource: String, Codable, Hashable, Sendable {
     /// The page's own title, or the host that stands in for a page without one, also when another address drops a hook's name.
     case page
@@ -106,6 +112,7 @@ public enum BrowserEventPayload: Codable, Hashable, Sendable {
     case spaceSwitched(windowID: UUID, spaceID: UUID, personaID: UUID, previousSpaceID: UUID?, previousPersonaID: UUID?)
 }
 
+/// One sequenced browser change with its payload and optional cause.
 public struct BrowserEvent: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID
     /// One more than the previous event's in this launch; outside programs resume after it.
@@ -123,6 +130,7 @@ public struct BrowserEvent: Identifiable, Codable, Hashable, Sendable {
         self.cause = cause
     }
 
+    /// The event kind represented by the payload.
     public var kind: BrowserEventKind {
         switch payload {
         case .tabOpened: return .tabOpened
@@ -181,6 +189,7 @@ public struct BrowserEvent: Identifiable, Codable, Hashable, Sendable {
 
 /// What made a change, when code made it. Every event that code causes names the hooks whose runs led to it, so loop protection can stop a hook from running for its own effects (hook decision 9).
 public struct BrowserEventCause: Codable, Hashable, Sendable {
+    /// The code that caused a browser change.
     public enum Origin: Codable, Hashable, Sendable {
         case hookRun(hook: UUID, run: UUID)
         case agentSession(id: UUID)

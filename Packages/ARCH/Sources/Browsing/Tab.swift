@@ -7,6 +7,7 @@ import Events
 import Foundation
 import LiveFolders
 
+/// A tab's engine contents, sidebar state, page prompts, and navigation reports.
 @MainActor public final class Tab: ObservableObject, Identifiable {
     /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
     public let id: UUID
@@ -141,6 +142,7 @@ import LiveFolders
     /// Where an agent tab asks about its navigations and reports what its rules did. The session sets it.
     weak var agentMonitor: (any AgentTabMonitor)?
 
+    /// Wraps engine contents and observes its UI, navigation, and page script events.
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
         self.id = id
         self.webContents = webContents
@@ -176,6 +178,7 @@ import LiveFolders
     @Published private var fallbackPreference: EngineKind?
     private var originalEngineState: (url: URL, data: Data)?
 
+    /// Keeps the preferred engine's page state only when it still belongs to this address.
     var restorableStateForPreferredEngine: Data? {
         guard preferredEngine != engineKind else { return webContents.restorableState }
         return originalEngineState?.url == url ? originalEngineState?.data : nil
@@ -350,6 +353,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
+    /// Updates navigation state and records a finished page visit outside agent tabs.
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
         let wasLoading = isLoading
         isLoading = webContents.isLoading
@@ -368,6 +372,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
             recordVisit?(url, webContents.title)
         }
     }
+    /// Starts a new document identity, clears typed-input state, and ends old requests.
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
         guard webContents === self.webContents else { return }
         documentID = UUID()
@@ -378,6 +383,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         pageDownloads.documentDidCommit(site: Self.site(of: url))
         didCommitDocument?()
     }
+    /// Reports a finished main document to page listeners and an agent owner.
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
         commit(url)
         didLoadDocument.send()
@@ -480,6 +486,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         showPrompt(TabPromptContent.confirm(message: message, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) { completion(TabPromptContent.confirmResult($0)) }
     }
 
+    /// Shows a page's text prompt under its committed site's identity and reports an agent wait.
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void) {
         reportToAgent(.dialogWaiting(.prompt, message: message, frame: frameOrigin))
         showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) {
@@ -564,6 +571,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url, false) }
     }
 
+    /// Offers an explicit download for an HTTP link or image in the context menu.
     private func downloadItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         return EngineActionMenuItem(title) { [weak self] in

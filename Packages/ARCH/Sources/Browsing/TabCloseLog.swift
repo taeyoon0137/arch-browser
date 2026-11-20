@@ -53,6 +53,7 @@ public enum TabCloseReason: String {
     }
 }
 
+/// One tab's close reason and page state captured for the debug log.
 public struct TabCloseLogEntry: Identifiable {
     public let id = UUID()
     public let date = Date()
@@ -90,6 +91,7 @@ public final class TabCloseLog: ObservableObject {
     @Published public private(set) var entries: [TabCloseLogEntry] = []
     static let limit = 500
 
+    /// Prepends an entry and discards the oldest one above the log limit.
     func record(_ entry: TabCloseLogEntry) {
         entries.insert(entry, at: 0)
         if entries.count > Self.limit { entries.removeLast() }
