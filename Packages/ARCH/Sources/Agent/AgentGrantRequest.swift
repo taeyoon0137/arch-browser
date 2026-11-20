@@ -19,6 +19,7 @@ public struct AgentGrantRequest: Sendable {
         self.spacesByPersona = spacesByPersona
     }
 
+    /// Returns the spaces available for the chosen Persona.
     public func spaces(of persona: AgentGrantChoice.PersonaChoice) -> [AgentSpaceInfo] {
         switch persona {
         case .agents: return agentsSpaces
@@ -29,6 +30,7 @@ public struct AgentGrantRequest: Sendable {
 
 /// The user's Allow, with the sheet's choices. Every field starts at the design's default.
 public struct AgentGrantChoice: Equatable, Sendable {
+    /// The Agents Persona or one of the user's existing Personas.
     public enum PersonaChoice: Hashable, Sendable {
         /// The Agents Persona, which Arch creates on first use.
         case agents
@@ -36,6 +38,7 @@ public struct AgentGrantChoice: Equatable, Sendable {
         case existing(UUID)
     }
 
+    /// How long an outside client's grant remains valid.
     public enum Duration: String, CaseIterable, Sendable {
         case untilQuit
         case day
@@ -49,6 +52,7 @@ public struct AgentGrantChoice: Equatable, Sendable {
             }
         }
 
+        /// Converts the selected duration into the grant's expiry rule.
         func expiry(from date: Date) -> AgentGrantExpiry {
             switch self {
             case .untilQuit: return .whenArchQuits
@@ -91,6 +95,7 @@ public protocol AgentAuthenticating: Sendable {
     func authenticate(reason: String) async -> Bool
 }
 
+/// Uses LocalAuthentication to verify the device owner before a grant.
 public struct AgentDeviceOwnerAuthentication: AgentAuthenticating {
     public init() {}
 

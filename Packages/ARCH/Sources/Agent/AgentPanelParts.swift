@@ -1,5 +1,7 @@
+// Shared controls and layout pieces for the in-app agent panel.
 import SwiftUI
 
+/// Shows a session title and status beside an optional action.
 struct AgentStateHeader<Action: View>: View {
     let title: String
     let status: String
@@ -19,6 +21,7 @@ struct AgentStateHeader<Action: View>: View {
     }
 }
 
+/// Places panel content in a rounded section with consistent padding.
 struct AgentSectionBox<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -30,6 +33,7 @@ struct AgentSectionBox<Content: View>: View {
     }
 }
 
+/// Aligns a detail label and its content in a panel row.
 struct AgentDetailRow<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
@@ -45,6 +49,7 @@ struct AgentDetailRow<Content: View>: View {
     }
 }
 
+/// Shows a compact button for a primary session action.
 struct AgentPrimaryAction: View {
     let title: String
     let action: () -> Void
@@ -54,6 +59,7 @@ struct AgentPrimaryAction: View {
     }
 }
 
+/// Hides technical session details in a disclosure group.
 struct AgentTechnicalDetails<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content

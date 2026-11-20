@@ -7,6 +7,7 @@ import AgentControl
 import AI
 import SwiftUI
 
+/// Shows an in-app agent session, its decisions, transcript, and message field.
 public struct AgentSessionPanel: View {
     @ObservedObject var service: AgentService
     @ObservedObject var session: AgentSession
@@ -65,6 +66,7 @@ public struct AgentSessionPanel: View {
 
     // MARK: Header
 
+    /// The session state shown below its title, with pending decisions taking priority.
     private var statusSentence: String {
         if !approvals.pending.filter({ $0.ownerID == session.id }).isEmpty { return "Waiting for your decision" }
         if session.isTakenOver && !session.hasEnded { return "You are in control" }
@@ -122,6 +124,7 @@ public struct AgentSessionPanel: View {
         }
     }
 
+    /// Lists tabs shared with the session and lets the user change that list.
     private var sharedTabs: some View {
         let shared = session.handles.sharedTabIDs
         let visible = service.host.userTabs(in: session.personaID)
@@ -203,6 +206,7 @@ public struct AgentSessionPanel: View {
         .frame(maxHeight: 280)
     }
 
+    /// Shows transcript items and scrolls to the newest one when they change.
     private var transcript: some View {
         return ScrollViewReader { proxy in
             ScrollView {
@@ -373,6 +377,7 @@ private struct AgentTranscriptRow: View {
         }
     }
 
+    /// Links to tabs read for this transcript item while they remain available.
     private var sources: some View {
         let available = item.pagesRead.compactMap { page -> (page: AgentReadPage, label: String)? in
             guard let tab = readTab(page) else { return nil }
@@ -393,6 +398,7 @@ private struct AgentTranscriptRow: View {
         }
     }
 
+    /// Builds the available recovery action for a transcript error.
     @ViewBuilder private func button(for action: AgentErrorAction) -> some View {
         switch action {
         case .retry:

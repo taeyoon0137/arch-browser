@@ -25,6 +25,7 @@ public enum AgentRuleEffect: Equatable, Sendable {
     case dismisses
 }
 
+/// One policy rule's trigger, effect, and message.
 public struct AgentRuleEntry: Sendable {
     public var rule: AgentRule
     /// When the rule applies, as the design's table says it.
@@ -73,6 +74,7 @@ public enum AgentPolicyStep: Equatable, Sendable {
     case externalApp
 }
 
+/// Facts about an agent interaction that the policy uses to decide whether it can run.
 public struct AgentInteraction: Equatable, Sendable {
     public var tool: String
     public var tab: AgentTabAccess
@@ -179,6 +181,7 @@ enum AgentRuleOutcome: Equatable {
     case refused(AgentRule, String)
 }
 
+/// Applies the agent permission and approval rules to classified steps.
 public enum AgentPolicy {
     // MARK: The table
 
@@ -215,6 +218,7 @@ public enum AgentPolicy {
                        sentence: "Renaming a tab the user shared asks the user once for that tab."),
     ]
 
+    /// Returns the numbered policy rule's table entry.
     public static func entry(_ rule: AgentRule) -> AgentRuleEntry {
         table.first { $0.rule == rule }!
     }
@@ -253,6 +257,7 @@ public enum AgentPolicy {
         }
     }
 
+    /// Applies tab, element, mode, and allowance rules to one interaction.
     private static func decide(_ step: AgentInteraction, client: AgentClientKind, mode: AgentAccessLevel, allowances: AgentAllowances) -> AgentDecision {
         let tool = AgentToolCatalog.tool(named: step.tool)
         let changesNoData = tool?.traits.contains(.allowedInReadOnly) ?? false
@@ -404,6 +409,7 @@ public enum AgentPolicy {
         return String(separated).split(separator: " ").joined(separator: " ")
     }
 
+    /// Matches a control's text against the words that require approval.
     static func readsAsIrreversible(_ text: String) -> Bool {
         names(text, oneOf: irreversibleWords)
     }
@@ -423,6 +429,7 @@ public enum AgentPolicy {
     /// The line an Arch card leads with when the agent's text on an `ask_user`, `hand_to_user`, or `request_approval` card names a secret (P1's words).
     public static let secretWarning = "Agents never need your passwords or codes. Type them only into the page after Take Over."
 
+    /// Checks card text for words that name credentials or other secrets.
     public static func cardTextNamesSecret(_ text: String) -> Bool {
         names(text, oneOf: secretWords)
     }

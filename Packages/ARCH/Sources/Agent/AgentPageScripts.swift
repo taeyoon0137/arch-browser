@@ -116,6 +116,7 @@ enum AgentPageOperation: Encodable {
 
     private enum Keys: String, CodingKey { case op, full, ref, shared, scroll, action, words, token, need, cancelRest, disarm }
 
+    /// Encodes the operation and the policy word lists for the page script.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: Keys.self)
         try container.encode(AgentPageScripts.words, forKey: .words)
@@ -197,6 +198,7 @@ struct AgentVisualViewport: Decodable, Equatable {
     var h: Double
 }
 
+/// A point in CSS pixels of the layout viewport.
 struct AgentPoint: Decodable, Equatable {
     var x: Double
     var y: Double
@@ -272,6 +274,7 @@ struct AgentOutlineNode: Decodable, Equatable {
     var text: String?
 }
 
+/// The page address, title, and outline returned by a snapshot operation.
 struct AgentSnapshotReply: Decodable {
     var url: String
     var title: String
@@ -291,12 +294,15 @@ struct AgentElementReply: Decodable {
     var viewport: AgentSize?
 }
 
+/// A width and height in CSS pixels.
 struct AgentSize: Codable, Equatable {
     var w: Double
     var h: Double
 }
 
+/// The page and viewport sizes and areas a screenshot must cover.
 struct AgentBoxesReply: Decodable, Equatable {
+    /// One area to cover in a screenshot, with its reason.
     struct Box: Decodable, Equatable {
         var x: Double
         var y: Double
@@ -314,6 +320,7 @@ struct AgentBoxesReply: Decodable, Equatable {
     var boxes: [Box]
 }
 
+/// The page address and outcome of an action performed through DOM events.
 struct AgentActionReply: Decodable {
     var url: String
     var problem: String?
@@ -326,6 +333,7 @@ struct AgentActionReply: Decodable {
     var missing: String?
 }
 
+/// Builds the page script and input check used for agent snapshots and actions.
 public enum AgentPageScripts {
     /// The script world of the agents' page script.
     static let world = "arch.agent"
