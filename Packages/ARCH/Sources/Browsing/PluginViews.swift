@@ -36,9 +36,11 @@ private struct PluginSidebarItemRow: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 18)
+                    .accessibilityHidden(true)
                 Text(item.item.title)
                     .font(.system(size: 14))
                     .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
                 if let badge {
                     Text(badge)
@@ -46,7 +48,7 @@ private struct PluginSidebarItemRow: View {
                         .lineLimit(1)
                         .padding(.horizontal, 6)
                         .frame(minWidth: 18, minHeight: 18)
-                        .background(Capsule().fill(Color.primary.opacity(0.1)))
+                        .background(Capsule().fill(SidebarFill.field.color(in: colorScheme)))
                 }
             }
             .padding(.leading, 10)

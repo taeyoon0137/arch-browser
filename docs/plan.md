@@ -975,11 +975,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] C1.30 Packages/ARCH/Sources/Browsing/PanePromptLayer.swift
     - ok
-  - [ ] C1.31 Packages/ARCH/Sources/Browsing/PluginViews.swift
-  - [ ] C1.32 Packages/ARCH/Sources/Browsing/PromptButtonRow.swift
-  - [ ] C1.33 Packages/ARCH/Sources/Browsing/PromptCard.swift
-  - [ ] C1.34 Packages/ARCH/Sources/Browsing/PromptFieldStack.swift
-  - [ ] C1.35 Packages/ARCH/Sources/Browsing/PromptFocusGuard.swift
+  - [x] C1.31 Packages/ARCH/Sources/Browsing/PluginViews.swift
+    - Hid the decorative plugin symbol, truncated its title, and used a sidebar fill for the badge.
+  - [x] C1.32 Packages/ARCH/Sources/Browsing/PromptButtonRow.swift
+    - ok
+  - [x] C1.33 Packages/ARCH/Sources/Browsing/PromptCard.swift
+    - Truncated a long prompt title.
+  - [x] C1.34 Packages/ARCH/Sources/Browsing/PromptFieldStack.swift
+    - ok
+  - [x] C1.35 Packages/ARCH/Sources/Browsing/PromptFocusGuard.swift
+    - ok
   - [ ] C1.36 Packages/ARCH/Sources/Browsing/PromptGlyphTile.swift
   - [ ] C1.37 Packages/ARCH/Sources/Browsing/PromptIdentityRow.swift
   - [ ] C1.38 Packages/ARCH/Sources/Browsing/PromptNoteList.swift

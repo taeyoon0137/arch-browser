@@ -138,7 +138,8 @@ struct PromptCard: View {
         if let title = content.title {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused($isVoiceOverOnHeading)
         }
