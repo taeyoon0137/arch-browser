@@ -1562,7 +1562,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - E1.162 blocked: The week-queue rule forbids changes under a Tests folder.
     - E1.163 blocked: The week-queue rule forbids changes under a Tests folder.
 - [x] W2. **Commit** `Docs: Record what the week queue's first pass finished and left`. **Push**.
-- [ ] W3. **Preview** 5.
+- [x] W3. **Preview** 5.
+  - Installed from `301850487dcf65303625a9e3279364690224ae55` after build and bundle verification; the app was not running.
 
 #### Group X: rounds until November 22, 05:00 KST
 
