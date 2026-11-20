@@ -2029,7 +2029,9 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.114 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
     - Added missing type and nontrivial function documentation.
-- [ ] X3. Unused code: for each `private func`, `private var`, and `fileprivate` declaration in `Packages/ARCH/Sources` whose name appears nowhere else in its file (`grep -c`), remove it if `swift build` still passes; restore it otherwise. Subject: `Refactor: Remove private code that nothing calls`.
+- [x] X3. Unused code: for each `private func`, `private var`, and `fileprivate` declaration in `Packages/ARCH/Sources` whose name appears nowhere else in its file (`grep -c`), remove it if `swift build` still passes; restore it otherwise. Subject: `Refactor: Remove private code that nothing calls`.
+  - [x] X3.r1.1 Packages/ARCH/Sources/Plugins/PluginManager.swift `allowNetwork`
+    - Removed the unused function and its `networkOpenings` state after fetch began refusing requests before network I/O.
 - [ ] X4. Duplicates: find view code repeated in three or more files (the same modifier chain of five or more lines); move it into the nearest shared parts file and use it from each place, changing no look. Subject: `Refactor: Share repeated view code`.
 - [ ] X5. Open decisions: read the Open decisions lists of `docs/plugins.md`, `docs/agents.md`, `docs/hooks.md`, `docs/sync.md`, and `docs/bookmarks.md`; for each one that the surrounding text clearly leans on and that needs no engine change, decide it, record the decision in the document, and build it with one commit `Feat: …` or `Fix: …` each. Leave the others.
 - [ ] X6. Repeat B1, C1, and D1 for the files changed in this round.

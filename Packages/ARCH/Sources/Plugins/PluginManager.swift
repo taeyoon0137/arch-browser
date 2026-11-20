@@ -179,7 +179,6 @@ public final class PluginManager: ObservableObject {
     private var eventLimiter = BrowserEventRateLimiter()
     /// When each plugin opened the tabs it opened in the last minute, which `tabOpenLimit` caps.
     private var tabOpenings: [PluginID: [Date]] = [:]
-    private var networkOpenings: [PluginID: [Date]] = [:]
     /// The AI interface that the plugins with `ai` send their requests through, whose hook scheduler runs their hooks; without one, they get no AI and their events arrive as for other plugins.
     private let ai: AIService?
     /// The features this manager registered in `ai`, those of its enabled plugins with `ai`, by identifier.
@@ -1517,18 +1516,6 @@ public final class PluginManager: ObservableObject {
               let name = plugins.first(where: { $0.id == plugin && $0.isEnabled })?.manifest.name else { return }
         lastNotification[plugin] = now
         browserHost?.postNotification(pluginName: name, title: title, body: body)
-    }
-
-    /// Validates a granted HTTPS host and enforces the plugin's network request rate limit.
-    fileprivate func allowNetwork(_ plugin: PluginID, request: URLRequest, grant: PluginGrant) throws {
-        guard !isClosed, let installed = plugins.first(where: { $0.id == plugin && $0.isEnabled }),
-              installed.grant == grant, grant.permissions.contains(.network) else { throw PluginError.permissionDenied(.network) }
-        guard let url = request.url, url.scheme?.lowercased() == "https", let host = url.host,
-              grant.network.contains(where: { $0.covers(host) }) else { throw PluginError.hostRefused }
-        let now = Date()
-        let recent = (networkOpenings[plugin] ?? []).filter { now.timeIntervalSince($0) < 60 }
-        guard recent.count < 60 else { throw PluginError.rateLimited }
-        networkOpenings[plugin] = recent + [now]
     }
 
     /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
