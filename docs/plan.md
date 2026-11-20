@@ -1299,11 +1299,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the tab-row overview into short sentences.
   - [x] E1.70 Packages/ARCH/Sources/Browsing/TabSwitcherView.swift
     - Split the switcher overview into short sentences.
-  - [ ] E1.71 Packages/ARCH/Sources/Browsing/TabUnloading.swift
-  - [ ] E1.72 Packages/ARCH/Sources/Browsing/UnloadedWebContents.swift
-  - [ ] E1.73 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
-  - [ ] E1.74 Packages/ARCH/Sources/Browsing/WebExtensionActionsSection.swift
-  - [ ] E1.75 Packages/ARCH/Sources/Events/BrowserEvent.swift
+  - [x] E1.71 Packages/ARCH/Sources/Browsing/TabUnloading.swift
+    - Split the unloading overview into short sentences.
+  - [x] E1.72 Packages/ARCH/Sources/Browsing/UnloadedWebContents.swift
+    - Split the stand-in page behavior into short sentences.
+  - [x] E1.73 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
+    - ok
+  - [x] E1.74 Packages/ARCH/Sources/Browsing/WebExtensionActionsSection.swift
+    - Split the extension-row behavior into short sentences.
+  - [x] E1.75 Packages/ARCH/Sources/Events/BrowserEvent.swift
+    - ok
   - [ ] E1.76 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
   - [ ] E1.77 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
   - [ ] E1.78 Packages/ARCH/Sources/History/HistoryWindowController.swift
