@@ -185,6 +185,7 @@ extension PluginBrowserHost {
     public func postNotification(pluginName: String, title: String, body: String) {}
 }
 
+/// A Persona's download metadata exposed to a plugin.
 public struct PluginDownload: Identifiable, Hashable, Sendable {
     public let id: UUID
     public let name: String
@@ -200,6 +201,7 @@ public struct PluginDownload: Identifiable, Hashable, Sendable {
         self.totalBytes = totalBytes
     }
 
+    /// The JSON value exposed to script plugins for this download.
     public var scriptValue: PluginValue {
         .object(["id": .string(id.uuidString), "name": .string(name), "state": .string(state),
                  "completedBytes": .number(Double(completedBytes)), "totalBytes": .number(Double(totalBytes))])
@@ -241,6 +243,7 @@ public struct PluginOpenTabOptions: Hashable, Sendable {
 
 /// What a command runs on.
 public struct PluginInvocation: Sendable {
+    /// Where the user invoked a plugin command.
     public enum Source: String, Sendable { case palette, menu, contextMenu, shortcut, sidebar }
     public var source: Source
     public var argument: String?
@@ -358,6 +361,7 @@ public enum PluginValue: Hashable, Sendable {
 }
 
 extension PluginValue: Codable {
+    /// Decodes one JSON value into a plugin value.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
@@ -375,6 +379,7 @@ extension PluginValue: Codable {
         }
     }
 
+    /// Encodes this value as its corresponding JSON value.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
@@ -407,6 +412,7 @@ public protocol PluginSecrets: AnyObject {
     func setSecret(_ secret: String?, forKey key: String) async throws
 }
 
+/// Failures raised by plugin lifecycle, permissions, package handling, and browser calls.
 public enum PluginError: Error, Hashable, Sendable {
     /// The plugin's grant lacks the permission a call needs.
     case permissionDenied(PluginPermission)
@@ -452,6 +458,8 @@ public enum PluginError: Error, Hashable, Sendable {
     case tooManyTabs
     /// The network request names a host outside the grant or one resolving to a local address.
     case hostRefused
+    /// Network fetch is unavailable until Arch can bind the checked address to the connection.
+    case networkUnavailable
     /// A redirect leaves the grant, uses another scheme, or exceeds five hops.
     case redirectRefused
     /// A plugin started 60 network requests within a minute.
@@ -465,6 +473,7 @@ public enum PluginError: Error, Hashable, Sendable {
 }
 
 extension PluginError: LocalizedError {
+    /// A user-facing explanation of the plugin failure.
     public var errorDescription: String? {
         switch self {
         case let .permissionDenied(permission): return "The plugin may not \(permission.summary.prefix(1).lowercased() + permission.summary.dropFirst())."
@@ -489,6 +498,7 @@ extension PluginError: LocalizedError {
         case let .invalidAddress(text): return "\u{201C}\(text)\u{201D} is not the address of a web page."
         case .tooManyTabs: return "The plugin opened as many tabs within a minute as it may."
         case .hostRefused: return "The plugin may not reach this network host."
+        case .networkUnavailable: return "Plugin network requests are unavailable in this build."
         case .redirectRefused: return "The network redirect is outside the plugin's grant."
         case .rateLimited: return "The plugin has made as many requests within a minute as it may."
         case .responseTooLarge: return "The network response is too large."

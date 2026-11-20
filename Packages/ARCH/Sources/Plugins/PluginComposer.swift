@@ -130,12 +130,14 @@ public final class PluginComposer {
     }
 }
 
+/// Errors that prevent AI from producing a usable plugin package.
 public enum PluginComposerError: Error, Hashable, Sendable {
     /// Every reply to a request broke a rule for plugins that AI writes; the text states the last reply's problem as a sentence.
     case unusableReply(String)
 }
 
 extension PluginComposerError: LocalizedError {
+    /// The message shown for a composer failure.
     public var errorDescription: String? {
         switch self {
         case let .unusableReply(problem): return "AI wrote a plugin that Arch cannot use. \(problem)"

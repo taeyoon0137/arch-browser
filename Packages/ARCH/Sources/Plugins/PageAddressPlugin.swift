@@ -2,6 +2,7 @@
 import Foundation
 
 @MainActor
+/// Copies the selected tab's address or Markdown link through the plugin context.
 public final class PageAddressPlugin: BuiltInPlugin {
     public static let manifest = PluginManifest(
         id: PluginID(rawValue: "xyz.taeyoon.arch.page-address")!,

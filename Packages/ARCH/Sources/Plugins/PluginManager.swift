@@ -110,6 +110,7 @@ public protocol PluginNativeAppGate: AnyObject {
     func refusal(of manifest: PluginManifest, proof: PluginProof?, predatesProof: Bool) -> String?
 }
 
+/// Manages one Persona's plugin installs, grants, contributions, runtimes, and event delivery.
 @MainActor
 public final class PluginManager: ObservableObject {
     /// The start of the identifiers of Arch's own plugins: those built into it and, under `PluginComposer.identifierPrefix`, those that AI writes.
@@ -236,6 +237,7 @@ public final class PluginManager: ObservableObject {
         self.init(persona: persona, directory: directory, builtIns: builtIns, runtimes: runtimes, secretStore: PluginKeychain(), events: events, browserHost: browserHost, ai: ai)
     }
 
+    /// Restores plugin state with the supplied secret store and script limits.
     init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], secretStore: any PluginSecretStore,
          scriptLimits: ScriptPluginLimits = .standard, publisherKeyDigest: Data = CRXArchive.webStorePublisherKeyDigest,
          events: BrowserEventBus? = nil, browserHost: (any PluginBrowserHost)? = nil, ai: AIService? = nil) {
@@ -401,10 +403,12 @@ public final class PluginManager: ObservableObject {
         updateGrant(of: id) { $0.permissions.remove(permission) }
     }
 
+    /// Removes a site from an installed plugin's grant and stops its current context.
     public func revoke(_ site: MatchPattern, from id: PluginID) {
         updateGrant(of: id) { $0.sites.removeAll { $0 == site } }
     }
 
+    /// Persists an installed plugin's reduced grant and stops its running instance.
     private func updateGrant(of id: PluginID, _ change: (inout PluginGrant) -> Void) {
         guard !isClosed, let index = plugins.firstIndex(where: { $0.id == id && $0.origin != .bundled }),
               let entryIndex = installs.firstIndex(where: { $0.id == id.rawValue }),
@@ -1114,6 +1118,7 @@ public final class PluginManager: ObservableObject {
         badges[plugin, default: [:]][id] = text?.isEmpty == false ? text : nil
     }
 
+    /// Enables or disables one contributed command for the current plugin run.
     fileprivate func setEnabled(_ isEnabled: Bool, command id: String, of plugin: PluginID) {
         guard let installed = enabledPlugin(plugin), installed.commands(among: plugins).contains(where: { $0.id == id }) else { return }
         if isEnabled { disabledCommands[plugin, default: []].remove(id) }
@@ -1121,6 +1126,7 @@ public final class PluginManager: ObservableObject {
         contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
     }
 
+    /// Requests a panel for a contributed sidebar item with a panel action.
     fileprivate func showPanel(_ item: String, of plugin: PluginID) {
         guard let installed = enabledPlugin(plugin), installed.manifest.contributions.sidebarItems.contains(where: {
             guard $0.id == item, case .panel = $0.action else { return false }
@@ -1243,6 +1249,7 @@ public final class PluginManager: ObservableObject {
         return tab
     }
 
+    /// Clears the named plugins' access in a tab and republishes its page scripts.
     private func endSiteAccess(of plugins: [PluginID], inTab id: UUID) {
         for plugin in plugins { siteAccess[plugin]?[id] = nil }
         siteAccess = siteAccess.filter { !$0.value.isEmpty }
@@ -1483,6 +1490,7 @@ public final class PluginManager: ObservableObject {
         setEnabled(false, for: [id], failure: "Arch switched the plugin off after it failed three times within five minutes. \(reason)")
     }
 
+    /// Creates a context scoped to the installed plugin and its Persona.
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
         ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant,
                             storage: ScopedPluginStorage(file: storage(for: installed.id)), secrets: secrets(for: installed.id),
@@ -1502,6 +1510,7 @@ public final class PluginManager: ObservableObject {
         browserHost?.renameDownload(id, to: name, in: persona) ?? false
     }
 
+    /// Posts a notification for an enabled plugin, at most once every ten seconds.
     fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
         let now = Date()
         guard lastNotification[plugin].map({ now.timeIntervalSince($0) >= 10 }) ?? true,
@@ -1510,6 +1519,7 @@ public final class PluginManager: ObservableObject {
         browserHost?.postNotification(pluginName: name, title: title, body: body)
     }
 
+    /// Validates a granted HTTPS host and enforces the plugin's network request rate limit.
     fileprivate func allowNetwork(_ plugin: PluginID, request: URLRequest, grant: PluginGrant) throws {
         guard !isClosed, let installed = plugins.first(where: { $0.id == plugin && $0.isEnabled }),
               installed.grant == grant, grant.permissions.contains(.network) else { throw PluginError.permissionDenied(.network) }
@@ -1625,6 +1635,7 @@ private struct PackageMove {
     /// The plugin's folder, if the move created it.
     private let createdFolder: URL?
 
+    /// Moves a staged package into place while retaining the prior package for rollback.
     init(from stagedURL: URL, to destination: URL) throws {
         let fileManager = FileManager.default
         let folder = destination.deletingLastPathComponent()
@@ -1667,6 +1678,7 @@ private struct PackageMove {
 struct PluginListFile: Codable {
     static let name = "plugins.json"
 
+    /// An on/off choice for one plugin.
     struct Choice: Codable {
         /// The plugin's identifier as `PluginID` writes it.
         var id: String
@@ -1915,15 +1927,8 @@ final class ScopedPluginContext: PluginPanelContext {
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.network)
-        guard let manager else { throw PluginError.stopped }
-        try manager.allowNetwork(pluginID, request: request, grant: grant)
-        let id = UUID()
-        let task = Task { try await PluginNetworkFetch(hosts: grant.network).run(request) }
-        networkRuns[id] = task
-        defer { networkRuns[id] = nil }
-        let response = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
-        guard !hasEnded else { throw PluginError.stopped }
-        return response
+        // URLSession may resolve the host again after the checked DNS result. Refuse until the connection uses a checked address.
+        throw PluginError.networkUnavailable
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {

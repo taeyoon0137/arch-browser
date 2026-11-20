@@ -2,6 +2,7 @@
 import ARCHEngine
 import Foundation
 
+/// The commands, interface items, settings, and page scripts declared by a plugin.
 public struct PluginContributions: Hashable, Sendable {
     public var commands: [PluginCommand]
     public var menuItems: [PluginMenuItem]
@@ -91,6 +92,7 @@ extension Set where Element == PluginPageContext {
     }
 }
 
+/// Where a plugin menu item appears in the browser interface.
 public enum PluginMenuLocation: Hashable, Sendable {
     /// The Plugins menu in the menu bar. Its commands run on the active window's selected tab.
     case pluginsMenu
@@ -118,9 +120,11 @@ public struct PluginMenuItem: Hashable, Sendable {
 
 /// A row below the favorites with a symbol, a title, and the badge the plugin sets.
 public struct PluginSidebarItem: Identifiable, Hashable, Sendable {
+    /// How a plugin sidebar item opens its content.
     public enum Presentation: String, Hashable, Sendable {
         case popover, sidebar
     }
+    /// The command or panel action of a plugin sidebar item.
     public enum Action: Hashable, Sendable {
         /// Runs one of the plugin's commands on the window's selected tab.
         case command(String)
@@ -147,6 +151,7 @@ public struct PluginSidebarItem: Identifiable, Hashable, Sendable {
 
 /// A field of the plugin's form in Settings ▸ Plugins. The plugin reads the value through `PluginContext.setting(_:)`, or a secret through `PluginContext.secrets`, under the field's key.
 public struct PluginSetting: Identifiable, Hashable, Sendable {
+    /// The supported value and control kinds for a plugin setting.
     public enum Kind: Hashable, Sendable {
         case toggle(default: Bool)
         case text(default: String)
@@ -317,6 +322,7 @@ public struct PluginContributionIndex: Sendable {
         return sections
     }
 
+    /// Splits search text into lowercase words for contribution matching.
     private static func words(in text: String) -> [Substring] {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
             .split { !$0.isLetter && !$0.isNumber }

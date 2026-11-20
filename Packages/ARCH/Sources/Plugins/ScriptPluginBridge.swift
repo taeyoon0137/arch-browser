@@ -671,6 +671,7 @@ private extension PluginError {
         case .invalidAddress: return "invalidAddress"
         case .tooManyTabs: return "tooManyTabs"
         case .hostRefused: return "hostRefused"
+        case .networkUnavailable: return "networkUnavailable"
         case .redirectRefused: return "redirectRefused"
         case .rateLimited: return "rateLimited"
         case .responseTooLarge: return "responseTooLarge"

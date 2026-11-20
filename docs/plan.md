@@ -2001,11 +2001,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.100 Packages/ARCH/Sources/LiveFolders/LiveItem.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.101 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
-  - [ ] X2.r1.102 Packages/ARCH/Sources/Plugins/Plugin.swift
-  - [ ] X2.r1.103 Packages/ARCH/Sources/Plugins/PluginComposer.swift
-  - [ ] X2.r1.104 Packages/ARCH/Sources/Plugins/PluginContributions.swift
-  - [ ] X2.r1.105 Packages/ARCH/Sources/Plugins/PluginManager.swift
+  - [x] X2.r1.101 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.102 Packages/ARCH/Sources/Plugins/Plugin.swift
+    - Added missing type and nontrivial function documentation. Kept the X1 network refusal fix in this file.
+  - [x] X2.r1.103 Packages/ARCH/Sources/Plugins/PluginComposer.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.104 Packages/ARCH/Sources/Plugins/PluginContributions.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.105 Packages/ARCH/Sources/Plugins/PluginManager.swift
+    - Added missing type and nontrivial function documentation. Kept the X1 network refusal fix in this file.
   - [ ] X2.r1.106 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
   - [ ] X2.r1.107 Packages/ARCH/Sources/Sync/BrowserSession+Sync.swift
   - [ ] X2.r1.108 Packages/ARCH/Sources/Sync/FirstSyncMerge.swift
