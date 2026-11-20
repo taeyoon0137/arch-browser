@@ -1,3 +1,4 @@
+// Adapts BrowserSession's saved sidebar to the sync controller's read, apply, and save operations.
 import ARCHEngine
 import Browsing
 import Foundation

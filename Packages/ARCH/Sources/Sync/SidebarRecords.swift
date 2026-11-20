@@ -2,6 +2,7 @@
 import Browsing
 import Foundation
 
+/// Projects a saved sidebar into ordered sync records for first sync and outgoing comparisons.
 public enum SidebarRecords {
     /// Records stay in sidebar order within each sibling list. SyncDiff assigns the sparse keys
     /// against the mirror on later comparisons. No browser data outside this projection is read.

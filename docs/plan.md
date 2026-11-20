@@ -2011,11 +2011,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.105 Packages/ARCH/Sources/Plugins/PluginManager.swift
     - Added missing type and nontrivial function documentation. Kept the X1 network refusal fix in this file.
-  - [ ] X2.r1.106 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
-  - [ ] X2.r1.107 Packages/ARCH/Sources/Sync/BrowserSession+Sync.swift
-  - [ ] X2.r1.108 Packages/ARCH/Sources/Sync/FirstSyncMerge.swift
-  - [ ] X2.r1.109 Packages/ARCH/Sources/Sync/IncomingSidebarRecords.swift
-  - [ ] X2.r1.110 Packages/ARCH/Sources/Sync/SidebarRecords.swift
+  - [x] X2.r1.106 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
+    - Added missing file, type, and nontrivial function documentation.
+  - [x] X2.r1.107 Packages/ARCH/Sources/Sync/BrowserSession+Sync.swift
+    - Added missing file, type, and nontrivial function documentation.
+  - [x] X2.r1.108 Packages/ARCH/Sources/Sync/FirstSyncMerge.swift
+    - Added missing file, type, and nontrivial function documentation.
+  - [x] X2.r1.109 Packages/ARCH/Sources/Sync/IncomingSidebarRecords.swift
+    - Added missing file, type, and nontrivial function documentation.
+  - [x] X2.r1.110 Packages/ARCH/Sources/Sync/SidebarRecords.swift
+    - Added missing file, type, and nontrivial function documentation.
   - [ ] X2.r1.111 Packages/ARCH/Sources/Sync/SyncController.swift
   - [ ] X2.r1.112 Packages/ARCH/Sources/Sync/SyncMerge.swift
   - [ ] X2.r1.113 Packages/ARCH/Sources/Sync/SyncOffReason.swift

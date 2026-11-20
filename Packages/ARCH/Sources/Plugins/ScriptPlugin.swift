@@ -29,6 +29,7 @@ public enum ScriptPluginStop: Equatable, Sendable {
 }
 
 @MainActor
+/// Runs one sandboxed script plugin instance and its background, panel, and event calls.
 public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     private let package: PluginPackage
     private let limits: ScriptPluginLimits
@@ -141,6 +142,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
         return makePanel(title: package.manifest.name, page: page, context: context, rules: rules, size: NSSize(width: 480, height: 480))
     }
 
+    /// Creates a panel in the plugin sandbox and keeps the instance active while it is shown.
     private func makePanel(title: String, page: String, context: any PluginContext, rules: WKContentRuleList, size: NSSize) -> NSViewController {
         let bridge = ScriptPluginBridge(context: context, role: .panel)
         let panel = ScriptPluginPanel(title: title, page: PluginSandbox.url(of: page, in: package.manifest.id),

@@ -5,7 +5,9 @@ import CryptoKit
 import Foundation
 import LiveFolders
 
+/// Merges fetched sidebar records and repairs their graph before applying them locally.
 public enum IncomingSidebarRecords {
+    /// The sidebar to apply, local deletions, records to repair, and records to delete remotely.
     public struct Plan {
         public let sidebar: SidebarSyncState
         public let deletions: SidebarSyncDeletions
@@ -13,6 +15,7 @@ public enum IncomingSidebarRecords {
         public let recordsToDelete: [String]
     }
 
+    /// A malformed record or identity found while rebuilding the sidebar graph.
     public enum InvalidGraph: Error {
         case malformedRecord(String)
         case inconsistentIdentity(String)
@@ -60,6 +63,7 @@ public enum IncomingSidebarRecords {
         Set(heldRecords(server: server, local: local).keys)
     }
 
+    /// Holds out unsupported or moved records and their descendants from the repair plan.
     private static func heldRecords(server: [SyncRecord], local: [SyncRecord]) -> [String: SyncRecord] {
         let localByName = Dictionary(local.map { ($0.recordName, $0) }) { first, _ in first }
         var held: [String: SyncRecord] = [:]
@@ -118,6 +122,7 @@ public enum IncomingSidebarRecords {
         }
     }
 
+    /// Repairs missing spaces, invalid parent links, cycles, and excessive folder depth, then builds the sidebar and tombstones.
     private static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind, held: [String: SyncRecord]) throws -> Plan {
         var all: [String: SyncRecord] = [:]
         var removed = deleted.filter { $0.value != .setting }
@@ -265,6 +270,7 @@ public enum IncomingSidebarRecords {
         return hash.withUnsafeBytes { UUID(uuid: $0.loadUnaligned(as: uuid_t.self)) }
     }
 
+    /// Validates a record name as a UUID, with the fixed default Persona as an exception.
     private static func identifier(_ raw: String, type: SyncRecordType) throws -> UUID {
         if type == .persona, raw == "default" { return Persona.defaultID }
         guard let id = UUID(uuidString: raw), raw == id.uuidString, type != .persona || id != Persona.defaultID else {
@@ -278,6 +284,7 @@ public enum IncomingSidebarRecords {
         return name
     }
 
+    /// Converts repaired records into the sidebar's Personas, spaces, folders, favorites, and pinned tabs.
     private static func sidebar(personas: [SyncRecord], spaces: [SyncValue?: [SyncRecord]], folders: [SyncRecord],
                                 all: [String: SyncRecord], defaultEngine: EngineKind) throws -> SidebarSyncState {
         func text(_ item: SyncRecord, _ field: SyncField) throws -> String {
