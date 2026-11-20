@@ -1389,11 +1389,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - blocked: The week-queue rule forbids changes under a Tests folder.
   - [x] E1.115 Packages/ARCH/Tests/AgentControlTests/HarnessTests.swift
     - blocked: The week-queue rule forbids changes under a Tests folder.
-  - [ ] E1.116 Packages/ARCH/Tests/AgentTests/AgentRunnerTests.swift
-  - [ ] E1.117 Packages/ARCH/Tests/AgentTests/ApprovalTests.swift
-  - [ ] E1.118 Packages/ARCH/Tests/AgentTests/GrantTests.swift
-  - [ ] E1.119 Packages/ARCH/Tests/AgentTests/OutsideEventsTests.swift
-  - [ ] E1.120 Packages/ARCH/Tests/AgentTests/OutsideHooksTests.swift
+  - [x] E1.116 Packages/ARCH/Tests/AgentTests/AgentRunnerTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.117 Packages/ARCH/Tests/AgentTests/ApprovalTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.118 Packages/ARCH/Tests/AgentTests/GrantTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.119 Packages/ARCH/Tests/AgentTests/OutsideEventsTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.120 Packages/ARCH/Tests/AgentTests/OutsideHooksTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
   - [ ] E1.121 Packages/ARCH/Tests/AgentTests/OutsideRunsTests.swift
   - [ ] E1.122 Packages/ARCH/Tests/AgentTests/PolicyTests.swift
   - [ ] E1.123 Packages/ARCH/Tests/AgentTests/SealTests.swift
