@@ -1089,7 +1089,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 4 stale claims about proposal status, destination naming, and the table's time frame.
   - [x] D1.2 docs/agents.md
     - Corrected 1 stale claim about agent menu availability without a model.
-  - [ ] D1.3 docs/ai.md
+  - [x] D1.3 docs/ai.md
+    - Corrected 4 stale claims in the capability example, menu availability, and error examples.
   - [ ] D1.4 docs/bookmarks.md
   - [ ] D1.5 docs/engine-protocol.md
   - [ ] D1.6 docs/features.md

@@ -266,7 +266,7 @@ public enum AIFeatureRouting: String, Codable, Sendable {
 }
 
 public enum AIModelCapability: String, Codable, Sendable {
-    case tools, jsonOutput, images, files
+    case tools, jsonOutput, images, files, agent
 }
 ```
 
@@ -307,7 +307,7 @@ The first features:
 | `plugin.<id>` | V.11 | automatic when the plugin declares hooks (`ai` and events), otherwise user | text, and page and selection as the plugin's `ai` lists them | - |
 | `agent` | VII.17 registers it; VII.16 runs its sessions on Claude Code and Codex (`docs/agents.md`) | user | page, selection, and screenshots as files, only as tool results | `agent` |
 
-- When no provider is connected, Arch shows no AI command, menu item, or panel; only Settings ▸ AI mentions AI.
+- When no provider is connected, model-dependent AI actions stay unavailable. New Agent Task and Show Agent Panel remain in their menus and open Settings ▸ AI ▸ Providers.
 - Each agent hook registers one automatic feature, `agentHook.<hook id>`, and runs started by outside programs use `agentRun`. Both are `perRequest` features, which use the route in each request (Routing; `docs/hooks.md`, Model choice and tiers).
 
 ## Providers
@@ -862,11 +862,12 @@ public enum AIError: Error, Sendable {
     case malformedReply(String)
     case replyTooLong
     case toolRoundLimit
+    case toolCallLimit
     case cancelled
 }
 
 public enum AINotConfiguredReason: Sendable { case switchedOff, noModel, noUsableModel, unknownFeature, emptyTier(AIModelTier) }
-public enum AIPolicyReason: Sendable { case siteExcluded(String), dataNotDeclared(AIDataKind), commandLineToolWithPageData, agentUsedOwnTools(String), routeNotAllowed }
+public enum AIPolicyReason: Sendable { case siteExcluded(String), dataNotDeclared(AIDataKind), commandLineToolWithPageData, agentUsedOwnTools(String), agentMessageIsCommand, unknownProvider, routeNotAllowed }
 public enum AIBudget: Sendable { case automaticRequestsPerDay, monthlySpending }
 ```
 
