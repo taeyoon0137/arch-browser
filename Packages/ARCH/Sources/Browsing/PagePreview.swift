@@ -1,4 +1,6 @@
-// Previews show a page in a floating panel over the page area without opening a tab: Shift held while the pointer rests on a favorite, or a link in a page clicked with Shift. The panel's web contents belongs to no tab and closes with the panel, so the page never enters the tab list, the saved session, or history, unless it opens a page of its own and becomes a tab. Open in Tab loads the panel's page in a new tab; Escape or a click outside the panel closes it.
+// A preview shows a page in a floating panel without opening a tab. It starts when Shift is held over a favorite or a page link is clicked with Shift.
+// Its web contents belongs to no tab and closes with the panel. The page enters no tab list, saved session, or history unless it opens its own page and becomes a tab.
+// Open in Tab loads the preview in a new tab. Escape or a click outside closes it.
 import AppKit
 import ARCHEngine
 import SwiftUI

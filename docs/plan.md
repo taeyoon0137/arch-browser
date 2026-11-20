@@ -1249,11 +1249,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the folder-tree overview into short sentences.
   - [x] E1.45 Packages/ARCH/Sources/Browsing/LibraryView.swift
     - ok
-  - [ ] E1.46 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
-  - [ ] E1.47 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift
-  - [ ] E1.48 Packages/ARCH/Sources/Browsing/PageAnswerView.swift
-  - [ ] E1.49 Packages/ARCH/Sources/Browsing/PageDownloadGate.swift
-  - [ ] E1.50 Packages/ARCH/Sources/Browsing/PagePreview.swift
+  - [x] E1.46 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
+    - Split the live-folder sheet overview into short sentences.
+  - [x] E1.47 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift
+    - ok
+  - [x] E1.48 Packages/ARCH/Sources/Browsing/PageAnswerView.swift
+    - Split the answer-view overview into short sentences.
+  - [x] E1.49 Packages/ARCH/Sources/Browsing/PageDownloadGate.swift
+    - Split the download-gate rules into short sentences.
+  - [x] E1.50 Packages/ARCH/Sources/Browsing/PagePreview.swift
+    - Split the preview behavior into short sentences.
   - [ ] E1.51 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
   - [ ] E1.52 Packages/ARCH/Sources/Browsing/PersonaEngines.swift
   - [ ] E1.53 Packages/ARCH/Sources/Browsing/PluginPages.swift

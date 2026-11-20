@@ -1,4 +1,5 @@
-// What the page reader and the question popover show for each question: the reply as text with inline Markdown, the model that wrote it with its tokens and estimated cost, and the AI module's errors with one action each. Also the notice and the switch for a site where AI is off.
+// The page reader and question popover show a reply as text with inline Markdown, its model, tokens, and estimated cost.
+// They also show AI errors with one action each, plus a notice and switch when AI is off for a site.
 import AI
 import SwiftUI
 
