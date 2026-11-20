@@ -65,6 +65,7 @@ public struct AgentRunLimits: Codable, Hashable, Sendable {
         case timeout, rounds, toolCalls
     }
 
+    /// Decodes second-based limits, using defaults for omitted values and refusing a nonfinite timeout.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AgentRunLimits()
@@ -80,6 +81,7 @@ public struct AgentRunLimits: Codable, Hashable, Sendable {
         toolCalls = try container.decodeIfPresent(Int.self, forKey: .toolCalls) ?? defaults.toolCalls
     }
 
+    /// Writes the timeout in seconds with the round and tool-call limits.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(timeout.agentRunSeconds, forKey: .timeout)
@@ -179,6 +181,7 @@ public struct AgentRunGrant: Codable, Hashable, Sendable {
         case tools, tabAccess, minimumRecord, maximumRecord, runsPerDay, limits, returnsReply
     }
 
+    /// Encodes the granted tools in sorted order with the access and run limits.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(tools.sorted(), forKey: .tools)
@@ -272,7 +275,9 @@ public enum AgentRunAction: Codable, Hashable, Sendable {
     }
 }
 
+/// The status, actions, reply, model, and usage returned by a bounded run.
 public struct AgentRunResult: Codable, Sendable {
+    /// Whether the run completed, failed, timed out, was cancelled, or was refused.
     public enum Status: String, Codable, Sendable {
         case completed, failed, timedOut, cancelled, refused
     }

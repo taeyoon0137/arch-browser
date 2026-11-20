@@ -19,7 +19,7 @@ final class AgentHookCLIRun {
     private var executing: Task<AgentToolResult, Never>?
 
     init?(tools: [AgentTool], limit: Int, knownProviders: [AIProviderID: String], dispatch: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) {
-        guard let ticket = AgentSessionTicket.make() else { return nil }
+        guard let ticket = AgentSessionTicket.makeIfPossible() else { return nil }
         self.ticket = ticket
         self.tools = tools
         self.limit = limit

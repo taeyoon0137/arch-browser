@@ -9,12 +9,26 @@ struct AgentSessionTicket: Sendable {
     /// What `ARCH_AGENT_TICKET` carries.
     let text: String
 
-    /// A new ticket from the system's random number generator.
-    static func make() -> AgentSessionTicket? {
+    /// A new ticket for callers that require a nonoptional value.
+    static func make() -> AgentSessionTicket {
+        if let ticket = makeIfPossible() { return ticket }
+        var bytes = [UInt8](repeating: 0, count: 32)
+        bytes.withUnsafeMutableBytes { buffer in
+            arc4random_buf(buffer.baseAddress, buffer.count)
+        }
+        return AgentSessionTicket(bytes: bytes)
+    }
+
+    /// A new ticket from Security's random number generator, or nil if it fails.
+    static func makeIfPossible() -> AgentSessionTicket? {
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         guard status == errSecSuccess else { return nil }
-        return AgentSessionTicket(text: Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: ""))
+        return AgentSessionTicket(bytes: bytes)
+    }
+
+    private init(bytes: [UInt8]) {
+        text = Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 
     /// Whether a presented ticket is this one. It takes the same time wherever the two differ.
