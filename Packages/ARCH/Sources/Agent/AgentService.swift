@@ -1,4 +1,9 @@
-// The agents' service in the app (docs/agents.md, Local control channel; Outside clients: identity, grants, revocation; Sealed settings; In the browser; Approval interface): it owns `agent.json`, the activity log, the grants, the in-app sessions, the cards that wait for the user, the agent panel's model, and the control endpoint, which listens only while Allow Outside Clients is on or an in-app session needs it. It answers `hello`, binds a session's `arch-mcp` by its ticket, asks for a grant at an outside client's first tool call, runs calls through the tool host, starts sessions for the user and for clients with the Start Agent Tasks scope, and ends a grant's connections when the grant is revoked, released, or expires. A revocation, expiry, Stop All Agents, a client's Stop, the client leaving, and quit end the cards they concern as denied, and all but quit cancel the outside clients' calls they concern that still run. A call that answers `approvalPending` records its entry and step when it ends. Every decision about a call is made here and in the tool host, never in `arch-cli` or `arch-mcp`.
+// The app's agent service owns `agent.json`, activity, grants, in-app sessions, pending cards, the panel model, and the local control endpoint (docs/agents.md).
+// The endpoint listens only while outside clients are allowed or an in-app session needs it. The service answers `hello` and binds a session's `arch-mcp` by its ticket.
+// It asks for a grant on an outside client's first tool call, sends calls to the tool host, and starts user sessions or client sessions with Start Agent Tasks.
+// A revoked, released, or expired grant loses its connections. Those events, Stop All Agents, a client's Stop or exit, and quit deny the cards they concern.
+// All but quit also cancel the outside client's running calls they concern. A call that answers `approvalPending` records its entry and step when it ends.
+// The service and tool host decide every call. `arch-cli` and `arch-mcp` make no access decision.
 import AgentControl
 import AI
 import AppKit

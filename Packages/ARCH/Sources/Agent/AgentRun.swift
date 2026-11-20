@@ -1,4 +1,6 @@
-// The agent run's plain values (`docs/hooks.md`, Agent run API): what a caller asks of one agent run, what its grant allows, and what the run returns. Hooks keep the options and grants in `hooks.json`, and scripts and outside programs send the options as JSON. `AgentRunner` (VII.27) runs them; nothing here runs an agent.
+// Plain values for a bounded agent run (`docs/hooks.md`, Agent run API).
+// They describe the caller's request, the grant's limits, and the result. Hooks store options and grants in `hooks.json`.
+// Scripts and outside programs send options as JSON. `AgentRunner` (VII.27) runs them; this file runs no agent.
 import AgentControl
 import AI
 import Foundation

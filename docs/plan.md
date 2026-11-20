@@ -1189,11 +1189,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.15 Packages/ARCH/Sources/Agent/AgentPolicy.swift
     - Split the policy overview into short sentences.
-  - [ ] E1.16 Packages/ARCH/Sources/Agent/AgentRun.swift
-  - [ ] E1.17 Packages/ARCH/Sources/Agent/AgentRunner.swift
-  - [ ] E1.18 Packages/ARCH/Sources/Agent/AgentService.swift
-  - [ ] E1.19 Packages/ARCH/Sources/Agent/AgentSessionTicket.swift
-  - [ ] E1.20 Packages/ARCH/Sources/Agent/AgentSettings.swift
+  - [x] E1.16 Packages/ARCH/Sources/Agent/AgentRun.swift
+    - Split the value types' header into short sentences.
+  - [x] E1.17 Packages/ARCH/Sources/Agent/AgentRunner.swift
+    - ok
+  - [x] E1.18 Packages/ARCH/Sources/Agent/AgentService.swift
+    - Split the service overview into short sentences.
+  - [x] E1.19 Packages/ARCH/Sources/Agent/AgentSessionTicket.swift
+    - Split the ticket rules into short sentences.
+  - [x] E1.20 Packages/ARCH/Sources/Agent/AgentSettings.swift
+    - Shortened the settings file overview.
   - [ ] E1.21 Packages/ARCH/Sources/Agent/AgentToolHost.swift
   - [ ] E1.22 Packages/ARCH/Sources/Agent/AgentTranscript.swift
   - [ ] E1.23 Packages/ARCH/Sources/Agent/AgentUserTools.swift

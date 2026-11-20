@@ -1,4 +1,6 @@
-// An in-app session's ticket (docs/agents.md, In-app sessions: tickets): 32 random bytes, base64url-encoded, that reach the session's `arch-mcp --session` through the CLI's MCP configuration. Arch binds a connection to the session only when the ticket matches in a constant-time comparison and the session's running CLI process is an ancestor of the peer, by process ID and start time, so a ticket read from another process's environment binds nothing. The ticket dies with the session.
+// An in-app session's ticket has 32 random bytes encoded as base64url (docs/agents.md, In-app sessions: tickets).
+// The CLI's MCP configuration passes it to `arch-mcp --session`. Arch compares it in constant time and binds the connection only if the session's running CLI process is an ancestor of the peer.
+// The ancestor check uses process ID and start time, so a ticket copied from another process's environment binds nothing. The ticket dies with the session.
 import Darwin
 import Foundation
 import Security

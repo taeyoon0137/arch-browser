@@ -1,4 +1,5 @@
-// What `agent.json` keeps (docs/agents.md, Storage; Outside clients: identity, grants, revocation): Settings ▸ AI ▸ Agents, the grants that outlive a launch, and the Agents Persona's ID. Grants until Arch quits stay in memory. The file holds no secrets and is sealed (`AgentSettingsFile`).
+// `agent.json` holds Settings ▸ AI ▸ Agents, grants that outlive a launch, and the Agents Persona's ID (docs/agents.md, Storage).
+// Grants that last only until Arch quits remain in memory. The file holds no secrets and is sealed by `AgentSettingsFile`.
 import AgentControl
 import Foundation
 
