@@ -1087,7 +1087,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
 - [ ] D1. List: `ls docs/*.md resources/README.preset.md`. For each document, section by section (level-2 and level-3 headings): check every concrete claim (a type, function, file, key, menu title, number, default, or behavior) against the code on this branch with `grep`; where the document is wrong or stale, fix the document, never the code; where a claim cannot be checked without the running app, leave it. Do not rewrite style. Escape placeholders as AGENTS.md says and run `./scripts/check_markdown.py`. For `resources/README.preset.md`, also run `./scripts/readme_update.sh` and stage the regenerated files. Under the sub-step write how many claims were fixed. One commit per document: `Docs: Correct <document> against the code`.
   - [x] D1.1 docs/agent-panel-design.md
     - Corrected 4 stale claims about proposal status, destination naming, and the table's time frame.
-  - [ ] D1.2 docs/agents.md
+  - [x] D1.2 docs/agents.md
+    - Corrected 1 stale claim about agent menu availability without a model.
   - [ ] D1.3 docs/ai.md
   - [ ] D1.4 docs/bookmarks.md
   - [ ] D1.5 docs/engine-protocol.md
