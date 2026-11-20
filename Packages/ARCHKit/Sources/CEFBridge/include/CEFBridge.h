@@ -375,7 +375,11 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserRunLeavePageDialogWithCompletion:(void (^)(BOOL leave))completion;
 /// The page's dialogs no longer apply, as after a navigation. Sheets still open for them should close.
 - (void)cefBrowserDidResetDialogs;
-/// Asks the app to show its own panel for a file chooser that CEF gives this browser: its page's file input, or another chooser, such as a download's Save As. CEF shows none of its own. CEF names no frame, and it also gives a browser the choosers of views without a browser of their own, such as an extension's popup or docked DevTools, from the same window or the focused browser. `acceptedTypes` are the lowercase MIME types and dotted extensions the page accepts, empty for any file; `defaultPath` is the suggested path, often only a file name, or empty; `pageURL` is the address the main frame committed, not one it is still loading. Call `completion` once with the chosen paths, or with nil or an empty array to cancel; CEF cancels the chooser if the block is released unanswered.
+/// Asks the app to show its panel for a file chooser CEF gives this browser, such as a page file input or a download's Save As. CEF shows no panel of its own.
+/// CEF names no frame. It may also give this browser a chooser from a view without its own browser, such as an extension popup or docked DevTools, in the same window or the focused browser.
+/// `acceptedTypes` holds lowercase MIME types and dotted extensions the page accepts, or is empty for any file.
+/// `defaultPath` is the suggested path, often only a file name, or empty. `pageURL` is the main frame's committed address, not a pending navigation address.
+/// Call `completion` once with chosen paths, or nil or an empty array to cancel. CEF cancels if the block is released unanswered.
 - (void)cefBrowserRunFileChooser:(ARCHCEFFileChooserMode)mode
                       defaultPath:(NSString *)defaultPath
                     acceptedTypes:(NSArray<NSString *> *)acceptedTypes

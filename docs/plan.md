@@ -1479,11 +1479,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.160 Packages/ARCHKit/Sources/CEFBridge/CEFBridgeBrowser.mm
     - Split the file chooser contract into short sentences.
-  - [ ] E1.161 Packages/ARCHKit/Sources/CEFBridge/include/CEFBridge.h
-  - [ ] E1.162 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitFileChooserTests.swift
-  - [ ] E1.163 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitWebContentsTests.swift
-  - [ ] E1.164 docs/agent-panel-design.md
-  - [ ] E1.165 docs/agents.md
+  - [x] E1.161 Packages/ARCHKit/Sources/CEFBridge/include/CEFBridge.h
+    - Split the file chooser contract into short sentences.
+  - [x] E1.162 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitFileChooserTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.163 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitWebContentsTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.164 docs/agent-panel-design.md
+    - ok
+  - [x] E1.165 docs/agents.md
+    - Used American spelling in prose while retaining code names.
   - [ ] E1.166 docs/ai.md
   - [ ] E1.167 docs/bookmarks.md
   - [ ] E1.168 docs/engine-protocol.md
