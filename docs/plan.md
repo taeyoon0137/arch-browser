@@ -1449,11 +1449,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - blocked: The week-queue rule forbids changes under a Tests folder.
   - [x] E1.145 Packages/ARCH/Tests/PluginsTests/PluginsTests.swift
     - blocked: The week-queue rule forbids changes under a Tests folder.
-  - [ ] E1.146 Packages/ARCH/Tests/PluginsTests/ScriptPluginTests.swift
-  - [ ] E1.147 Packages/ARCH/Tests/PreferencesTests/AgentHooksSummaryTests.swift
-  - [ ] E1.148 Packages/ARCHApp/Sources/Arch/AppDelegate.swift
-  - [ ] E1.149 Packages/ARCHApp/Sources/Arch/PluginsMenu.swift
-  - [ ] E1.150 Packages/ARCHApp/Sources/ArchCLI/CLICommands.swift
+  - [x] E1.146 Packages/ARCH/Tests/PluginsTests/ScriptPluginTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.147 Packages/ARCH/Tests/PreferencesTests/AgentHooksSummaryTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.148 Packages/ARCHApp/Sources/Arch/AppDelegate.swift
+    - Split the app and menu validation overviews into short sentences.
+  - [x] E1.149 Packages/ARCHApp/Sources/Arch/PluginsMenu.swift
+    - Split the menu overview into short sentences.
+  - [x] E1.150 Packages/ARCHApp/Sources/ArchCLI/CLICommands.swift
+    - Split the CLI command and output rules into short sentences.
   - [ ] E1.151 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
   - [ ] E1.152 Packages/ARCHKit/Sources/ARCHEngine/EnginePageScript.swift
   - [ ] E1.153 Packages/ARCHKit/Sources/ARCHEngine/EngineWebContents.swift

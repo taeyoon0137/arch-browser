@@ -1,4 +1,5 @@
-// Registers the engines, creates the browser session, which opens the browser windows, the agents' service, and the hook registry, and connects the menu bar to them.
+// Registers the engines and creates the browser session, agent service, and hook registry.
+// The session opens browser windows. The menu bar connects to these parts.
 import Agent
 import AI
 import AppKit
@@ -799,7 +800,14 @@ import Terminal
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them, or the key window of floating tools, which the Developer menu then acts on. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front, no prompt waiting on its tab, and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Toggles name what they will do. Page commands check the active window and sidebar commands the last main window.
+    /// Validates menu commands against the current page and window.
+    /// The Appearance checkmark follows the stored value, which Settings can change. Only an app bundle can become the default browser.
+    /// Developer tools need a capable engine or a floating tools window, which the Developer menu then controls.
+    /// Zoom and capture need a selected tab uncovered by an internal page or preview.
+    /// Print needs a front page, no pending prompt on its tab, and no sheet on its window. Share needs a page.
+    /// Home needs a home page for the current space and no internal page or preview.
+    /// Split View needs a selected tab that can open as a pane and has no internal page over it.
+    /// Toggles name their next action. Page commands use the active window; sidebar commands use the last main window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let activeWindow = session?.activeWindow
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {

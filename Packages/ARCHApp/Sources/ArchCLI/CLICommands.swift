@@ -1,4 +1,11 @@
-// Handles `arch-cli`'s commands: `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, the commands that each run one tool (`open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`), `task`, `sessions`, `events`, `hooks`, `agent run`, `rename`, `--help`, and the setup commands `mcp-config`, `setup`, `links`, and `skills` (docs/agents.md, arch-cli). Sends text to standard output and each error as one sentence to standard error, with the exit code from `AgentExitCode`. A tool command prints the result's text, or its structured value with `--json`, and exits with its status's code. A step that waits for the user's approval says so on standard error and keeps calling `approval_wait` until Arch answers. `type --text -` reads the text from standard input, and `screenshot` writes its image only to a file.
+// Handles `arch-cli` commands (`docs/agents.md`, arch-cli).
+// Commands include `status`, `guide`, `tools`, `spaces`, `tabs`, `release`, `task`, `sessions`, `events`, `hooks`, `agent run`, `rename`, and `--help`.
+// Tool commands are `open`, `navigate`, `back`, `forward`, `reload`, `close`, `snapshot`, `screenshot`, `text`, `click`, `type`, `press`, `select`, `scroll`, `hover`, `wait`, `downloads`, `history`, and `call`.
+// Setup commands are `mcp-config`, `setup`, `links`, and `skills`.
+// Text goes to standard output. Errors go to standard error as one sentence, with an `AgentExitCode` exit code.
+// A tool command prints result text or a structured value with `--json`, then exits with its status code.
+// A step waiting for approval reports it on standard error and calls `approval_wait` until Arch answers.
+// `type --text -` reads standard input. `screenshot` writes its image only to a file.
 import AgentControl
 import Foundation
 
