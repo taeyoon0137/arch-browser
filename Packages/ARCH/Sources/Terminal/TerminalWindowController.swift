@@ -1,4 +1,6 @@
-// The built-in terminal: one window with the user's login shell, where the user installs command-line AI tools and signs in to them. Closing the window or quitting the app ends the shell. Showing the terminal again after its shell ended starts a new one.
+// The built-in terminal opens the user's login shell in one window.
+// The user can install command-line AI tools and sign in to them there.
+// Closing the window or quitting Arch ends the shell. Showing the terminal again starts a new shell.
 import AppKit
 
 public final class TerminalWindowController: NSWindowController, NSWindowDelegate {

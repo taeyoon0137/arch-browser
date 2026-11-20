@@ -1379,11 +1379,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the website settings overview into short sentences.
   - [x] E1.110 Packages/ARCH/Sources/Sync/SyncController.swift
     - ok
-  - [ ] E1.111 Packages/ARCH/Sources/Terminal/TerminalView.swift
-  - [ ] E1.112 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
-  - [ ] E1.113 Packages/ARCH/Tests/AITests/AgentSessionTests.swift
-  - [ ] E1.114 Packages/ARCH/Tests/AgentControlTests/CommandLineTests.swift
-  - [ ] E1.115 Packages/ARCH/Tests/AgentControlTests/HarnessTests.swift
+  - [x] E1.111 Packages/ARCH/Sources/Terminal/TerminalView.swift
+    - Split the terminal view overview into short sentences.
+  - [x] E1.112 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
+    - Split the terminal window overview into short sentences.
+  - [x] E1.113 Packages/ARCH/Tests/AITests/AgentSessionTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.114 Packages/ARCH/Tests/AgentControlTests/CommandLineTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.115 Packages/ARCH/Tests/AgentControlTests/HarnessTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
   - [ ] E1.116 Packages/ARCH/Tests/AgentTests/AgentRunnerTests.swift
   - [ ] E1.117 Packages/ARCH/Tests/AgentTests/ApprovalTests.swift
   - [ ] E1.118 Packages/ARCH/Tests/AgentTests/GrantTests.swift
