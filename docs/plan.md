@@ -848,11 +848,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
   - [x] B2.5 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
     - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
-  - [ ] B2.6 Packages/ARCH/Sources/Import/BrowserSource.swift
-  - [ ] B2.7 Packages/ARCH/Sources/Import/ChromiumProfile.swift
-  - [ ] B2.8 Packages/ARCH/Sources/Import/DatabaseCopy.swift
-  - [ ] B2.9 Packages/ARCH/Sources/Import/HistoryDatabase.swift
-  - [ ] B2.10 Packages/ARCH/Sources/Import/ImportController.swift
+  - [x] B2.6 Packages/ARCH/Sources/Import/BrowserSource.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.7 Packages/ARCH/Sources/Import/ChromiumProfile.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.8 Packages/ARCH/Sources/Import/DatabaseCopy.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.9 Packages/ARCH/Sources/Import/HistoryDatabase.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.10 Packages/ARCH/Sources/Import/ImportController.swift
+    - changed: 0; no unguarded array index or removal on stored data.
   - [ ] B2.11 Packages/ARCH/Sources/Import/ImportedBrowser.swift
   - [ ] B2.12 Packages/ARCH/Sources/Import/ImportedFile.swift
   - [ ] B2.13 Packages/ARCH/Sources/Import/SearchKeywords.swift
