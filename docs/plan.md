@@ -985,11 +985,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] C1.35 Packages/ARCH/Sources/Browsing/PromptFocusGuard.swift
     - ok
-  - [ ] C1.36 Packages/ARCH/Sources/Browsing/PromptGlyphTile.swift
-  - [ ] C1.37 Packages/ARCH/Sources/Browsing/PromptIdentityRow.swift
-  - [ ] C1.38 Packages/ARCH/Sources/Browsing/PromptNoteList.swift
-  - [ ] C1.39 Packages/ARCH/Sources/Browsing/PromptScrim.swift
-  - [ ] C1.40 Packages/ARCH/Sources/Browsing/SidebarBottomBar.swift
+  - [x] C1.36 Packages/ARCH/Sources/Browsing/PromptGlyphTile.swift
+    - ok
+  - [x] C1.37 Packages/ARCH/Sources/Browsing/PromptIdentityRow.swift
+    - ok
+  - [x] C1.38 Packages/ARCH/Sources/Browsing/PromptNoteList.swift
+    - ok
+  - [x] C1.39 Packages/ARCH/Sources/Browsing/PromptScrim.swift
+    - ok
+  - [x] C1.40 Packages/ARCH/Sources/Browsing/SidebarBottomBar.swift
+    - ok
   - [ ] C1.41 Packages/ARCH/Sources/Browsing/SidebarDragAndDrop.swift
   - [ ] C1.42 Packages/ARCH/Sources/Browsing/SidebarDragState.swift
   - [ ] C1.43 Packages/ARCH/Sources/Browsing/SidebarView.swift
