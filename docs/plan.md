@@ -935,11 +935,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Hid the decorative client symbol and truncated long client labels.
   - [x] C1.10 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
     - ok
-  - [ ] C1.11 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
-  - [ ] C1.12 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
-  - [ ] C1.13 Packages/ARCH/Sources/Browsing/CaptureRegionOverlay.swift
-  - [ ] C1.14 Packages/ARCH/Sources/Browsing/CommandPaletteView.swift
-  - [ ] C1.15 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
+  - [x] C1.11 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
+    - ok
+  - [x] C1.12 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
+    - Hid the decorative crash symbol.
+  - [x] C1.13 Packages/ARCH/Sources/Browsing/CaptureRegionOverlay.swift
+    - ok
+  - [x] C1.14 Packages/ARCH/Sources/Browsing/CommandPaletteView.swift
+    - Hid decorative palette symbols and truncated long titles.
+  - [x] C1.15 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
+    - Named the developer tools resize handle for accessibility.
   - [ ] C1.16 Packages/ARCH/Sources/Browsing/DownloadsView.swift
   - [ ] C1.17 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
   - [ ] C1.18 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift

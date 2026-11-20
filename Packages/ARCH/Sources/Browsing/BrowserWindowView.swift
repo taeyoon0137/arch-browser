@@ -384,6 +384,7 @@ struct PageCrashNoticeView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 30))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Text("This page stopped working")
                     .font(.system(size: 15, weight: .semibold))
                 Text("Reload to open it again.")

@@ -237,6 +237,7 @@ struct CommandPaletteView: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
+                    .accessibilityHidden(true)
                 if let argumentCommand {
                     Text(argumentCommand.item.title)
                         .font(.system(size: 13, weight: .medium))
@@ -585,9 +586,11 @@ struct PaletteRow: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 15, weight: isPrimary ? .medium : .regular))
+                    .truncationMode(title.contains("://") ? .middle : .tail)
                 if let subtitle {
                     Text(subtitle)
                         .font(.system(size: 12))
@@ -624,6 +627,7 @@ struct PaletteTabRow: View {
             Text(tab.shownTitle)
                 .font(.system(size: 15))
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 0)
             Text("Switch to Tab")
                 .font(.system(size: 12))

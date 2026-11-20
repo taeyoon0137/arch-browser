@@ -344,6 +344,7 @@ private struct DevToolsResizeHandle: View {
     var body: some View {
         Color.clear
             .contentShape(Rectangle())
+            .accessibilityLabel("Resize Developer Tools")
             .onHover { isInside in
                 guard isInside != hasPushedCursor else { return }
                 hasPushedCursor = isInside
