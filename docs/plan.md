@@ -1840,11 +1840,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - ok
   - [x] X1.r2.20 91040057 Docs: Say what each file and type is for (part 20)
     - ok
-  - [ ] X1.r2.21 ef1747de Docs: Say what each file and type is for (part 21)
-  - [ ] X1.r2.22 37b453d1 Docs: Say what each file and type is for (part 22)
-  - [ ] X1.r2.23 59fad810 Docs: Say what each file and type is for (part 23)
-  - [ ] X1.r2.24 29078c09 Refactor: Remove private code that nothing calls
-  - [ ] X1.r2.25 8ebc3c0f Fix: Keep unexpected data from stopping the app
+  - [x] X1.r2.21 ef1747de Docs: Say what each file and type is for (part 21)
+    - The fetch refusal code in this comment commit is the security fix for X1.r1.3; X6.r1.D1 corrected the follow-up documentation. The mixed purpose is recorded without rewriting history.
+  - [x] X1.r2.22 37b453d1 Docs: Say what each file and type is for (part 22)
+    - ok
+  - [x] X1.r2.23 59fad810 Docs: Say what each file and type is for (part 23)
+    - ok
+  - [x] X1.r2.24 29078c09 Refactor: Remove private code that nothing calls
+    - ok
+  - [x] X1.r2.25 8ebc3c0f Fix: Keep unexpected data from stopping the app
+    - ok
   - [ ] X1.r2.26 00f2189e Fix: Label controls for VoiceOver and build views from the shared parts
   - [ ] X1.r2.27 de832047 Docs: Correct agent comments against the code
 - [x] X2. Documentation comments: List `grep -rLE '^// ' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift'` (files without a header comment) and files where a `public` or `internal` type has no `///` comment. For each, add a header comment that says what the file holds and a `///` sentence for each type and non-trivial function, stating what it does and any rule it keeps, from reading the code; never guess. Subject: `Docs: Say what each file and type is for`.
