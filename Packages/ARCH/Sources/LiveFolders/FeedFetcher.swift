@@ -14,12 +14,14 @@ public struct FeedValidators: Codable, Hashable, Sendable {
     }
 }
 
+/// A parsed feed with validators or an unchanged response.
 public enum FeedFetchResult: Equatable, Sendable {
     /// 304: the items stay as they are.
     case notModified
     case fetched(Feed, FeedValidators)
 }
 
+/// Fetches HTTPS feeds without browser cookies, cache, or stored credentials.
 public final class FeedFetcher: Sendable {
     public static let timeLimit: TimeInterval = 30
     public static let sizeLimit = 5 * 1_024 * 1_024
@@ -111,6 +113,7 @@ public final class FeedFetcher: Sendable {
         return FeedDate.rfc822(value)
     }
 
+    /// Converts URL loading failures into the live folder's network errors.
     private static func liveFolderError(_ error: URLError) -> any Error {
         switch error.code {
         case .notConnectedToInternet, .networkConnectionLost: return LiveFolderError.offline

@@ -1981,11 +1981,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.90 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.91 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
-  - [ ] X2.r1.92 Packages/ARCH/Sources/LiveFolders/FeedFetcher.swift
-  - [ ] X2.r1.93 Packages/ARCH/Sources/LiveFolders/FeedParser.swift
-  - [ ] X2.r1.94 Packages/ARCH/Sources/LiveFolders/GitHubCLI.swift
-  - [ ] X2.r1.95 Packages/ARCH/Sources/LiveFolders/LiveFolderReconciler.swift
+  - [x] X2.r1.91 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.92 Packages/ARCH/Sources/LiveFolders/FeedFetcher.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.93 Packages/ARCH/Sources/LiveFolders/FeedParser.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.94 Packages/ARCH/Sources/LiveFolders/GitHubCLI.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.95 Packages/ARCH/Sources/LiveFolders/LiveFolderReconciler.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.96 Packages/ARCH/Sources/LiveFolders/LiveFolderSchedule.swift
   - [ ] X2.r1.97 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
   - [ ] X2.r1.98 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
