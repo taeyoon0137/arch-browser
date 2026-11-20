@@ -1,4 +1,7 @@
-// The session as the host of its Personas' web extensions: it starts their profiles in the engines, opens, selects, and closes tabs for them, opens windows for them, shows their popups in its windows and their questions as cards over their tabs, starts the store install that the store's own install button asks for, and reports its windows to them. Arch's tabs live in spaces, which main windows show, so each space of a Persona is a window to its extensions: its tabs in sidebar order, the favorites' tabs that a window shows on it first, and its active tab, the one a main window shows there or else the one selected last. Each small window is a window of its own with its one tab. The window that last became main has the focused one.
+// The session hosts web extensions for its Personas. It starts engine profiles and opens, selects, and closes their tabs and windows.
+// It shows popups in windows, questions as cards over tabs, and store-install review for a store button. It reports Arch windows to extensions.
+// Each space is one extension window: favorites shown in a main window come first, followed by its tabs in sidebar order. Its active tab is the one shown there or last selected.
+// Each small window reports its single tab as its own window. The last window to become main is focused.
 import AppKit
 import ARCHEngine
 import Combine

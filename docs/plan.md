@@ -1269,11 +1269,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Clarified that a plugin panel can open in the sidebar.
   - [x] E1.55 Packages/ARCH/Sources/Browsing/PromptCard.swift
     - Split the prompt-card overview into short sentences.
-  - [ ] E1.56 Packages/ARCH/Sources/Browsing/PromptState.swift
-  - [ ] E1.57 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift
-  - [ ] E1.58 Packages/ARCH/Sources/Browsing/SessionWebExtensionHost.swift
-  - [ ] E1.59 Packages/ARCH/Sources/Browsing/SidebarDragState.swift
-  - [ ] E1.60 Packages/ARCH/Sources/Browsing/SidebarView.swift
+  - [x] E1.56 Packages/ARCH/Sources/Browsing/PromptState.swift
+    - Split the prompt-state overview into short sentences.
+  - [x] E1.57 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift
+    - Split the plugin-host overview into short sentences.
+  - [x] E1.58 Packages/ARCH/Sources/Browsing/SessionWebExtensionHost.swift
+    - Split the extension-host overview into short sentences.
+  - [x] E1.59 Packages/ARCH/Sources/Browsing/SidebarDragState.swift
+    - Split the sidebar-drag overview into short sentences.
+  - [x] E1.60 Packages/ARCH/Sources/Browsing/SidebarView.swift
+    - Split the sidebar-frame overview into short sentences.
   - [ ] E1.61 Packages/ARCH/Sources/Browsing/SiteSettingsParts.swift
   - [ ] E1.62 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
   - [ ] E1.63 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift

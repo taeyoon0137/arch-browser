@@ -1,4 +1,5 @@
-// The sidebar's frame: its column, which the library pushes aside, the top row with the sidebar and navigation buttons, the swipe between space pages, the resize handle along its trailing edge, the fills of its controls, and the environment values its views share. `BrowserWindowView` places it in the window, docked or floating as a card.
+// The sidebar frame holds its column, top navigation row, space-page swipe, trailing resize handle, control fills, and shared environment values.
+// The library pushes the column aside. `BrowserWindowView` places the sidebar in a window, docked or floating as a card.
 import AppKit
 import SwiftUI
 

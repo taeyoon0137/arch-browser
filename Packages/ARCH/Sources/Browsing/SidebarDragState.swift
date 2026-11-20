@@ -1,4 +1,6 @@
-// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab or folder row above the sidebar and the page. Tab and folder rows start their drags in `SpaceTabsView.swift`, where a row held near the list's top or bottom scrolls it (`DragAutoScroll.swift`), favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
+// A sidebar drag tracks the lifted item, its position, and the drop target. A layer draws a lifted tab or folder row over the sidebar and page.
+// `SpaceTabsView.swift` starts tab and folder drags and scrolls a row held near an edge through `DragAutoScroll.swift`.
+// `SidebarDragAndDrop.swift` starts favorite and space-symbol drags. `SplitView.swift` finds a dragged tab's place in the page area.
 import SwiftUI
 
 /// What a drag in the sidebar lifts.

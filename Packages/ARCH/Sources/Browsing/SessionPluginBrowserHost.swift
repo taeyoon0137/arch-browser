@@ -1,4 +1,6 @@
-// The session's side of the tab calls of plugins and hook scripts (`docs/plugins.md`, Manager, runtimes, and the browser host): every Persona's open tabs as plugins see them, never agent tabs, suggested names under the AI hooks' rules (`docs/hooks.md`, hook decision 13), whose events carry the caller's cause, and the tabs' pages for plugins' page calls. One host serves every Persona's plugin manager and the JavaScript hook runner.
+// The session serves tab and page calls from plugins and hook scripts (`docs/plugins.md`, Manager, runtimes, and the browser host).
+// It lists each Persona's open tabs as plugins see them, omitting agent tabs. Suggested names follow AI hook rules (`docs/hooks.md`, hook decision 13), and their events name the caller's cause.
+// It also gives plugins access to tabs' pages. One host serves every Persona's plugin manager and the JavaScript hook runner.
 import ARCHEngine
 import Events
 import Foundation
