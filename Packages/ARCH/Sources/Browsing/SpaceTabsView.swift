@@ -554,6 +554,7 @@ struct SpaceHeaderView: View {
     @FocusState private var isNameFocused: Bool
     @State private var isMenuHovering = false
     @Environment(\.spaceTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         nameRow
@@ -569,6 +570,7 @@ struct SpaceHeaderView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(theme.symbolColor(for: space.tint))
                 .frame(width: 18)
+                .accessibilityHidden(true)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 if let personaName = session.displayedName(ofPersona: space.resolvedPersonaID) {
                     Text(personaName)
@@ -593,7 +595,7 @@ struct SpaceHeaderView: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 26, height: 22)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isMenuHovering ? 0.08 : 0)))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isMenuHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
                     .contentShape(Rectangle())
             }
             .menuStyle(.button)

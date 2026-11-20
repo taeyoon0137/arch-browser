@@ -142,6 +142,8 @@ private struct TabCloseLogView: View {
                     .width(min: 60, ideal: 70)
                     TableColumn("Title") { entry in
                         Text(entry.title)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                             .help(entry.title)
                     }
                     TableColumn("Address") { entry in

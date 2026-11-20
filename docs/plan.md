@@ -1005,11 +1005,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Labeled controls whose visual labels are hidden.
   - [x] C1.45 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
     - Hid the decorative site symbol and used the sidebar hover fill.
-  - [ ] C1.46 Packages/ARCH/Sources/Browsing/SpaceSwipeView.swift
-  - [ ] C1.47 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift
-  - [ ] C1.48 Packages/ARCH/Sources/Browsing/SpaceTheme.swift
-  - [ ] C1.49 Packages/ARCH/Sources/Browsing/SplitView.swift
-  - [ ] C1.50 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+  - [x] C1.46 Packages/ARCH/Sources/Browsing/SpaceSwipeView.swift
+    - ok
+  - [x] C1.47 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift
+    - Hid the decorative space symbol and used the sidebar hover fill.
+  - [x] C1.48 Packages/ARCH/Sources/Browsing/SpaceTheme.swift
+    - ok
+  - [x] C1.49 Packages/ARCH/Sources/Browsing/SplitView.swift
+    - Hid a decorative pane symbol and truncated its tab title.
+  - [x] C1.50 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+    - Truncated long titles in the closed-tab table.
   - [ ] C1.51 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
   - [ ] C1.52 Packages/ARCH/Sources/Browsing/TabPromptIndicator.swift
   - [ ] C1.53 Packages/ARCH/Sources/Browsing/TabRowView.swift
