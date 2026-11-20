@@ -1399,11 +1399,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - blocked: The week-queue rule forbids changes under a Tests folder.
   - [x] E1.120 Packages/ARCH/Tests/AgentTests/OutsideHooksTests.swift
     - blocked: The week-queue rule forbids changes under a Tests folder.
-  - [ ] E1.121 Packages/ARCH/Tests/AgentTests/OutsideRunsTests.swift
-  - [ ] E1.122 Packages/ARCH/Tests/AgentTests/PolicyTests.swift
-  - [ ] E1.123 Packages/ARCH/Tests/AgentTests/SealTests.swift
-  - [ ] E1.124 Packages/ARCH/Tests/AgentTests/ShellHookTicketTests.swift
-  - [ ] E1.125 Packages/ARCH/Tests/BrowsingTests/AgentTabTests.swift
+  - [x] E1.121 Packages/ARCH/Tests/AgentTests/OutsideRunsTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.122 Packages/ARCH/Tests/AgentTests/PolicyTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.123 Packages/ARCH/Tests/AgentTests/SealTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.124 Packages/ARCH/Tests/AgentTests/ShellHookTicketTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.125 Packages/ARCH/Tests/BrowsingTests/AgentTabTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
   - [ ] E1.126 Packages/ARCH/Tests/BrowsingTests/BrowserEventSourceTests.swift
   - [ ] E1.127 Packages/ARCH/Tests/BrowsingTests/DragAutoScrollTests.swift
   - [ ] E1.128 Packages/ARCH/Tests/BrowsingTests/ExtensionPageTitleTests.swift
