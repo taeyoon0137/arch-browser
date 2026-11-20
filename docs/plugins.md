@@ -1305,6 +1305,7 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 
 - Isolation on Chromium: plugin page scripts share the page's main world until a CEF patch adds isolated worlds. The alternative is to run plugin page scripts on WebKit tabs only.
 - Sandbox for script plugins: a hidden `WKWebView` per running plugin costs a web content process each. JavaScriptCore in the app process would cost less. It provides no process isolation, and its execution time limit is private API.
+  - Decided in X5: keep the hidden WKWebView sandbox so each running plugin has process isolation.
 - One extension, two runtimes: each engine keeps its own copy of an extension's state and storage, so the user may unlock a password manager once per engine.
 - Engine versions by name: without a shared `key`, two packages match only by name and a matching developer field, which a package can copy, as it can copy a `key`. The review's choice, which starts on joining only for packages whose checks complement each other, and Separate Versions are the safeguards. Whether a matching name alone should pair two packages whose manifests name no developer is open; until then the user joins them with Join With… or Install \<Engine> Version….
 - Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site must use a page script on that site.
