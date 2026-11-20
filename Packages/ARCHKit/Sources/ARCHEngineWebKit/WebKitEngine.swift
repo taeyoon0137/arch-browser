@@ -331,10 +331,20 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         return (WKWebViewConfiguration(), nil)
     }
 
-    /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller, page scripts, and web extensions, and loads the pages its opener loads: `extensionBaseURL` is the opener's.
-    init?(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
-        guard let userContent = parentConfiguration.userContentController as? WebKitUserContentController else {
-            return nil
+    /// For popups (window.open), a valid configuration keeps the opener's content controller, page scripts, and web extensions. `extensionBaseURL` is the opener's.
+    /// `makePopup` rejects an unexpected controller. Direct callers receive a fresh controller instead of trapping.
+    static func makePopup(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) -> WebKitWebContents? {
+        guard parentConfiguration.userContentController is WebKitUserContentController else { return nil }
+        return WebKitWebContents(parentConfiguration: parentConfiguration, extensionBaseURL: extensionBaseURL, context: context)
+    }
+
+    init(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
+        let userContent: WebKitUserContentController
+        if let existing = parentConfiguration.userContentController as? WebKitUserContentController {
+            userContent = existing
+        } else {
+            userContent = WebKitUserContentController()
+            parentConfiguration.userContentController = userContent
         }
         self.context = context
         self.userContent = userContent
