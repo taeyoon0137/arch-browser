@@ -1065,11 +1065,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Labeled the hidden secret field.
   - [x] C1.75 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
     - Hid the decorative downloads folder icon.
-  - [ ] C1.76 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift
-  - [ ] C1.77 Packages/ARCH/Sources/Preferences/ShortcutsSection.swift
-  - [ ] C1.78 Packages/ARCH/Sources/Preferences/SiteSearchSection.swift
-  - [ ] C1.79 Packages/ARCH/Sources/Preferences/SyncSection.swift
-  - [ ] C1.80 Packages/ARCH/Sources/Preferences/WebStoreInstallSheet.swift
+  - [x] C1.76 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift
+    - Labeled the hidden number field and stepper.
+  - [x] C1.77 Packages/ARCH/Sources/Preferences/ShortcutsSection.swift
+    - ok
+  - [x] C1.78 Packages/ARCH/Sources/Preferences/SiteSearchSection.swift
+    - ok
+  - [x] C1.79 Packages/ARCH/Sources/Preferences/SyncSection.swift
+    - ok
+  - [x] C1.80 Packages/ARCH/Sources/Preferences/WebStoreInstallSheet.swift
+    - ok
   - [ ] C1.81 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
 - [ ] C2. Menus: in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift` and every `.contextMenu` and `Menu` in `Packages/ARCH/Sources`, make titles consistent: title case; "…" (one character, never three periods) only where the command opens a sheet, panel, or dialog before acting; no trailing period; the same command has the same title everywhere (list the titles that differed under this step). `swift build`.
 - [ ] C3. **Commit** `Fix: Make menu titles consistent across the menu bar and context menus`. **Push**.

@@ -546,10 +546,13 @@ struct ScriptHookSheet: View {
             HStack(spacing: 6) {
                 TextField(title, value: value, format: .number)
                     .labelsHidden()
+                    .accessibilityLabel(title)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 64)
                 if let unit { Text(unit).foregroundStyle(.secondary) }
-                Stepper(title, value: value, in: range).labelsHidden()
+                Stepper(title, value: value, in: range)
+                    .labelsHidden()
+                    .accessibilityLabel(title)
             }
         }
     }
