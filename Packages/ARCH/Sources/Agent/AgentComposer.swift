@@ -193,6 +193,8 @@ public struct AgentComposer: View {
             Text(service.place(of: context))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
             if models.isEmpty {
                 modelSetup
             } else {
@@ -243,6 +245,7 @@ public struct AgentComposer: View {
             Text(isEnabled ? "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Button(isEnabled ? "Open Providers" : "Open Features") {
                 actions.openModelSettings(isEnabled ? .providers : .features)
             }
@@ -272,6 +275,7 @@ public struct AgentComposer: View {
                     ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
                 }
                 .labelsHidden()
+                .accessibilityLabel("Mode")
                 .controlSize(.small)
             }
             GridRow {
@@ -281,6 +285,7 @@ public struct AgentComposer: View {
                     ForEach(models, id: \.self) { Text(settings.title(of: $0)).tag(Optional($0)) }
                 }
                 .labelsHidden()
+                .accessibilityLabel("Model")
                 .controlSize(.small)
             }
             if !effortLevels.isEmpty {
@@ -291,6 +296,7 @@ public struct AgentComposer: View {
                         ForEach(effortLevels, id: \.self) { Text($0).tag(Optional($0)) }
                     }
                     .labelsHidden()
+                    .accessibilityLabel("Effort")
                     .controlSize(.small)
                 }
             }
@@ -457,6 +463,7 @@ struct AgentTabChip: View {
         HStack(spacing: 4) {
             Image(systemName: "doc.text")
                 .font(.system(size: 10))
+                .accessibilityHidden(true)
             AgentAttachmentLabel(tab: tab)
                 .font(.system(size: 11))
             Button(action: remove) {

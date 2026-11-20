@@ -915,6 +915,92 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
 #### Group C: accessibility and shared parts in every view
 
 - [ ] C1. List: `grep -rlE 'struct [A-Za-z]+: View|NSViewRepresentable|NSViewController' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift' | sort`. For each file, read it in full and fix only these, changing no behavior: (a) a `Button` or tappable view whose label is only an image gets `.accessibilityLabel` and `.help` with a short English name of its action; (b) a decorative `Image` gets `.accessibilityHidden(true)`; (c) a control under `.labelsHidden()` gets an `.accessibilityLabel`; (d) a title that can be long gets `.lineLimit(1)` with `.truncationMode(.middle)` for file names and addresses or `.tail` otherwise, and a sentence gets `.fixedSize(horizontal: false, vertical: true)`; (e) a literal color used for a hover, selected, or field fill becomes the matching `SidebarFill` case, and a row built by hand as a symbol, a label, and a control inside a popover or sheet becomes `SiteSettingsRow` in a `SiteSettingsGroup` when its sizes already match; (f) a Persona named without its space where the view knows the space becomes "Persona / Space". Write `ok` or what changed under the sub-step. Subject: `Fix: Label controls for VoiceOver and build views from the shared parts`.
+  - [x] C1.1 Packages/ARCH/Sources/Agent/AgentApprovalCard.swift
+    - ok
+  - [x] C1.2 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
+    - Labeled the close action, hid the decorative status symbol, and truncated long owner titles.
+  - [x] C1.3 Packages/ARCH/Sources/Agent/AgentComposer.swift
+    - Labeled hidden pickers, hid a decorative attachment symbol, and let guidance wrap.
+  - [x] C1.4 Packages/ARCH/Sources/Agent/AgentGrantSheet.swift
+    - Truncated the client name and executable path, with the full path in Help.
+  - [x] C1.5 Packages/ARCH/Sources/Agent/AgentHookRegistrar.swift
+    - ok
+  - [ ] C1.6 Packages/ARCH/Sources/Agent/AgentPanel.swift
+  - [ ] C1.7 Packages/ARCH/Sources/Agent/AgentPanelParts.swift
+  - [ ] C1.8 Packages/ARCH/Sources/Browsing/AddressPillView.swift
+  - [ ] C1.9 Packages/ARCH/Sources/Browsing/AgentPanelColumn.swift
+  - [ ] C1.10 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
+  - [ ] C1.11 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
+  - [ ] C1.12 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
+  - [ ] C1.13 Packages/ARCH/Sources/Browsing/CaptureRegionOverlay.swift
+  - [ ] C1.14 Packages/ARCH/Sources/Browsing/CommandPaletteView.swift
+  - [ ] C1.15 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
+  - [ ] C1.16 Packages/ARCH/Sources/Browsing/DownloadsView.swift
+  - [ ] C1.17 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
+  - [ ] C1.18 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift
+  - [ ] C1.19 Packages/ARCH/Sources/Browsing/FindBarView.swift
+  - [ ] C1.20 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
+  - [ ] C1.21 Packages/ARCH/Sources/Browsing/LibraryView.swift
+  - [ ] C1.22 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
+  - [ ] C1.23 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift
+  - [ ] C1.24 Packages/ARCH/Sources/Browsing/PageAnswerView.swift
+  - [ ] C1.25 Packages/ARCH/Sources/Browsing/PageAuthoredTextView.swift
+  - [ ] C1.26 Packages/ARCH/Sources/Browsing/PageFieldFocus.swift
+  - [ ] C1.27 Packages/ARCH/Sources/Browsing/PagePreview.swift
+  - [ ] C1.28 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
+  - [ ] C1.29 Packages/ARCH/Sources/Browsing/PageReaderPanel.swift
+  - [ ] C1.30 Packages/ARCH/Sources/Browsing/PanePromptLayer.swift
+  - [ ] C1.31 Packages/ARCH/Sources/Browsing/PluginViews.swift
+  - [ ] C1.32 Packages/ARCH/Sources/Browsing/PromptButtonRow.swift
+  - [ ] C1.33 Packages/ARCH/Sources/Browsing/PromptCard.swift
+  - [ ] C1.34 Packages/ARCH/Sources/Browsing/PromptFieldStack.swift
+  - [ ] C1.35 Packages/ARCH/Sources/Browsing/PromptFocusGuard.swift
+  - [ ] C1.36 Packages/ARCH/Sources/Browsing/PromptGlyphTile.swift
+  - [ ] C1.37 Packages/ARCH/Sources/Browsing/PromptIdentityRow.swift
+  - [ ] C1.38 Packages/ARCH/Sources/Browsing/PromptNoteList.swift
+  - [ ] C1.39 Packages/ARCH/Sources/Browsing/PromptScrim.swift
+  - [ ] C1.40 Packages/ARCH/Sources/Browsing/SidebarBottomBar.swift
+  - [ ] C1.41 Packages/ARCH/Sources/Browsing/SidebarDragAndDrop.swift
+  - [ ] C1.42 Packages/ARCH/Sources/Browsing/SidebarDragState.swift
+  - [ ] C1.43 Packages/ARCH/Sources/Browsing/SidebarView.swift
+  - [ ] C1.44 Packages/ARCH/Sources/Browsing/SiteSettingsParts.swift
+  - [ ] C1.45 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
+  - [ ] C1.46 Packages/ARCH/Sources/Browsing/SpaceSwipeView.swift
+  - [ ] C1.47 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift
+  - [ ] C1.48 Packages/ARCH/Sources/Browsing/SpaceTheme.swift
+  - [ ] C1.49 Packages/ARCH/Sources/Browsing/SplitView.swift
+  - [ ] C1.50 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+  - [ ] C1.51 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
+  - [ ] C1.52 Packages/ARCH/Sources/Browsing/TabPromptIndicator.swift
+  - [ ] C1.53 Packages/ARCH/Sources/Browsing/TabRowView.swift
+  - [ ] C1.54 Packages/ARCH/Sources/Browsing/TabSwitcherView.swift
+  - [ ] C1.55 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
+  - [ ] C1.56 Packages/ARCH/Sources/Browsing/WebExtensionActionsSection.swift
+  - [ ] C1.57 Packages/ARCH/Sources/Browsing/WindowButtonsReader.swift
+  - [ ] C1.58 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+  - [ ] C1.59 Packages/ARCH/Sources/History/HistoryWindowController.swift
+  - [ ] C1.60 Packages/ARCH/Sources/Hooks/HookProposalSheet.swift
+  - [ ] C1.61 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
+  - [ ] C1.62 Packages/ARCH/Sources/Plugins/Plugin.swift
+  - [ ] C1.63 Packages/ARCH/Sources/Plugins/PluginManager.swift
+  - [ ] C1.64 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
+  - [ ] C1.65 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
+  - [ ] C1.66 Packages/ARCH/Sources/Preferences/AICommandLineEditor.swift
+  - [ ] C1.67 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
+  - [ ] C1.68 Packages/ARCH/Sources/Preferences/AISettingsView.swift
+  - [ ] C1.69 Packages/ARCH/Sources/Preferences/AIUsageView.swift
+  - [ ] C1.70 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
+  - [ ] C1.71 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift
+  - [ ] C1.72 Packages/ARCH/Sources/Preferences/PluginComposerSheet.swift
+  - [ ] C1.73 Packages/ARCH/Sources/Preferences/PluginInstallSheet.swift
+  - [ ] C1.74 Packages/ARCH/Sources/Preferences/PluginsSection.swift
+  - [ ] C1.75 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
+  - [ ] C1.76 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift
+  - [ ] C1.77 Packages/ARCH/Sources/Preferences/ShortcutsSection.swift
+  - [ ] C1.78 Packages/ARCH/Sources/Preferences/SiteSearchSection.swift
+  - [ ] C1.79 Packages/ARCH/Sources/Preferences/SyncSection.swift
+  - [ ] C1.80 Packages/ARCH/Sources/Preferences/WebStoreInstallSheet.swift
+  - [ ] C1.81 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
 - [ ] C2. Menus: in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift` and every `.contextMenu` and `Menu` in `Packages/ARCH/Sources`, make titles consistent: title case; "…" (one character, never three periods) only where the command opens a sheet, panel, or dialog before acting; no trailing period; the same command has the same title everywhere (list the titles that differed under this step). `swift build`.
 - [ ] C3. **Commit** `Fix: Make menu titles consistent across the menu bar and context menus`. **Push**.
 - [ ] C4. **Preview** 4.

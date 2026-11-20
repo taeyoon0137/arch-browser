@@ -131,11 +131,13 @@ public struct AgentPanel: View {
                     Text(owner?.name ?? "Agent")
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
+                        .truncationMode(.tail)
                     if let owner {
                         Text("\(owner.access) \u{2014} \(owner.place)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
                 Spacer()
@@ -145,6 +147,7 @@ public struct AgentPanel: View {
                 Button(action: close) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("Close Agent Panel")
+                    .help("Close Agent Panel")
             }
             .padding(.leading, 14)
             .padding(.trailing, 8)
@@ -190,6 +193,7 @@ private struct AgentStepRow: View {
                 Image(systemName: symbol)
                     .foregroundStyle(step.status == .ok ? Color.secondary : Color.orange)
                     .font(.caption)
+                    .accessibilityHidden(true)
                 Text(step.sentence)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
