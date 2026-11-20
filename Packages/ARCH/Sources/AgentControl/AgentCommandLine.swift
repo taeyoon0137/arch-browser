@@ -1,4 +1,5 @@
-// `arch-cli`'s command table and argument parsing, and the `argv[0]` dispatch that makes the same executable `arch-mcp` (docs/agents.md, agent decision 2; arch-cli). The table also generates the `cli` guide topic and `--help`, so the three cannot drift apart. The executable in `ArchCLI` only runs what this parses.
+// `arch-cli`'s command table and argument parser also dispatch by `argv[0]`, so the same executable serves `arch-mcp` (docs/agents.md, arch-cli).
+// The table generates the `cli` guide topic and `--help`, keeping them in step. The `ArchCLI` executable runs only commands parsed here.
 import Foundation
 
 /// What the executable runs as.

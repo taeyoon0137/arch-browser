@@ -1,4 +1,5 @@
-// The control protocol's version, Arch's first message, `ready`, and the client's, `hello` (docs/agents.md, Local control channel ▸ Framing and methods). `ready`, `hello`, and its answer keep this shape in every protocol version, so that a client and an Arch of different versions can still name both versions.
+// The local control protocol starts with Arch's `ready` and the client's `hello` (docs/agents.md, Framing and methods).
+// These messages and the answer keep the same shape across protocol versions, so each side can name both versions even when they differ.
 import Foundation
 
 public enum AgentControlProtocol {

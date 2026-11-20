@@ -1199,11 +1199,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the ticket rules into short sentences.
   - [x] E1.20 Packages/ARCH/Sources/Agent/AgentSettings.swift
     - Shortened the settings file overview.
-  - [ ] E1.21 Packages/ARCH/Sources/Agent/AgentToolHost.swift
-  - [ ] E1.22 Packages/ARCH/Sources/Agent/AgentTranscript.swift
-  - [ ] E1.23 Packages/ARCH/Sources/Agent/AgentUserTools.swift
-  - [ ] E1.24 Packages/ARCH/Sources/AgentControl/AgentCommandLine.swift
-  - [ ] E1.25 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
+  - [x] E1.21 Packages/ARCH/Sources/Agent/AgentToolHost.swift
+    - Split the tool-host overview into short sentences.
+  - [x] E1.22 Packages/ARCH/Sources/Agent/AgentTranscript.swift
+    - Split the transcript overview into short sentences.
+  - [x] E1.23 Packages/ARCH/Sources/Agent/AgentUserTools.swift
+    - Split the user-tool overview and shared-tab rename rules into short sentences.
+  - [x] E1.24 Packages/ARCH/Sources/AgentControl/AgentCommandLine.swift
+    - Split the command-table overview into short sentences.
+  - [x] E1.25 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
+    - Split the protocol handshake overview into short sentences.
   - [ ] E1.26 Packages/ARCH/Sources/AgentControl/AgentHarness.swift
   - [ ] E1.27 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
   - [ ] E1.28 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift

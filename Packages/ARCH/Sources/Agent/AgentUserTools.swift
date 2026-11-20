@@ -1,4 +1,7 @@
-// The tools that wait for the user (docs/agents.md, Tools ▸ Catalog; Approval interface): `request_tab`, `ask_user`, `request_approval` (P15), and `hand_to_user`, each a card in the agent panel, an outside client's `rename_tab`, whose first rename of a tab the user shared asks on P19's card, and the cards for a download (P6), a file chooser (P7), or a link to another app (P11) that a page in an agent tab starts. The agent's words on a card are marked as the agent's, and a card whose words name a secret leads with Arch's warning. The user's answers are the user's own words and reach the agent as they are.
+// These tools wait for the user (docs/agents.md, Tools; Approval interface).
+// `request_tab`, `ask_user`, `request_approval` (P15), and `hand_to_user` show cards in the agent panel.
+// An outside client's first `rename_tab` of a shared tab asks on a P19 card. Agent-page downloads (P6), file choosers (P7), and external links (P11) also ask on cards.
+// Cards mark the agent's words as its own and warn first when those words name a secret. The user's answers reach the agent unchanged.
 import AgentControl
 import AppKit
 import ARCHEngine
@@ -133,7 +136,11 @@ extension AgentToolHost {
         }
     }
 
-    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; rule P19): its own agent tab renames freely, and a tab the user shared once the user allows it on P19's card, which is not sensitive, so Allow for This Tab asks for no Touch ID. The allowance lasts while the tab stays shared, so the client's later renames of the tab ask nothing. Any other tab is refused with P17, and a tab on a site excluded from AI with P16. A name the tab would not take, since the user named the tab or turned the name down, answers `userNamed` without a card. A name belongs to the document the tab has committed, ignoring the fragment: a tab that loads another address answers `stale`, and so does a shared tab whose document ends or that closes while its card waits, which withdraws the card. After Allow for This Tab, the call renames nothing once it was cancelled, and the tab is checked again: a tab moved into the client's own agent folder renames as its agent tabs do, and any other that left the client is refused with P17. The name's first line is trimmed and cut to 60 characters, and an empty name clears a suggested name, through `BrowserAgentHost`'s suggested names (`AgentTabNaming`) with the grant as the cause.
+    /// An outside client's `rename_tab` (`docs/hooks.md`, Tools; P19) renames its own agent tab freely. A shared tab needs one P19 card, which is not sensitive, so Allow for This Tab needs no Touch ID. That allowance lasts while the tab stays shared.
+    /// Another tab is refused with P17; an AI-excluded site is refused with P16. A user-named or declined name answers `userNamed` without a card.
+    /// A name belongs to the committed document, ignoring its fragment. Loading another address answers `stale`; a shared tab's document ending or tab closing withdraws its card and also answers `stale`.
+    /// After Allow, cancellation renames nothing. The tab is checked again: one moved into the client's agent folder follows the agent-tab rule; one that left the client is refused with P17.
+    /// The first line is trimmed to 60 characters. An empty name clears the suggestion through `BrowserAgentHost` and `AgentTabNaming`, with the grant as its cause.
     func renameTab(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let handle = arguments["tab"]?.stringValue ?? ""
         guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return Self.error("tabNotFound", "This client has no tab \(handle).") }

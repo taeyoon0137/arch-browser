@@ -1,4 +1,6 @@
-// An in-app session's conversation as the agent panel shows it (docs/agents.md, In the browser ▸ The agent panel): the user's messages, the agent's replies and thinking from the CLI's stream, one step per tool call from Arch's tool host, notices, errors with one action each, and the model and tokens under each turn. It stays in memory until the session is deleted or Arch quits. Tool steps come from the host, not from the stream, so the panel shows what Arch did.
+// The in-app conversation shown in the agent panel (docs/agents.md, The agent panel).
+// It holds user messages, CLI replies and thinking, host tool steps, notices, errors with one action, and each turn's model and tokens.
+// It remains in memory until the session is deleted or Arch quits. Tool steps come from the host, so the panel shows what Arch did.
 import AgentControl
 import AI
 import Foundation
