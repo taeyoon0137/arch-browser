@@ -1850,8 +1850,10 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - ok
   - [x] X1.r2.25 8ebc3c0f Fix: Keep unexpected data from stopping the app
     - ok
-  - [ ] X1.r2.26 00f2189e Fix: Label controls for VoiceOver and build views from the shared parts
-  - [ ] X1.r2.27 de832047 Docs: Correct agent comments against the code
+  - [x] X1.r2.26 00f2189e Fix: Label controls for VoiceOver and build views from the shared parts
+    - ok
+  - [x] X1.r2.27 de832047 Docs: Correct agent comments against the code
+    - ok
 - [x] X2. Documentation comments: List `grep -rLE '^// ' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift'` (files without a header comment) and files where a `public` or `internal` type has no `///` comment. For each, add a header comment that says what the file holds and a `///` sentence for each type and non-trivial function, stating what it does and any rule it keeps, from reading the code; never guess. Subject: `Docs: Say what each file and type is for`.
   - [x] X2.r1.1 Packages/ARCH/Sources/AI/AIAgentSession.swift
     - Added missing type and nontrivial function documentation.
