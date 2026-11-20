@@ -1,4 +1,8 @@
-// The agent panel's conversation (docs/agents.md, In the browser ▸ The agent panel): a header with the session's title, its tool and model, the mode menu that lowers the mode at once and raises it only after a confirmation, the site scope, and Stop; the transcript, with the agent's replies rendered as the page reader renders them, thinking collapsed, one row per tool step from Arch's host with a button that shows its tab, every card the session waits on (steps and addresses to allow, questions, tab-sharing requests, downloads, and links to other apps), errors with one action, and the model and tokens under each turn; the queued messages with Remove; Take Over and Hand Back; and the field for the next message, whose Send becomes Stop while a turn runs. The browser places it in the trailing column.
+// The agent panel shows an in-app session's conversation in the browser's trailing column (docs/agents.md, The agent panel).
+// Its header shows the title, tool, model, site scope, and Stop. Lowering the mode acts at once; raising it asks first.
+// The transcript shows replies as the page reader does, collapsed thinking, host tool steps with tab buttons, pending cards, errors, and each turn's model and tokens.
+// Cards cover approvals, questions, tab sharing, downloads, and external links. Queued messages have Remove.
+// Take Over and Hand Back control the session. The next-message field's Send becomes Stop while a turn runs.
 import AgentControl
 import AI
 import SwiftUI

@@ -1179,11 +1179,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the grant-sheet header into short sentences.
   - [x] E1.10 Packages/ARCH/Sources/Agent/AgentGrantState.swift
     - Split the grant-state header into short sentences.
-  - [ ] E1.11 Packages/ARCH/Sources/Agent/AgentHookCLIRun.swift
-  - [ ] E1.12 Packages/ARCH/Sources/Agent/AgentHookRegistrar.swift
-  - [ ] E1.13 Packages/ARCH/Sources/Agent/AgentPanel.swift
-  - [ ] E1.14 Packages/ARCH/Sources/Agent/AgentPanelParts.swift
-  - [ ] E1.15 Packages/ARCH/Sources/Agent/AgentPolicy.swift
+  - [x] E1.11 Packages/ARCH/Sources/Agent/AgentHookCLIRun.swift
+    - ok
+  - [x] E1.12 Packages/ARCH/Sources/Agent/AgentHookRegistrar.swift
+    - Split the outside-hook contract into short sentences.
+  - [x] E1.13 Packages/ARCH/Sources/Agent/AgentPanel.swift
+    - Split the panel overview into short sentences.
+  - [x] E1.14 Packages/ARCH/Sources/Agent/AgentPanelParts.swift
+    - ok
+  - [x] E1.15 Packages/ARCH/Sources/Agent/AgentPolicy.swift
+    - Split the policy overview into short sentences.
   - [ ] E1.16 Packages/ARCH/Sources/Agent/AgentRun.swift
   - [ ] E1.17 Packages/ARCH/Sources/Agent/AgentRunner.swift
   - [ ] E1.18 Packages/ARCH/Sources/Agent/AgentService.swift
