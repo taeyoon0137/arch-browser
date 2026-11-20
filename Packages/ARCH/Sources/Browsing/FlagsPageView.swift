@@ -2,6 +2,7 @@
 import ARCHPrivateAPI
 import SwiftUI
 
+/// An internal browser page that opens from an address.
 public enum InternalPage {
     case flags
 
@@ -26,6 +27,7 @@ public enum InternalPage {
     }
 }
 
+/// Displays the view for the selected internal page.
 struct InternalPageView: View {
     let page: InternalPage
 
@@ -90,6 +92,7 @@ struct FlagsPageView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    /// Names a private API's current availability check result.
     private func availabilityText(_ id: String) -> String {
         switch flags.availability[id] {
         case true?: return "Available"
@@ -98,12 +101,14 @@ struct FlagsPageView: View {
         }
     }
 
+    /// Summarizes a feature's active state and the private APIs it uses.
     private func featureDetail(_ feature: PrivateAPIFeature) -> String {
         let names = feature.apiIDs.map { id in flags.apis.first { $0.id == id }?.name ?? id }.joined(separator: ", ")
         return "\(flags.allows(feature.id) ? "Active" : "Inactive") · Uses \(names)"
     }
 }
 
+/// Groups private API or feature switches under a heading.
 private struct FlagsSection<Content: View>: View {
     let title: String
     let emptyText: String

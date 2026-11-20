@@ -6,6 +6,7 @@ import ARCHEngine
 import Combine
 import SwiftUI
 
+/// A dock edge for developer tools, or a separate floating window.
 public enum DevToolsSide: String, CaseIterable {
     case right, bottom, left
     /// The tools keep a window of their own.
@@ -42,6 +43,7 @@ public final class DevToolsDockSettings: ObservableObject {
     private static let widthKey = "ARCHDevToolsWidth"
     private static let heightKey = "ARCHDevToolsHeight"
 
+    /// Restores the shared dock side and dimensions from the supplied defaults.
     init(defaults: UserDefaults) {
         self.defaults = defaults
         side = defaults.string(forKey: Self.sideKey).flatMap(DevToolsSide.init(rawValue:)) ?? .right
@@ -72,6 +74,7 @@ public final class DevToolsDock: ObservableObject {
         max(0, min(room, max(minimumSize, min(saved, room - minimumPageSize))))
     }
 
+    /// Follows shared placement changes and floating tool windows.
     init(settings: DevToolsDockSettings = .shared, undockedWindows: DevToolsUndockedWindows = .shared) {
         self.settings = settings
         self.undockedWindows = undockedWindows
@@ -190,6 +193,7 @@ final class DevToolsUndockedWindows: NSObject, NSWindowDelegate {
         window.close()
     }
 
+    /// Creates and positions a floating window for a tools view.
     private func makeWindow(for devTools: any EngineDevTools) -> DevToolsWindow {
         let window = DevToolsWindow(devTools: devTools)
         if !(frameName.map { window.setFrameUsingName($0) } ?? false) { window.center() }
@@ -210,6 +214,7 @@ final class DevToolsUndockedWindows: NSObject, NSWindowDelegate {
         return false
     }
 
+    /// Saves a tools window's frame and removes it from the floating list.
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? DevToolsWindow else { return }
         saveFrame(of: window)
@@ -245,6 +250,7 @@ final class DevToolsWindow: NSWindow {
         titleObserver = titles.sink { [weak self] in self?.title = Self.title(for: $0) }
     }
 
+    /// Names the tools window, including the page title when available.
     static func title(for pageTitle: String?) -> String {
         pageTitle.map { "Developer Tools \u{2014} \($0)" } ?? "Developer Tools"
     }

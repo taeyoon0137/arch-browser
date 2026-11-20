@@ -1911,11 +1911,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.55 Packages/ARCH/Sources/Browsing/BrowserSession.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.56 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
-  - [ ] X2.r1.57 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
-  - [ ] X2.r1.58 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
-  - [ ] X2.r1.59 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
-  - [ ] X2.r1.60 Packages/ARCH/Sources/Browsing/NotificationAuthorization.swift
+  - [x] X2.r1.56 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.57 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.58 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.59 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.60 Packages/ARCH/Sources/Browsing/NotificationAuthorization.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.61 Packages/ARCH/Sources/Browsing/PageAssistant.swift
   - [ ] X2.r1.62 Packages/ARCH/Sources/Browsing/ProfileOwnership.swift
   - [ ] X2.r1.63 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift

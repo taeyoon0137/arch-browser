@@ -5,6 +5,7 @@
 import AppKit
 import SwiftUI
 
+/// Arranges the sidebar, page, panels, and transient overlays of a browser window.
 public struct BrowserWindowView: View {
     @ObservedObject var session: BrowserSession
     /// The window this view shows. Its subviews read it from the environment.
@@ -193,6 +194,7 @@ public struct BrowserWindowView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
+    /// Reveals the floating sidebar card and starts checking when it should close.
     private func peekSidebar() {
         guard !windowModel.isSidebarVisible else { return }
         peekCheck?.cancel()
@@ -203,11 +205,13 @@ public struct BrowserWindowView: View {
         scheduleCheckOfPeek()
     }
 
+    /// Remembers child windows already open before the sidebar card appears.
     private func recordChildWindows() {
         childWindowsBeforePeek = Set((windowReference.window?.childWindows ?? []).map(ObjectIdentifier.init))
     }
 
     // Check rather than track the pointer: a card sliding under it gets no hover until the pointer leaves.
+    /// Schedules another check of whether the sidebar card is still in use.
     private func scheduleCheckOfPeek() {
         let work = DispatchWorkItem { checkPeek() }
         peekCheck = work
@@ -255,6 +259,7 @@ struct WindowButtonsVisibility: NSViewRepresentable {
 
     private static let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
 
+    /// Tracks window button positions and supersedes earlier slide completions.
     final class Coordinator {
         var isHidden: Bool?
         /// The buttons' resting positions, recorded while they slide.
@@ -267,6 +272,7 @@ struct WindowButtonsVisibility: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
+    /// Moves the standard window buttons with the sidebar when their visibility changes.
     func updateNSView(_ view: NSView, context: Context) {
         let isHidden = isHidden
         let slideDistance = slideDistance
