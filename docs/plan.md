@@ -888,11 +888,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0; no unguarded array index or removal on stored data.
   - [x] B2.25 Packages/ARCH/Sources/Sync/IncomingSidebarRecords.swift
     - changed: 0; no unguarded array index or removal on stored data.
-  - [ ] B2.26 Packages/ARCH/Sources/Sync/SidebarRecords.swift
-  - [ ] B2.27 Packages/ARCH/Sources/Sync/SyncAvailability.swift
-  - [ ] B2.28 Packages/ARCH/Sources/Sync/SyncCloudKitRecords.swift
-  - [ ] B2.29 Packages/ARCH/Sources/Sync/SyncController.swift
-  - [ ] B2.30 Packages/ARCH/Sources/Sync/SyncDiff.swift
+  - [x] B2.26 Packages/ARCH/Sources/Sync/SidebarRecords.swift
+    - changed: 0; the indexed position comes from the same array or the subscript is keyed.
+  - [x] B2.27 Packages/ARCH/Sources/Sync/SyncAvailability.swift
+    - changed: 0; the indexed position comes from the same array or the subscript is keyed.
+  - [x] B2.28 Packages/ARCH/Sources/Sync/SyncCloudKitRecords.swift
+    - changed: 0; the indexed position comes from the same array or the subscript is keyed.
+  - [x] B2.29 Packages/ARCH/Sources/Sync/SyncController.swift
+    - changed: 0; the indexed position comes from the same array or the subscript is keyed.
+  - [x] B2.30 Packages/ARCH/Sources/Sync/SyncDiff.swift
+    - changed: 0; the indexed position comes from the same array or the subscript is keyed.
   - [ ] B2.31 Packages/ARCH/Sources/Sync/SyncEngineClient.swift
   - [ ] B2.32 Packages/ARCH/Sources/Sync/SyncMirror.swift
   - [ ] B2.33 Packages/ARCH/Sources/Sync/SyncOrderKeys.swift
