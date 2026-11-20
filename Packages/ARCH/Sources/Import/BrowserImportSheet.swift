@@ -245,6 +245,7 @@ struct BrowserImportSheet: View {
                     }
                     .pickerStyle(.radioGroup)
                     .labelsHidden()
+                    .accessibilityLabel("Search engine")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -258,6 +259,7 @@ struct BrowserImportSheet: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 15))
                     .frame(width: 18, height: 18)
+                    .accessibilityHidden(true)
             }
         }
     }
@@ -319,10 +321,12 @@ private struct BrowserSection: View {
                     Image(nsImage: icon)
                         .resizable()
                         .frame(width: 18, height: 18)
+                        .accessibilityHidden(true)
                 } else {
                     Image(systemName: "globe")
                         .font(.system(size: 15))
                         .frame(width: 18, height: 18)
+                        .accessibilityHidden(true)
                 }
             }
         }
@@ -353,6 +357,8 @@ private struct ProfileRow: View {
                 Toggle(isOn: choice.isIncluded) {
                     Text(profile.name)
                         .fontWeight(.medium)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 .toggleStyle(.checkbox)
                 Spacer()
@@ -363,6 +369,7 @@ private struct ProfileRow: View {
                     Text(model.title(of: .newPersona, for: profile)).tag(SidebarImport.Destination.newPersona)
                 }
                 .labelsHidden()
+                .accessibilityLabel("Persona")
                 .fixedSize()
                 .disabled(!choice.wrappedValue.isIncluded || choice.wrappedValue.parts.isDisjoint(with: [.favorites, .spaces, .bookmarkFolders]))
             }

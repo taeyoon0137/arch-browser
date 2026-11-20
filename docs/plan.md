@@ -1035,11 +1035,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Truncated long history titles and addresses.
   - [x] C1.60 Packages/ARCH/Sources/Hooks/HookProposalSheet.swift
     - Truncated the executable path and let review sentences wrap.
-  - [ ] C1.61 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
-  - [ ] C1.62 Packages/ARCH/Sources/Plugins/Plugin.swift
-  - [ ] C1.63 Packages/ARCH/Sources/Plugins/PluginManager.swift
-  - [ ] C1.64 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
-  - [ ] C1.65 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
+  - [x] C1.61 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
+    - Labeled hidden pickers, hid decorative import symbols, and truncated profile names.
+  - [x] C1.62 Packages/ARCH/Sources/Plugins/Plugin.swift
+    - ok
+  - [x] C1.63 Packages/ARCH/Sources/Plugins/PluginManager.swift
+    - ok
+  - [x] C1.64 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
+    - ok
+  - [x] C1.65 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
+    - ok
   - [ ] C1.66 Packages/ARCH/Sources/Preferences/AICommandLineEditor.swift
   - [ ] C1.67 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
   - [ ] C1.68 Packages/ARCH/Sources/Preferences/AISettingsView.swift
