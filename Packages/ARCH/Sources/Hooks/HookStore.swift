@@ -47,6 +47,7 @@ public enum HookStoreNotice: Equatable, Sendable {
     case notSaved(String)
 }
 
+/// A refusal to change hooks before their sealed settings are ready.
 public enum HookStoreError: LocalizedError {
     /// The file has not been read, or the Keychain did not give its key, so a write would replace hooks Arch has not seen.
     case notReady
@@ -57,6 +58,7 @@ public enum HookStoreError: LocalizedError {
 }
 
 @MainActor
+/// Reads and writes sealed hook settings while preserving fields from newer versions.
 public final class HookStore {
     public static let fileName = "hooks.json"
     public static let scriptsFolderName = "Hooks"
@@ -133,6 +135,7 @@ public final class HookStore {
         }
     }
 
+    /// Resets the store to default settings after a missing or set-aside file.
     private func ready(notice: HookStoreNotice?, hasFile: Bool) -> HookSettings {
         self.notice = notice
         isReady = true

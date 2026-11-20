@@ -1971,11 +1971,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.85 Packages/ARCH/Sources/Hooks/HookPresets.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.86 Packages/ARCH/Sources/Hooks/HookRegistry.swift
-  - [ ] X2.r1.87 Packages/ARCH/Sources/Hooks/HookRunLog.swift
-  - [ ] X2.r1.88 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
-  - [ ] X2.r1.89 Packages/ARCH/Sources/Hooks/HookStore.swift
-  - [ ] X2.r1.90 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
+  - [x] X2.r1.86 Packages/ARCH/Sources/Hooks/HookRegistry.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.87 Packages/ARCH/Sources/Hooks/HookRunLog.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.88 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.89 Packages/ARCH/Sources/Hooks/HookStore.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.90 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.91 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
   - [ ] X2.r1.92 Packages/ARCH/Sources/LiveFolders/FeedFetcher.swift
   - [ ] X2.r1.93 Packages/ARCH/Sources/LiveFolders/FeedParser.swift

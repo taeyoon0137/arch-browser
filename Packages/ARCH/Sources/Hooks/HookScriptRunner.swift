@@ -9,6 +9,7 @@ import Foundation
 import Plugins
 
 @MainActor
+/// Runs a JavaScript hook in a bounded plugin instance for its Persona.
 public final class HookScriptRunner: HookScriptRunning {
     /// The largest script the runner runs.
     public nonisolated static let maximumScriptSize = 256 * 1024
@@ -42,6 +43,7 @@ public final class HookScriptRunner: HookScriptRunning {
         return ScriptPlugin.syntaxError(in: source).map { "The script does not parse: \($0)." }
     }
 
+    /// Checks the script, starts or reuses an instance, and returns its listener's bounded outcome.
     public func run(_ invocation: HookInvocation) async -> HookRunOutcome {
         if !parsedDigests.contains(invocation.hook.script.digest) {
             if let problem = Self.problem(in: invocation.script) { return .failed(code: "invalidScript", message: problem) }
@@ -140,6 +142,7 @@ public final class HookScriptRunner: HookScriptRunning {
         return instance
     }
 
+    /// Builds an in-memory plugin instance and context from the checked script and hook grant.
     private func makeInstance(for invocation: HookInvocation, key: InstanceKey, configuration: Configuration) -> Instance {
         let hook = invocation.hook
         let id = HookScriptContext.pluginID(of: hook.id)
@@ -167,6 +170,7 @@ public final class HookScriptRunner: HookScriptRunning {
         if instance.isRetired { end(instance, as: nil) }
     }
 
+    /// Stops the instance assigned to this run with the given reason.
     private func end(run: UUID, as reason: Instance.EndReason) {
         guard let instance = running[run], instance.run == run else { return }
         end(instance, as: reason)
@@ -180,6 +184,7 @@ public final class HookScriptRunner: HookScriptRunning {
         Task { await instance.plugin.deactivate() }
     }
 
+    /// Removes an instance from its hook and Persona's kept pool.
     private func drop(_ instance: Instance) {
         instances[instance.key]?.removeAll { $0 === instance }
         if instances[instance.key]?.isEmpty == true { instances[instance.key] = nil }

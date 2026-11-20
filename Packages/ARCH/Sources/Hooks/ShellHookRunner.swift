@@ -194,11 +194,13 @@ public enum HookShellScript {
 
     // MARK: Files
 
+    /// Whether the path names a regular executable file.
     private static func isProgram(_ path: String) -> Bool {
         var status = stat()
         return stat(path, &status) == 0 && status.st_mode & S_IFMT == S_IFREG && access(path, X_OK) == 0
     }
 
+    /// Resolves symbolic links in an interpreter path.
     private static func realPath(of path: String) -> String? {
         guard let resolved = Darwin.realpath(path, nil) else { return nil }
         defer { free(resolved) }
@@ -265,6 +267,7 @@ private final class Locked<Value>: @unchecked Sendable {
 // MARK: - The runner
 
 @MainActor
+/// Runs a trusted shell hook with its checked interpreter, bounded process, and grant channel.
 public final class ShellHookRunner: HookScriptRunning {
     /// The end of standard error that a run's last runs keep in memory.
     public static let errorOutputLimit = 4 * 1024
@@ -293,6 +296,7 @@ public final class ShellHookRunner: HookScriptRunning {
         self.loginPath = loginPath
     }
 
+    /// Checks the interpreter, starts the script with a bounded environment and ticket, and returns its outcome.
     public func run(_ invocation: HookInvocation) async -> HookRunOutcome {
         guard case .shell(_, _, let recorded) = invocation.hook.script else { return .failed(code: "invalidScript", message: "This hook's script is not a shell script.") }
         if let problem = HookShellScript.problem(in: invocation.script) { return .failed(code: "invalidScript", message: problem) }
@@ -373,6 +377,7 @@ public final class ShellHookRunner: HookScriptRunning {
         running[run]?.cancel()
     }
 
+    /// Returns and removes the captured standard error for a run.
     public func takeErrorOutput(of run: UUID) -> String? {
         errorOutputs.removeValue(forKey: run)
     }
@@ -582,6 +587,7 @@ final class ShellHookRunTools {
         return (tab.title ?? "", document)
     }
 
+    /// Checks a run tab's document before applying or proposing its suggested name.
     private func rename(_ arguments: [String: AgentJSON]) -> AgentToolResult {
         guard let handle = arguments["tab"]?.stringValue, let name = arguments["name"]?.stringValue else {
             return AgentToolResult(status: .refused, code: "invalidArguments", text: "rename_tab needs a tab's handle and a name.")
