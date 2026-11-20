@@ -259,7 +259,7 @@ Every installed plugin has a `PluginKind`: the manager runs script plugins itsel
 
 The `ai` permission gives a plugin `PluginContext.ai()`, a client of the AI interface (`PluginAIClient`), and scripts `arch.ai.reply({instructions, messages, schema, maxOutputTokens})`, which resolves with `{text, finishReason}` or rejects with the name of a `PluginError` or `AIError` case (`docs/plugins.md`, AI hooks and plugins that AI writes), and `arch.ai.stream(request, onText)`, which calls `onText` with each piece of the reply's text as it arrives, waiting for its promise, and settles as `arch.ai.reply` does. The script fetches each piece with an `ai.next` call, which counts as a wait for Arch for the hang limit; `onText` without a function rejects with `invalidCall`, and an `onText` that throws stops the request with `ai.cancel`. Every request goes out under the plugin's own feature, `plugin.<id>`, on that feature's route, whatever feature, route, or model it names, and stops when the instance stops. It carries text and the data kinds beyond text that the plugin's `ai` lists in `permissions` as `{"ai": ["page", "selection"]}` (`PluginManifest.aiDataKinds`, which come with `ai` as `InstalledPlugin.aiDataKinds`): the feature's scope declares them, so the interface checks their parts as any feature's, and a part of another kind ends the request with `blockedByPolicy(.dataNotDeclared)` before it goes out (`PluginAIRequests`), and before it reaches the service, so it adds no entry to the service's activity, from which Settings ▸ AI ▸ Features reads a plugin's last error. A script's message is `{role, text}` or `{role, parts}` with `{type: "text", text}`, `{type: "page", url, title, text}`, and `{type: "selection", url, title, text}` parts. The install sheet and Settings ▸ Plugins state the kinds in one sentence after the permissions and before the sites (`PluginManifest.aiDataSummary`), which the review of an update marks New when it lists a kind the installed version did not, and Settings ▸ AI ▸ Features states what the feature sends, each naming the kinds as `AIDataKind.sentenceName` does, such as "the text of pages". The manager registers the feature of each enabled plugin with `ai`, named after the plugin, in the `AIService` the session gives it (`AIService.shared`). Managers of several Personas share the feature of plugins with one identifier, which stays registered while one of them has it enabled and declares the data kinds that any of them lists, while each instance's requests carry only its own plugin's kinds. A plugin with `ai` whose manifest lists events declares hooks (`InstalledPlugin.runsHooks`), which makes the feature automatic. Each of its events then posts a step to the shared hook scheduler at order 200 (`PluginManager.hookOrder`) under that feature, in place of reaching the plugin as it arrives. The scheduler runs the step only while the feature is on with a model of its own, the event's addresses are open to AI, and the budgets leave room, within its 30-second timeout and pause. The plugin's steps run one at a time (`PluginHookQueue`). Each `ai()` call, which the bridge makes as an `arch.ai.reply` or `arch.ai.stream` call arrives, gives a client bound to the step that runs then (`PluginAIRequests`), also for a command's or a page script value's request. The errors of the step's requests count toward the pause. When the scheduler stops the step, they end with `cancelled`, later ones end at once without going out, and the step's renames of its event's tab, otherwise for its event's document, return false. A panel's bridge asks for a client bound to no step and renames, closes, selects, and moves outside any step (`PluginPanelContext.panelAI()`, `panelRenameTab(_:to:)`, `panelCloseTab(_:)`, `panelSelectTab(_:)`, and `panelMoveTab(_:to:)`), since the user makes its calls there. A stop that comes while the plugin starts delivers nothing, and a step that waits in the queue holds its chain and spends its timeout. The manager and the hook registry post an event that a plugin's call caused with `plugin.<id>` among its owners. A plugin with `ai` makes no page call in a tab on a site excluded from AI and gets no page script values from a frame or a tab on such a site, no title or address from `tabs()` and `tab(_:)` of a tab whose address or committed document (`PluginTab.documentURL`, since a leaving tab keeps the page's title until the next document commits) is on such a site, and for a command none of what the user clicked on such a page and no link or image address on such a site. While a provider is connected, Settings ▸ Plugins says which models it uses, by the shared feature's trigger. Settings ▸ AI ▸ Features shows a plugin feature's last request error from the activity list. The composer refuses `ai`.
 
-The `network` permission lists HTTPS hosts in `plugin.json`; `PluginGrant` keeps those hosts, and `PluginContext.fetch(_:)` sends bounded, cookie-free requests to them through `PluginNetworkFetch`, with address checks, a redirect limit, and a per-plugin rate limit. Script plugins reach it as `arch.net.fetch`; the review and Settings name the granted hosts. A script plugin's `settingsPage` opens its package's HTML file in a 480 by 520 point sheet in Settings ▸ Plugins, with the panel sandbox and bridge. An unpaired installed script plugin or web extension can stage its package in another Persona through Install in Another Persona… and receive a fresh review there. A sidebar item with `presentation: "sidebar"` shows its script plugin panel in place of the space's tab list; back, Escape, switching spaces, or stopping the plugin returns the list. `downloads.rename` lets a plugin rename a completed download in its Persona through the existing safe filename path. The history member of `PluginContext` and changing an installed plugin with AI are not built yet, and no plugin pins or unpins tabs.
+The `network` permission lists HTTPS hosts in `plugin.json`, and `PluginGrant` keeps them. Script plugins reach `PluginContext.fetch(_:)` as `arch.net.fetch`; the review and Settings name the granted hosts. Fetch currently returns `networkUnavailable` before network I/O: `PluginNetworkFetch` checks DNS, but `URLSession` may resolve the host again for the connection. The checked address must be bound to the connection before bounded, cookie-free requests with redirect and rate limits can be enabled. A script plugin's `settingsPage` opens its package's HTML file in a 480 by 520 point sheet in Settings ▸ Plugins, with the panel sandbox and bridge. An unpaired installed script plugin or web extension can stage its package in another Persona through Install in Another Persona… and receive a fresh review there. A sidebar item with `presentation: "sidebar"` shows its script plugin panel in place of the space's tab list; back, Escape, switching spaces, or stopping the plugin returns the list. `downloads.rename` lets a plugin rename a completed download in its Persona through the existing safe filename path. The history member of `PluginContext` and changing an installed plugin with AI are not built yet, and no plugin pins or unpins tabs.
 
 ### Extensions module
 
@@ -1569,8 +1569,357 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
 
 Run rounds in order, then start again at X1 with the next round number, until `date` shows the time has come. In each round after the first, a list step lists only files changed since that step's last round (`git diff --name-only <the round's first commit>...HEAD`); if a list is empty, write `none` and go on. Number each round's sub-steps `X<n>.r<round>.<k>`.
 
-- [ ] X1. Review of the round's own work: List the commits made since the last X1 (or since G1), and check each as G1 does.
+- [x] X1. Review of the round's own work: List the commits made since the last X1 (or since G1), and check each as G1 does.
+  - [x] X1.r1.1 956463a3 Fix: Hold the user's November reports to their code paths
+    - ok
+  - [x] X1.r1.2 40d60582 Docs: Record preview 1 of the week queue
+    - ok
+  - [x] X1.r1.3 e145311e Task(V.11): Let plugins with network fetch from their listed hosts without cookies
+    - fixed: fetch now returns `networkUnavailable` before I/O; the checked DNS address still needs connection binding before enabling it.
+  - [x] X1.r1.4 dafa8423 Task(V.11): Open a script plugin's settings page in a sheet of Settings ▸ Plugins
+    - ok
+  - [x] X1.r1.5 50ed7cfe Task(V.11): Install an unpaired plugin in another Persona through the install review
+    - ok
+  - [x] X1.r1.6 7569a077 Task(V.11): Show a plugin panel in the sidebar's place when its item asks for it
+    - ok
+  - [x] X1.r1.7 29e2970c Task(V.11): Let plugins rename completed downloads in their Persona
+    - ok
+  - [x] X1.r1.8 8c01a505 Docs: Record preview 2 of the week queue
+    - ok
+  - [x] X1.r1.9 c31a99b2 Fix: Keep unexpected data from stopping the app (part 1)
+    - fixed: restored the nonoptional ticket factory for old callers and kept production creation fail closed.
+  - [x] X1.r1.10 52f5724d Fix: Keep unexpected data from stopping the app (part 2)
+    - ok
+  - [x] X1.r1.11 a61a816c Fix: Keep unexpected data from stopping the app (part 3)
+    - ok
+  - [x] X1.r1.12 ab733aa7 Fix: Keep unexpected data from stopping the app (part 4)
+    - ok
+  - [x] X1.r1.13 b328c869 Fix: Keep unexpected data from stopping the app (part 5)
+    - ok
+  - [x] X1.r1.14 85300260 Fix: Keep unexpected data from stopping the app (part 6)
+    - fixed: restored the nonfailable popup initializer and put rejection of unexpected configuration in the popup factory.
+  - [x] X1.r1.15 e21af6ee Fix: Keep unexpected data from stopping the app (part 7)
+    - ok
+  - [x] X1.r1.16 80b34ccd Fix: Guard indexes into stored and synced lists (part 1)
+    - ok
+  - [x] X1.r1.17 49ddb333 Fix: Guard indexes into stored and synced lists (part 2)
+    - ok
+  - [x] X1.r1.18 7f4f73cd Fix: Guard indexes into stored and synced lists (part 3)
+    - ok
+  - [x] X1.r1.19 1c3a65ad Fix: Guard indexes into stored and synced lists (part 4)
+    - ok
+  - [x] X1.r1.20 621e869d Fix: Guard indexes into stored and synced lists (part 5)
+    - ok
+  - [x] X1.r1.21 59fe0f55 Fix: Guard indexes into stored and synced lists (part 6)
+    - ok
+  - [x] X1.r1.22 a7ac4418 Fix: Guard indexes into stored and synced lists (part 7)
+    - ok
+  - [x] X1.r1.23 df3eeabf Fix: Hold sync's crash-loop guard while it builds records to send
+    - ok
+  - [x] X1.r1.24 54b3e835 Docs: Record preview 3 of the week queue
+    - ok
+  - [x] X1.r1.25 6467572a Fix: Label controls for VoiceOver and build views from the shared parts (part 1)
+    - ok
+  - [x] X1.r1.26 0d43ed3d Fix: Label controls for VoiceOver and build views from the shared parts (part 2)
+    - fixed: one accessibility label now names the edit action and page context.
+  - [x] X1.r1.27 7869d8d4 Fix: Label controls for VoiceOver and build views from the shared parts (part 3)
+    - ok
+  - [x] X1.r1.28 2d6cd6e0 Fix: Label controls for VoiceOver and build views from the shared parts (part 4)
+    - ok
+  - [x] X1.r1.29 ea6d2d62 Fix: Label controls for VoiceOver and build views from the shared parts (part 5)
+    - ok
+  - [x] X1.r1.30 a72594f6 Fix: Label controls for VoiceOver and build views from the shared parts (part 6)
+    - ok
+  - [x] X1.r1.31 a01e7033 Fix: Label controls for VoiceOver and build views from the shared parts (part 7)
+    - ok
+  - [x] X1.r1.32 976d2cf3 Fix: Label controls for VoiceOver and build views from the shared parts (part 8)
+    - ok
+  - [x] X1.r1.33 22b74fb4 Fix: Label controls for VoiceOver and build views from the shared parts (part 9)
+    - ok
+  - [x] X1.r1.34 40faed0f Fix: Label controls for VoiceOver and build views from the shared parts (part 10)
+    - ok
+  - [x] X1.r1.35 1091604c Fix: Label controls for VoiceOver and build views from the shared parts (part 11)
+    - ok
+  - [x] X1.r1.36 e7ef95cb Fix: Label controls for VoiceOver and build views from the shared parts (part 12)
+    - ok
+  - [x] X1.r1.37 039a9c83 Fix: Label controls for VoiceOver and build views from the shared parts (part 13)
+    - ok
+  - [x] X1.r1.38 5194777d Fix: Label controls for VoiceOver and build views from the shared parts (part 14)
+    - ok
+  - [x] X1.r1.39 5e5e31a7 Fix: Label controls for VoiceOver and build views from the shared parts (part 15)
+    - ok
+  - [x] X1.r1.40 6ca0def8 Fix: Label controls for VoiceOver and build views from the shared parts (part 16)
+    - ok
+  - [x] X1.r1.41 5c9d166a Fix: Label controls for VoiceOver and build views from the shared parts (part 17)
+    - ok
+  - [x] X1.r1.42 d5903f08 Fix: Make menu titles consistent across the menu bar and context menus
+    - ok
+  - [x] X1.r1.43 a494686a Docs: Record preview 4 of the week queue
+    - ok
+  - [x] X1.r1.44 6d3c117a Docs: Correct agent-panel-design against the code
+    - ok
+  - [x] X1.r1.45 0ea8e360 Docs: Correct agents against the code
+    - ok
+  - [x] X1.r1.46 667e4fe3 Docs: Correct ai against the code
+    - ok
+  - [x] X1.r1.47 460b87ae Docs: Correct bookmarks against the code
+    - ok
+  - [x] X1.r1.48 7df9c492 Docs: Correct engine-protocol against the code
+    - ok
+  - [x] X1.r1.49 544fc201 Docs: Correct features against the code
+    - ok
+  - [x] X1.r1.50 ebac0816 Docs: Correct hooks against the code
+    - ok
+  - [x] X1.r1.51 e3cd3a37 Docs: Correct import-browsers against the code
+    - ok
+  - [x] X1.r1.52 3bf3c9a1 Docs: Correct password-managers against the code
+    - ok
+  - [x] X1.r1.53 dc9d81ec Docs: Correct plan against the code
+    - ok
+  - [x] X1.r1.54 bfca84e5 Docs: Correct plugins against the code
+    - ok
+  - [x] X1.r1.55 1a84c023 Docs: Correct sync against the code
+    - ok
+  - [x] X1.r1.56 e4a64f5b Docs: Correct web-store against the code
+    - ok
+  - [x] X1.r1.57 0bcee24c Docs: Correct windows-personas against the code
+    - ok
+  - [x] X1.r1.58 e8399eb2 Docs: Correct README.preset against the code
+    - ok
+  - [x] X1.r1.59 f2817d97 Docs: Correct the plan's Engine abstraction state against the code
+    - ok
+  - [x] X1.r1.60 1e9f6635 Docs: Correct the plan's WebKit adapter state against the code
+    - ok
+  - [x] X1.r1.61 a021ed59 Docs: Correct the plan's Chromium adapter state against the code
+    - ok
+  - [x] X1.r1.62 1f70da81 Docs: Correct the plan's Private API flags state against the code
+    - ok
+  - [x] X1.r1.63 3cdeb87e Docs: Correct the plan's Browsing module state against the code
+    - ok
+  - [x] X1.r1.64 7c00ae99 Docs: Correct the plan's History module state against the code
+    - ok
+  - [x] X1.r1.65 77f6b63d Docs: Correct the plan's Import module state against the code
+    - ok
+  - [x] X1.r1.66 a1c80d26 Docs: Correct the plan's Plugins module state against the code
+    - ok
+  - [x] X1.r1.67 9969575e Docs: Correct the plan's Extensions module state against the code
+    - ok
+  - [x] X1.r1.68 e10d7381 Docs: Correct the plan's AI module state against the code
+    - ok
+  - [x] X1.r1.69 ed006085 Docs: Correct the plan's AgentControl module and arch-cli state against the code
+    - ok
+  - [x] X1.r1.70 5c991d9a Docs: Correct the plan's Agent module state against the code
+    - ok
+  - [x] X1.r1.71 2abafe2f Docs: Correct the plan's Events module state against the code
+    - ok
+  - [x] X1.r1.72 6883350f Docs: Correct the plan's Hooks module state against the code
+    - ok
+  - [x] X1.r1.73 b7f9d656 Docs: Correct the plan's Terminal module state against the code
+    - ok
+  - [x] X1.r1.74 aa1fe234 Docs: Correct the plan's LiveFolders module state against the code
+    - ok
+  - [x] X1.r1.75 624d470c Docs: Correct the plan's Preferences module state against the code
+    - ok
+  - [x] X1.r1.76 57749537 Docs: Correct the plan's Sync module state against the code
+    - ok
+  - [x] X1.r1.77 23b98985 Docs: Correct the plan's App shell state against the code
+    - ok
+  - [x] X1.r1.78 60cd1e54 Docs: Rewrite prose for plain English (part 1)
+    - ok
+  - [x] X1.r1.79 11d5aaec Docs: Rewrite prose for plain English (part 2)
+    - fixed: restored the dropped `agent` and `docs/hooks.md` code spans.
+  - [x] X1.r1.80 791b55a4 Docs: Rewrite prose for plain English (part 3)
+    - fixed: restored the dropped `title` code span.
+  - [x] X1.r1.81 19550cb0 Docs: Rewrite prose for plain English (part 4)
+    - ok
+  - [x] X1.r1.82 55fa722c Docs: Rewrite prose for plain English (part 5)
+    - fixed: restored the dropped `guide` and `agent decision 2` references.
+  - [x] X1.r1.83 95e2ac8d Docs: Rewrite prose for plain English (part 6)
+    - ok
+  - [x] X1.r1.84 9b3b3852 Docs: Rewrite prose for plain English (part 7)
+    - ok
+  - [x] X1.r1.85 9048b3cf Docs: Rewrite prose for plain English (part 8)
+    - ok
+  - [x] X1.r1.86 8f6e3dcf Docs: Rewrite prose for plain English (part 9)
+    - ok
+  - [x] X1.r1.87 08a27397 Docs: Rewrite prose for plain English (part 10)
+    - ok
+  - [x] X1.r1.88 f06a9889 Docs: Rewrite prose for plain English (part 11)
+    - ok
+  - [x] X1.r1.89 a093cfce Docs: Rewrite prose for plain English (part 12)
+    - ok
+  - [x] X1.r1.90 579fb859 Docs: Rewrite prose for plain English (part 13)
+    - ok
+  - [x] X1.r1.91 0ff1e605 Docs: Rewrite prose for plain English (part 14)
+    - ok
+  - [x] X1.r1.92 32dfd30a Docs: Rewrite prose for plain English (part 15)
+    - ok
+  - [x] X1.r1.93 7a69ed96 Docs: Rewrite prose for plain English (part 16)
+    - ok
+  - [x] X1.r1.94 e1357186 Docs: Rewrite prose for plain English (part 17)
+    - ok
+  - [x] X1.r1.95 d5fde24e Docs: Rewrite prose for plain English (part 18)
+    - ok
+  - [x] X1.r1.96 c8d2c355 Docs: Rewrite prose for plain English (part 19)
+    - ok
+  - [x] X1.r1.97 7c27beb1 Docs: Rewrite prose for plain English (part 20)
+    - ok
+  - [x] X1.r1.98 ae655b77 Docs: Rewrite prose for plain English (part 21)
+    - ok
+  - [x] X1.r1.99 605df1cf Docs: Rewrite prose for plain English (part 22)
+    - ok
+  - [x] X1.r1.100 1fb4dc67 Docs: Rewrite prose for plain English (part 23)
+    - ok
+  - [x] X1.r1.101 b338ea5a Docs: Rewrite prose for plain English (part 24)
+    - ok
+  - [x] X1.r1.102 46dc11be Docs: Rewrite prose for plain English (part 25)
+    - ok
+  - [x] X1.r1.103 3cf822c4 Docs: Rewrite prose for plain English (part 26)
+    - ok
+  - [x] X1.r1.104 47582963 Docs: Rewrite prose for plain English (part 27)
+    - ok
+  - [x] X1.r1.105 75c648ec Docs: Rewrite prose for plain English (part 28)
+    - ok
+  - [x] X1.r1.106 02a6d88d Docs: Rewrite prose for plain English (part 29)
+    - ok
+  - [x] X1.r1.107 d1c17d87 Docs: Rewrite prose for plain English (part 30)
+    - ok
+  - [x] X1.r1.108 37439856 Docs: Rewrite prose for plain English (part 31)
+    - ok
+  - [x] X1.r1.109 1fc2dfbd Docs: Rewrite prose for plain English (part 32)
+    - ok
+  - [x] X1.r1.110 2e52d04a Docs: Rewrite prose for plain English (part 33)
+    - ok
+  - [x] X1.r1.111 35438d3c Docs: Rewrite prose for plain English (part 34)
+    - ok
+  - [x] X1.r1.112 b93619d3 Docs: Rewrite prose for plain English (part 35)
+    - ok
+  - [x] X1.r1.113 5168779e Docs: Drop the prose pass notes that are done
+    - ok
+  - [x] X1.r1.114 30185048 Docs: Record what the week queue's first pass finished and left
+    - ok
+  - [x] X1.r1.115 03d4ca4b Docs: Record preview 5 of the week queue
+    - ok
 - [ ] X2. Documentation comments: List `grep -rLE '^// ' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift'` (files without a header comment) and files where a `public` or `internal` type has no `///` comment. For each, add a header comment that says what the file holds and a `///` sentence for each type and non-trivial function, stating what it does and any rule it keeps, from reading the code; never guess. Subject: `Docs: Say what each file and type is for`.
+  - [x] X2.r1.1 Packages/ARCH/Sources/AI/AIAgentSession.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.2 Packages/ARCH/Sources/AI/AIClient.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.3 Packages/ARCH/Sources/AI/AIError.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.4 Packages/ARCH/Sources/AI/AIFeature.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.5 Packages/ARCH/Sources/AI/AIHookScheduler.swift
+    - Added missing type and nontrivial function documentation.
+  - [ ] X2.r1.6 Packages/ARCH/Sources/AI/AIHooks.swift
+  - [ ] X2.r1.7 Packages/ARCH/Sources/AI/AIPageSource.swift
+  - [ ] X2.r1.8 Packages/ARCH/Sources/AI/AIProviders.swift
+  - [ ] X2.r1.9 Packages/ARCH/Sources/AI/AIRouting.swift
+  - [ ] X2.r1.10 Packages/ARCH/Sources/AI/AIService.swift
+  - [ ] X2.r1.11 Packages/ARCH/Sources/AI/AISettingsStore.swift
+  - [ ] X2.r1.12 Packages/ARCH/Sources/AI/AIUsage.swift
+  - [ ] X2.r1.13 Packages/ARCH/Sources/AI/CommandLineProcess.swift
+  - [ ] X2.r1.14 Packages/ARCH/Sources/AI/LoginShell.swift
+  - [ ] X2.r1.15 Packages/ARCH/Sources/Agent/AgentAPISession.swift
+  - [ ] X2.r1.16 Packages/ARCH/Sources/Agent/AgentActivityLog.swift
+  - [ ] X2.r1.17 Packages/ARCH/Sources/Agent/AgentApprovals.swift
+  - [ ] X2.r1.18 Packages/ARCH/Sources/Agent/AgentBrowserHost.swift
+  - [ ] X2.r1.19 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
+  - [ ] X2.r1.20 Packages/ARCH/Sources/Agent/AgentComposer.swift
+  - [ ] X2.r1.21 Packages/ARCH/Sources/Agent/AgentGrantRequest.swift
+  - [ ] X2.r1.22 Packages/ARCH/Sources/Agent/AgentPageScripts.swift
+  - [ ] X2.r1.23 Packages/ARCH/Sources/Agent/AgentPanel.swift
+  - [ ] X2.r1.24 Packages/ARCH/Sources/Agent/AgentPanelParts.swift
+  - [ ] X2.r1.25 Packages/ARCH/Sources/Agent/AgentPolicy.swift
+  - [ ] X2.r1.26 Packages/ARCH/Sources/Agent/AgentRun.swift
+  - [ ] X2.r1.27 Packages/ARCH/Sources/Agent/AgentRunner.swift
+  - [ ] X2.r1.28 Packages/ARCH/Sources/Agent/AgentService.swift
+  - [ ] X2.r1.29 Packages/ARCH/Sources/Agent/AgentSession.swift
+  - [ ] X2.r1.30 Packages/ARCH/Sources/Agent/AgentSettings.swift
+  - [ ] X2.r1.31 Packages/ARCH/Sources/Agent/AgentSettingsFile.swift
+  - [ ] X2.r1.32 Packages/ARCH/Sources/Agent/AgentTranscript.swift
+  - [ ] X2.r1.33 Packages/ARCH/Sources/AgentControl/AgentBundleLayout.swift
+  - [ ] X2.r1.34 Packages/ARCH/Sources/AgentControl/AgentCommandLine.swift
+  - [ ] X2.r1.35 Packages/ARCH/Sources/AgentControl/AgentControlClient.swift
+  - [ ] X2.r1.36 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
+  - [ ] X2.r1.37 Packages/ARCH/Sources/AgentControl/AgentExitCode.swift
+  - [ ] X2.r1.38 Packages/ARCH/Sources/AgentControl/AgentFraming.swift
+  - [ ] X2.r1.39 Packages/ARCH/Sources/AgentControl/AgentHarness.swift
+  - [ ] X2.r1.40 Packages/ARCH/Sources/AgentControl/AgentJSON.swift
+  - [ ] X2.r1.41 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
+  - [ ] X2.r1.42 Packages/ARCH/Sources/AgentControl/AgentLinkInstaller.swift
+  - [ ] X2.r1.43 Packages/ARCH/Sources/AgentControl/AgentMCPConfiguration.swift
+  - [ ] X2.r1.44 Packages/ARCH/Sources/AgentControl/AgentMCPServer.swift
+  - [ ] X2.r1.45 Packages/ARCH/Sources/AgentControl/AgentPeerCheck.swift
+  - [ ] X2.r1.46 Packages/ARCH/Sources/AgentControl/AgentRPC.swift
+  - [ ] X2.r1.47 Packages/ARCH/Sources/AgentControl/AgentSkillInstaller.swift
+  - [ ] X2.r1.48 Packages/ARCH/Sources/AgentControl/AgentSocketLocation.swift
+  - [ ] X2.r1.49 Packages/ARCH/Sources/AgentControl/AgentTaskMessages.swift
+  - [ ] X2.r1.50 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
+  - [ ] X2.r1.51 Packages/ARCH/Sources/AgentControl/AgentUntrusted.swift
+  - [ ] X2.r1.52 Packages/ARCH/Sources/Browsing/BookmarkMenu.swift
+  - [ ] X2.r1.53 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift
+  - [ ] X2.r1.54 Packages/ARCH/Sources/Browsing/BrowserHookHost.swift
+  - [ ] X2.r1.55 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+  - [ ] X2.r1.56 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
+  - [ ] X2.r1.57 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
+  - [ ] X2.r1.58 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
+  - [ ] X2.r1.59 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
+  - [ ] X2.r1.60 Packages/ARCH/Sources/Browsing/NotificationAuthorization.swift
+  - [ ] X2.r1.61 Packages/ARCH/Sources/Browsing/PageAssistant.swift
+  - [ ] X2.r1.62 Packages/ARCH/Sources/Browsing/ProfileOwnership.swift
+  - [ ] X2.r1.63 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift
+  - [ ] X2.r1.64 Packages/ARCH/Sources/Browsing/SidebarSync.swift
+  - [ ] X2.r1.65 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
+  - [ ] X2.r1.66 Packages/ARCH/Sources/Browsing/Space.swift
+  - [ ] X2.r1.67 Packages/ARCH/Sources/Browsing/Tab.swift
+  - [ ] X2.r1.68 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+  - [ ] X2.r1.69 Packages/ARCH/Sources/Browsing/TabUnloading.swift
+  - [ ] X2.r1.70 Packages/ARCH/Sources/Events/BrowserEvent.swift
+  - [ ] X2.r1.71 Packages/ARCH/Sources/Events/BrowserEventBus.swift
+  - [ ] X2.r1.72 Packages/ARCH/Sources/Events/BrowserEventFilter.swift
+  - [ ] X2.r1.73 Packages/ARCH/Sources/Events/BrowserEventRateLimiter.swift
+  - [ ] X2.r1.74 Packages/ARCH/Sources/Events/BrowserEventView.swift
+  - [ ] X2.r1.75 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+  - [ ] X2.r1.76 Packages/ARCH/Sources/Extensions/NativeAppGuide.swift
+  - [ ] X2.r1.77 Packages/ARCH/Sources/Extensions/WebExtensionQuestion.swift
+  - [ ] X2.r1.78 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
+  - [ ] X2.r1.79 Packages/ARCH/Sources/Extensions/WebStore.swift
+  - [ ] X2.r1.80 Packages/ARCH/Sources/Extensions/WebStoreClient.swift
+  - [ ] X2.r1.81 Packages/ARCH/Sources/Extensions/WebStoreInstaller.swift
+  - [ ] X2.r1.82 Packages/ARCH/Sources/History/HistoryStore.swift
+  - [ ] X2.r1.83 Packages/ARCH/Sources/Hooks/AgentHookTemplate.swift
+  - [ ] X2.r1.84 Packages/ARCH/Sources/Hooks/Hook.swift
+  - [ ] X2.r1.85 Packages/ARCH/Sources/Hooks/HookPresets.swift
+  - [ ] X2.r1.86 Packages/ARCH/Sources/Hooks/HookRegistry.swift
+  - [ ] X2.r1.87 Packages/ARCH/Sources/Hooks/HookRunLog.swift
+  - [ ] X2.r1.88 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
+  - [ ] X2.r1.89 Packages/ARCH/Sources/Hooks/HookStore.swift
+  - [ ] X2.r1.90 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
+  - [ ] X2.r1.91 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
+  - [ ] X2.r1.92 Packages/ARCH/Sources/LiveFolders/FeedFetcher.swift
+  - [ ] X2.r1.93 Packages/ARCH/Sources/LiveFolders/FeedParser.swift
+  - [ ] X2.r1.94 Packages/ARCH/Sources/LiveFolders/GitHubCLI.swift
+  - [ ] X2.r1.95 Packages/ARCH/Sources/LiveFolders/LiveFolderReconciler.swift
+  - [ ] X2.r1.96 Packages/ARCH/Sources/LiveFolders/LiveFolderSchedule.swift
+  - [ ] X2.r1.97 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
+  - [ ] X2.r1.98 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
+  - [ ] X2.r1.99 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
+  - [ ] X2.r1.100 Packages/ARCH/Sources/LiveFolders/LiveItem.swift
+  - [ ] X2.r1.101 Packages/ARCH/Sources/Plugins/PageAddressPlugin.swift
+  - [ ] X2.r1.102 Packages/ARCH/Sources/Plugins/Plugin.swift
+  - [ ] X2.r1.103 Packages/ARCH/Sources/Plugins/PluginComposer.swift
+  - [ ] X2.r1.104 Packages/ARCH/Sources/Plugins/PluginContributions.swift
+  - [ ] X2.r1.105 Packages/ARCH/Sources/Plugins/PluginManager.swift
+  - [ ] X2.r1.106 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
+  - [ ] X2.r1.107 Packages/ARCH/Sources/Sync/BrowserSession+Sync.swift
+  - [ ] X2.r1.108 Packages/ARCH/Sources/Sync/FirstSyncMerge.swift
+  - [ ] X2.r1.109 Packages/ARCH/Sources/Sync/IncomingSidebarRecords.swift
+  - [ ] X2.r1.110 Packages/ARCH/Sources/Sync/SidebarRecords.swift
+  - [ ] X2.r1.111 Packages/ARCH/Sources/Sync/SyncController.swift
+  - [ ] X2.r1.112 Packages/ARCH/Sources/Sync/SyncMerge.swift
+  - [ ] X2.r1.113 Packages/ARCH/Sources/Sync/SyncOffReason.swift
+  - [ ] X2.r1.114 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
 - [ ] X3. Unused code: for each `private func`, `private var`, and `fileprivate` declaration in `Packages/ARCH/Sources` whose name appears nowhere else in its file (`grep -c`), remove it if `swift build` still passes; restore it otherwise. Subject: `Refactor: Remove private code that nothing calls`.
 - [ ] X4. Duplicates: find view code repeated in three or more files (the same modifier chain of five or more lines); move it into the nearest shared parts file and use it from each place, changing no look. Subject: `Refactor: Share repeated view code`.
 - [ ] X5. Open decisions: read the Open decisions lists of `docs/plugins.md`, `docs/agents.md`, `docs/hooks.md`, `docs/sync.md`, and `docs/bookmarks.md`; for each one that the surrounding text clearly leans on and that needs no engine change, decide it, record the decision in the document, and build it with one commit `Feat: …` or `Fix: …` each. Leave the others.

@@ -55,6 +55,7 @@ public enum AIHookStepOutcome: Sendable {
     case skipped(AIHookSkipReason)
 }
 
+/// Why a posted hook step was skipped before its work started.
 public enum AIHookSkipReason: Sendable {
     /// Its chain was replaced or canceled, or its owner was canceled, before it started.
     case canceled
@@ -69,6 +70,7 @@ public enum AIHookSkipReason: Sendable {
     case budgetReached(AIBudget)
 }
 
+/// Runs hook steps in ordered chains and applies AI availability and failure checks.
 @MainActor
 public final class AIHookScheduler: ObservableObject {
     /// The consecutive authentication or provider errors that pause an owner.
@@ -86,6 +88,7 @@ public final class AIHookScheduler: ObservableObject {
     private var routes: [String: AIRoute]
     private var cancellables: Set<AnyCancellable> = []
 
+    /// Watches route changes and app termination while scheduling this service's steps.
     init(service: AIService) {
         self.service = service
         routes = service.settings.routes
@@ -220,10 +223,12 @@ public final class AIHookScheduler: ObservableObject {
             }
         }
 
+        /// Removes the next waiting step, if any.
         func takeFirst() -> AIHookStep? {
             waiting.isEmpty ? nil : waiting.removeFirst()
         }
 
+        /// Skips waiting steps that match the caller's predicate.
         func dropWaiting(where matches: (AIHookStep) -> Bool) {
             let dropped = waiting.filter(matches)
             waiting.removeAll(where: matches)
@@ -253,6 +258,7 @@ public final class AIHookScheduler: ObservableObject {
             self.task = task
         }
 
+        /// Marks the running step stopped and cancels its task.
         func stop() {
             isStopped = true
             task.cancel()
@@ -336,6 +342,7 @@ public final class AIHookScheduler: ObservableObject {
         private var ended: AIHookStepOutcome?
         private var continuation: CheckedContinuation<AIHookStepOutcome, Never>?
 
+        /// Records and resumes the first outcome reported by the step or watchdog.
         func end(_ outcome: AIHookStepOutcome) {
             guard ended == nil else { return }
             ended = outcome
@@ -343,6 +350,7 @@ public final class AIHookScheduler: ObservableObject {
             continuation = nil
         }
 
+        /// Waits until either the step or watchdog reports an outcome.
         func outcome() async -> AIHookStepOutcome {
             if let ended { return ended }
             return await withCheckedContinuation { continuation = $0 }
@@ -376,11 +384,13 @@ public final class AIHookScheduler: ObservableObject {
         }
     }
 
+    /// Cancels every active chain when the application terminates.
     private func cancelAll() {
         chains.values.forEach { $0.cancel() }
         chains = [:]
     }
 
+    /// Compares document addresses without their fragments.
     private static func withoutFragment(_ url: URL) -> URL {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.fragment != nil else { return url }
         components.fragment = nil

@@ -59,7 +59,9 @@ public struct AIRequest: Sendable {
     }
 }
 
+/// One user or assistant message with typed content parts.
 public struct AIMessage: Sendable {
+    /// The speaker of a message in an AI conversation.
     public enum Role: String, Sendable {
         case user
         case assistant
@@ -74,6 +76,7 @@ public struct AIMessage: Sendable {
     }
 }
 
+/// The reply format a request asks the provider to produce.
 public enum AIOutputFormat: Sendable {
     case text
     /// A reply that is one JSON value matching the schema, a JSON Schema object.
@@ -95,6 +98,7 @@ public enum AIPart: Sendable {
     case toolResult(AIToolResult)
 }
 
+/// A page address, title, and readable text supplied to a request.
 public struct AIPageContent: Sendable {
     /// The page's address. The service removes the query and fragment before sending.
     public var url: URL
@@ -114,6 +118,7 @@ public struct AIPageContent: Sendable {
     }
 }
 
+/// Selected text with the page that supplied it.
 public struct AISelection: Sendable {
     public var pageURL: URL
     public var pageTitle: String
@@ -126,6 +131,7 @@ public struct AISelection: Sendable {
     }
 }
 
+/// A named file part with its bytes and optional source address.
 public struct AIFile: Sendable {
     public var name: String
     /// For example `text/plain`, `application/pdf`, or `image/png`.
@@ -142,6 +148,7 @@ public struct AIFile: Sendable {
     }
 }
 
+/// Download metadata a feature may send without the file's bytes.
 public struct AIDownloadInfo: Sendable {
     public var filename: String
     public var mediaType: String?
@@ -163,6 +170,7 @@ public struct AIDownloadInfo: Sendable {
 
 // MARK: - Replies and streaming
 
+/// The provider-neutral interface for streaming AI requests.
 public protocol AIClient: Sendable {
     /// Streams the reply. The stream ends after `.finished` or with an `AIError`. Cancelling the task that reads the stream, or dropping the stream, cancels the request.
     func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error>
@@ -182,17 +190,20 @@ public enum AIEvent: Sendable {
     case finished(AIFinishReason)
 }
 
+/// Why a request is waiting before a provider starts it.
 public enum AIWaitReason: Sendable, Equatable {
     case queued
     case rateLimited(until: Date)
 }
 
+/// How the provider ended a reply.
 public enum AIFinishReason: Sendable, Equatable {
     case completed
     case lengthLimit
     case toolUse
 }
 
+/// A streamed request collected into its text, calls, model, and usage.
 public struct AIReply: Sendable {
     public var text: String
     public var toolCalls: [AIToolCall]
@@ -238,6 +249,7 @@ extension AIClient {
 
 // MARK: - Tool calls
 
+/// A tool definition offered to a model with a JSON argument schema.
 public struct AITool: Sendable {
     /// 1 to 64 characters from `a-z`, `A-Z`, `0-9`, `_`, and `-`.
     public var name: String
@@ -252,6 +264,7 @@ public struct AITool: Sendable {
     }
 }
 
+/// A model's complete call to one offered tool.
 public struct AIToolCall: Sendable {
     public var id: String
     public var name: String
@@ -265,6 +278,7 @@ public struct AIToolCall: Sendable {
     }
 }
 
+/// The content returned for a tool call, or an error the model can read.
 public struct AIToolResult: Sendable {
     public var callID: String
     /// Text, page, selection, and image parts. The service checks them like any other part; a result the checks refuse goes to the model as an error result that says why, and an image goes only to a model with `images` whose format carries images in tool results (`messages`). An image's `sourceURL` names the page it shows, so that site exclusions apply to it.
@@ -317,6 +331,7 @@ extension AIClient {
         }
     }
 
+    /// Streams model rounds and applies bounded tool calls while preserving the conversation.
     private func runRounds(_ request: AIRequest, tools: [AIToolHandler], maxRounds: Int, performsFinalCalls: Bool, maximumToolCalls: Int?, unavailableTool: (@Sendable () async -> Void)?, conversationDidChange: (@Sendable ([AIMessage]) async -> Void)?,
                            continuation: AsyncThrowingStream<AIEvent, any Error>.Continuation) async throws {
         var request = request
@@ -372,6 +387,7 @@ extension AIClient {
         throw AIError.toolRoundLimit
     }
 
+    /// Runs an offered tool and turns unavailable tools or thrown errors into error results.
     private static func perform(_ call: AIToolCall, with tools: [AIToolHandler], unavailableTool: (@Sendable () async -> Void)?) async -> AIToolResult {
         guard let handler = tools.first(where: { $0.tool.name == call.name }) else {
             await unavailableTool?()
@@ -390,6 +406,7 @@ enum AIToolHistory {
     /// The rounds of tool results, counted back from the newest, that go whole.
     static let wholeRounds = 8
 
+    /// Rechecks retained tool results against current access before another model round.
     @MainActor static func checkingAccess(in messages: [AIMessage]) -> [AIMessage] {
         messages.map { message in
             var message = message
@@ -441,6 +458,7 @@ enum AIToolHistory {
         return fitted
     }
 
+    /// Maps tool call identifiers to names for notes about older results.
     private static func toolNames(in messages: [AIMessage]) -> [String: String] {
         var names: [String: String] = [:]
         for message in messages {
@@ -449,6 +467,7 @@ enum AIToolHistory {
         return names
     }
 
+    /// Reports whether a message contains at least one tool result.
     private static func hasResults(_ message: AIMessage) -> Bool {
         message.parts.contains { if case .toolResult = $0 { return true } else { return false } }
     }
