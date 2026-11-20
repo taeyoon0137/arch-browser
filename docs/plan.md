@@ -2048,7 +2048,7 @@ Run rounds in order, then start again at X1 with the next round number, until `d
   - [x] X5.r1.10 Keep team requests out of Review Requests.
 - [ ] X6. Repeat B1, C1, and D1 for the files changed in this round.
   - [x] X6.r1.B1: Of 17 matching declarations in changed Swift files, 15 are guaranteed by local invariants; the other two remain blocked as B1.8 and B1.29 because their nonoptional engine contracts have no local failure value. Kept the popup initializer compatible with existing callers while refusing an unexpected production popup controller.
-  - [ ] X6.r1.C1: Reviewed 15 matching changed files, including 10 SwiftUI views; no new C1 issue. Keep the address button's single action-first VoiceOver label.
+  - [x] X6.r1.C1: Reviewed 15 matching changed files, including 10 SwiftUI views; no new C1 issue. Kept the address button's single action-first VoiceOver label.
   - [ ] X6.r1.D1: Correct six stale plugin network claims in `docs/plugins.md` and the V.11 row here; preserve the exact code names in three Agent file comments.
 - [ ] X7. **Preview** (numbered on from 6), then `date`; if before November 22, 05:00 KST, start the next round at X1; otherwise go to Z.
 

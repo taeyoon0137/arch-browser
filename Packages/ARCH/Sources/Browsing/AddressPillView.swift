@@ -58,6 +58,7 @@ struct AddressPillView: View {
     var body: some View {
         let extensionName = self.extensionName
         let host = self.host(extensionName: extensionName)
+        let pageLabel = extensionName.map(Self.accessibilityLabel(ofExtensionPage:)) ?? host
         HStack(spacing: 0) {
             Button(action: { windowModel.focusCommandBar(from: .addressPill) }) {
                 // The symbol takes the tab rows' icon column, so the host starts where their titles do, whichever symbol shows.
@@ -78,9 +79,8 @@ struct AddressPillView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Edit Address")
             .help(windowModel.internalPage?.address ?? url?.absoluteString ?? "")
-            .accessibilityLabel(extensionName.map(Self.accessibilityLabel(ofExtensionPage:)) ?? host)
+            .accessibilityLabel(pageLabel.isEmpty ? "Edit Address" : "Edit Address, \(pageLabel)")
             if let tab, !windowModel.isSelectedPageCovered {
                 TemporaryEngineLabel(tab: tab)
             }
