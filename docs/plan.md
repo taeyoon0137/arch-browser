@@ -1881,11 +1881,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.40 Packages/ARCH/Sources/AgentControl/AgentJSON.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.41 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
-  - [ ] X2.r1.42 Packages/ARCH/Sources/AgentControl/AgentLinkInstaller.swift
-  - [ ] X2.r1.43 Packages/ARCH/Sources/AgentControl/AgentMCPConfiguration.swift
-  - [ ] X2.r1.44 Packages/ARCH/Sources/AgentControl/AgentMCPServer.swift
-  - [ ] X2.r1.45 Packages/ARCH/Sources/AgentControl/AgentPeerCheck.swift
+  - [x] X2.r1.41 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.42 Packages/ARCH/Sources/AgentControl/AgentLinkInstaller.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.43 Packages/ARCH/Sources/AgentControl/AgentMCPConfiguration.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.44 Packages/ARCH/Sources/AgentControl/AgentMCPServer.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.45 Packages/ARCH/Sources/AgentControl/AgentPeerCheck.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.46 Packages/ARCH/Sources/AgentControl/AgentRPC.swift
   - [ ] X2.r1.47 Packages/ARCH/Sources/AgentControl/AgentSkillInstaller.swift
   - [ ] X2.r1.48 Packages/ARCH/Sources/AgentControl/AgentSocketLocation.swift
