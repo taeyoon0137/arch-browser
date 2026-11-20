@@ -1800,6 +1800,38 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - ok
   - [x] X1.r1.115 03d4ca4b Docs: Record preview 5 of the week queue
     - ok
+  - [x] X1.r2.1 bba22492 Docs: Say what each file and type is for (part 1)
+    - ok
+  - [x] X1.r2.2 01d8cfef Docs: Say what each file and type is for (part 2)
+    - ok
+  - [x] X1.r2.3 60da564e Docs: Say what each file and type is for (part 3)
+    - fixed duplicate `Variables` type documentation in `LoginShell.swift`.
+  - [x] X1.r2.4 fa1bbdbd Docs: Say what each file and type is for (part 4)
+    - fixed duplicate `Decision` type documentation in `AgentActivityLog.swift`.
+  - [x] X1.r2.5 65151574 Docs: Say what each file and type is for (part 5)
+    - ok
+  - [ ] X1.r2.6 e89dd2f7 Docs: Say what each file and type is for (part 6)
+  - [ ] X1.r2.7 c573535b Docs: Say what each file and type is for (part 7)
+  - [ ] X1.r2.8 dbc4da7d Docs: Say what each file and type is for (part 8)
+  - [ ] X1.r2.9 9cbc0f9c Docs: Say what each file and type is for (part 9)
+  - [ ] X1.r2.10 3a115363 Docs: Say what each file and type is for (part 10)
+  - [ ] X1.r2.11 84434d11 Docs: Say what each file and type is for (part 11)
+  - [ ] X1.r2.12 1960eade Docs: Say what each file and type is for (part 12)
+  - [ ] X1.r2.13 82a0a5bb Docs: Say what each file and type is for (part 13)
+  - [ ] X1.r2.14 cd2594f9 Docs: Say what each file and type is for (part 14)
+  - [ ] X1.r2.15 9d5ea0ce Docs: Say what each file and type is for (part 15)
+  - [ ] X1.r2.16 2262f204 Docs: Say what each file and type is for (part 16)
+  - [ ] X1.r2.17 9743cc72 Docs: Say what each file and type is for (part 17)
+  - [ ] X1.r2.18 edcb28b3 Docs: Say what each file and type is for (part 18)
+  - [ ] X1.r2.19 d5870316 Docs: Say what each file and type is for (part 19)
+  - [ ] X1.r2.20 91040057 Docs: Say what each file and type is for (part 20)
+  - [ ] X1.r2.21 ef1747de Docs: Say what each file and type is for (part 21)
+  - [ ] X1.r2.22 37b453d1 Docs: Say what each file and type is for (part 22)
+  - [ ] X1.r2.23 59fad810 Docs: Say what each file and type is for (part 23)
+  - [ ] X1.r2.24 29078c09 Refactor: Remove private code that nothing calls
+  - [ ] X1.r2.25 8ebc3c0f Fix: Keep unexpected data from stopping the app
+  - [ ] X1.r2.26 00f2189e Fix: Label controls for VoiceOver and build views from the shared parts
+  - [ ] X1.r2.27 de832047 Docs: Correct agent comments against the code
 - [x] X2. Documentation comments: List `grep -rLE '^// ' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift'` (files without a header comment) and files where a `public` or `internal` type has no `///` comment. For each, add a header comment that says what the file holds and a `///` sentence for each type and non-trivial function, stating what it does and any rule it keeps, from reading the code; never guess. Subject: `Docs: Say what each file and type is for`.
   - [x] X2.r1.1 Packages/ARCH/Sources/AI/AIAgentSession.swift
     - Added missing type and nontrivial function documentation.

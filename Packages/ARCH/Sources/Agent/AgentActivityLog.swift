@@ -23,7 +23,6 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         case agentRun
     }
 
-    /// How a call was decided.
     /// How Arch or the user decided a tool call.
     public enum Decision: String, Codable, Sendable {
         case auto
