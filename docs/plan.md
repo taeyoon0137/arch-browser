@@ -2034,7 +2034,8 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Removed the unused function and its `networkOpenings` state after fetch began refusing requests before network I/O.
 - [x] X4. Duplicates: find view code repeated in three or more files (the same modifier chain of five or more lines); move it into the nearest shared parts file and use it from each place, changing no look. Subject: `Refactor: Share repeated view code`.
   - none: the SwiftUI modifier chains examined did not repeat across three files.
-- [ ] X5. Open decisions: read the Open decisions lists of `docs/plugins.md`, `docs/agents.md`, `docs/hooks.md`, `docs/sync.md`, and `docs/bookmarks.md`; for each one that the surrounding text clearly leans on and that needs no engine change, decide it, record the decision in the document, and build it with one commit `Feat: …` or `Fix: …` each. Leave the others.
+- [x] X5. Open decisions: read the Open decisions lists of `docs/plugins.md`, `docs/agents.md`, `docs/hooks.md`, `docs/sync.md`, and `docs/bookmarks.md`; for each one that the surrounding text clearly leans on and that needs no engine change, decide it, record the decision in the document, and build it with one commit `Feat: …` or `Fix: …` each. Leave the others.
+  - Remaining plugin choices either need an engine change or lack a clear leaning. The two agent decisions explicitly need the user's choice. Hooks has no user decision, and Sync has no Open decisions section. Chromium back-list restoration needs an engine change.
   - [x] X5.r1.1 Keep script plugins in separate web content processes.
   - [x] X5.r1.2 Keep extension state separate across engines.
   - [x] X5.r1.3 Keep plugin fetches free of Persona cookies.
@@ -2044,7 +2045,7 @@ Run rounds in order, then start again at X1 with the next round number, until `d
   - [x] X5.r1.7 Keep other live folder sources out for now.
   - [x] X5.r1.8 Keep JSON Feed out for now.
   - [x] X5.r1.9 Keep new-item notifications out for now.
-  - [ ] X5.r1.10 Keep team requests out of Review Requests.
+  - [x] X5.r1.10 Keep team requests out of Review Requests.
 - [ ] X6. Repeat B1, C1, and D1 for the files changed in this round.
 - [ ] X7. **Preview** (numbered on from 6), then `date`; if before November 22, 05:00 KST, start the next round at X1; otherwise go to Z.
 

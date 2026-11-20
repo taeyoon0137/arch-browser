@@ -427,4 +427,5 @@ Until the user decides otherwise, the implementation uses the option this note d
 3. Notifications for new items: none (this note); the dots and counts are enough for now.
   - Decided in X5: use the existing dots and counts without new-item notifications.
 4. Requests to the user's teams in Review Requests: left out (this note); a search with `review-requested:@me` includes them.
+  - Decided in X5: exclude team requests from Review Requests.
 5. Chromium back lists across an unload: lost (this note), since CEF has no public API that restores navigation entries; a change in `arch-chromium` could add one for unloaded and restored tabs alike.
