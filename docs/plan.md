@@ -1084,7 +1084,7 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
 
 #### Group D: documents against the code
 
-- [ ] D1. List: `ls docs/*.md resources/README.preset.md`. For each document, section by section (level-2 and level-3 headings): check every concrete claim (a type, function, file, key, menu title, number, default, or behavior) against the code on this branch with `grep`; where the document is wrong or stale, fix the document, never the code; where a claim cannot be checked without the running app, leave it. Do not rewrite style. Escape placeholders as AGENTS.md says and run `./scripts/check_markdown.py`. For `resources/README.preset.md`, also run `./scripts/readme_update.sh` and stage the regenerated files. Under the sub-step write how many claims were fixed. One commit per document: `Docs: Correct <document> against the code`.
+- [x] D1. List: `ls docs/*.md resources/README.preset.md`. For each document, section by section (level-2 and level-3 headings): check every concrete claim (a type, function, file, key, menu title, number, default, or behavior) against the code on this branch with `grep`; where the document is wrong or stale, fix the document, never the code; where a claim cannot be checked without the running app, leave it. Do not rewrite style. Escape placeholders as AGENTS.md says and run `./scripts/check_markdown.py`. For `resources/README.preset.md`, also run `./scripts/readme_update.sh` and stage the regenerated files. Under the sub-step write how many claims were fixed. One commit per document: `Docs: Correct <document> against the code`.
   - [x] D1.1 docs/agent-panel-design.md
     - Corrected 4 stale claims about proposal status, destination naming, and the table's time frame.
   - [x] D1.2 docs/agents.md
@@ -1113,7 +1113,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 0 claims; code-checkable store and installer contracts matched the sources.
   - [x] D1.14 docs/windows-personas.md
     - Corrected 1 stale claim about the multiple-window design's implementation status.
-  - [ ] D1.15 resources/README.preset.md
+  - [x] D1.15 resources/README.preset.md
+    - Corrected 1 stale claim about the agent panel design's implementation status.
 - [ ] D2. `docs/plan.md` itself: in Current State, each module's paragraphs against that module's sources, one module per commit: `Docs: Correct the plan's <module> state against the code`. Do not edit the Work Queue rows' meaning; only fix file and function names that no longer exist.
 - [ ] D3. **Push**.
 
