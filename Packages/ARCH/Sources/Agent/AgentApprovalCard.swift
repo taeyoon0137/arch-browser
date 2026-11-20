@@ -1,4 +1,9 @@
-// A card in the agent panel (docs/agents.md, Approval interface): it leads with the facts the host computed (the step in a sentence, the tab and site, the element marked on a capture of the viewport, and the exact text, address, or tab name that would be sent), then the agent's own words under "The agent says:". A card whose agent text names a secret leads with Arch's warning, and P19's card for a tab the user shared says what Allow for This Tab lets the client do. No card has a default button, so Return and Space answer none; on a sensitive card, Allow, and Share and Done, take only a pointer click on the button that no other program posted, and for outside clients Allow on a sensitive card and Share take Touch ID or the login password as well (`AgentApprovals.answer(_:with:)`).
+// Cards in the agent panel show the host's facts before the agent's own words (docs/agents.md, Approval interface).
+// The facts name the step, tab, site, marked viewport element, and exact text, address, or tab name to send.
+// A card warns first when the agent's words name a secret. The P19 card explains what Allow for This Tab permits.
+// No card has a default button, so Return and Space answer none.
+// Sensitive Allow, Share, and Done require a real pointer click on their button.
+// For outside clients, sensitive Allow and Share also require Touch ID or the login password (`AgentApprovals.answer(_:with:)`).
 import AgentControl
 import AppKit
 import Darwin

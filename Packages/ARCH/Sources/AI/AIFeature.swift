@@ -33,7 +33,7 @@ public enum AITrigger: String, Codable, Sendable {
 public enum AIFeatureRouting: String, Codable, Sendable {
     /// The feature's route in `ai.json`, which Settings ▸ AI ▸ Features edits. The default.
     case stored
-    /// Each request names its route, as an agent hook's runs do. Features does not list the feature; Usage lists it by name.
+    /// Each request names its route, as an agent hook run does. The Features page does not list this feature; Usage lists it by name.
     case perRequest
 }
 

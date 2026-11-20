@@ -1154,11 +1154,191 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.19 App shell
     - File and function names matched the sources.
-- [ ] D3. **Push**.
+- [x] D3. **Push**.
 
 #### Group E: the prose pass
 
 - [ ] E1. List: collect every file named in a "prose pass" note in this file (`grep -n -i 'prose pass' docs/plan.md`), plus every file changed on this branch (`git diff --name-only main...HEAD -- Packages docs`), deduplicated and sorted. For each file: rewrite only prose, that is English comments, documentation comments, and Markdown sentences: short sentences, plain words, active voice, one fact per sentence, American spelling, no praise or filler; keep every fact, name, number, code span, and Markdown structure; change no code, identifier, or string literal. Skip a file whose prose already reads so. `swift build` after Swift files. Subject: `Docs: Rewrite prose for plain English`.
+  - [x] E1.1 Packages/ARCH/Sources/AI/AIFeature.swift
+    - Clarified which Settings page omits a per-request feature.
+  - [x] E1.2 Packages/ARCH/Sources/AI/CommandLineProcess.swift
+    - Shortened the process and pipe header.
+  - [x] E1.3 Packages/ARCH/Sources/Agent/AgentActivityLog.swift
+    - ok
+  - [x] E1.4 Packages/ARCH/Sources/Agent/AgentApprovalCard.swift
+    - Split the approval-card header into short sentences.
+  - [x] E1.5 Packages/ARCH/Sources/Agent/AgentApprovals.swift
+    - Split the pending-card header into short sentences.
+  - [ ] E1.6 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
+  - [ ] E1.7 Packages/ARCH/Sources/Agent/AgentComposer.swift
+  - [ ] E1.8 Packages/ARCH/Sources/Agent/AgentEventBuffer.swift
+  - [ ] E1.9 Packages/ARCH/Sources/Agent/AgentGrantSheet.swift
+  - [ ] E1.10 Packages/ARCH/Sources/Agent/AgentGrantState.swift
+  - [ ] E1.11 Packages/ARCH/Sources/Agent/AgentHookCLIRun.swift
+  - [ ] E1.12 Packages/ARCH/Sources/Agent/AgentHookRegistrar.swift
+  - [ ] E1.13 Packages/ARCH/Sources/Agent/AgentPanel.swift
+  - [ ] E1.14 Packages/ARCH/Sources/Agent/AgentPanelParts.swift
+  - [ ] E1.15 Packages/ARCH/Sources/Agent/AgentPolicy.swift
+  - [ ] E1.16 Packages/ARCH/Sources/Agent/AgentRun.swift
+  - [ ] E1.17 Packages/ARCH/Sources/Agent/AgentRunner.swift
+  - [ ] E1.18 Packages/ARCH/Sources/Agent/AgentService.swift
+  - [ ] E1.19 Packages/ARCH/Sources/Agent/AgentSessionTicket.swift
+  - [ ] E1.20 Packages/ARCH/Sources/Agent/AgentSettings.swift
+  - [ ] E1.21 Packages/ARCH/Sources/Agent/AgentToolHost.swift
+  - [ ] E1.22 Packages/ARCH/Sources/Agent/AgentTranscript.swift
+  - [ ] E1.23 Packages/ARCH/Sources/Agent/AgentUserTools.swift
+  - [ ] E1.24 Packages/ARCH/Sources/AgentControl/AgentCommandLine.swift
+  - [ ] E1.25 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
+  - [ ] E1.26 Packages/ARCH/Sources/AgentControl/AgentHarness.swift
+  - [ ] E1.27 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
+  - [ ] E1.28 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
+  - [ ] E1.29 Packages/ARCH/Sources/Browsing/AddressPillView.swift
+  - [ ] E1.30 Packages/ARCH/Sources/Browsing/AgentPanelColumn.swift
+  - [ ] E1.31 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift
+  - [ ] E1.32 Packages/ARCH/Sources/Browsing/BrowserEventSource.swift
+  - [ ] E1.33 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+  - [ ] E1.34 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
+  - [ ] E1.35 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
+  - [ ] E1.36 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
+  - [ ] E1.37 Packages/ARCH/Sources/Browsing/CommandPaletteView.swift
+  - [ ] E1.38 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
+  - [ ] E1.39 Packages/ARCH/Sources/Browsing/DownloadNotifier.swift
+  - [ ] E1.40 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
+  - [ ] E1.41 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift
+  - [ ] E1.42 Packages/ARCH/Sources/Browsing/FindBarView.swift
+  - [ ] E1.43 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
+  - [ ] E1.44 Packages/ARCH/Sources/Browsing/FolderTree.swift
+  - [ ] E1.45 Packages/ARCH/Sources/Browsing/LibraryView.swift
+  - [ ] E1.46 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
+  - [ ] E1.47 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift
+  - [ ] E1.48 Packages/ARCH/Sources/Browsing/PageAnswerView.swift
+  - [ ] E1.49 Packages/ARCH/Sources/Browsing/PageDownloadGate.swift
+  - [ ] E1.50 Packages/ARCH/Sources/Browsing/PagePreview.swift
+  - [ ] E1.51 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
+  - [ ] E1.52 Packages/ARCH/Sources/Browsing/PersonaEngines.swift
+  - [ ] E1.53 Packages/ARCH/Sources/Browsing/PluginPages.swift
+  - [ ] E1.54 Packages/ARCH/Sources/Browsing/PluginViews.swift
+  - [ ] E1.55 Packages/ARCH/Sources/Browsing/PromptCard.swift
+  - [ ] E1.56 Packages/ARCH/Sources/Browsing/PromptState.swift
+  - [ ] E1.57 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift
+  - [ ] E1.58 Packages/ARCH/Sources/Browsing/SessionWebExtensionHost.swift
+  - [ ] E1.59 Packages/ARCH/Sources/Browsing/SidebarDragState.swift
+  - [ ] E1.60 Packages/ARCH/Sources/Browsing/SidebarView.swift
+  - [ ] E1.61 Packages/ARCH/Sources/Browsing/SiteSettingsParts.swift
+  - [ ] E1.62 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
+  - [ ] E1.63 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift
+  - [ ] E1.64 Packages/ARCH/Sources/Browsing/SplitView.swift
+  - [ ] E1.65 Packages/ARCH/Sources/Browsing/Tab.swift
+  - [ ] E1.66 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
+  - [ ] E1.67 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
+  - [ ] E1.68 Packages/ARCH/Sources/Browsing/TabPromptContent.swift
+  - [ ] E1.69 Packages/ARCH/Sources/Browsing/TabRowView.swift
+  - [ ] E1.70 Packages/ARCH/Sources/Browsing/TabSwitcherView.swift
+  - [ ] E1.71 Packages/ARCH/Sources/Browsing/TabUnloading.swift
+  - [ ] E1.72 Packages/ARCH/Sources/Browsing/UnloadedWebContents.swift
+  - [ ] E1.73 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
+  - [ ] E1.74 Packages/ARCH/Sources/Browsing/WebExtensionActionsSection.swift
+  - [ ] E1.75 Packages/ARCH/Sources/Events/BrowserEvent.swift
+  - [ ] E1.76 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+  - [ ] E1.77 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
+  - [ ] E1.78 Packages/ARCH/Sources/History/HistoryWindowController.swift
+  - [ ] E1.79 Packages/ARCH/Sources/Hooks/HookProposalSheet.swift
+  - [ ] E1.80 Packages/ARCH/Sources/Hooks/HookRegistry.swift
+  - [ ] E1.81 Packages/ARCH/Sources/Hooks/HookScriptContext.swift
+  - [ ] E1.82 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
+  - [ ] E1.83 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift
+  - [ ] E1.84 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
+  - [ ] E1.85 Packages/ARCH/Sources/Plugins/Plugin.swift
+  - [ ] E1.86 Packages/ARCH/Sources/Plugins/PluginAI.swift
+  - [ ] E1.87 Packages/ARCH/Sources/Plugins/PluginComposer.swift
+  - [ ] E1.88 Packages/ARCH/Sources/Plugins/PluginComposerInstructions.swift
+  - [ ] E1.89 Packages/ARCH/Sources/Plugins/PluginContributions.swift
+  - [ ] E1.90 Packages/ARCH/Sources/Plugins/PluginManager.swift
+  - [ ] E1.91 Packages/ARCH/Sources/Plugins/PluginManifest.swift
+  - [ ] E1.92 Packages/ARCH/Sources/Plugins/PluginManifestFile.swift
+  - [ ] E1.93 Packages/ARCH/Sources/Plugins/PluginNetwork.swift
+  - [ ] E1.94 Packages/ARCH/Sources/Plugins/PluginPageScripts.swift
+  - [ ] E1.95 Packages/ARCH/Sources/Plugins/PluginSandbox.swift
+  - [ ] E1.96 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
+  - [ ] E1.97 Packages/ARCH/Sources/Plugins/ScriptPluginBridge.swift
+  - [ ] E1.98 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
+  - [ ] E1.99 Packages/ARCH/Sources/Preferences/AICommandLineEditor.swift
+  - [ ] E1.100 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
+  - [ ] E1.101 Packages/ARCH/Sources/Preferences/AISettingsView.swift
+  - [ ] E1.102 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
+  - [ ] E1.103 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift
+  - [ ] E1.104 Packages/ARCH/Sources/Preferences/PluginInstallSheet.swift
+  - [ ] E1.105 Packages/ARCH/Sources/Preferences/PluginsSection.swift
+  - [ ] E1.106 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
+  - [ ] E1.107 Packages/ARCH/Sources/Preferences/PreferencesWindowController.swift
+  - [ ] E1.108 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift
+  - [ ] E1.109 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
+  - [ ] E1.110 Packages/ARCH/Sources/Sync/SyncController.swift
+  - [ ] E1.111 Packages/ARCH/Sources/Terminal/TerminalView.swift
+  - [ ] E1.112 Packages/ARCH/Sources/Terminal/TerminalWindowController.swift
+  - [ ] E1.113 Packages/ARCH/Tests/AITests/AgentSessionTests.swift
+  - [ ] E1.114 Packages/ARCH/Tests/AgentControlTests/CommandLineTests.swift
+  - [ ] E1.115 Packages/ARCH/Tests/AgentControlTests/HarnessTests.swift
+  - [ ] E1.116 Packages/ARCH/Tests/AgentTests/AgentRunnerTests.swift
+  - [ ] E1.117 Packages/ARCH/Tests/AgentTests/ApprovalTests.swift
+  - [ ] E1.118 Packages/ARCH/Tests/AgentTests/GrantTests.swift
+  - [ ] E1.119 Packages/ARCH/Tests/AgentTests/OutsideEventsTests.swift
+  - [ ] E1.120 Packages/ARCH/Tests/AgentTests/OutsideHooksTests.swift
+  - [ ] E1.121 Packages/ARCH/Tests/AgentTests/OutsideRunsTests.swift
+  - [ ] E1.122 Packages/ARCH/Tests/AgentTests/PolicyTests.swift
+  - [ ] E1.123 Packages/ARCH/Tests/AgentTests/SealTests.swift
+  - [ ] E1.124 Packages/ARCH/Tests/AgentTests/ShellHookTicketTests.swift
+  - [ ] E1.125 Packages/ARCH/Tests/BrowsingTests/AgentTabTests.swift
+  - [ ] E1.126 Packages/ARCH/Tests/BrowsingTests/BrowserEventSourceTests.swift
+  - [ ] E1.127 Packages/ARCH/Tests/BrowsingTests/DragAutoScrollTests.swift
+  - [ ] E1.128 Packages/ARCH/Tests/BrowsingTests/ExtensionPageTitleTests.swift
+  - [ ] E1.129 Packages/ARCH/Tests/BrowsingTests/PageDownloadGateTests.swift
+  - [ ] E1.130 Packages/ARCH/Tests/BrowsingTests/PageInputTests.swift
+  - [ ] E1.131 Packages/ARCH/Tests/BrowsingTests/PluginPagesTests.swift
+  - [ ] E1.132 Packages/ARCH/Tests/BrowsingTests/SessionPluginBrowserHostTests.swift
+  - [ ] E1.133 Packages/ARCH/Tests/BrowsingTests/SessionWebExtensionHostTests.swift
+  - [ ] E1.134 Packages/ARCH/Tests/BrowsingTests/SidebarDragTests.swift
+  - [ ] E1.135 Packages/ARCH/Tests/BrowsingTests/SidebarTabSlotTests.swift
+  - [ ] E1.136 Packages/ARCH/Tests/BrowsingTests/TabUnloadingTests.swift
+  - [ ] E1.137 Packages/ARCH/Tests/ExtensionsTests/EngineVersionsTests.swift
+  - [ ] E1.138 Packages/ARCH/Tests/HooksTests/HookScriptRunnerTests.swift
+  - [ ] E1.139 Packages/ARCH/Tests/HooksTests/OutsideHookTests.swift
+  - [ ] E1.140 Packages/ARCH/Tests/HooksTests/ShellHookRunnerTests.swift
+  - [ ] E1.141 Packages/ARCH/Tests/PluginsTests/PluginAITests.swift
+  - [ ] E1.142 Packages/ARCH/Tests/PluginsTests/PluginEventsTests.swift
+  - [ ] E1.143 Packages/ARCH/Tests/PluginsTests/PluginPageCallTests.swift
+  - [ ] E1.144 Packages/ARCH/Tests/PluginsTests/PluginSiteAccessTests.swift
+  - [ ] E1.145 Packages/ARCH/Tests/PluginsTests/PluginsTests.swift
+  - [ ] E1.146 Packages/ARCH/Tests/PluginsTests/ScriptPluginTests.swift
+  - [ ] E1.147 Packages/ARCH/Tests/PreferencesTests/AgentHooksSummaryTests.swift
+  - [ ] E1.148 Packages/ARCHApp/Sources/Arch/AppDelegate.swift
+  - [ ] E1.149 Packages/ARCHApp/Sources/Arch/PluginsMenu.swift
+  - [ ] E1.150 Packages/ARCHApp/Sources/ArchCLI/CLICommands.swift
+  - [ ] E1.151 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
+  - [ ] E1.152 Packages/ARCHKit/Sources/ARCHEngine/EnginePageScript.swift
+  - [ ] E1.153 Packages/ARCHKit/Sources/ARCHEngine/EngineWebContents.swift
+  - [ ] E1.154 Packages/ARCHKit/Sources/ARCHEngineChromium/ChromiumEngine.swift
+  - [ ] E1.155 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitDelegateBridge.swift
+  - [ ] E1.156 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitEngine.swift
+  - [ ] E1.157 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitExtensions.swift
+  - [ ] E1.158 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitPageScripts.swift
+  - [ ] E1.159 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitWebView.swift
+  - [ ] E1.160 Packages/ARCHKit/Sources/CEFBridge/CEFBridgeBrowser.mm
+  - [ ] E1.161 Packages/ARCHKit/Sources/CEFBridge/include/CEFBridge.h
+  - [ ] E1.162 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitFileChooserTests.swift
+  - [ ] E1.163 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitWebContentsTests.swift
+  - [ ] E1.164 docs/agent-panel-design.md
+  - [ ] E1.165 docs/agents.md
+  - [ ] E1.166 docs/ai.md
+  - [ ] E1.167 docs/bookmarks.md
+  - [ ] E1.168 docs/engine-protocol.md
+  - [ ] E1.169 docs/features.md
+  - [ ] E1.170 docs/hooks.md
+  - [ ] E1.171 docs/import-browsers.md
+  - [ ] E1.172 docs/plan.md
+  - [ ] E1.173 docs/plugins.md
+  - [ ] E1.174 docs/sync.md
+  - [ ] E1.175 docs/windows-personas.md
 - [ ] E2. Remove the "prose pass" notes from the rows whose files are all done. **Commit** `Docs: Drop the prose pass notes that are done`. **Push**.
 
 #### Group W: wrap-up of the first pass

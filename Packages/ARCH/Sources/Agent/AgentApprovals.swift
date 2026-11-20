@@ -1,4 +1,9 @@
-// The cards that wait for the user (docs/agents.md, Permissions, approvals, and injection defenses ▸ Approval interface): the steps a rule or the mode asks about, `request_approval`, `ask_user`, `hand_to_user`, `request_tab`, an outside client's first rename of a tab the user shared (P19), and the downloads, links to other apps, and file choosers that pages in agent tabs start. Each card waits until the user answers in Arch's own interface, its time runs out, its page moves on, or the client's work ends; an unanswered card is a denial. Several cards can wait per client, grouped by page: Allow on This Page, Allow on <site>, and Allow for This Tab answer the other cards of that page, site, or tab that offer them. A sensitive card of an outside client asks for Touch ID or the login password before Allow counts.
+// Approval cards wait for the user (docs/agents.md, Permissions, approvals, and injection defenses).
+// They cover steps a rule or mode asks about, `request_approval`, `ask_user`, `hand_to_user`, and `request_tab`.
+// They also cover an outside client's first rename of a shared tab (P19), downloads, external links, and file choosers that agent pages start.
+// Each card ends when the user answers, time runs out, its page moves on, or the client's work ends. No answer means denial.
+// Several cards for a client can wait together, grouped by page. Allow on This Page, Allow on <site>, and Allow for This Tab also answer other cards that offer the same choice.
+// A sensitive allowance for an outside client requires Touch ID or the login password.
 import AgentControl
 import AppKit
 import Foundation

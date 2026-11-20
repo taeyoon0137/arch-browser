@@ -1,4 +1,4 @@
-// One run of a command-line tool, started with `posix_spawn`: its own process group, pipes for standard input, output, and error instead of a terminal, only the given environment, and its own working directory. Standard input closes after the first input, or stays open for more in order, as a Claude Code session's messages need. A shell hook's interpreter also reads its script from a pipe at descriptor 3. Ending it sends SIGTERM to the group and SIGKILL two seconds later.
+// Runs one command-line tool with `posix_spawn` in its own process group and working directory. The process receives only the given environment. Pipes replace a terminal for standard input, output, and error. Standard input closes after the first message unless the caller keeps it open for later messages, as a Claude Code session does. A shell hook's interpreter reads its script from descriptor 3. Ending the run sends SIGTERM to the group, then SIGKILL two seconds later.
 import Darwin
 import Foundation
 
