@@ -1239,11 +1239,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.40 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
     - Split the drag-scroll overview into short sentences.
-  - [ ] E1.41 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift
-  - [ ] E1.42 Packages/ARCH/Sources/Browsing/FindBarView.swift
-  - [ ] E1.43 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
-  - [ ] E1.44 Packages/ARCH/Sources/Browsing/FolderTree.swift
-  - [ ] E1.45 Packages/ARCH/Sources/Browsing/LibraryView.swift
+  - [x] E1.41 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift
+    - ok
+  - [x] E1.42 Packages/ARCH/Sources/Browsing/FindBarView.swift
+    - ok
+  - [x] E1.43 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
+    - ok
+  - [x] E1.44 Packages/ARCH/Sources/Browsing/FolderTree.swift
+    - Split the folder-tree overview into short sentences.
+  - [x] E1.45 Packages/ARCH/Sources/Browsing/LibraryView.swift
+    - ok
   - [ ] E1.46 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
   - [ ] E1.47 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift
   - [ ] E1.48 Packages/ARCH/Sources/Browsing/PageAnswerView.swift
