@@ -38,6 +38,7 @@ public struct BrowserEventScriptAccess {
 
 /// An event as a hook script or a script plugin receives it, as JSON with camel-case keys such as `personaId`. Members that do not apply to the event's kind are absent.
 public struct BrowserEventScriptView: Codable, Hashable, Sendable {
+    /// The tab fields a hook or script plugin may receive.
     public struct Tab: Codable, Hashable, Sendable {
         public var id: UUID
         public var personaID: UUID
@@ -51,6 +52,7 @@ public struct BrowserEventScriptView: Codable, Hashable, Sendable {
         }
     }
 
+    /// The download fields a hook or script plugin may receive.
     public struct Download: Codable, Hashable, Sendable {
         public var id: UUID
         public var personaID: UUID
@@ -178,6 +180,7 @@ public protocol BrowserEventOutsideReader: AnyObject {
 
 /// An event as an outside program with the events scope receives it: one JSON line of `arch-cli events --json`, or one entry of `watch_events`.
 public struct BrowserEventOutsideView: Codable, Hashable, Sendable {
+    /// A tab identified by an agent handle or a watch ID, with only permitted address details.
     public struct Tab: Codable, Hashable, Sendable {
         /// The handle of the client's own agent tab or a tab shared with it.
         public var handle: String?
@@ -302,6 +305,7 @@ extension BrowserEvent {
         return view
     }
 
+    /// Reduces or hides a tab's address according to its grant handle and AI site access.
     @MainActor
     private static func outsideTab(_ tab: BrowserTabRef, named name: BrowserEventOutsideTab, reader: some BrowserEventOutsideReader) -> BrowserEventOutsideView.Tab {
         var shown = BrowserEventOutsideView.Tab(space: tab.spaceID.map(reader.handle(ofSpace:)), kind: tab.kind, engine: tab.engine.viewName)
@@ -322,6 +326,7 @@ extension BrowserEvent {
         return shown
     }
 
+    /// Returns the handle or watch ID that names a tab to this client.
     private static func label(_ name: BrowserEventOutsideTab) -> String {
         switch name {
         case .own(let handle), .shared(let handle), .watched(let handle): return handle

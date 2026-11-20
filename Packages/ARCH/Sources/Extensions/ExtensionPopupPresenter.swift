@@ -2,6 +2,7 @@
 import AppKit
 import ARCHEngine
 
+/// Presents an engine extension's popup and keeps its page within popup size limits.
 @MainActor
 public enum ExtensionPopupPresenter {
     /// The smallest and largest size of a popup page, in points.
@@ -48,6 +49,7 @@ private final class PopupPageController: NSViewController, NSPopoverDelegate {
         return nil
     }
 
+    /// Embeds the popup page and connects its resize and close callbacks to the popover.
     override func loadView() {
         let container = NSView(frame: NSRect(origin: .zero, size: ExtensionPopupPresenter.clamped(page.preferredSize)))
         page.view.frame = container.bounds
@@ -63,6 +65,7 @@ private final class PopupPageController: NSViewController, NSPopoverDelegate {
         view.window?.makeKey()
     }
 
+    /// Removes the page's callbacks and view after the popover closes.
     func popoverDidClose(_ notification: Notification) {
         page.sizeDidChange = nil
         page.didClose = nil

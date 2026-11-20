@@ -1941,11 +1941,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.70 Packages/ARCH/Sources/Events/BrowserEvent.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.71 Packages/ARCH/Sources/Events/BrowserEventBus.swift
-  - [ ] X2.r1.72 Packages/ARCH/Sources/Events/BrowserEventFilter.swift
-  - [ ] X2.r1.73 Packages/ARCH/Sources/Events/BrowserEventRateLimiter.swift
-  - [ ] X2.r1.74 Packages/ARCH/Sources/Events/BrowserEventView.swift
-  - [ ] X2.r1.75 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+  - [x] X2.r1.71 Packages/ARCH/Sources/Events/BrowserEventBus.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.72 Packages/ARCH/Sources/Events/BrowserEventFilter.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.73 Packages/ARCH/Sources/Events/BrowserEventRateLimiter.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.74 Packages/ARCH/Sources/Events/BrowserEventView.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.75 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.76 Packages/ARCH/Sources/Extensions/NativeAppGuide.swift
   - [ ] X2.r1.77 Packages/ARCH/Sources/Extensions/WebExtensionQuestion.swift
   - [ ] X2.r1.78 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
