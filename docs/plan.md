@@ -1419,11 +1419,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - blocked: The week-queue rule forbids changes under a Tests folder.
   - [x] E1.130 Packages/ARCH/Tests/BrowsingTests/PageInputTests.swift
     - blocked: The week-queue rule forbids changes under a Tests folder.
-  - [ ] E1.131 Packages/ARCH/Tests/BrowsingTests/PluginPagesTests.swift
-  - [ ] E1.132 Packages/ARCH/Tests/BrowsingTests/SessionPluginBrowserHostTests.swift
-  - [ ] E1.133 Packages/ARCH/Tests/BrowsingTests/SessionWebExtensionHostTests.swift
-  - [ ] E1.134 Packages/ARCH/Tests/BrowsingTests/SidebarDragTests.swift
-  - [ ] E1.135 Packages/ARCH/Tests/BrowsingTests/SidebarTabSlotTests.swift
+  - [x] E1.131 Packages/ARCH/Tests/BrowsingTests/PluginPagesTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.132 Packages/ARCH/Tests/BrowsingTests/SessionPluginBrowserHostTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.133 Packages/ARCH/Tests/BrowsingTests/SessionWebExtensionHostTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.134 Packages/ARCH/Tests/BrowsingTests/SidebarDragTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.135 Packages/ARCH/Tests/BrowsingTests/SidebarTabSlotTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
   - [ ] E1.136 Packages/ARCH/Tests/BrowsingTests/TabUnloadingTests.swift
   - [ ] E1.137 Packages/ARCH/Tests/ExtensionsTests/EngineVersionsTests.swift
   - [ ] E1.138 Packages/ARCH/Tests/HooksTests/HookScriptRunnerTests.swift
