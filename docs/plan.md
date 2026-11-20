@@ -1489,11 +1489,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.165 docs/agents.md
     - Used American spelling in prose while retaining code names.
-  - [ ] E1.166 docs/ai.md
-  - [ ] E1.167 docs/bookmarks.md
-  - [ ] E1.168 docs/engine-protocol.md
-  - [ ] E1.169 docs/features.md
-  - [ ] E1.170 docs/hooks.md
+  - [x] E1.166 docs/ai.md
+    - ok; `cancelled` is a code case.
+  - [x] E1.167 docs/bookmarks.md
+    - Used American spelling in prose.
+  - [x] E1.168 docs/engine-protocol.md
+    - Used American spelling in prose.
+  - [x] E1.169 docs/features.md
+    - Used American spelling in prose.
+  - [x] E1.170 docs/hooks.md
+    - Used American spelling in prose while retaining code names.
   - [ ] E1.171 docs/import-browsers.md
   - [ ] E1.172 docs/plan.md
   - [ ] E1.173 docs/plugins.md
