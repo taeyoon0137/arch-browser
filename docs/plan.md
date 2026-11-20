@@ -1134,7 +1134,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.9 Extensions module
     - File and function names matched the sources.
-  - [ ] D2.10 AI module
+  - [x] D2.10 AI module
+    - File and function names matched the sources.
   - [ ] D2.11 AgentControl module and arch-cli
   - [ ] D2.12 Agent module
   - [ ] D2.13 Events module
