@@ -1259,11 +1259,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the download-gate rules into short sentences.
   - [x] E1.50 Packages/ARCH/Sources/Browsing/PagePreview.swift
     - Split the preview behavior into short sentences.
-  - [ ] E1.51 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
-  - [ ] E1.52 Packages/ARCH/Sources/Browsing/PersonaEngines.swift
-  - [ ] E1.53 Packages/ARCH/Sources/Browsing/PluginPages.swift
-  - [ ] E1.54 Packages/ARCH/Sources/Browsing/PluginViews.swift
-  - [ ] E1.55 Packages/ARCH/Sources/Browsing/PromptCard.swift
+  - [x] E1.51 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
+    - Split the popover overview into short sentences.
+  - [x] E1.52 Packages/ARCH/Sources/Browsing/PersonaEngines.swift
+    - ok
+  - [x] E1.53 Packages/ARCH/Sources/Browsing/PluginPages.swift
+    - Split the page-plugin overview into short sentences.
+  - [x] E1.54 Packages/ARCH/Sources/Browsing/PluginViews.swift
+    - Clarified that a plugin panel can open in the sidebar.
+  - [x] E1.55 Packages/ARCH/Sources/Browsing/PromptCard.swift
+    - Split the prompt-card overview into short sentences.
   - [ ] E1.56 Packages/ARCH/Sources/Browsing/PromptState.swift
   - [ ] E1.57 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift
   - [ ] E1.58 Packages/ARCH/Sources/Browsing/SessionWebExtensionHost.swift

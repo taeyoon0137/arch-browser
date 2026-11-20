@@ -1,4 +1,5 @@
-// What the plugins of a window's Persona add to the sidebar: rows below the favorites that run a command or open the plugin's panel in a popover, and their items in the menus that SwiftUI builds, the tab rows' context menus and the space menu.
+// Shows plugin items below the favorites. An item runs a command or opens a panel in a popover or the sidebar.
+// Plugin items also appear in tab and space menus.
 import AppKit
 import Plugins
 import SwiftUI
@@ -71,7 +72,7 @@ private struct PluginSidebarItemRow: View {
         .accessibilityValue(badge ?? "")
     }
 
-    /// A command runs on the window's selected tab. A panel opens beside the row once the plugin hands it over and closes with a click outside it, Escape, a click on the row, or its own end.
+    /// Runs a command on the selected tab or opens the panel in its requested presentation. A popover closes on a click outside, Escape, a second click on the row, or its own end.
     private func open() {
         switch item.item.action {
         case let .command(id):

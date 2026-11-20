@@ -1,4 +1,5 @@
-// A tab's prompt as Arch's card: who asks, the glyph, Arch's question and its explanation, the page's own words in their box, what an extension gets, the fields, the notes, and the buttons, on the prompt surface. The card holds the keyboard focus for its prompt and binds Return and Escape while it has it; it knows nothing of the queue and only reports its answer once.
+// A tab's prompt appears on Arch's card surface. It shows the requester, glyph, question, explanation, page words, extension access, fields, notes, and buttons.
+// The card holds keyboard focus for its prompt and binds Return and Escape there. It knows nothing about the queue and reports its answer once.
 import SwiftUI
 
 struct PromptCard: View {

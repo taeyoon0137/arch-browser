@@ -1,4 +1,5 @@
-// Connects the session's tabs to the plugins of their Personas: each tab's pages run the page scripts of its Persona's enabled plugins, the values those scripts send reach their plugins, and the page's context menu shows the plugins' items for what the user clicked on.
+// Connects tabs to the plugins in their Personas.
+// Each tab runs its Persona's enabled page scripts and delivers their values to the plugins. The page's context menu shows plugin items for what the user clicked.
 import AppKit
 import ARCHEngine
 import Combine
