@@ -1,6 +1,7 @@
 // Frames on the control socket: a 4-byte big-endian length, then that many bytes of one UTF-8 JSON-RPC message, at most 16 MiB (docs/agents.md, Local control channel ▸ Framing and methods). Length framing keeps page text from splitting messages, and the limit fits a full-page screenshot.
 import Foundation
 
+/// Encodes one size-bounded JSON-RPC message for the local socket.
 public enum AgentFrame {
     /// The largest message a frame carries: 16 MiB.
     public static let maximumLength = 16 * 1024 * 1024
@@ -17,6 +18,7 @@ public enum AgentFrame {
     }
 }
 
+/// A frame whose message length exceeds the protocol limit.
 public enum AgentFrameError: Error, Equatable {
     /// A message, or a frame's announced length, over `AgentFrame.maximumLength`. The connection closes.
     case tooLong(Int)

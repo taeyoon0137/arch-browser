@@ -1871,11 +1871,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.35 Packages/ARCH/Sources/AgentControl/AgentControlClient.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.36 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
-  - [ ] X2.r1.37 Packages/ARCH/Sources/AgentControl/AgentExitCode.swift
-  - [ ] X2.r1.38 Packages/ARCH/Sources/AgentControl/AgentFraming.swift
-  - [ ] X2.r1.39 Packages/ARCH/Sources/AgentControl/AgentHarness.swift
-  - [ ] X2.r1.40 Packages/ARCH/Sources/AgentControl/AgentJSON.swift
+  - [x] X2.r1.36 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.37 Packages/ARCH/Sources/AgentControl/AgentExitCode.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.38 Packages/ARCH/Sources/AgentControl/AgentFraming.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.39 Packages/ARCH/Sources/AgentControl/AgentHarness.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.40 Packages/ARCH/Sources/AgentControl/AgentJSON.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.41 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
   - [ ] X2.r1.42 Packages/ARCH/Sources/AgentControl/AgentLinkInstaller.swift
   - [ ] X2.r1.43 Packages/ARCH/Sources/AgentControl/AgentMCPConfiguration.swift

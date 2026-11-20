@@ -28,6 +28,7 @@ public enum AgentGuideTopic: String, CaseIterable, Sendable {
         }
     }
 
+    /// The guide text for this topic.
     public var text: String {
         switch self {
         case .browsing: return AgentHarness.browsingTopic
@@ -110,6 +111,7 @@ public struct AgentSkill: Equatable, Sendable {
     }
 }
 
+/// Shared instructions, guide topics, and skills supplied to in-app and outside agents.
 public enum AgentHarness {
     /// The guide or one of its topics.
     public static func text(for topic: AgentGuideTopic?) -> String {
