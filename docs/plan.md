@@ -1429,11 +1429,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - blocked: The week-queue rule forbids changes under a Tests folder.
   - [x] E1.135 Packages/ARCH/Tests/BrowsingTests/SidebarTabSlotTests.swift
     - blocked: The week-queue rule forbids changes under a Tests folder.
-  - [ ] E1.136 Packages/ARCH/Tests/BrowsingTests/TabUnloadingTests.swift
-  - [ ] E1.137 Packages/ARCH/Tests/ExtensionsTests/EngineVersionsTests.swift
-  - [ ] E1.138 Packages/ARCH/Tests/HooksTests/HookScriptRunnerTests.swift
-  - [ ] E1.139 Packages/ARCH/Tests/HooksTests/OutsideHookTests.swift
-  - [ ] E1.140 Packages/ARCH/Tests/HooksTests/ShellHookRunnerTests.swift
+  - [x] E1.136 Packages/ARCH/Tests/BrowsingTests/TabUnloadingTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.137 Packages/ARCH/Tests/ExtensionsTests/EngineVersionsTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.138 Packages/ARCH/Tests/HooksTests/HookScriptRunnerTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.139 Packages/ARCH/Tests/HooksTests/OutsideHookTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
+  - [x] E1.140 Packages/ARCH/Tests/HooksTests/ShellHookRunnerTests.swift
+    - blocked: The week-queue rule forbids changes under a Tests folder.
   - [ ] E1.141 Packages/ARCH/Tests/PluginsTests/PluginAITests.swift
   - [ ] E1.142 Packages/ARCH/Tests/PluginsTests/PluginEventsTests.swift
   - [ ] E1.143 Packages/ARCH/Tests/PluginsTests/PluginPageCallTests.swift
