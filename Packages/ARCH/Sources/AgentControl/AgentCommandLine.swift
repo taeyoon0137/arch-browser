@@ -1,4 +1,4 @@
-// `arch-cli`'s command table and argument parser also dispatch by `argv[0]`, so the same executable serves `arch-mcp` (docs/agents.md, arch-cli).
+// `arch-cli`'s command table and argument parser also dispatch by `argv[0]`, so the same executable serves `arch-mcp` (docs/agents.md, agent decision 2; arch-cli).
 // The table generates the `cli` guide topic and `--help`, keeping them in step. The `ArchCLI` executable runs only commands parsed here.
 import Foundation
 
@@ -10,6 +10,7 @@ public enum AgentInvocation: Equatable, Sendable {
     case mcp([String])
 }
 
+/// The commands and arguments accepted by arch-cli.
 public enum AgentCLICommand: Equatable, Sendable {
     case help
     case status
@@ -47,6 +48,7 @@ public enum AgentCLICommand: Equatable, Sendable {
     case agentRun(AgentJSON, promptFromStandardInput: Bool)
 }
 
+/// A request to list, propose, or remove an outside client's hook.
 public enum AgentHooksAction: Equatable, Sendable {
     case list
     /// The proposal without its script and agent options, which `script` and `agentOptions` name as files that `arch-cli` reads when it runs.
@@ -54,23 +56,27 @@ public enum AgentHooksAction: Equatable, Sendable {
     case remove(UUID)
 }
 
+/// A request to list, inspect, or stop an agent session.
 public enum AgentSessionsAction: Equatable, Sendable {
     case list
     case show(UUID)
     case stop(UUID)
 }
 
+/// Whether to install or remove the command-line links on PATH.
 public enum AgentLinksAction: String, CaseIterable, Sendable {
     case install
     case remove
 }
 
+/// Whether to list, install, or remove the agent entry skill.
 public enum AgentSkillsAction: String, CaseIterable, Sendable {
     case list
     case install
     case remove
 }
 
+/// A parsed command and its structured-output preference.
 public struct AgentCLIRequest: Equatable, Sendable {
     public var command: AgentCLICommand
     /// `--json`: print the result's structured value instead of text. `guide`, `--help`, the setup commands, and `skills` always print text.
@@ -82,6 +88,7 @@ public struct AgentCLIRequest: Equatable, Sendable {
     }
 }
 
+/// An invalid command-line invocation with a message for the user.
 public struct AgentUsageError: Error, Equatable {
     public var message: String
 
@@ -100,6 +107,7 @@ public struct AgentCLICommandSpec: Sendable {
     public var needsArch: Bool
 }
 
+/// Defines arch-cli commands and parses their arguments into requests.
 public enum AgentCommandLine {
     public static let commands: [AgentCLICommandSpec] = [
         AgentCLICommandSpec(name: "status", arguments: "", summary: "Shows whether Arch is running, whether agent access is on, this client's grant, and both versions.", needsArch: true),
@@ -299,6 +307,7 @@ public enum AgentCommandLine {
         var deniesApprovals = false
     }
 
+    /// Parses the list, show, or stop action and validates its session ID.
     private static func sessionsAction(_ operands: [String]) throws -> AgentSessionsAction {
         switch operands.first {
         case nil, "list"?:

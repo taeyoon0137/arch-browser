@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import Security
 
+/// Errors from connecting to or communicating with the local agent control socket.
 public enum AgentClientError: Error, Equatable {
     /// Neither the home folder's socket path nor the temporary folder's fits `sun_path`.
     case noSocketLocation
@@ -26,6 +27,7 @@ public enum AgentClientError: Error, Equatable {
     /// Arch answered a method with a JSON-RPC error.
     case failed(AgentRPCError)
 
+    /// Maps a client failure to the process exit status used by arch-cli.
     public var exitCode: AgentExitCode {
         switch self {
         case .noSocketLocation, .timedOut, .malformedAnswer, .system, .failed: return .internalError
@@ -68,6 +70,7 @@ public enum AgentClientError: Error, Equatable {
     }
 }
 
+/// A blocking connection that verifies Arch before sending and checks its peer for each frame.
 public final class AgentControlConnection {
     private let socket: Int32
     /// The listener as the check saw it.

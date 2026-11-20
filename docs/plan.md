@@ -1861,11 +1861,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.30 Packages/ARCH/Sources/Agent/AgentSettings.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.31 Packages/ARCH/Sources/Agent/AgentSettingsFile.swift
-  - [ ] X2.r1.32 Packages/ARCH/Sources/Agent/AgentTranscript.swift
-  - [ ] X2.r1.33 Packages/ARCH/Sources/AgentControl/AgentBundleLayout.swift
-  - [ ] X2.r1.34 Packages/ARCH/Sources/AgentControl/AgentCommandLine.swift
-  - [ ] X2.r1.35 Packages/ARCH/Sources/AgentControl/AgentControlClient.swift
+  - [x] X2.r1.31 Packages/ARCH/Sources/Agent/AgentSettingsFile.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.32 Packages/ARCH/Sources/Agent/AgentTranscript.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.33 Packages/ARCH/Sources/AgentControl/AgentBundleLayout.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.34 Packages/ARCH/Sources/AgentControl/AgentCommandLine.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.35 Packages/ARCH/Sources/AgentControl/AgentControlClient.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.36 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
   - [ ] X2.r1.37 Packages/ARCH/Sources/AgentControl/AgentExitCode.swift
   - [ ] X2.r1.38 Packages/ARCH/Sources/AgentControl/AgentFraming.swift

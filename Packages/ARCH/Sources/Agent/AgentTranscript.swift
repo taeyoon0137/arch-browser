@@ -33,7 +33,9 @@ public enum AgentErrorAction: Equatable, Sendable {
     case openAISettings
 }
 
+/// One identified item shown in an in-app session's transcript.
 public struct AgentTranscriptItem: Identifiable, Equatable, Sendable {
+    /// The message, step, notice, error, or footer represented by an item.
     public enum Kind: Equatable, Sendable {
         case user(String)
         case reply(String)
@@ -57,6 +59,7 @@ public struct AgentTranscriptItem: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Builds one session's in-memory transcript and tracks its current turn.
 struct AgentTranscript: Equatable {
     private(set) var items: [AgentTranscriptItem] = []
     private(set) var retryableErrorID: UUID?
@@ -70,6 +73,7 @@ struct AgentTranscript: Equatable {
         case reply, thinking
     }
 
+    /// Appends an item and tracks whether its error can be retried.
     mutating func append(_ kind: AgentTranscriptItem.Kind) {
         growing = nil
         let item = AgentTranscriptItem(kind)
@@ -79,6 +83,7 @@ struct AgentTranscript: Equatable {
         }
     }
 
+    /// Resets per-turn state and appends the user's message unless retrying.
     mutating func beginTurn(_ text: String, isRetry: Bool) {
         turnStartIndex = items.count
         retryableErrorID = nil
@@ -97,6 +102,7 @@ struct AgentTranscript: Equatable {
         }
     }
 
+    /// Joins streamed thinking text to the current thinking item.
     mutating func thinkingText(_ text: String) {
         guard !text.isEmpty else { return }
         if growing == .thinking, case .thinking(let earlier)? = items.last?.kind {
@@ -111,10 +117,12 @@ struct AgentTranscript: Equatable {
         turnUsage = usage
     }
 
+    /// Reports whether any completed transcript item records a read of the tab.
     func containsRead(of tabID: UUID) -> Bool {
         items.contains { $0.pagesRead.contains { $0.tabID == tabID } }
     }
 
+    /// Records a distinct page read for the current turn.
     mutating func read(_ page: AgentReadPage) {
         if !turnPages.contains(page) { turnPages.append(page) }
     }
@@ -150,6 +158,7 @@ enum AgentStepText {
         AgentStep(tool: call.name, sentence: sentence(for: call, result: result, hostStep: hostStep), tabHandle: tabHandle, tabID: tabID, status: result.status)
     }
 
+    /// Names the tool step and translates known result states into a short panel sentence.
     static func sentence(for call: AgentToolCall, result: AgentToolResult, hostStep: String? = nil) -> String {
         let done: String
         switch call.name {
