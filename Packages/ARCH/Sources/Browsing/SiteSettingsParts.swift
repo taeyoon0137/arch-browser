@@ -169,6 +169,7 @@ struct SiteSettingsRow<Icon: View, Accessory: View>: View {
             Spacer(minLength: 0)
             accessory
                 .labelsHidden()
+                .accessibilityLabel(title)
                 .controlSize(.small)
                 .fixedSize()
                 .accessibilityHint(isControl ? help ?? "" : "")

@@ -310,6 +310,7 @@ struct SidebarIconButton: View {
     var shortcut: String?
     let action: () -> Void
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
 
     var body: some View {
@@ -317,7 +318,7 @@ struct SidebarIconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .frame(width: 30, height: 28)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHovering && isEnabled ? 0.08 : 0)))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering && isEnabled ? SidebarFill.hover.color(in: colorScheme) : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

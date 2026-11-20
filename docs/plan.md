@@ -995,11 +995,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] C1.40 Packages/ARCH/Sources/Browsing/SidebarBottomBar.swift
     - ok
-  - [ ] C1.41 Packages/ARCH/Sources/Browsing/SidebarDragAndDrop.swift
-  - [ ] C1.42 Packages/ARCH/Sources/Browsing/SidebarDragState.swift
-  - [ ] C1.43 Packages/ARCH/Sources/Browsing/SidebarView.swift
-  - [ ] C1.44 Packages/ARCH/Sources/Browsing/SiteSettingsParts.swift
-  - [ ] C1.45 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
+  - [x] C1.41 Packages/ARCH/Sources/Browsing/SidebarDragAndDrop.swift
+    - ok
+  - [x] C1.42 Packages/ARCH/Sources/Browsing/SidebarDragState.swift
+    - ok
+  - [x] C1.43 Packages/ARCH/Sources/Browsing/SidebarView.swift
+    - Used the sidebar hover fill for symbol buttons.
+  - [x] C1.44 Packages/ARCH/Sources/Browsing/SiteSettingsParts.swift
+    - Labeled controls whose visual labels are hidden.
+  - [x] C1.45 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
+    - Hid the decorative site symbol and used the sidebar hover fill.
   - [ ] C1.46 Packages/ARCH/Sources/Browsing/SpaceSwipeView.swift
   - [ ] C1.47 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift
   - [ ] C1.48 Packages/ARCH/Sources/Browsing/SpaceTheme.swift
