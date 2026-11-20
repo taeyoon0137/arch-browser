@@ -1514,8 +1514,54 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
 
 #### Group W: wrap-up of the first pass
 
-- [ ] W1. `swift build`, `./scripts/check_markdown.py`, `git diff --check main...HEAD`. Under this step write: each group's number of commits, every `decision:` and `blocked:` line with its step, and every build warning.
-- [ ] W2. **Commit** `Docs: Record what the week queue's first pass finished and left`. **Push**.
+- [x] W1. `swift build`, `./scripts/check_markdown.py`, `git diff --check main...HEAD`. Under this step write: each group's number of commits, every `decision:` and `blocked:` line with its step, and every build warning.
+  - Commits: P 0; G 6; A 6; B 16; C 19; D 34; E 36. The queue setup commit is separate. Total through E: 117.
+  - Build warnings observed: `PluginManager.swift:2043` and `ChromiumExtensions.swift:147` each reported `#ImplicitStrongCapture` for a weak `self` capture inside an outer closure that implicitly captured `self` strongly.
+  - Decisions and blockers:
+    - A7 decision: The web page takes 480 by 480 points and the Done row takes 40 points; a disabled plugin cannot start its settings page.
+    - A13 decision: The panel fills the sidebar width and at least 320 points of height; the sidebar scrolls when favorites leave less room.
+    - A15 blocked: The existing `history.sqlite` visits table has no Persona field, and changing its tables is forbidden; the current store cannot return only one Persona's visits.
+    - B1.8 blocked: When both engines fail, the nonoptional runtime(for:in:) contract has no runtime to return; changing it requires a wider API and caller migration.
+    - B1.28 blocked: createBrowser requires a browser result even for a context from the wrong engine; no valid Chromium browser can be returned from that context.
+    - B1.29 blocked: createBrowser requires a browser result even for a context from the wrong engine; no valid WebKit browser can be returned from that context.
+    - E1.113 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.114 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.115 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.116 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.117 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.118 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.119 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.120 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.121 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.122 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.123 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.124 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.125 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.126 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.127 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.128 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.129 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.130 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.131 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.132 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.133 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.134 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.135 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.136 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.137 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.138 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.139 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.140 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.141 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.142 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.143 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.144 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.145 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.146 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.147 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.162 blocked: The week-queue rule forbids changes under a Tests folder.
+    - E1.163 blocked: The week-queue rule forbids changes under a Tests folder.
+- [x] W2. **Commit** `Docs: Record what the week queue's first pass finished and left`. **Push**.
 - [ ] W3. **Preview** 5.
 
 #### Group X: rounds until November 22, 05:00 KST
