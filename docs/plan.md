@@ -878,11 +878,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0; indexed access follows a bounds check, or the key is a dictionary key.
   - [x] B2.20 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
     - changed: 0; indexed access follows a bounds check, or the key is a dictionary key.
-  - [ ] B2.21 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
-  - [ ] B2.22 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
-  - [ ] B2.23 Packages/ARCH/Sources/Sync/CloudKitSyncEngine.swift
-  - [ ] B2.24 Packages/ARCH/Sources/Sync/FirstSyncMerge.swift
-  - [ ] B2.25 Packages/ARCH/Sources/Sync/IncomingSidebarRecords.swift
+  - [x] B2.21 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.22 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.23 Packages/ARCH/Sources/Sync/CloudKitSyncEngine.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.24 Packages/ARCH/Sources/Sync/FirstSyncMerge.swift
+    - changed: 0; no unguarded array index or removal on stored data.
+  - [x] B2.25 Packages/ARCH/Sources/Sync/IncomingSidebarRecords.swift
+    - changed: 0; no unguarded array index or removal on stored data.
   - [ ] B2.26 Packages/ARCH/Sources/Sync/SidebarRecords.swift
   - [ ] B2.27 Packages/ARCH/Sources/Sync/SyncAvailability.swift
   - [ ] B2.28 Packages/ARCH/Sources/Sync/SyncCloudKitRecords.swift
