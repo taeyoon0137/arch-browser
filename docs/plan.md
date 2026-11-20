@@ -1821,11 +1821,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.10 Packages/ARCH/Sources/AI/AIService.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.11 Packages/ARCH/Sources/AI/AISettingsStore.swift
-  - [ ] X2.r1.12 Packages/ARCH/Sources/AI/AIUsage.swift
-  - [ ] X2.r1.13 Packages/ARCH/Sources/AI/CommandLineProcess.swift
-  - [ ] X2.r1.14 Packages/ARCH/Sources/AI/LoginShell.swift
-  - [ ] X2.r1.15 Packages/ARCH/Sources/Agent/AgentAPISession.swift
+  - [x] X2.r1.11 Packages/ARCH/Sources/AI/AISettingsStore.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.12 Packages/ARCH/Sources/AI/AIUsage.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.13 Packages/ARCH/Sources/AI/CommandLineProcess.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.14 Packages/ARCH/Sources/AI/LoginShell.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.15 Packages/ARCH/Sources/Agent/AgentAPISession.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.16 Packages/ARCH/Sources/Agent/AgentActivityLog.swift
   - [ ] X2.r1.17 Packages/ARCH/Sources/Agent/AgentApprovals.swift
   - [ ] X2.r1.18 Packages/ARCH/Sources/Agent/AgentBrowserHost.swift

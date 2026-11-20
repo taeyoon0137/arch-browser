@@ -1,6 +1,7 @@
 // Token usage, prices, and spending limits, and the usage totals in `ai-usage.json`. Arch ships no price list; costs come from the prices the user enters and are estimates.
 import Foundation
 
+/// Token counts reported for one or more model requests.
 public struct AIUsage: Codable, Sendable, Equatable {
     /// Input tokens that were not read from the provider's cache.
     public var inputTokens: Int
@@ -18,6 +19,7 @@ public struct AIUsage: Codable, Sendable, Equatable {
     }
 }
 
+/// An amount in a named currency for a spending limit.
 public struct AIMoney: Codable, Sendable, Equatable {
     public var currency: String
     public var amount: Decimal
@@ -33,6 +35,7 @@ public struct AIMoney: Codable, Sendable, Equatable {
     }
 }
 
+/// User-entered prices for a model's input and output tokens.
 public struct AIPrice: Codable, Sendable, Equatable {
     public var currency: String
     public var inputPerMillion: Decimal
@@ -56,6 +59,7 @@ public struct AIPrice: Codable, Sendable, Equatable {
     }
 }
 
+/// Daily automatic request and optional monthly spending limits.
 public struct AILimits: Codable, Sendable, Equatable {
     public static let defaultAutomaticRequestsPerDay = 300
 
@@ -86,6 +90,7 @@ public struct AILimits: Codable, Sendable, Equatable {
 /// Usage totals without content or addresses: per month (the last 13), per feature, provider, and model, plus the current day's automatic request counts for the daily limit. Names are kept with each total so a removed feature or provider still reads well.
 @MainActor
 public final class AIUsageStore: ObservableObject {
+    /// Usage and estimated costs for one feature, provider, and model.
     public struct Total: Codable, Sendable, Identifiable {
         public var id: String { "\(feature)\u{1F}\(provider)\u{1F}\(model)" }
         public var feature: String
@@ -100,6 +105,7 @@ public final class AIUsageStore: ObservableObject {
         public var costs: [String: Decimal]
     }
 
+    /// The usage totals recorded for one calendar month.
     public struct Month: Codable, Sendable {
         /// `yyyy-MM` in the user's calendar.
         public var month: String
@@ -125,6 +131,7 @@ public final class AIUsageStore: ObservableObject {
     private let now: () -> Date
     private var pendingSave: DispatchWorkItem?
 
+    /// Loads usage totals, merging repeated months and setting unreadable data aside.
     init(fileURL: URL, now: @escaping () -> Date = Date.init) {
         self.fileURL = fileURL
         self.now = now
@@ -213,6 +220,7 @@ public final class AIUsageStore: ObservableObject {
         day == Self.dayKey(now()) ? automaticRequests[feature.rawValue] ?? 0 : 0
     }
 
+    /// Counts another automatic request toward today's limit for the feature.
     func countAutomaticRequest(for feature: AIFeatureID) {
         beginToday()
         automaticRequests[feature.rawValue, default: 0] += 1
@@ -229,6 +237,7 @@ public final class AIUsageStore: ObservableObject {
         return true
     }
 
+    /// Resets daily request and agent run counts when the calendar day changes.
     private func beginToday() {
         let today = Self.dayKey(now())
         if day != today {
@@ -258,6 +267,7 @@ public final class AIUsageStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// Writes the current usage totals atomically after canceling a pending save.
     func saveNow() {
         pendingSave?.cancel()
         pendingSave = nil
@@ -267,11 +277,13 @@ public final class AIUsageStore: ObservableObject {
         try? data.write(to: fileURL, options: .atomic)
     }
 
+    /// Formats the date's calendar month as the usage file's key.
     private static func monthKey(_ date: Date) -> String {
         let components = Calendar.current.dateComponents([.year, .month], from: date)
         return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
     }
 
+    /// Formats the date's calendar day as the daily count key.
     private static func dayKey(_ date: Date) -> String {
         let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)

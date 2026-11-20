@@ -14,6 +14,7 @@ public enum CommandLineTermination: Equatable, Sendable {
     }
 }
 
+/// Runs one process in its own group and streams its standard output.
 public final class CommandLineProcess: @unchecked Sendable {
     /// Seconds between SIGTERM and SIGKILL.
     private static let terminationGrace: TimeInterval = 2
@@ -251,10 +252,12 @@ private final class InputPipe: @unchecked Sendable {
     /// Read and written only on `queue`.
     private var isOpen = true
 
+    /// Keeps the descriptor open for ordered writes and a later close.
     init(descriptor: Int32) {
         self.descriptor = descriptor
     }
 
+    /// Queues nonempty input behind earlier writes unless the pipe has closed.
     func write(_ data: Data) {
         guard !data.isEmpty else { return }
         queue.async { [self] in
@@ -263,6 +266,7 @@ private final class InputPipe: @unchecked Sendable {
         }
     }
 
+    /// Queues a close after all writes already submitted.
     func close() {
         queue.async { [self] in
             guard isOpen else { return }
@@ -279,6 +283,7 @@ private final class ScriptPipe: @unchecked Sendable {
     /// Set by the source's cancel handler; read under `lock`.
     private var hasClosed = false
 
+    /// Streams script bytes through descriptor 3 without blocking a thread.
     init(descriptor: Int32, script: Data) {
         // An interpreter that exits before it reads its whole script ends the write with EPIPE instead of a signal.
         _ = fcntl(descriptor, F_SETNOSIGPIPE, 1)
@@ -318,6 +323,7 @@ private final class ExitRecord: @unchecked Sendable {
     private var termination: CommandLineTermination?
     private var waiters: [CheckedContinuation<CommandLineTermination, Never>] = []
 
+    /// Saves the process result and resumes callers already waiting for it.
     func record(_ termination: CommandLineTermination) {
         lock.lock()
         self.termination = termination
@@ -327,6 +333,7 @@ private final class ExitRecord: @unchecked Sendable {
         waiting.forEach { $0.resume(returning: termination) }
     }
 
+    /// Returns the recorded result or waits until the process ends.
     func wait() async -> CommandLineTermination {
         await withCheckedContinuation { continuation in
             lock.lock()
