@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// The Unix socket path shared by Arch and its local control clients.
 public struct AgentSocketLocation: Equatable, Sendable {
     public var path: String
     /// Whether the home folder's path was too long and the socket is in the per-user temporary folder instead.

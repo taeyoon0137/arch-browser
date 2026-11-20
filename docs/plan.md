@@ -1891,11 +1891,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.45 Packages/ARCH/Sources/AgentControl/AgentPeerCheck.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.46 Packages/ARCH/Sources/AgentControl/AgentRPC.swift
-  - [ ] X2.r1.47 Packages/ARCH/Sources/AgentControl/AgentSkillInstaller.swift
-  - [ ] X2.r1.48 Packages/ARCH/Sources/AgentControl/AgentSocketLocation.swift
-  - [ ] X2.r1.49 Packages/ARCH/Sources/AgentControl/AgentTaskMessages.swift
-  - [ ] X2.r1.50 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
+  - [x] X2.r1.46 Packages/ARCH/Sources/AgentControl/AgentRPC.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.47 Packages/ARCH/Sources/AgentControl/AgentSkillInstaller.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.48 Packages/ARCH/Sources/AgentControl/AgentSocketLocation.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.49 Packages/ARCH/Sources/AgentControl/AgentTaskMessages.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.50 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.51 Packages/ARCH/Sources/AgentControl/AgentUntrusted.swift
   - [ ] X2.r1.52 Packages/ARCH/Sources/Browsing/BookmarkMenu.swift
   - [ ] X2.r1.53 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift

@@ -24,7 +24,9 @@ public enum AgentToolClass: String, Sendable, CaseIterable {
     }
 }
 
+/// One named tool parameter and the constraints exposed in its JSON Schema.
 public struct AgentToolParameter: Sendable {
+    /// The JSON value shape a tool parameter accepts.
     public enum Kind: Sendable, Equatable {
         case string
         case integer
@@ -88,6 +90,7 @@ public struct AgentToolParameter: Sendable {
     }
 }
 
+/// A tool's catalog description, access class, parameters, and MCP annotations.
 public struct AgentTool: Sendable {
     /// Notes the catalog's class column adds to a tool's class.
     public struct Traits: OptionSet, Sendable {
@@ -146,10 +149,12 @@ public struct AgentTool: Sendable {
     }
 }
 
+/// The shared tool definitions used by agent sessions and local control clients.
 public enum AgentToolCatalog {
     /// Tab handles: `t1`, `t2`, and so on, per session or per grant.
     static let tabPattern = "^t[1-9][0-9]*$"
 
+    /// Defines a tab handle parameter with the catalog's handle pattern.
     private static func tab(required: Bool = true, _ description: String = "The agent tab's handle, such as t1.") -> AgentToolParameter {
         AgentToolParameter("tab", .string, required: required, description, pattern: tabPattern)
     }
@@ -159,6 +164,7 @@ public enum AgentToolCatalog {
         value.formatted(.number.locale(Locale(identifier: "en_US")))
     }
 
+    /// Defines a snapshot element reference parameter.
     private static func ref(required: Bool = true, _ description: String = "An element's ref from the tab's latest snapshot, such as e5.") -> AgentToolParameter {
         AgentToolParameter("ref", .string, required: required, description)
     }
@@ -286,11 +292,13 @@ public enum AgentToolCatalog {
         AgentToolParameter("timeout_ms", .integer, "How long to wait for a first event, at most \(number(AgentLimits.toolWaitSeconds * 1000)) milliseconds, the default.", minimum: 0, maximum: AgentLimits.toolWaitSeconds * 1000),
     ])
 
+    /// The read-only tab request offered to an outside client's task session.
     public static let sessionTabRequest = AgentTool("request_tab", .reads, [.waitsForUser], "Asks the user to choose one tab to share for reading.", [
         AgentToolParameter("reason", .string, required: true, "Why this task needs another tab, shown to the user."),
         AgentToolParameter("access", .choice(["read"]), required: true, "Read-only access."),
     ])
 
+    /// Finds a session tool, substituting its read-only tab request definition.
     public static func sessionTool(named name: String) -> AgentTool? {
         switch name {
         case sessionTabRequest.name: return sessionTabRequest
@@ -298,6 +306,7 @@ public enum AgentToolCatalog {
         }
     }
 
+    /// Finds a shared tool or a tool offered only by a hook or outside client.
     public static func tool(named name: String) -> AgentTool? {
         if name == renameTab.name { return renameTab }
         if name == watchEvents.name { return watchEvents }
