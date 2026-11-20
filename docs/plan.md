@@ -1118,7 +1118,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
 - [ ] D2. `docs/plan.md` itself: in Current State, each module's paragraphs against that module's sources, one module per commit: `Docs: Correct the plan's <module> state against the code`. Do not edit the Work Queue rows' meaning; only fix file and function names that no longer exist.
   - [x] D2.1 Engine abstraction
     - File and function names matched the sources.
-  - [ ] D2.2 WebKit adapter
+  - [x] D2.2 WebKit adapter
+    - File and function names matched the sources.
   - [ ] D2.3 Chromium adapter
   - [ ] D2.4 Private API flags
   - [ ] D2.5 Browsing module
