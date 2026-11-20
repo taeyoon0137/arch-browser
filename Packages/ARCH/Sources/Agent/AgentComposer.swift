@@ -1,6 +1,6 @@
 // The composer starts an in-app session (docs/agents.md, Starting a session; Model choice and fallbacks).
 // It holds the task and the selected tab as a removable chip unless the site is excluded. It shows the Persona / Space and Use the Agents Persona choice.
-// The mode starts from Settings. The model menu starts with the agent route's first model; an effort menu appears when the tool supports it.
+// The mode starts from Settings. The model menu starts with the `agent` route's first model; an effort menu appears when the tool supports it.
 // Without a usable model, it explains how to connect an API-key model, Claude Code, or Codex.
 // A task starting with `/` is refused and left in the field when a Claude Code session loads Arch's skills.
 import AgentControl
@@ -67,6 +67,7 @@ public struct AgentReaderExcerpt: Equatable {
         return nil
     }
 
+    /// Checks that the attached tab is still the same reviewed document and address.
     public func matches(_ tab: AgentTabInfo?) -> Bool {
         tab?.id == tabID && tab?.documentID == documentID && tab?.url == url
     }
@@ -121,6 +122,7 @@ public struct AgentReaderExcerpt: Equatable {
     }
 }
 
+/// Collects a task, destination, model, mode, and optional page context before starting a session.
 public struct AgentComposer: View {
     @ObservedObject var service: AgentService
     @ObservedObject private var settings = AIService.shared.settings
@@ -354,6 +356,7 @@ public struct AgentComposer: View {
         return loadedEffort.levels
     }
 
+    /// Loads effort choices for the selected command-line model and clears a stale choice.
     private func loadEffortLevels() async {
         guard let source = effortSource else {
             loadedEffort = nil
@@ -381,6 +384,7 @@ public struct AgentComposer: View {
         return nil
     }
 
+    /// Starts a session with the selected task and attachments, leaving errors in the draft.
     private func start() {
         let task = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty, selectedModel != nil else { return }
@@ -414,6 +418,7 @@ extension AgentTabInfo {
         attachmentLabel(address: url.map { AgentAddress.reduced($0).absoluteString })
     }
 
+    /// Uses a reduced address when the title is empty or duplicates the address.
     private func attachmentLabel(address: String?) -> String {
         guard let address else { return title.isEmpty ? "Tab" : title }
         if title.isEmpty || title == url?.host || url.map({ AgentAddress.isOwnAddress(title, of: $0) }) == true { return address }

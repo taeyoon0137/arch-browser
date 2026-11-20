@@ -2,7 +2,9 @@
 import AgentControl
 import Foundation
 
+/// A content-free record of an agent tool call or grant event.
 public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
+    /// The activity or grant event recorded by an entry.
     public enum Event: String, Codable, Sendable {
         /// A tool call, with its tool, class, decision, and outcome.
         case toolCall
@@ -22,6 +24,7 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// How a call was decided.
+    /// How Arch or the user decided a tool call.
     public enum Decision: String, Codable, Sendable {
         case auto
         case approved
@@ -87,6 +90,7 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+/// Keeps up to 90 days and 10,000 content-free activity entries in `agent-activity.json`.
 @MainActor public final class AgentActivityLog: ObservableObject {
     public static let keptDays = 90
     /// At most this many entries stay, oldest dropped first, so that each save and the launch read stay small.
@@ -122,6 +126,7 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// Appends an entry, removes expired or excess entries, and schedules a save.
     func record(_ entry: AgentActivityEntry) {
         entries.append(entry)
         dropOldEntries()
@@ -144,12 +149,14 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
                                   runID: run))
     }
 
+    /// Uses a fixed outcome for a cancelled or previewed tool call, or its status otherwise.
     private static func outcome(of status: AgentResultStatus, tool: AgentTool?, cancelled: Bool, dryRun: Bool) -> String {
         if cancelled { return "cancelled" }
         if dryRun && status == .ok && tool?.name == "rename_tab" { return "previewed" }
         return status.rawValue
     }
 
+    /// Maps a tool result status to the decision recorded in activity.
     private static func decision(for status: AgentResultStatus) -> AgentActivityEntry.Decision {
         switch status {
         case .refused: return .refused
@@ -170,11 +177,13 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         saveNow()
     }
 
+    /// Removes entries older than the 90-day retention window.
     private func dropOldEntries() {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -Self.keptDays, to: now()), entries.contains(where: { $0.date < cutoff }) else { return }
         entries.removeAll { $0.date < cutoff }
     }
 
+    /// Drops the oldest entries above the configured count limit.
     private func dropOverflowingEntries() {
         guard entries.count > entryLimit else { return }
         entries.removeFirst(entries.count - entryLimit)
@@ -190,6 +199,7 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// Cancels the pending save and writes the activity file atomically.
     func saveNow() {
         pendingSave?.cancel()
         pendingSave = nil

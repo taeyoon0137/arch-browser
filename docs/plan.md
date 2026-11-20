@@ -1831,11 +1831,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.15 Packages/ARCH/Sources/Agent/AgentAPISession.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.16 Packages/ARCH/Sources/Agent/AgentActivityLog.swift
-  - [ ] X2.r1.17 Packages/ARCH/Sources/Agent/AgentApprovals.swift
-  - [ ] X2.r1.18 Packages/ARCH/Sources/Agent/AgentBrowserHost.swift
-  - [ ] X2.r1.19 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
-  - [ ] X2.r1.20 Packages/ARCH/Sources/Agent/AgentComposer.swift
+  - [x] X2.r1.16 Packages/ARCH/Sources/Agent/AgentActivityLog.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.17 Packages/ARCH/Sources/Agent/AgentApprovals.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.18 Packages/ARCH/Sources/Agent/AgentBrowserHost.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.19 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.20 Packages/ARCH/Sources/Agent/AgentComposer.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.21 Packages/ARCH/Sources/Agent/AgentGrantRequest.swift
   - [ ] X2.r1.22 Packages/ARCH/Sources/Agent/AgentPageScripts.swift
   - [ ] X2.r1.23 Packages/ARCH/Sources/Agent/AgentPanel.swift

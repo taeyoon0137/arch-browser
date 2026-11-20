@@ -177,6 +177,7 @@ public struct AgentApproval: Identifiable {
     }
 }
 
+/// Holds pending approval cards and their recent outcomes until each card is answered or ends.
 @MainActor public final class AgentApprovals: ObservableObject {
     /// The cards waiting, oldest first.
     @Published public private(set) var pending: [AgentApproval] = []
@@ -234,6 +235,7 @@ public struct AgentApproval: Identifiable {
 
     func draftAnswer(to id: UUID) -> String { questionDrafts[id] ?? "" }
 
+    /// Saves text only for a pending question card.
     func setDraftAnswer(_ text: String, to id: UUID) {
         guard case .question? = cards[id]?.kind, isPending(id) else { return }
         questionDrafts[id] = text.isEmpty ? nil : text
@@ -317,6 +319,7 @@ public struct AgentApproval: Identifiable {
         }
     }
 
+    /// Removes a waiting card, keeps its outcome, and notifies its completion and owner.
     private func finish(_ id: UUID, _ answer: AgentApprovalAnswer, window: NSWindow? = nil) {
         guard waiting.remove(id) != nil else { return }
         pending.removeAll { $0.id == id }

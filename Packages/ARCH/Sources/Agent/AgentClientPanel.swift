@@ -57,6 +57,7 @@ public struct AgentPanelOwner: Equatable {
         self.approvals = approvals
     }
 
+    /// Adds a client's step and keeps at most 300 steps for that client.
     func record(_ step: AgentStepRecord, for ownerID: UUID) {
         var list = steps[ownerID] ?? []
         list.append(step)
@@ -64,6 +65,7 @@ public struct AgentPanelOwner: Equatable {
         steps[ownerID] = list
     }
 
+    /// Updates the client's displayed name, access, and place when they change.
     func describe(_ owner: AgentPanelOwner, for ownerID: UUID) {
         if owners[ownerID] != owner { owners[ownerID] = owner }
     }
@@ -83,6 +85,7 @@ public enum AgentAttention {
 
     public static func identifier(for ownerID: UUID) -> String { prefix + ownerID.uuidString }
 
+    /// Extracts a waiting agent's owner ID from a notification identifier.
     public static func ownerID(in identifier: String) -> UUID? {
         guard identifier.hasPrefix(prefix) else { return nil }
         return UUID(uuidString: String(identifier.dropFirst(prefix.count)))
@@ -94,6 +97,7 @@ public enum AgentAttention {
         return UNNotificationRequest(identifier: identifier(for: ownerID), content: content, trigger: nil)
     }
 
+    /// Posts a content-free notification when Arch is inactive and a client waits.
     static func notify(_ ownerID: UUID) {
         guard Bundle.main.bundleURL.pathExtension == "app", !NSApp.isActive else { return }
         let center = UNUserNotificationCenter.current()
@@ -111,6 +115,7 @@ public enum AgentAttention {
     }
 }
 
+/// Shows an outside client's steps and waiting approval cards in a trailing column.
 public struct AgentPanel: View {
     @ObservedObject var model: AgentPanelModel
     @ObservedObject var approvals: AgentApprovals
