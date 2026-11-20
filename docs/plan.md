@@ -1951,11 +1951,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.75 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.76 Packages/ARCH/Sources/Extensions/NativeAppGuide.swift
-  - [ ] X2.r1.77 Packages/ARCH/Sources/Extensions/WebExtensionQuestion.swift
-  - [ ] X2.r1.78 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
-  - [ ] X2.r1.79 Packages/ARCH/Sources/Extensions/WebStore.swift
-  - [ ] X2.r1.80 Packages/ARCH/Sources/Extensions/WebStoreClient.swift
+  - [x] X2.r1.76 Packages/ARCH/Sources/Extensions/NativeAppGuide.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.77 Packages/ARCH/Sources/Extensions/WebExtensionQuestion.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.78 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.79 Packages/ARCH/Sources/Extensions/WebStore.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.80 Packages/ARCH/Sources/Extensions/WebStoreClient.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.81 Packages/ARCH/Sources/Extensions/WebStoreInstaller.swift
   - [ ] X2.r1.82 Packages/ARCH/Sources/History/HistoryStore.swift
   - [ ] X2.r1.83 Packages/ARCH/Sources/Hooks/AgentHookTemplate.swift

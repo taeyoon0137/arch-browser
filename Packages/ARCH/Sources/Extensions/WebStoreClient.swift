@@ -65,6 +65,7 @@ extension WebStoreError: LocalizedError {
     }
 }
 
+/// Fetches Web Store update answers and downloads bounded extension packages.
 public final class WebStoreClient: Sendable {
     /// The most identifiers that one request asks about.
     static let identifiersPerRequest = 25
@@ -172,6 +173,7 @@ public final class WebStoreClient: Sendable {
         return answers
     }
 
+    /// Interprets one update response entry as a release or a refusal.
     private static func answer(for app: UpdateResponseReader.App) throws -> WebStoreAnswer {
         guard app.status == "ok" else { return app.status == "error-unknownApplication" ? .unknown : .refused(app.status) }
         guard let check = app.updateCheck else { return .noUpdate }
@@ -239,6 +241,7 @@ public final class WebStoreClient: Sendable {
 
 /// Collects the `app` elements of an update response with their `updatecheck` element's attributes.
 private final class UpdateResponseReader: NSObject, XMLParserDelegate {
+    /// One extension's status and optional update attributes in the response.
     struct App {
         let id: String
         let status: String
@@ -251,6 +254,7 @@ private final class UpdateResponseReader: NSObject, XMLParserDelegate {
     private var depth = 0
     private var app: App?
 
+    /// Reads the response root, app entries, and their update attributes.
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String] = [:]) {
         defer { depth += 1 }
         if depth == 0 {
@@ -309,6 +313,7 @@ private final class PackageDownload: NSObject, URLSessionDataDelegate, @unchecke
         }
     }
 
+    /// Allows a package redirect only when its destination uses HTTPS.
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
                     completionHandler: @escaping (URLRequest?) -> Void) {
         guard request.url?.scheme?.lowercased() == "https" else {
@@ -318,6 +323,7 @@ private final class PackageDownload: NSObject, URLSessionDataDelegate, @unchecke
         completionHandler(request)
     }
 
+    /// Refuses a response with an unexpected status or a declared size above the limit.
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -329,6 +335,7 @@ private final class PackageDownload: NSObject, URLSessionDataDelegate, @unchecke
         completionHandler(failure == nil ? .allow : .cancel)
     }
 
+    /// Writes body chunks while checking the size limit and updating the digest.
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard failure == nil else { return }
         size += data.count
@@ -341,6 +348,7 @@ private final class PackageDownload: NSObject, URLSessionDataDelegate, @unchecke
         }
     }
 
+    /// Completes the download with its digest and size or its first failure.
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         if let failure = failure ?? error {
             continuation?.resume(throwing: failure)

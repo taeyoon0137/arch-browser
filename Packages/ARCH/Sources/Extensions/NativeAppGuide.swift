@@ -5,6 +5,7 @@ import Security
 
 /// Where Arch runs from and how it is signed, which native apps check before they accept a browser: 1Password accepts only a signed browser in the Applications folder that is not reached through a symbolic link (`docs/password-managers.md`, Facts). It keeps only the kind of signature.
 public struct ArchInstallation: Equatable, Sendable {
+    /// The installation category used to explain native app availability.
     public enum Signing: Equatable, Sendable {
         /// Signed by a developer team.
         case team
