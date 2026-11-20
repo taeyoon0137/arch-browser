@@ -1830,11 +1830,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - ok
   - [x] X1.r2.15 9d5ea0ce Docs: Say what each file and type is for (part 15)
     - ok
-  - [ ] X1.r2.16 2262f204 Docs: Say what each file and type is for (part 16)
-  - [ ] X1.r2.17 9743cc72 Docs: Say what each file and type is for (part 17)
-  - [ ] X1.r2.18 edcb28b3 Docs: Say what each file and type is for (part 18)
-  - [ ] X1.r2.19 d5870316 Docs: Say what each file and type is for (part 19)
-  - [ ] X1.r2.20 91040057 Docs: Say what each file and type is for (part 20)
+  - [x] X1.r2.16 2262f204 Docs: Say what each file and type is for (part 16)
+    - ok
+  - [x] X1.r2.17 9743cc72 Docs: Say what each file and type is for (part 17)
+    - ok
+  - [x] X1.r2.18 edcb28b3 Docs: Say what each file and type is for (part 18)
+    - ok
+  - [x] X1.r2.19 d5870316 Docs: Say what each file and type is for (part 19)
+    - ok
+  - [x] X1.r2.20 91040057 Docs: Say what each file and type is for (part 20)
+    - ok
   - [ ] X1.r2.21 ef1747de Docs: Say what each file and type is for (part 21)
   - [ ] X1.r2.22 37b453d1 Docs: Say what each file and type is for (part 22)
   - [ ] X1.r2.23 59fad810 Docs: Say what each file and type is for (part 23)
