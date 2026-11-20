@@ -2,9 +2,11 @@
 import Darwin
 import Foundation
 
+/// Holds an advisory lock on the app's profile directory for its lifetime.
 public final class ProfileOwnership {
     private let descriptor: Int32
 
+    /// Opens the profile directory and takes its nonblocking exclusive lock when supported.
     public init(directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let fd = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)

@@ -3,7 +3,9 @@ import ARCHEngine
 import Foundation
 import LiveFolders
 
+/// The sidebar records eligible for sharing with another Mac.
 public struct SidebarSyncState: Equatable {
+    /// A shareable pinned folder with its owning Persona and space.
     public struct Folder: Equatable, Identifiable {
         public let id: UUID
         public let personaID: UUID
@@ -22,6 +24,7 @@ public struct SidebarSyncState: Equatable {
         }
     }
 
+    /// A pinned tab's saved identity and page for sidebar synchronization.
     public struct PinnedTab: Equatable, Identifiable {
         public let id: UUID
         public let personaID: UUID
@@ -105,6 +108,7 @@ public struct SidebarSyncState: Equatable {
         return items.filter { seen.insert($0.id).inserted }
     }
 
+    /// Accepts ordinary folders and only live folder sources safe to share.
     public static func canShare(_ live: LiveFolderConfiguration?) -> Bool {
         switch live?.source {
         case nil: return true

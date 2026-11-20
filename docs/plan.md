@@ -1921,11 +1921,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.60 Packages/ARCH/Sources/Browsing/NotificationAuthorization.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.61 Packages/ARCH/Sources/Browsing/PageAssistant.swift
-  - [ ] X2.r1.62 Packages/ARCH/Sources/Browsing/ProfileOwnership.swift
-  - [ ] X2.r1.63 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift
-  - [ ] X2.r1.64 Packages/ARCH/Sources/Browsing/SidebarSync.swift
-  - [ ] X2.r1.65 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
+  - [x] X2.r1.61 Packages/ARCH/Sources/Browsing/PageAssistant.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.62 Packages/ARCH/Sources/Browsing/ProfileOwnership.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.63 Packages/ARCH/Sources/Browsing/SessionPluginBrowserHost.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.64 Packages/ARCH/Sources/Browsing/SidebarSync.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.65 Packages/ARCH/Sources/Browsing/SitePermissionStore.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.66 Packages/ARCH/Sources/Browsing/Space.swift
   - [ ] X2.r1.67 Packages/ARCH/Sources/Browsing/Tab.swift
   - [ ] X2.r1.68 Packages/ARCH/Sources/Browsing/TabCloseLog.swift

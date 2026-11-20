@@ -6,6 +6,7 @@ import Events
 import Foundation
 import Plugins
 
+/// Implements plugin tab, download, notification, and page access through a browser session.
 @MainActor
 public final class SessionPluginBrowserHost: PluginBrowserHost {
     private weak var session: BrowserSession?
@@ -13,15 +14,18 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
     /// Made with the session, which calls `attach(to:)` once it exists.
     nonisolated init() {}
 
+    /// Attaches the session after the host has been created.
     func attach(to session: BrowserSession) {
         self.session = session
     }
 
+    /// Lists one Persona's sidebar tabs for plugins, excluding agent tabs.
     public func tabs(in persona: PersonaID) -> [PluginTab] {
         guard let session else { return [] }
         return session.tabsInSidebarOrder.filter { $0.personaID == persona && BrowserEventSource.kind(of: $0) != .agent }.map(session.pluginTab)
     }
 
+    /// Lists one Persona's downloads with the metadata available to plugins.
     public func downloads(in persona: PersonaID) -> [PluginDownload] {
         session?.downloads.filter { $0.personaID == persona }.map {
             PluginDownload(id: $0.id, name: $0.filename, state: $0.state.rawValue,
@@ -29,11 +33,13 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         } ?? []
     }
 
+    /// Renames a download only when it belongs to the requested Persona.
     public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool {
         guard let entry = session?.downloads.first(where: { $0.id == id && $0.personaID == persona }) else { return false }
         return entry.rename(to: name)
     }
 
+    /// Asks the session to post a local notification under the plugin's name.
     public func postNotification(pluginName: String, title: String, body: String) {
         session?.postPluginNotification(pluginName: pluginName, title: title, body: body)
     }

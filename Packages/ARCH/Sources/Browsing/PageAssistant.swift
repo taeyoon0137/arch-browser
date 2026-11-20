@@ -23,12 +23,14 @@ struct PageQuestion: Identifiable {
     /// The popover's question and reply. Each question starts it over, so the popover shows one reply.
     let conversation: PageConversation
 
+    /// Starts a fresh answer about the selected text or the whole page.
     @MainActor func ask(_ text: String) {
         conversation.startOver()
         conversation.ask(text, about: selection.map(QuestionSelection.chosen) ?? .wholePage)
     }
 }
 
+/// Manages page reader and question conversations for a browser session.
 @MainActor
 public final class PageAssistant: ObservableObject {
     /// Set by the app to open Settings ▸ AI, where errors about models, keys, and limits send the user.
@@ -94,6 +96,7 @@ public final class PageAssistant: ObservableObject {
         ids.forEach { readerConversations[$0]?.cancel() }
     }
 
+    /// Returns the tab's existing reader conversation or creates one for its document.
     func readerConversation(for tab: Tab) -> PageConversation {
         if let conversation = readerConversations[tab.id] { return conversation }
         let conversation = PageConversation(feature: .pageReader, tabID: tab.id, instructions: Self.readerInstructions, pages: pages, client: AIService.shared, documentID: { [weak tab] in tab?.documentID })
@@ -101,6 +104,7 @@ public final class PageAssistant: ObservableObject {
         return conversation
     }
 
+    /// Requests a summary in the tab's reader conversation.
     func summarize(_ tab: Tab) {
         readerConversation(for: tab).ask(Self.summaryPrompt, title: "Summary")
     }
@@ -132,6 +136,7 @@ public final class PageAssistant: ObservableObject {
 
     // MARK: Tabs
 
+    /// Observes open tabs, discarding closed conversations and checking page changes.
     private func follow(_ tabs: [Tab]) {
         let ids = Set(tabs.map(\.id))
         for id in tabObservers.keys where !ids.contains(id) {
@@ -173,6 +178,7 @@ public final class PageAssistant: ObservableObject {
         session?.closePageQuestions(ofTab: tab.id)
     }
 
+    /// Cancels the reader conversation and page questions tied to a tab.
     private func forgetConversations(ofTab id: UUID) {
         if let conversation = readerConversations[id] {
             objectWillChange.send()
@@ -221,6 +227,7 @@ final class TabPageSource: AIPageSource {
 
     nonisolated init() {}
 
+    /// Reads a tab's page through its engine and converts it to AI page content.
     func content(ofTab id: UUID, limit: Int) async throws -> AIPageContent {
         let page = try await readableContent(ofTab: id, limit: limit)
         return AIPageContent(url: page.url, title: page.title, text: page.text, language: page.language, isTruncated: page.isTruncated)
@@ -266,6 +273,7 @@ private final class PageRead: @unchecked Sendable {
         return false
     }
 
+    /// Stores the first read result and resumes a waiting continuation once.
     func end(with result: Result<EngineReadableContent, Error>) {
         lock.lock()
         guard self.result == nil else {
