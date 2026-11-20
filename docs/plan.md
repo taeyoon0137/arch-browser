@@ -945,11 +945,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Hid decorative palette symbols and truncated long titles.
   - [x] C1.15 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
     - Named the developer tools resize handle for accessibility.
-  - [ ] C1.16 Packages/ARCH/Sources/Browsing/DownloadsView.swift
-  - [ ] C1.17 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
-  - [ ] C1.18 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift
-  - [ ] C1.19 Packages/ARCH/Sources/Browsing/FindBarView.swift
-  - [ ] C1.20 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
+  - [x] C1.16 Packages/ARCH/Sources/Browsing/DownloadsView.swift
+    - ok
+  - [x] C1.17 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
+    - ok
+  - [x] C1.18 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift
+    - Hid decorative favorite icons behind the tile’s accessible title.
+  - [x] C1.19 Packages/ARCH/Sources/Browsing/FindBarView.swift
+    - Hid the decorative search symbol.
+  - [x] C1.20 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
+    - Labeled switches with hidden visual labels and let details wrap.
   - [ ] C1.21 Packages/ARCH/Sources/Browsing/LibraryView.swift
   - [ ] C1.22 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
   - [ ] C1.23 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift

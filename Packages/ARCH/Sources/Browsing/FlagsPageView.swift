@@ -65,6 +65,7 @@ struct FlagsPageView: View {
                     Spacer()
                     Toggle("Use private APIs", isOn: Binding(get: { flags.allowsPrivateAPIs }, set: { flags.allowsPrivateAPIs = $0 }))
                         .labelsHidden()
+                        .accessibilityLabel("Use private APIs")
                         .toggleStyle(.switch)
                 }
                 FlagsSection(title: "Private APIs", emptyText: "Arch uses no private API yet.", isEmpty: flags.apis.isEmpty) {
@@ -137,9 +138,12 @@ private struct FlagRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(isMonospaced ? .system(size: 13, design: .monospaced) : .system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(detail)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             // Dims with the switch while Use private APIs is off, which text beside a control does not do by itself.
             .opacity(isEnabled ? 1 : 0.5)
@@ -148,6 +152,7 @@ private struct FlagRow: View {
             Spacer()
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
+                .accessibilityLabel(title)
                 .toggleStyle(.switch)
                 .accessibilityHint(detail)
         }

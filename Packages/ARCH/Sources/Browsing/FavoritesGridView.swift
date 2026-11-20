@@ -177,11 +177,13 @@ struct FavoriteTileView: View {
                         .frame(width: FavoriteTileLayout.iconSize, height: FavoriteTileLayout.iconSize)
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                         .opacity(isOpen ? 1 : SidebarDimming.unopened)
+                        .accessibilityHidden(true)
                 } else {
                     Image(systemName: "globe")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                         .opacity(isOpen ? 1 : SidebarDimming.unopened)
+                        .accessibilityHidden(true)
                 }
             }
             .animation(.easeOut(duration: 0.2), value: isOpen)
