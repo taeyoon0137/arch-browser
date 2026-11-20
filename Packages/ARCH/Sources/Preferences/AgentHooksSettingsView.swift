@@ -130,10 +130,11 @@ struct AgentHooksPage: View {
                     if isOn { registry.resume(hook.id) } else { registry.pause(hook.id) }
                 }))
                 .labelsHidden()
+                .accessibilityLabel(hook.name)
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(hook.name).fontWeight(.medium)
+                    Text(hook.name).fontWeight(.medium).lineLimit(1).truncationMode(.tail)
                     ForEach(HookSummary.lines(for: hook, places: registry.places, lastRun: registry.lastRuns[hook.id]?.last), id: \.self) { line in
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
@@ -192,6 +193,8 @@ struct AgentHooksPage: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .accessibilityLabel("Hook Actions")
+        .help("Hook Actions")
     }
 
     @ViewBuilder

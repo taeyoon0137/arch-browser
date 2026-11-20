@@ -355,6 +355,7 @@ struct AIModelList<Accessory: View>: View {
         HStack {
             TextField("Model", text: $newModel, prompt: Text("Model name"))
                 .labelsHidden()
+                .accessibilityLabel("Model")
                 .onSubmit(add)
             Button("Add", action: add)
                 .disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -409,8 +410,10 @@ struct AINameValueRows: View {
             HStack {
                 TextField("Name", text: rowBinding($rows, id: row.id, field: \.name), prompt: Text("Name"))
                     .labelsHidden()
+                    .accessibilityLabel("Name")
                 TextField("Value", text: rowBinding($rows, id: row.id, field: \.value), prompt: Text("Value"))
                     .labelsHidden()
+                    .accessibilityLabel("Value")
                 Button {
                     rows.removeAll { $0.id == row.id }
                 } label: {

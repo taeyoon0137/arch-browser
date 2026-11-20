@@ -1045,11 +1045,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] C1.65 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
     - ok
-  - [ ] C1.66 Packages/ARCH/Sources/Preferences/AICommandLineEditor.swift
-  - [ ] C1.67 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
-  - [ ] C1.68 Packages/ARCH/Sources/Preferences/AISettingsView.swift
-  - [ ] C1.69 Packages/ARCH/Sources/Preferences/AIUsageView.swift
-  - [ ] C1.70 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
+  - [x] C1.66 Packages/ARCH/Sources/Preferences/AICommandLineEditor.swift
+    - Labeled the hidden argument field.
+  - [x] C1.67 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
+    - Labeled hidden model, name, and value fields.
+  - [x] C1.68 Packages/ARCH/Sources/Preferences/AISettingsView.swift
+    - Labeled the hidden page picker.
+  - [x] C1.69 Packages/ARCH/Sources/Preferences/AIUsageView.swift
+    - ok
+  - [x] C1.70 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
+    - Labeled the hidden hook switch and actions menu, and truncated long hook names.
   - [ ] C1.71 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift
   - [ ] C1.72 Packages/ARCH/Sources/Preferences/PluginComposerSheet.swift
   - [ ] C1.73 Packages/ARCH/Sources/Preferences/PluginInstallSheet.swift

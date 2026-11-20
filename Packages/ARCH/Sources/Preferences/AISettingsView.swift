@@ -44,6 +44,7 @@ struct AISettingsView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .accessibilityLabel("Page")
             .padding(.horizontal, 20)
             .padding(.top, 16)
             Form {

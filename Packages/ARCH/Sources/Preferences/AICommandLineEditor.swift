@@ -327,6 +327,7 @@ struct AICommandLineEditor: View {
                 HStack {
                     TextField("Argument", text: rowBinding($draft.arguments, id: argument.id, field: \.value), prompt: Text("Argument"))
                         .labelsHidden()
+                        .accessibilityLabel("Argument")
                     Button {
                         draft.arguments.removeAll { $0.id == argument.id }
                     } label: {
