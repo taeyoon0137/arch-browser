@@ -1,4 +1,6 @@
-// The one tool catalog that `tools/list`, `arch-mcp`, `arch-cli`, and the API-key loop share (docs/agents.md, Tools ▸ Catalog): each tool's name, description, access class, parameters with their limits, and MCP annotations. The catalog describes tools; the tool host decides every call, so nothing here grants anything.
+// One catalog serves `tools/list`, `arch-mcp`, `arch-cli`, and the API-key loop (docs/agents.md, Tools).
+// It names each tool, describes its access class and parameters with limits, and gives its MCP annotations.
+// The catalog describes tools; the tool host decides each call. Nothing here grants access.
 import Foundation
 
 /// A tool's access class, which the modes and rules gate (docs/agents.md, Permissions, approvals, and injection defenses ▸ Modes).

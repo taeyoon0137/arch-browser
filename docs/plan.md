@@ -1209,11 +1209,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the command-table overview into short sentences.
   - [x] E1.25 Packages/ARCH/Sources/AgentControl/AgentControlProtocol.swift
     - Split the protocol handshake overview into short sentences.
-  - [ ] E1.26 Packages/ARCH/Sources/AgentControl/AgentHarness.swift
-  - [ ] E1.27 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
-  - [ ] E1.28 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
-  - [ ] E1.29 Packages/ARCH/Sources/Browsing/AddressPillView.swift
-  - [ ] E1.30 Packages/ARCH/Sources/Browsing/AgentPanelColumn.swift
+  - [x] E1.26 Packages/ARCH/Sources/AgentControl/AgentHarness.swift
+    - Split the harness overview into short sentences.
+  - [x] E1.27 Packages/ARCH/Sources/AgentControl/AgentLimits.swift
+    - ok
+  - [x] E1.28 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
+    - Split the catalog overview into short sentences.
+  - [x] E1.29 Packages/ARCH/Sources/Browsing/AddressPillView.swift
+    - ok
+  - [x] E1.30 Packages/ARCH/Sources/Browsing/AgentPanelColumn.swift
+    - Split the column overview into short sentences.
   - [ ] E1.31 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift
   - [ ] E1.32 Packages/ARCH/Sources/Browsing/BrowserEventSource.swift
   - [ ] E1.33 Packages/ARCH/Sources/Browsing/BrowserSession.swift

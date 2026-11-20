@@ -1,4 +1,7 @@
-// Where the agent panel shows (docs/agents.md, In the browser ▸ The agent panel; Sidebar and attention): in a main or small window's trailing column in place of the page reader and at its width, with the composer for a new task, one session's conversation, or an outside client's steps and the cards that wait for the user; the bottom bar's agents indicator, whose menu lists the acting sessions and outside clients and Stop All Agents; and the dot on the symbol of a space whose session waits for the user. The panel's views are the `Agent` module's; this file gives them the page reader's way of rendering replies and the window's ways of opening links and tabs.
+// The agent panel replaces the page reader in a main or small window's trailing column, at the reader's width (docs/agents.md, The agent panel).
+// It shows a new-task composer, one session's conversation, or an outside client's steps and pending cards.
+// The bottom bar's agents menu lists active sessions and outside clients and offers Stop All Agents. A space symbol gets a dot while its session waits for the user.
+// `Agent` owns the views. This file supplies the reader's reply rendering and the window's link and tab actions.
 import Agent
 import AI
 import SwiftUI
