@@ -1,4 +1,5 @@
-// Plugin page scripts as the engines run them: a plugin's scripts share a world apart from other plugins' scripts, and each starts only in documents that its patterns and its plugin's granted sites cover, where it adds its styles before it runs.
+// Engine page scripts of one plugin share a world separate from other plugins.
+// Each runs only in documents matching its patterns and the plugin's granted sites. Its styles are added before its script runs.
 import ARCHEngine
 import Foundation
 import JavaScriptCore

@@ -1339,11 +1339,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.90 Packages/ARCH/Sources/Plugins/PluginManager.swift
     - Split the manager behavior into short sentences.
-  - [ ] E1.91 Packages/ARCH/Sources/Plugins/PluginManifest.swift
-  - [ ] E1.92 Packages/ARCH/Sources/Plugins/PluginManifestFile.swift
-  - [ ] E1.93 Packages/ARCH/Sources/Plugins/PluginNetwork.swift
-  - [ ] E1.94 Packages/ARCH/Sources/Plugins/PluginPageScripts.swift
-  - [ ] E1.95 Packages/ARCH/Sources/Plugins/PluginSandbox.swift
+  - [x] E1.91 Packages/ARCH/Sources/Plugins/PluginManifest.swift
+    - ok
+  - [x] E1.92 Packages/ARCH/Sources/Plugins/PluginManifestFile.swift
+    - Split the manifest rules into short sentences.
+  - [x] E1.93 Packages/ARCH/Sources/Plugins/PluginNetwork.swift
+    - ok
+  - [x] E1.94 Packages/ARCH/Sources/Plugins/PluginPageScripts.swift
+    - Split the page-script rules into short sentences.
+  - [x] E1.95 Packages/ARCH/Sources/Plugins/PluginSandbox.swift
+    - Split the sandbox rules into short sentences.
   - [ ] E1.96 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
   - [ ] E1.97 Packages/ARCH/Sources/Plugins/ScriptPluginBridge.swift
   - [ ] E1.98 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift

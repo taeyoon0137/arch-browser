@@ -1,4 +1,7 @@
-// The sandbox of a script plugin's web views. Their documents load only from the plugin's package through the `arch-plugin` scheme, under a content security policy that allows neither inline nor evaluated code and limits connections to the package. A rule list blocks every other load, Lockdown Mode takes away WebRTC, whose connections neither covers, a data store of their own keeps nothing, and the bridge is their only way to the app. Each web view runs in a WebKit web content process apart from the app and the tabs.
+// Script plugin web views load documents only from their package through `arch-plugin`.
+// A content security policy forbids inline and evaluated code and limits connections to the package. A rule list blocks other loads.
+// Lockdown Mode disables WebRTC, which neither of those rules covers. A separate data store keeps nothing, and the bridge is their only route to the app.
+// Each web view runs in a WebKit content process separate from the app and tabs.
 import UniformTypeIdentifiers
 import WebKit
 

@@ -1,4 +1,5 @@
-// `plugin.json`, the manifest of a script plugin's package, read into a `PluginManifest`. Arch refuses the keys it does not read, so that a plugin never goes without a field it relies on, and reads each page script and style sheet from the package file the manifest names.
+// `plugin.json` is a script package's manifest and becomes a `PluginManifest`.
+// Arch refuses unknown keys so the plugin never relies on an ignored field. It reads each named page script and style sheet from the package.
 import AI
 import ARCHEngine
 import Events
