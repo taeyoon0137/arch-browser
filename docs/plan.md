@@ -2050,7 +2050,9 @@ Run rounds in order, then start again at X1 with the next round number, until `d
   - [x] X6.r1.B1: Of 17 matching declarations in changed Swift files, 15 are guaranteed by local invariants; the other two remain blocked as B1.8 and B1.29 because their nonoptional engine contracts have no local failure value. Kept the popup initializer compatible with existing callers while refusing an unexpected production popup controller.
   - [x] X6.r1.C1: Reviewed 15 matching changed files, including 10 SwiftUI views; no new C1 issue. Kept the address button's single action-first VoiceOver label.
   - [x] X6.r1.D1: Corrected six stale plugin network claims in `docs/plugins.md` and the V.11 row here; preserved the exact code names in three Agent file comments.
-- [ ] X7. **Preview** (numbered on from 6), then `date`; if before November 22, 05:00 KST, start the next round at X1; otherwise go to Z.
+- [x] X7. **Preview** (numbered on from 6), then `date`; if before November 22, 05:00 KST, start the next round at X1; otherwise go to Z.
+  - [x] X7.r1: Preview 6 installed.
+  - Installed commit `5a4e6fefa1e06272c23c21f276de25d932cec2ad` on November 20 at 13:24 KST after backing up to `~/Library/Application Support/Arch Backups/2026-11-20-1324-before-preview`. The app was not opened. Network fetch remains blocked pending connection-bound address checks.
 
 #### Group Z: the end
 
