@@ -646,7 +646,12 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         element.isEditable && pageView?.inputContext == nil
     }
 
-    /// The spelling and editing items CEF can run, as the WebKit adapter hands them to the tab: the misspelled word's suggestions, or No Guesses Found, Ignore Spelling, and Learn Spelling, then Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside one that is not on a link, image, or media, where WebKit's menu has no Copy. A right click on a text link selects the link's text on both engines. Select All is enabled in any field, as the WebKit adapter's is, also where Chromium would not run it, as in an empty field, where it selects nothing. Ignore Spelling sends AppKit's `ignoreSpelling:` to `pageView`, which runs Blink's IgnoreSpelling command on the selected misspelled word, and shows only when the view takes it. The other items have no target: a suggestion carries its word, Learn Spelling the misspelled word, and an editing item its command as its tag.
+    /// Builds the spelling and editing items CEF can run, as the WebKit adapter hands them to the tab.
+    /// For a misspelled word, it offers suggestions or No Guesses Found, Ignore Spelling, and Learn Spelling.
+    /// It adds Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside a field that is not on a link, image, or media; WebKit has no Copy there.
+    /// A right click on a text link selects its text on both engines. Select All works in every field, even an empty one where it selects nothing.
+    /// Ignore Spelling sends AppKit's `ignoreSpelling:` to `pageView`, which runs Blink's IgnoreSpelling command on the selected word. It appears only when the view accepts it.
+    /// Other items have no target: a suggestion carries its word, Learn Spelling carries the misspelled word, and an editing item carries its command as a tag.
     static func engineMenuItems(misspelledWord: String, suggestions: [String], element: EngineContextMenuElement, editCommands: ARCHCEFEditCommand,
                                 pageView: NSView? = nil) -> [NSMenuItem] {
         var items: [NSMenuItem] = []

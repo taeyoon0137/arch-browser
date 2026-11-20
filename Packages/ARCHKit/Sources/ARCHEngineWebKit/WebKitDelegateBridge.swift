@@ -16,7 +16,9 @@ extension WebKitWebContents {
 final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     unowned let owner: WebKitWebContents
     private var observations: [NSKeyValueObservation] = []
-    /// The address the main frame last committed, by which a file chooser's request names the page (`runOpenPanelWith`). WebKit gives `url` that address when it reports the commit; before a navigation commits, `url` already gives the navigation's address, and from the start of a back or forward navigation, also one the page starts with `history.back()`, the back-forward list's current item is the target's.
+    /// The main frame's last committed address names a file chooser's page (`runOpenPanelWith`).
+    /// WebKit gives `url` that address at commit. Before commit, `url` may already give the pending navigation's address.
+    /// At the start of back or forward navigation, including `history.back()`, the back-forward list's current item is the target.
     private var committedURL: URL?
     /// Whether a main frame navigation has started and not yet committed or failed. WebKit has no public flag for a server redirect, so a main frame navigation the delegate hears of meanwhile counts as one: a redirect hop, or a navigation that replaces the one still loading.
     private var isProvisional = false
@@ -86,7 +88,10 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard policy == .allow, navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url else { return decisionHandler(policy) }
         let isAppLoad = owner.appLoadURL == url.absoluteURL
         if isAppLoad { owner.appLoadURL = nil }
-        // WebKit loads a web extension's pages only in a web view made for that extension and no other page there, so a main frame navigation across that line loads in a replacement: one out to a web page from a link, a script, or the address field, and one into an extension's page that the app starts, as the address field and `tabs.update` do, or that a frame may start (`mayStartReplacement`). Any other navigation into an extension's pages, as a web page's link, script, redirect, or new window, loads nothing, as on Chromium. Any other navigation that goes ahead here ends a wait for an extension.
+        // WebKit loads extension pages only in a web view made for that extension. A main frame navigation across that boundary needs a replacement.
+        // This applies when an extension page opens a web page by link, script, or address field, and when the app opens an extension page by address field or `tabs.update`.
+        // A frame may also start a permitted replacement (`mayStartReplacement`). Other navigations into extension pages load nothing, as on Chromium.
+        // Those include a web page's link, script, redirect, or new window. Any other navigation allowed here ends a wait for an extension.
         if owner.needsReplacement(toLoad: url) {
             decisionHandler(.cancel)
             if isAppLoad || owner.mayStartReplacement(toLoad: url, from: Self.sourceOrigin(of: navigationAction)) { owner.scheduleReplacement(loading: url) }

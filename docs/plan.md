@@ -1459,11 +1459,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the menu overview into short sentences.
   - [x] E1.150 Packages/ARCHApp/Sources/ArchCLI/CLICommands.swift
     - Split the CLI command and output rules into short sentences.
-  - [ ] E1.151 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
-  - [ ] E1.152 Packages/ARCHKit/Sources/ARCHEngine/EnginePageScript.swift
-  - [ ] E1.153 Packages/ARCHKit/Sources/ARCHEngine/EngineWebContents.swift
-  - [ ] E1.154 Packages/ARCHKit/Sources/ARCHEngineChromium/ChromiumEngine.swift
-  - [ ] E1.155 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitDelegateBridge.swift
+  - [x] E1.151 Packages/ARCHKit/Sources/ARCHEngine/EngineActionMenuItem.swift
+    - Split the menu item comments into short sentences.
+  - [x] E1.152 Packages/ARCHKit/Sources/ARCHEngine/EnginePageScript.swift
+    - Split the page script and world rules into short sentences.
+  - [x] E1.153 Packages/ARCHKit/Sources/ARCHEngine/EngineWebContents.swift
+    - Split the gesture and input rules into short sentences.
+  - [x] E1.154 Packages/ARCHKit/Sources/ARCHEngineChromium/ChromiumEngine.swift
+    - Split the spelling menu rules into short sentences.
+  - [x] E1.155 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitDelegateBridge.swift
+    - Split the committed address and extension navigation rules into short sentences.
   - [ ] E1.156 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitEngine.swift
   - [ ] E1.157 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitExtensions.swift
   - [ ] E1.158 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitPageScripts.swift

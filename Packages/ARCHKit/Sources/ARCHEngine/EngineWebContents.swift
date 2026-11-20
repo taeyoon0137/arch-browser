@@ -82,9 +82,12 @@ public protocol EngineWebContents: AnyObject {
     var pageScriptListID: ObjectIdentifier { get }
     /// Calls a JavaScript function expression, such as `(channel) => …`, with the channel of `world` in the main frame's current document, opening one there if the world has none, and passes the string the function returns, or nil for any other value. Fails when the function throws or the main frame has no document to run it in.
     func executeJavaScript(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
-    /// As `executeJavaScript(_:inWorld:completion:)`, for a function that must run without the user's gesture, which would give the page's handlers for the events it dispatches user activation, as a script that a plugin runs once: an engine that cannot run it so runs nothing and fails with `EngineUserGestureError`. WebKit runs it through its evaluation without a user gesture, a private member, only while the private API flags allow plugins' page runs.
+    /// Runs as `executeJavaScript(_:inWorld:completion:)` but without the user's gesture. A gesture would give user activation to page handlers for events the script dispatches, as with a one-time plugin script.
+    /// An engine that cannot prevent that activation runs nothing and fails with `EngineUserGestureError`. WebKit uses a private evaluation member only while the private API flags allow plugin page runs.
     func executeJavaScriptWithoutUserGesture(_ script: String, inWorld world: String, completion: @escaping (Result<String?, Error>) -> Void)
-    /// Delivers a value, as JSON text, to the listeners of a world's channel in the main frame's current document, without the user's gesture, as a plugin's message: an engine that could deliver it only with the gesture, which would give the listeners and the page's handlers for the events they dispatch user activation, delivers nothing and throws `EngineUserGestureError`. Nothing happens without listeners. WebKit delivers it through its evaluation without a user gesture, only while the private API flags allow plugins' page runs.
+    /// Delivers JSON text to a world's channel listeners in the main frame's current document, without the user's gesture.
+    /// An engine that can deliver only with a gesture sends nothing and throws `EngineUserGestureError`, since listeners and page handlers for their events would receive user activation.
+    /// With no listeners, nothing happens. WebKit uses private evaluation only while the private API flags allow plugin page runs.
     func postPageScriptMessage(_ json: String, toWorld world: String) throws
     /// Reads the main frame's visible text, up to `limit` characters, with its address, title, language, and selection. Fields and editable areas are never read. Fails with `EngineReadableContentError.unreadable` when the page has no document a script can read.
     func readableContent(limit: Int, completion: @escaping (Result<EngineReadableContent, Error>) -> Void)
@@ -146,7 +149,9 @@ public protocol EngineDevTools: AnyObject {
 ///
 /// Points are in the page's viewport, in points from the top-left corner of the area that shows the page. An element's box from `getBoundingClientRect()`, in CSS pixels, maps to it as `(x - visualViewport.offsetLeft) * visualViewport.scale * zoomFactor`, and likewise for `y`.
 ///
-/// Each method sends all of its events or throws `EngineInputError` and sends none. The page handles them in order after the method returns. The engine finds the element under each pointer event, and the focused element for each key and text, only when the page handles the event, so an element that the page moves under the point, or focus that it moves, after a caller's check receives the input; a caller that must act on one element checks the target in the event itself (`docs/agents.md`, Actions).
+/// Each method sends all its events or throws `EngineInputError` and sends none. The page handles events in order after the method returns.
+/// The engine finds the element under each pointer event, or the focused element for each key and text, when the page handles it.
+/// A page may move an element under the point or move focus after the caller checks it. A caller that must act on one element checks the target in the event itself (`docs/agents.md`, Actions).
 public protocol EngineInput: AnyObject {
     /// Moves the pointer to `point` with no button pressed.
     func movePointer(to point: CGPoint, modifiers: EngineInputModifiers) throws

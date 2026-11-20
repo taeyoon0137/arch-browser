@@ -1,7 +1,8 @@
-// A menu item that runs a closure, for the menu items that no view's own action runs: those `ARCHEngine` builds for the page context menu, and those the app's features add to it and to their other menus.
+// A menu item that runs a closure. `ARCHEngine` uses it for page context menus.
+// App features also add it to those and other menus.
 import AppKit
 
-/// Runs its closure when chosen. It is its own target, so it works in any menu and keeps what the closure captures for as long as the menu keeps it.
+/// Runs its closure when chosen. As its own target, it works in any menu. It keeps captured values while the menu keeps it.
 public final class EngineActionMenuItem: NSMenuItem {
     private let handler: () -> Void
 
