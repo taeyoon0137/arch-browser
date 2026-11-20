@@ -1025,11 +1025,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Truncated long tab titles and sites.
   - [x] C1.55 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
     - ok
-  - [ ] C1.56 Packages/ARCH/Sources/Browsing/WebExtensionActionsSection.swift
-  - [ ] C1.57 Packages/ARCH/Sources/Browsing/WindowButtonsReader.swift
-  - [ ] C1.58 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
-  - [ ] C1.59 Packages/ARCH/Sources/History/HistoryWindowController.swift
-  - [ ] C1.60 Packages/ARCH/Sources/Hooks/HookProposalSheet.swift
+  - [x] C1.56 Packages/ARCH/Sources/Browsing/WebExtensionActionsSection.swift
+    - ok
+  - [x] C1.57 Packages/ARCH/Sources/Browsing/WindowButtonsReader.swift
+    - ok
+  - [x] C1.58 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+    - ok
+  - [x] C1.59 Packages/ARCH/Sources/History/HistoryWindowController.swift
+    - Truncated long history titles and addresses.
+  - [x] C1.60 Packages/ARCH/Sources/Hooks/HookProposalSheet.swift
+    - Truncated the executable path and let review sentences wrap.
   - [ ] C1.61 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
   - [ ] C1.62 Packages/ARCH/Sources/Plugins/Plugin.swift
   - [ ] C1.63 Packages/ARCH/Sources/Plugins/PluginManager.swift

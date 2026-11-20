@@ -314,6 +314,7 @@ private struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.title.isEmpty ? entry.url.host ?? entry.url.absoluteString : entry.title)
                     .lineLimit(1)
+                    .truncationMode(entry.title.isEmpty ? .middle : .tail)
                 Text(entry.url.absoluteString)
                     .font(.caption)
                     .foregroundStyle(.secondary)

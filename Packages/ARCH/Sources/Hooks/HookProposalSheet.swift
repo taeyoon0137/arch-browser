@@ -99,8 +99,12 @@ struct HookProposalSheetView: View {
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(review.clientPath)
             VStack(alignment: .leading, spacing: 6) {
                 Text(review.situation)
+                    .fixedSize(horizontal: false, vertical: true)
                 ForEach(review.permissions, id: \.self) { Text($0) }
                 if !review.agent.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
@@ -141,6 +145,7 @@ struct HookProposalSheetView: View {
             Text("Allowing asks for Touch ID or your login password. The hook pauses when this program's access ends.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 AgentApprovalButton(title: "Don\u{2019}t Allow", keyEquivalent: "\u{1B}", requiresPointer: false) { finish(false) }
