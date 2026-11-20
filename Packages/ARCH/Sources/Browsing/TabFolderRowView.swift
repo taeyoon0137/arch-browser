@@ -49,6 +49,7 @@ struct TabFolderRowView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(isDropTarget ? dropColor : .secondary)
                 .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
             if isRenaming {
                 SidebarNameField(placeholder: "Folder Name", name: folder.name,
                                  onRename: { windowModel.renameFolder(folder.id, to: $0) }, onEnd: { windowModel.endRenamingFolder(folder.id) })
@@ -59,6 +60,7 @@ struct TabFolderRowView: View {
                 Text(folder.name)
                     .font(.system(size: 14))
                     .lineLimit(1)
+                    .truncationMode(.tail)
                 if folder.live != nil, status.unreadCount > 0 {
                     Text("\(status.unreadCount)")
                         .font(.system(size: 12))
@@ -89,6 +91,7 @@ struct TabFolderRowView: View {
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(folder.isCollapsed ? 0 : 90))
                     .frame(width: 22, height: 22)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.leading, 10)

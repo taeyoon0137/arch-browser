@@ -1015,11 +1015,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Hid a decorative pane symbol and truncated its tab title.
   - [x] C1.50 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
     - Truncated long titles in the closed-tab table.
-  - [ ] C1.51 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
-  - [ ] C1.52 Packages/ARCH/Sources/Browsing/TabPromptIndicator.swift
-  - [ ] C1.53 Packages/ARCH/Sources/Browsing/TabRowView.swift
-  - [ ] C1.54 Packages/ARCH/Sources/Browsing/TabSwitcherView.swift
-  - [ ] C1.55 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
+  - [x] C1.51 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
+    - Hid decorative folder symbols and truncated long names.
+  - [x] C1.52 Packages/ARCH/Sources/Browsing/TabPromptIndicator.swift
+    - ok
+  - [x] C1.53 Packages/ARCH/Sources/Browsing/TabRowView.swift
+    - Hid decorative tab icons, truncated titles, and used the sidebar hover fill.
+  - [x] C1.54 Packages/ARCH/Sources/Browsing/TabSwitcherView.swift
+    - Truncated long tab titles and sites.
+  - [x] C1.55 Packages/ARCH/Sources/Browsing/WebContentsHostView.swift
+    - ok
   - [ ] C1.56 Packages/ARCH/Sources/Browsing/WebExtensionActionsSection.swift
   - [ ] C1.57 Packages/ARCH/Sources/Browsing/WindowButtonsReader.swift
   - [ ] C1.58 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift

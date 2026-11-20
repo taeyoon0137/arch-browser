@@ -77,6 +77,7 @@ private struct TabSwitcherRow: View {
             Text(title)
                 .font(.system(size: 14))
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 8)
             if let site {
                 // Keeps its width, so a long title truncates first, as in the palette's rows.
@@ -84,6 +85,7 @@ private struct TabSwitcherRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                     .layoutPriority(1)
             }
         }
