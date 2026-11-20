@@ -837,7 +837,7 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 1
   - [x] B1.31 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitWebView.swift
     - changed: 1
-- [ ] B2. List: `grep -rlE '\[[A-Za-z_\.]+\]' Packages/ARCH/Sources/Sync Packages/ARCH/Sources/Browsing/SidebarSync.swift Packages/ARCH/Sources/Browsing/SessionStore.swift Packages/ARCH/Sources/Browsing/BrowserSession.swift Packages/ARCH/Sources/Import Packages/ARCH/Sources/LiveFolders --include='*.swift' | sort`. For each file: check every array subscript by index and every `removeFirst()`, `removeLast()`, `dropFirst(n)` on arrays built from stored or remote data; guard the index or use `first`/`indices.contains`. Subject: `Fix: Guard indexes into stored and synced lists`.
+- [x] B2. List: `grep -rlE '\[[A-Za-z_\.]+\]' Packages/ARCH/Sources/Sync Packages/ARCH/Sources/Browsing/SidebarSync.swift Packages/ARCH/Sources/Browsing/SessionStore.swift Packages/ARCH/Sources/Browsing/BrowserSession.swift Packages/ARCH/Sources/Import Packages/ARCH/Sources/LiveFolders --include='*.swift' | sort`. For each file: check every array subscript by index and every `removeFirst()`, `removeLast()`, `dropFirst(n)` on arrays built from stored or remote data; guard the index or use `first`/`indices.contains`. Subject: `Fix: Guard indexes into stored and synced lists`.
   - [x] B2.1 Packages/ARCH/Sources/Browsing/BrowserSession.swift
     - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
   - [x] B2.2 Packages/ARCH/Sources/Browsing/SessionStore.swift
@@ -898,11 +898,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0; the indexed position comes from the same array or the subscript is keyed.
   - [x] B2.30 Packages/ARCH/Sources/Sync/SyncDiff.swift
     - changed: 0; the indexed position comes from the same array or the subscript is keyed.
-  - [ ] B2.31 Packages/ARCH/Sources/Sync/SyncEngineClient.swift
-  - [ ] B2.32 Packages/ARCH/Sources/Sync/SyncMirror.swift
-  - [ ] B2.33 Packages/ARCH/Sources/Sync/SyncOrderKeys.swift
-  - [ ] B2.34 Packages/ARCH/Sources/Sync/SyncRecord.swift
-  - [ ] B2.35 Packages/ARCH/Sources/Sync/SyncedSettings.swift
+  - [x] B2.31 Packages/ARCH/Sources/Sync/SyncEngineClient.swift
+    - changed: 0; indexed positions are built from the same array, or the subscript is keyed.
+  - [x] B2.32 Packages/ARCH/Sources/Sync/SyncMirror.swift
+    - changed: 0; indexed positions are built from the same array, or the subscript is keyed.
+  - [x] B2.33 Packages/ARCH/Sources/Sync/SyncOrderKeys.swift
+    - changed: 0; indexed positions are built from the same array, or the subscript is keyed.
+  - [x] B2.34 Packages/ARCH/Sources/Sync/SyncRecord.swift
+    - changed: 0; indexed positions are built from the same array, or the subscript is keyed.
+  - [x] B2.35 Packages/ARCH/Sources/Sync/SyncedSettings.swift
+    - changed: 0; indexed positions are built from the same array, or the subscript is keyed.
 - [ ] B3. In `Packages/ARCH/Sources/Sync/SyncController.swift`, widen the crash-loop guard (`applyingKey`): also set it around the code that builds records to send (`record(toSave:)` and its caller) and clear it after; and in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`, where the session is created at launch, if the key `ARCHSyncApplyingChanges` is set, keep sync off as the controller does. Update the Crash-loop guard section of `docs/sync.md`. `swift build`.
 - [ ] B4. **Commit** `Fix: Hold sync's crash-loop guard while it builds records to send` with those files and this file. **Push**.
 - [ ] B5. **Preview** 3.
