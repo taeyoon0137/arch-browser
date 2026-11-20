@@ -1,4 +1,8 @@
-// The composer that starts an in-app session (docs/agents.md, In the browser ▸ Starting a session; Model choice and fallbacks): the task, the selected tab attached as a removable chip unless its site is excluded, the place as "Persona / Space" with Use the Agents Persona, the mode from Settings, the model menu with the `agent` route's first model, and the effort menu where the tool takes one. Without a model that can run a session, it says how to connect an API-key model, Claude Code, or Codex. A task that starts with `/` in a Claude Code session with Arch's skills is refused and stays in the field.
+// The composer starts an in-app session (docs/agents.md, Starting a session; Model choice and fallbacks).
+// It holds the task and the selected tab as a removable chip unless the site is excluded. It shows the Persona / Space and Use the Agents Persona choice.
+// The mode starts from Settings. The model menu starts with the agent route's first model; an effort menu appears when the tool supports it.
+// Without a usable model, it explains how to connect an API-key model, Claude Code, or Codex.
+// A task starting with `/` is refused and left in the field when a Claude Code session loads Arch's skills.
 import AgentControl
 import AI
 import SwiftUI

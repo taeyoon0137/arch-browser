@@ -1,4 +1,7 @@
-// The first agent panel, for outside clients (docs/agents.md, In the browser ▸ The agent panel): in a window's trailing column in place of the page reader, it shows one client's steps as the host describes them, each naming its tab with a button that shows it, and the client's cards, grouped by page, which the user answers there and nowhere over the page. A step whose page text speaks to AI agents says so. The service opens the panel on the front main window when a card waits and, while Arch is in the background, posts a notification without content. In-app sessions have a panel of their own, `AgentSessionPanel` in `AgentPanel.swift`, which shows their cards inline in the conversation.
+// The first panel for outside clients replaces the page reader in a window's trailing column (docs/agents.md, In the browser).
+// It shows each step as the host describes it, with a button for its tab. Cards are grouped by page and answered in the panel, never over the page.
+// A step marks page text addressed to AI agents. The service opens the panel in the front main window when a card waits.
+// While Arch is in the background, it posts a notification without content. In-app sessions use `AgentSessionPanel` in `AgentPanel.swift` instead.
 import AgentControl
 import AppKit
 import SwiftUI

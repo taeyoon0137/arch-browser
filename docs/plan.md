@@ -1169,11 +1169,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the approval-card header into short sentences.
   - [x] E1.5 Packages/ARCH/Sources/Agent/AgentApprovals.swift
     - Split the pending-card header into short sentences.
-  - [ ] E1.6 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
-  - [ ] E1.7 Packages/ARCH/Sources/Agent/AgentComposer.swift
-  - [ ] E1.8 Packages/ARCH/Sources/Agent/AgentEventBuffer.swift
-  - [ ] E1.9 Packages/ARCH/Sources/Agent/AgentGrantSheet.swift
-  - [ ] E1.10 Packages/ARCH/Sources/Agent/AgentGrantState.swift
+  - [x] E1.6 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
+    - Split the panel's header into short sentences.
+  - [x] E1.7 Packages/ARCH/Sources/Agent/AgentComposer.swift
+    - Split the composer's header into short sentences.
+  - [x] E1.8 Packages/ARCH/Sources/Agent/AgentEventBuffer.swift
+    - Split the event-buffer header into short sentences.
+  - [x] E1.9 Packages/ARCH/Sources/Agent/AgentGrantSheet.swift
+    - Split the grant-sheet header into short sentences.
+  - [x] E1.10 Packages/ARCH/Sources/Agent/AgentGrantState.swift
+    - Split the grant-state header into short sentences.
   - [ ] E1.11 Packages/ARCH/Sources/Agent/AgentHookCLIRun.swift
   - [ ] E1.12 Packages/ARCH/Sources/Agent/AgentHookRegistrar.swift
   - [ ] E1.13 Packages/ARCH/Sources/Agent/AgentPanel.swift

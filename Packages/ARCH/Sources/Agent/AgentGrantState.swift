@@ -1,4 +1,7 @@
-// What the tool host keeps for one grant, or for one in-app session, for the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface): the handles its client uses, the events since its previous call, what each of its agent tabs reported, which waits read, its calls today, each tab's latest snapshot with the fingerprints of its refs, what the user allowed for the session, the calls that still run, which a Stop cancels, the calls that wait for the user past the first answer, and each tab's file chooser.
+// The tool host keeps this state for one grant or in-app session during the launch (docs/agents.md, Tools; Page snapshots and refs; Approval interface).
+// It holds the client's handles, events since its last call, and reports from its agent tabs that waits read.
+// It also holds today's calls, each tab's latest snapshot and ref fingerprints, and the user's session allowances.
+// Stop cancels running calls. Calls waiting for the user may outlast the first answer. Each tab also keeps its current file chooser.
 import AgentControl
 import ARCHEngine
 import Foundation
