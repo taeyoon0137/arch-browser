@@ -2036,7 +2036,7 @@ Run rounds in order, then start again at X1 with the next round number, until `d
   - none: the SwiftUI modifier chains examined did not repeat across three files.
 - [ ] X5. Open decisions: read the Open decisions lists of `docs/plugins.md`, `docs/agents.md`, `docs/hooks.md`, `docs/sync.md`, and `docs/bookmarks.md`; for each one that the surrounding text clearly leans on and that needs no engine change, decide it, record the decision in the document, and build it with one commit `Feat: …` or `Fix: …` each. Leave the others.
   - [x] X5.r1.1 Keep script plugins in separate web content processes.
-  - [ ] X5.r1.2 Keep extension state separate across engines.
+  - [x] X5.r1.2 Keep extension state separate across engines.
   - [ ] X5.r1.3 Keep plugin fetches free of Persona cookies.
   - [ ] X5.r1.4 Suppress a plugin's own first-load events.
   - [ ] X5.r1.5 Keep plugin tab moves from changing pin status.
