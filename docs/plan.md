@@ -1116,6 +1116,26 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
   - [x] D1.15 resources/README.preset.md
     - Corrected 1 stale claim about the agent panel design's implementation status.
 - [ ] D2. `docs/plan.md` itself: in Current State, each module's paragraphs against that module's sources, one module per commit: `Docs: Correct the plan's <module> state against the code`. Do not edit the Work Queue rows' meaning; only fix file and function names that no longer exist.
+  - [x] D2.1 Engine abstraction
+    - File and function names matched the sources.
+  - [ ] D2.2 WebKit adapter
+  - [ ] D2.3 Chromium adapter
+  - [ ] D2.4 Private API flags
+  - [ ] D2.5 Browsing module
+  - [ ] D2.6 History module
+  - [ ] D2.7 Import module
+  - [ ] D2.8 Plugins module
+  - [ ] D2.9 Extensions module
+  - [ ] D2.10 AI module
+  - [ ] D2.11 AgentControl module and arch-cli
+  - [ ] D2.12 Agent module
+  - [ ] D2.13 Events module
+  - [ ] D2.14 Hooks module
+  - [ ] D2.15 Terminal module
+  - [ ] D2.16 LiveFolders module
+  - [ ] D2.17 Preferences module
+  - [ ] D2.18 Sync module
+  - [ ] D2.19 App shell
 - [ ] D3. **Push**.
 
 #### Group E: the prose pass
