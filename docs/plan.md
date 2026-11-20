@@ -1309,11 +1309,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the extension-row behavior into short sentences.
   - [x] E1.75 Packages/ARCH/Sources/Events/BrowserEvent.swift
     - ok
-  - [ ] E1.76 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
-  - [ ] E1.77 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
-  - [ ] E1.78 Packages/ARCH/Sources/History/HistoryWindowController.swift
-  - [ ] E1.79 Packages/ARCH/Sources/Hooks/HookProposalSheet.swift
-  - [ ] E1.80 Packages/ARCH/Sources/Hooks/HookRegistry.swift
+  - [x] E1.76 Packages/ARCH/Sources/Extensions/ExtensionPopupPresenter.swift
+    - ok
+  - [x] E1.77 Packages/ARCH/Sources/Extensions/WebExtensionRuntime.swift
+    - Split the extension runtime overview into short sentences.
+  - [x] E1.78 Packages/ARCH/Sources/History/HistoryWindowController.swift
+    - ok
+  - [x] E1.79 Packages/ARCH/Sources/Hooks/HookProposalSheet.swift
+    - Split the proposal-sheet overview into short sentences.
+  - [x] E1.80 Packages/ARCH/Sources/Hooks/HookRegistry.swift
+    - Split the registry overview into short sentences.
   - [ ] E1.81 Packages/ARCH/Sources/Hooks/HookScriptContext.swift
   - [ ] E1.82 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
   - [ ] E1.83 Packages/ARCH/Sources/Hooks/ShellHookRunner.swift

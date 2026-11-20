@@ -1,4 +1,9 @@
-// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, deletes a removed extension's storage in each engine, in a later launch for an engine that did not run at the removal, and does for those engines what the app does for extensions: it shows their popups, opens the tabs and windows they ask for, asks the user about access they request while they run and the engines' other questions, and relays their native messages. It has Arch look for native apps before it loads an extension that may reach one, and keeps out of Chromium, which reads Arch's links to other browsers' host manifests itself, each version whose identifier Arch cannot prove while a linked native app accepts it (`NativeMessagingHostLinks`). The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
+// Manages web extensions as plugins for one Persona. It reads packages and asks each capable engine to check them.
+// It loads enabled extensions with the user's grants into that Persona's profiles. A paired version runs only in its assigned engine.
+// It removes extension storage from each engine, or on the next launch if an engine did not run during removal.
+// It shows popups, handles extension tab and window requests, asks about access and engine prompts, and relays native messages.
+// Before an extension that may use native messaging loads, Arch looks for native apps. Chromium excludes versions whose identifier Arch cannot prove while a linked native app accepts them (`NativeMessagingHostLinks`).
+// The plugin list stays shared across engines; each engine runs the packages it supports.
 import AppKit
 import ARCHEngine
 import Plugins

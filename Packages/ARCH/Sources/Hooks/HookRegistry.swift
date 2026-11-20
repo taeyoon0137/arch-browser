@@ -1,4 +1,7 @@
-// The hook registry (`docs/hooks.md`, Hook registry): keeps the hooks of `hooks.json`, matches each browser event to them, and runs each match as a step of the shared hook scheduler, after the AI hook center's hooks for the same event, with the registry's own rules: concurrency caps, loop protection, rate and daily limits, pausing, and the run log. A step runs the hook's script through a `HookScriptRunning`; the registry never runs an agent itself.
+// The hook registry (`docs/hooks.md`, Hook registry) stores hooks from `hooks.json` and matches browser events to them.
+// It runs each match after the AI hook center's hooks for the same event, as a step in the shared scheduler.
+// It enforces concurrency, loop, rate, and daily limits, and keeps pauses and the run log.
+// A `HookScriptRunning` runs the script; the registry does not run an agent itself.
 import Agent
 import AgentControl
 import AI

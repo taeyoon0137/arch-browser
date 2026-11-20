@@ -1,4 +1,8 @@
-// The proposal sheet (`docs/hooks.md`, arch-cli hooks; Hooks from outside programs): a hook that an outside program proposes with `arch-cli hooks add` shows here, in Arch's frontmost main window, with a notification without content while Arch is in the background. It names the client and its path, the hook's name, its situation with "Persona / Space" entries, its permissions in sentences, its agent options, the sentence on tab names, the agent's instructions, and the script's full source, both read-only. It has no default button: Escape is Don't Allow, and Allow takes only a pointer click that no other program posted, after which the registry asks for Touch ID or the login password. An unanswered sheet closes as Don't Allow after the outside clients' approval window, and so does one whose asking task is cancelled, as when the program leaves.
+// The hook proposal sheet shows an outside program's `arch-cli hooks add` request in Arch's front main window (`docs/hooks.md`, Hooks from outside programs).
+// A background notification has no content. The sheet names the client and path, hook name, situation with Persona / Space entries, permissions, agent options, and tab-name rule.
+// It shows the agent's instructions and full script read-only. No button is the default; Escape means Don't Allow.
+// Allow needs a pointer click no other program posted, then the registry asks for Touch ID or the login password.
+// An unanswered sheet closes as Don't Allow after the approval window. A canceled asking task, as when the program leaves, closes it the same way.
 import Agent
 import AgentControl
 import AI
