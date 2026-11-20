@@ -58,6 +58,7 @@ struct GeneralSection: View {
                         Image(nsImage: NSWorkspace.shared.icon(forFile: downloadsFolder.path))
                             .resizable()
                             .frame(width: 16, height: 16)
+                            .accessibilityHidden(true)
                         Text(FileManager.default.displayName(atPath: downloadsFolder.path))
                         Button("Choose\u{2026}", action: chooseDownloadsFolder)
                     }

@@ -828,6 +828,7 @@ private struct PluginSecretRow<Title: View>: View {
             HStack(spacing: 6) {
                 SecureField("Secret", text: $draft, prompt: Text(isSaved ? "Saved" : "Not set"))
                     .labelsHidden()
+                    .accessibilityLabel("Secret")
                     .frame(width: 160)
                     .onSubmit(save)
                 Button("Save", action: save)

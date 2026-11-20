@@ -140,9 +140,12 @@ struct AgentSettingsPage: View {
             HStack(spacing: 6) {
                 TextField("Agent runs a day", value: runs, format: .number)
                     .labelsHidden()
+                    .accessibilityLabel("Agent runs a day")
                     .multilineTextAlignment(.trailing)
                     .frame(width: 64)
-                Stepper("Agent runs a day", value: runs, in: AgentGrant.runsPerDayRange).labelsHidden()
+                Stepper("Agent runs a day", value: runs, in: AgentGrant.runsPerDayRange)
+                    .labelsHidden()
+                    .accessibilityLabel("Agent runs a day")
             }
         } label: {
             Text("Agent runs a day").font(.caption).foregroundStyle(.secondary)

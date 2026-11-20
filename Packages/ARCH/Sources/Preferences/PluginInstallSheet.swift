@@ -236,6 +236,7 @@ private struct PluginReviewView: View {
                         }
                         .pickerStyle(.radioGroup)
                         .labelsHidden()
+                        .accessibilityLabel("Install")
                     }
                 }
                 if choice == .plugin, package.updateChoices.count > 1 {

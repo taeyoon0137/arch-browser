@@ -1055,11 +1055,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] C1.70 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
     - Labeled the hidden hook switch and actions menu, and truncated long hook names.
-  - [ ] C1.71 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift
-  - [ ] C1.72 Packages/ARCH/Sources/Preferences/PluginComposerSheet.swift
-  - [ ] C1.73 Packages/ARCH/Sources/Preferences/PluginInstallSheet.swift
-  - [ ] C1.74 Packages/ARCH/Sources/Preferences/PluginsSection.swift
-  - [ ] C1.75 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
+  - [x] C1.71 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift
+    - Labeled the hidden daily run field and stepper.
+  - [x] C1.72 Packages/ARCH/Sources/Preferences/PluginComposerSheet.swift
+    - ok
+  - [x] C1.73 Packages/ARCH/Sources/Preferences/PluginInstallSheet.swift
+    - Labeled the hidden install choice picker.
+  - [x] C1.74 Packages/ARCH/Sources/Preferences/PluginsSection.swift
+    - Labeled the hidden secret field.
+  - [x] C1.75 Packages/ARCH/Sources/Preferences/PreferencesSections.swift
+    - Hid the decorative downloads folder icon.
   - [ ] C1.76 Packages/ARCH/Sources/Preferences/ScriptHookSheet.swift
   - [ ] C1.77 Packages/ARCH/Sources/Preferences/ShortcutsSection.swift
   - [ ] C1.78 Packages/ARCH/Sources/Preferences/SiteSearchSection.swift
