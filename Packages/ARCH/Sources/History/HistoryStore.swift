@@ -3,6 +3,7 @@ import Foundation
 import os
 import SQLite3
 
+/// A visited page's address, title, visit count, and latest visit time.
 public struct HistoryEntry: Hashable, Identifiable {
     public var id: URL { url }
     public let url: URL
@@ -169,6 +170,7 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Removes all stored visits and pending import entries.
     public func clear() {
         queue.async {
             guard self.execute("DELETE FROM visits") != nil else { return }
@@ -191,6 +193,7 @@ public final class HistoryStore: @unchecked Sendable {
 
     private static let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+    /// Prepares a SQLite statement and binds each supplied value.
     private func prepare(_ sql: String, bindings: [Binding]) -> OpaquePointer? {
         guard let database else { return nil }
         var statement: OpaquePointer?
@@ -232,6 +235,7 @@ public final class HistoryStore: @unchecked Sendable {
         Self.log.error("history.sqlite: \(String(cString: sqlite3_errmsg(database)), privacy: .public) (\(sqlite3_extended_errcode(database)))")
     }
 
+    /// Reads history rows from a query, keeping rows obtained before a read error.
     private func entries(_ sql: String, bindings: [Binding]) -> [HistoryEntry] {
         guard let statement = prepare(sql, bindings: bindings) else { return [] }
         defer { sqlite3_finalize(statement) }

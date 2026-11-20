@@ -13,6 +13,7 @@ public enum WebStoreUpdateCheck: Equatable, Sendable {
     case failed(String)
 }
 
+/// Stages Web Store extensions and tracks available updates for each Persona during this run.
 @MainActor
 public final class WebStoreInstaller: ObservableObject {
     private let client: WebStoreClient

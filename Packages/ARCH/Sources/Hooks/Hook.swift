@@ -5,6 +5,7 @@ import AI
 import Events
 import Foundation
 
+/// A saved browser-event hook with its script, grant, timing, state, and origin.
 public struct Hook: Identifiable, Codable, Sendable {
     public var id: UUID
     public var name: String
@@ -54,6 +55,7 @@ public struct Hook: Identifiable, Codable, Sendable {
     public static func owner(of id: UUID) -> String { "hook.\(id.uuidString)" }
 }
 
+/// The event and optional conditions that start a hook run.
 public enum HookTrigger: Codable, Hashable, Sendable {
     case tabOpened
     /// Empty matches every reason.
@@ -108,6 +110,7 @@ public enum HookTrigger: Codable, Hashable, Sendable {
     }
 }
 
+/// Which page loads start a hook.
 public enum HookPageLoads: String, Codable, Hashable, Sendable {
     /// The tab's first page after it opened in this launch (`isFirstLoadAfterOpen`).
     case firstAfterOpen
@@ -116,12 +119,14 @@ public enum HookPageLoads: String, Codable, Hashable, Sendable {
     case every
 }
 
+/// Which address changes start a hook.
 public enum HookAddressChanges: String, Codable, Hashable, Sendable {
     /// The default, so that a single-page site's own address changes start nothing.
     case newHost
     case any
 }
 
+/// A JavaScript or trusted shell script stored for a hook.
 public enum HookScript: Codable, Hashable, Sendable {
     /// `Hooks/<hook id>/hook.js`. `generated`: the editor's template, which the editor writes again when `agent` changes.
     case javaScript(digest: String, generated: Bool)
@@ -149,6 +154,7 @@ public enum HookScript: Codable, Hashable, Sendable {
     }
 }
 
+/// The resolved path and digest of a trusted shell script's interpreter.
 public struct HookInterpreter: Codable, Hashable, Sendable {
     /// Absolute, with links resolved.
     public var path: String
@@ -161,6 +167,7 @@ public struct HookInterpreter: Codable, Hashable, Sendable {
     }
 }
 
+/// The tab and agent abilities a hook may receive in its grant.
 public enum HookPermission: String, Codable, Hashable, Sendable, CaseIterable {
     /// Titles and addresses of the tabs the hook's filter covers in the event's Persona (Run tabs).
     case tabs
@@ -170,6 +177,7 @@ public enum HookPermission: String, Codable, Hashable, Sendable, CaseIterable {
     case agent
 }
 
+/// A hook's permissions and optional ceiling for agent runs.
 public struct HookGrant: Codable, Hashable, Sendable {
     public var permissions: Set<HookPermission>
     /// The ceiling of the script's agent runs; nil without `agent`.
@@ -209,6 +217,7 @@ public struct HookTiming: Codable, Hashable, Sendable {
         case delay, timeout, runsPerDay
     }
 
+    /// Decodes the delay and timeout in seconds from stored hook timing.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         delay = .seconds(try container.decode(Double.self, forKey: .delay))
@@ -216,6 +225,7 @@ public struct HookTiming: Codable, Hashable, Sendable {
         runsPerDay = try container.decode(Int.self, forKey: .runsPerDay)
     }
 
+    /// Encodes the delay and timeout in seconds for storage.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(delay.hookSeconds, forKey: .delay)
@@ -233,6 +243,7 @@ public enum HookState: Codable, Hashable, Sendable {
         case paused
     }
 
+    /// Decodes the active marker or a paused state with its reason.
     public init(from decoder: any Decoder) throws {
         if let word = try? decoder.singleValueContainer().decode(String.self) {
             guard word == "active" else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown state \(word)")) }
@@ -242,6 +253,7 @@ public enum HookState: Codable, Hashable, Sendable {
         }
     }
 
+    /// Encodes the active marker or the paused reason.
     public func encode(to encoder: any Encoder) throws {
         switch self {
         case .active:
@@ -259,6 +271,7 @@ public enum HookState: Codable, Hashable, Sendable {
     }
 }
 
+/// The reason a hook remains paused until its owner or settings change.
 public enum HookPauseReason: String, Codable, Hashable, Sendable {
     /// `failures` covers three failed or timed-out runs in a row; `providerErrors` the scheduler's pause after three authentication or provider errors, which a change to the hook's tier route lifts; `scriptChanged` a shell hook's interpreter too; `grantEnded` an outside program's hook whose grant ended; `unknownProvider` a run that would reach a provider Arch did not see the user set up (Known providers).
     case user, failures, providerErrors, ranTooOften, stopAllAgents, placeDeleted, scriptChanged, shellScriptsOff, needsNewerArch, grantEnded, unknownProvider
@@ -280,6 +293,7 @@ public enum HookOrigin: Codable, Hashable, Sendable {
         var name: String
     }
 
+    /// Decodes a user, preset, or outside-client origin.
     public init(from decoder: any Decoder) throws {
         if let word = try? decoder.singleValueContainer().decode(String.self) {
             guard word == "user" else { throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown origin \(word)")) }
@@ -295,6 +309,7 @@ public enum HookOrigin: Codable, Hashable, Sendable {
         }
     }
 
+    /// Encodes the origin in its stored tagged form.
     public func encode(to encoder: any Encoder) throws {
         switch self {
         case .user:

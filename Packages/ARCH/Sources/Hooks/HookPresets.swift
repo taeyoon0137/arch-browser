@@ -3,7 +3,9 @@ import Agent
 import Events
 import Foundation
 
+/// Provides editable starting hooks that do not run until the user saves them.
 public enum HookPresets {
+    /// Builds a preset that asks an agent to shorten names on first page loads.
     public static var tidyTabNames: Hook {
         var hook = Hook(name: "Tidy Tab Names", trigger: .pageLoaded(loads: .firstAfterOpen, includesRestoredTabs: false),
                         filter: BrowserEventFilter(tabKinds: [.open, .pinned]), origin: .preset("tidyTabNames"))

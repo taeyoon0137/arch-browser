@@ -1961,11 +1961,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.80 Packages/ARCH/Sources/Extensions/WebStoreClient.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.81 Packages/ARCH/Sources/Extensions/WebStoreInstaller.swift
-  - [ ] X2.r1.82 Packages/ARCH/Sources/History/HistoryStore.swift
-  - [ ] X2.r1.83 Packages/ARCH/Sources/Hooks/AgentHookTemplate.swift
-  - [ ] X2.r1.84 Packages/ARCH/Sources/Hooks/Hook.swift
-  - [ ] X2.r1.85 Packages/ARCH/Sources/Hooks/HookPresets.swift
+  - [x] X2.r1.81 Packages/ARCH/Sources/Extensions/WebStoreInstaller.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.82 Packages/ARCH/Sources/History/HistoryStore.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.83 Packages/ARCH/Sources/Hooks/AgentHookTemplate.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.84 Packages/ARCH/Sources/Hooks/Hook.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.85 Packages/ARCH/Sources/Hooks/HookPresets.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.86 Packages/ARCH/Sources/Hooks/HookRegistry.swift
   - [ ] X2.r1.87 Packages/ARCH/Sources/Hooks/HookRunLog.swift
   - [ ] X2.r1.88 Packages/ARCH/Sources/Hooks/HookScriptRunner.swift
