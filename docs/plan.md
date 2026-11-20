@@ -1810,11 +1810,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - fixed duplicate `Decision` type documentation in `AgentActivityLog.swift`.
   - [x] X1.r2.5 65151574 Docs: Say what each file and type is for (part 5)
     - ok
-  - [ ] X1.r2.6 e89dd2f7 Docs: Say what each file and type is for (part 6)
-  - [ ] X1.r2.7 c573535b Docs: Say what each file and type is for (part 7)
-  - [ ] X1.r2.8 dbc4da7d Docs: Say what each file and type is for (part 8)
-  - [ ] X1.r2.9 9cbc0f9c Docs: Say what each file and type is for (part 9)
-  - [ ] X1.r2.10 3a115363 Docs: Say what each file and type is for (part 10)
+  - [x] X1.r2.6 e89dd2f7 Docs: Say what each file and type is for (part 6)
+    - fixed duplicate `Dependencies` documentation. The ticket factory and its production call sites in this commit restore compatibility for X1.r1.9.
+  - [x] X1.r2.7 c573535b Docs: Say what each file and type is for (part 7)
+    - ok
+  - [x] X1.r2.8 dbc4da7d Docs: Say what each file and type is for (part 8)
+    - ok
+  - [x] X1.r2.9 9cbc0f9c Docs: Say what each file and type is for (part 9)
+    - ok
+  - [x] X1.r2.10 3a115363 Docs: Say what each file and type is for (part 10)
+    - ok
   - [ ] X1.r2.11 84434d11 Docs: Say what each file and type is for (part 11)
   - [ ] X1.r2.12 1960eade Docs: Say what each file and type is for (part 12)
   - [ ] X1.r2.13 82a0a5bb Docs: Say what each file and type is for (part 13)
