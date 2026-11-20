@@ -838,6 +838,46 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
   - [x] B1.31 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitWebView.swift
     - changed: 1
 - [ ] B2. List: `grep -rlE '\[[A-Za-z_\.]+\]' Packages/ARCH/Sources/Sync Packages/ARCH/Sources/Browsing/SidebarSync.swift Packages/ARCH/Sources/Browsing/SessionStore.swift Packages/ARCH/Sources/Browsing/BrowserSession.swift Packages/ARCH/Sources/Import Packages/ARCH/Sources/LiveFolders --include='*.swift' | sort`. For each file: check every array subscript by index and every `removeFirst()`, `removeLast()`, `dropFirst(n)` on arrays built from stored or remote data; guard the index or use `first`/`indices.contains`. Subject: `Fix: Guard indexes into stored and synced lists`.
+  - [x] B2.1 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+    - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
+  - [x] B2.2 Packages/ARCH/Sources/Browsing/SessionStore.swift
+    - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
+  - [x] B2.3 Packages/ARCH/Sources/Browsing/SidebarSync.swift
+    - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
+  - [x] B2.4 Packages/ARCH/Sources/Import/BookmarkFile.swift
+    - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
+  - [x] B2.5 Packages/ARCH/Sources/Import/BrowserImportSheet.swift
+    - changed: 0; indexed accesses are guarded by firstIndex, indices.contains, or construction from the same array.
+  - [ ] B2.6 Packages/ARCH/Sources/Import/BrowserSource.swift
+  - [ ] B2.7 Packages/ARCH/Sources/Import/ChromiumProfile.swift
+  - [ ] B2.8 Packages/ARCH/Sources/Import/DatabaseCopy.swift
+  - [ ] B2.9 Packages/ARCH/Sources/Import/HistoryDatabase.swift
+  - [ ] B2.10 Packages/ARCH/Sources/Import/ImportController.swift
+  - [ ] B2.11 Packages/ARCH/Sources/Import/ImportedBrowser.swift
+  - [ ] B2.12 Packages/ARCH/Sources/Import/ImportedFile.swift
+  - [ ] B2.13 Packages/ARCH/Sources/Import/SearchKeywords.swift
+  - [ ] B2.14 Packages/ARCH/Sources/Import/SidebarFile.swift
+  - [ ] B2.15 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
+  - [ ] B2.16 Packages/ARCH/Sources/LiveFolders/FeedParser.swift
+  - [ ] B2.17 Packages/ARCH/Sources/LiveFolders/GitHubCLI.swift
+  - [ ] B2.18 Packages/ARCH/Sources/LiveFolders/LiveFolderKeychain.swift
+  - [ ] B2.19 Packages/ARCH/Sources/LiveFolders/LiveFolderReconciler.swift
+  - [ ] B2.20 Packages/ARCH/Sources/LiveFolders/LiveFolderService.swift
+  - [ ] B2.21 Packages/ARCH/Sources/LiveFolders/LiveFolderSource.swift
+  - [ ] B2.22 Packages/ARCH/Sources/LiveFolders/LiveFolderStore.swift
+  - [ ] B2.23 Packages/ARCH/Sources/Sync/CloudKitSyncEngine.swift
+  - [ ] B2.24 Packages/ARCH/Sources/Sync/FirstSyncMerge.swift
+  - [ ] B2.25 Packages/ARCH/Sources/Sync/IncomingSidebarRecords.swift
+  - [ ] B2.26 Packages/ARCH/Sources/Sync/SidebarRecords.swift
+  - [ ] B2.27 Packages/ARCH/Sources/Sync/SyncAvailability.swift
+  - [ ] B2.28 Packages/ARCH/Sources/Sync/SyncCloudKitRecords.swift
+  - [ ] B2.29 Packages/ARCH/Sources/Sync/SyncController.swift
+  - [ ] B2.30 Packages/ARCH/Sources/Sync/SyncDiff.swift
+  - [ ] B2.31 Packages/ARCH/Sources/Sync/SyncEngineClient.swift
+  - [ ] B2.32 Packages/ARCH/Sources/Sync/SyncMirror.swift
+  - [ ] B2.33 Packages/ARCH/Sources/Sync/SyncOrderKeys.swift
+  - [ ] B2.34 Packages/ARCH/Sources/Sync/SyncRecord.swift
+  - [ ] B2.35 Packages/ARCH/Sources/Sync/SyncedSettings.swift
 - [ ] B3. In `Packages/ARCH/Sources/Sync/SyncController.swift`, widen the crash-loop guard (`applyingKey`): also set it around the code that builds records to send (`record(toSave:)` and its caller) and clear it after; and in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift`, where the session is created at launch, if the key `ARCHSyncApplyingChanges` is set, keep sync off as the controller does. Update the Crash-loop guard section of `docs/sync.md`. `swift build`.
 - [ ] B4. **Commit** `Fix: Hold sync's crash-loop guard while it builds records to send` with those files and this file. **Push**.
 - [ ] B5. **Preview** 3.
