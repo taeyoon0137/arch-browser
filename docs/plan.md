@@ -1093,7 +1093,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 4 stale claims in the capability example, menu availability, and error examples.
   - [x] D1.4 docs/bookmarks.md
     - Corrected 1 stale claim about automatic unloading in split view.
-  - [ ] D1.5 docs/engine-protocol.md
+  - [x] D1.5 docs/engine-protocol.md
+    - Corrected 1 stale claim about Chromium activation requests.
   - [ ] D1.6 docs/features.md
   - [ ] D1.7 docs/hooks.md
   - [ ] D1.8 docs/import-browsers.md
