@@ -1,4 +1,8 @@
-// The browser side of the agents' service (docs/agents.md, Parts and modules): the session's Personas, spaces, and tabs in sidebar order, the Agents Persona, which it adds on demand and keeps agent-only, the front main window for the grant sheet, the search engine's results address for the sessions' site scope, and the agent tabs: it opens, navigates, reads, and closes them, runs the agents' page script in them and captures them, giving a tab that no window shows a viewport first, gives the tool host their trusted input, passes on what happens in them, asks the service about each of their navigations and downloads, and hands it their file choosers. It offers the user's own tabs for `request_tab`, shows tabs, opens links in other apps once the user allowed them, and opens the agent panel in a window.
+// The browser side of the agent service exposes Personas, spaces, tabs, and their sidebar order (docs/agents.md, Parts and modules).
+// It creates the agent-only Agents Persona on demand and supplies the front main window for the grant sheet and the search-results address for session scope.
+// It opens, navigates, reads, captures, and closes agent tabs. A hidden tab gets a viewport before capture. The host runs their page scripts and supplies trusted input.
+// It reports tab events, checks their navigations and downloads with the service, and hands over their file choosers.
+// It also offers user tabs for `request_tab`, shows tabs, opens allowed external links, and places the agent panel in a window.
 import Agent
 import AppKit
 import ARCHEngine

@@ -1219,11 +1219,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.30 Packages/ARCH/Sources/Browsing/AgentPanelColumn.swift
     - Split the column overview into short sentences.
-  - [ ] E1.31 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift
-  - [ ] E1.32 Packages/ARCH/Sources/Browsing/BrowserEventSource.swift
-  - [ ] E1.33 Packages/ARCH/Sources/Browsing/BrowserSession.swift
-  - [ ] E1.34 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
-  - [ ] E1.35 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
+  - [x] E1.31 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift
+    - Split the agent-host overview into short sentences.
+  - [x] E1.32 Packages/ARCH/Sources/Browsing/BrowserEventSource.swift
+    - Split the event-source overview into short sentences.
+  - [x] E1.33 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+    - Split the session ownership overview into short sentences.
+  - [x] E1.34 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
+    - ok
+  - [x] E1.35 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
+    - Split the window-state overview into short sentences.
   - [ ] E1.36 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
   - [ ] E1.37 Packages/ARCH/Sources/Browsing/CommandPaletteView.swift
   - [ ] E1.38 Packages/ARCH/Sources/Browsing/DevToolsDock.swift

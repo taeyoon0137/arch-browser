@@ -1,4 +1,6 @@
-// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and the prompt cards of the tabs on its screen, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the prompts waiting for their tabs, the page reader's conversations, engines, and persistence.
+// A browser window's state and commands live here. A main window shows a space, selected tab and split view, internal or fullscreen page, preview, reader, question popover, and prompt cards.
+// It also holds the palette, find, renaming, region capture, tab switcher, docked developer tools, and sharing. A small window shows only its one tab.
+// The session owns Personas, spaces, favorites, tabs, folders, split views, closed tabs, downloads, pending prompts, reader conversations, engines, and persistence.
 import Agent
 import AI
 import AppKit

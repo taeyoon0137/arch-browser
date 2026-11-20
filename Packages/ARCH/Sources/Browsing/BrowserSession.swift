@@ -1,4 +1,9 @@
-// Owns each engine's application and, for each Persona, one runtime per engine (the Persona's profile and browser), each started when a tab first needs it, so tabs of both engines live side by side, and the Persona's plugins. Also owns sidebar state: Personas, spaces, favorites and the tabs they keep alive, tabs, tab folders, split views, and the closed-tab list, and the app-wide stores it keeps in its folder: history, remembered site permissions, site search, and the live folders' items (`LiveFolderTabs.swift`). Archives inactive tabs on a timer, which also unloads inactive pinned tabs and favorites' tabs, as memory pressure unloads every tab that no window shows. Opens the browser windows, main windows with the sidebar and small windows for links from other apps, and follows them as they become main and close; each window's own state and commands live in its `BrowserWindowModel`, which views, menus, and scripts reach through `activeWindow` or `sidebarTarget()`.
+// The session owns each engine application and one runtime per engine for each Persona: its profile and browser. A runtime starts when a tab first needs it, so both engines can run beside each other.
+// It also owns each Persona's plugins and sidebar state: Personas, spaces, favorites and their tabs, open tabs, folders, split views, and closed tabs.
+// App-wide stores in its folder hold history, remembered site permissions, site search, and live-folder items (`LiveFolderTabs.swift`).
+// A timer archives inactive tabs and unloads inactive pinned tabs and favorites. Memory pressure unloads tabs no window shows.
+// The session opens main windows with a sidebar and small windows for links from other apps, then tracks which becomes main or closes.
+// Each window's state and commands live in `BrowserWindowModel`. Views, menus, and scripts reach them through `activeWindow` or `sidebarTarget()`.
 import Agent
 import AI
 import AppKit
