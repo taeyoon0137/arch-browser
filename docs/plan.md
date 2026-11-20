@@ -1509,7 +1509,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.175 docs/windows-personas.md
     - Used American spelling in prose.
-- [ ] E2. Remove the "prose pass" notes from the rows whose files are all done. **Commit** `Docs: Drop the prose pass notes that are done`. **Push**.
+- [x] E2. Remove the "prose pass" notes from the rows whose files are all done. **Commit** `Docs: Drop the prose pass notes that are done`. **Push**.
+  - none: Every affected row also names Tests files that the week-queue rule forbids changing.
 
 #### Group W: wrap-up of the first pass
 
