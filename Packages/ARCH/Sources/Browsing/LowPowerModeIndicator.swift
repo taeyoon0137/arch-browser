@@ -31,6 +31,7 @@ final class LowPowerMode: ObservableObject {
 /// A button in the address bar while Low Power Mode is on, before the share button of the sidebar's address pill and of a small window's top row: a battery symbol with a yellow level, as macOS marks the mode, sized like the bar's other buttons, whose help says pages may animate more slowly. A click, like the context menu's Low Power Mode Settings…, opens the mode's settings; Arch itself changes nothing.
 struct LowPowerModeIndicator: View {
     @ObservedObject private var mode = LowPowerMode.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
 
     var body: some View {
@@ -42,7 +43,7 @@ struct LowPowerModeIndicator: View {
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(Color.secondary, Color.yellow)
                     .frame(width: 30, height: 28)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHovering ? 0.08 : 0)))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

@@ -508,6 +508,7 @@ struct LiveFolderSheetView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                    .accessibilityLabel("Source")
                 }
                 SiteSettingsDivider()
                 SiteSettingsRow(symbol: "textformat", title: "Name") {
@@ -517,13 +518,13 @@ struct LiveFolderSheetView: View {
                 SiteSettingsRow(symbol: "number", title: "Items") {
                     Picker("Items", selection: $model.itemLimit) {
                         ForEach(LiveFolderConfiguration.itemLimits, id: \.self) { Text("\($0)").tag($0) }
-                    }.labelsHidden().fixedSize()
+                    }.labelsHidden().accessibilityLabel("Items").fixedSize()
                 }
                 SiteSettingsDivider()
                 SiteSettingsRow(symbol: "arrow.clockwise", title: "Refresh") {
                     Picker("Refresh", selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
                         ForEach(LiveFolderConfiguration.refreshIntervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
-                    }.labelsHidden().fixedSize()
+                    }.labelsHidden().accessibilityLabel("Refresh").fixedSize()
                 }
             }
             .disabled(model.isWorking)

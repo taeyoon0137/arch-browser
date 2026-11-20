@@ -22,6 +22,8 @@ struct PageExchangeView: View {
             Text(exchange.title)
                 .font(.system(size: 13, weight: .semibold))
                 .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.tail)
             if showsSelection, let selection = exchange.selection {
                 SelectionQuote(text: selection.text)
             }

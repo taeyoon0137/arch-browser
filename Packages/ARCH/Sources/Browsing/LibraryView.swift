@@ -56,6 +56,7 @@ struct LibraryToolRow: View {
                 Image(systemName: symbol)
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.system(size: 14))
                 Spacer(minLength: 0)
@@ -79,6 +80,7 @@ struct LibraryButton: View {
     let activityOnly: Bool
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @Environment(\.sidebarIsFloating) private var isFloating
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
 
     init(session: BrowserSession, activityOnly: Bool = false) {
@@ -118,17 +120,19 @@ struct LibraryButton: View {
                 if !downloads.isDownloading {
                     Image(systemName: "archivebox")
                         .font(.system(size: 15, weight: .medium))
+                        .accessibilityHidden(true)
                 } else {
                     VStack(spacing: 3) {
                         Image(systemName: "arrow.down")
                             .font(.system(size: 12, weight: .semibold))
+                            .accessibilityHidden(true)
                         DownloadProgressBar(progress: downloads.progress)
                             .frame(width: 16, height: 3)
                     }
                 }
             }
             .frame(width: 30, height: 28)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(windowModel.isLibraryVisible ? 0.1 : isHovering ? 0.08 : 0)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(windowModel.isLibraryVisible ? SidebarFill.selected.color(in: colorScheme) : isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
             .overlay(alignment: .topTrailing) {
                 if !downloads.isDownloading, !session.unseenDownloadIDs.isEmpty {
                     Text("\(session.unseenDownloadIDs.count)")

@@ -955,11 +955,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Hid the decorative search symbol.
   - [x] C1.20 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
     - Labeled switches with hidden visual labels and let details wrap.
-  - [ ] C1.21 Packages/ARCH/Sources/Browsing/LibraryView.swift
-  - [ ] C1.22 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
-  - [ ] C1.23 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift
-  - [ ] C1.24 Packages/ARCH/Sources/Browsing/PageAnswerView.swift
-  - [ ] C1.25 Packages/ARCH/Sources/Browsing/PageAuthoredTextView.swift
+  - [x] C1.21 Packages/ARCH/Sources/Browsing/LibraryView.swift
+    - Hid decorative library symbols and used sidebar fill roles.
+  - [x] C1.22 Packages/ARCH/Sources/Browsing/LiveFolderSheet.swift
+    - Labeled pickers whose visual labels are hidden.
+  - [x] C1.23 Packages/ARCH/Sources/Browsing/LowPowerModeIndicator.swift
+    - Used the sidebar hover fill.
+  - [x] C1.24 Packages/ARCH/Sources/Browsing/PageAnswerView.swift
+    - Truncated long answer titles.
+  - [x] C1.25 Packages/ARCH/Sources/Browsing/PageAuthoredTextView.swift
+    - ok
   - [ ] C1.26 Packages/ARCH/Sources/Browsing/PageFieldFocus.swift
   - [ ] C1.27 Packages/ARCH/Sources/Browsing/PagePreview.swift
   - [ ] C1.28 Packages/ARCH/Sources/Browsing/PageQuestionPopover.swift
