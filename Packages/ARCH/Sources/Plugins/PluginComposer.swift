@@ -1,4 +1,6 @@
-// Plugins that AI writes. The composer asks the AI interface for a script plugin that does what the user describes, checks the reply against the rules for plugins that AI writes, sends the problems it finds back to the model, and stages the plugin for the review sheet, as a package the user chose would be. Nothing of it runs until the user installs and enables it.
+// The composer asks Arch's AI interface to write a script plugin from the user's description.
+// It checks the reply against rules for AI-written plugins, sends problems back to the model, and stages a package for review.
+// Nothing in that package runs until the user installs and enables it.
 import AI
 import Foundation
 import JavaScriptCore

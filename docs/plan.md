@@ -1329,11 +1329,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the import sheet overview into short sentences.
   - [x] E1.85 Packages/ARCH/Sources/Plugins/Plugin.swift
     - ok
-  - [ ] E1.86 Packages/ARCH/Sources/Plugins/PluginAI.swift
-  - [ ] E1.87 Packages/ARCH/Sources/Plugins/PluginComposer.swift
-  - [ ] E1.88 Packages/ARCH/Sources/Plugins/PluginComposerInstructions.swift
-  - [ ] E1.89 Packages/ARCH/Sources/Plugins/PluginContributions.swift
-  - [ ] E1.90 Packages/ARCH/Sources/Plugins/PluginManager.swift
+  - [x] E1.86 Packages/ARCH/Sources/Plugins/PluginAI.swift
+    - Split the plugin AI overview into short sentences.
+  - [x] E1.87 Packages/ARCH/Sources/Plugins/PluginComposer.swift
+    - Split the composer behavior into short sentences.
+  - [x] E1.88 Packages/ARCH/Sources/Plugins/PluginComposerInstructions.swift
+    - Split the reference-text rules into short sentences.
+  - [x] E1.89 Packages/ARCH/Sources/Plugins/PluginContributions.swift
+    - ok
+  - [x] E1.90 Packages/ARCH/Sources/Plugins/PluginManager.swift
+    - Split the manager behavior into short sentences.
   - [ ] E1.91 Packages/ARCH/Sources/Plugins/PluginManifest.swift
   - [ ] E1.92 Packages/ARCH/Sources/Plugins/PluginManifestFile.swift
   - [ ] E1.93 Packages/ARCH/Sources/Plugins/PluginNetwork.swift

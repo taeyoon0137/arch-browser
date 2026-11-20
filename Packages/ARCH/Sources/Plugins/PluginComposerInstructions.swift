@@ -1,4 +1,5 @@
-// What the composer tells the model about plugins: the reply it expects, the manifest keys that plugins AI writes may use, and the JavaScript API of their background scripts. Keep it in step with `ScriptManifest`, which reads `plugin.json`, with `ScriptPluginBridge`, which defines `arch`, and with the rules of `PluginComposer.files(of:)`.
+// The composer tells the model which reply to return, which manifest keys it may use, and the background script's JavaScript API.
+// Keep this text in step with `ScriptManifest` for `plugin.json`, `ScriptPluginBridge` for `arch`, and `PluginComposer.files(of:)` for file rules.
 import Foundation
 
 extension PluginComposer {
