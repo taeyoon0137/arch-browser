@@ -1111,7 +1111,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 2 stale claims about when appearance changes apply.
   - [x] D1.13 docs/web-store.md
     - Corrected 0 claims; code-checkable store and installer contracts matched the sources.
-  - [ ] D1.14 docs/windows-personas.md
+  - [x] D1.14 docs/windows-personas.md
+    - Corrected 1 stale claim about the multiple-window design's implementation status.
   - [ ] D1.15 resources/README.preset.md
 - [ ] D2. `docs/plan.md` itself: in Current State, each module's paragraphs against that module's sources, one module per commit: `Docs: Correct the plan's <module> state against the code`. Do not edit the Work Queue rows' meaning; only fix file and function names that no longer exist.
 - [ ] D3. **Push**.

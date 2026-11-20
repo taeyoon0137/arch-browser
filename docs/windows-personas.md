@@ -3,7 +3,7 @@
 ## Purpose and scope
 
 - This note designs queue tasks III.6 (multiple windows), III.7 (small window), and III.12 (Personas) in `docs/plan.md`, rows 7, 6, and 9 of `docs/features.md`. It also fixes the parts of live favorites (III.13), sync (V.9), plugins (V.11), and the AI tasks (VII) that depend on windows or Personas.
-- The three tasks share one change. Today `BrowserSession` holds the user's data, the state of the one window, and one engine profile per engine. After this work, a window owns only what it shows, a Persona owns its engine storage, and the session owns everything else.
+- The three tasks shared one change. At design time, `BrowserSession` held the user's data, the state of one window, and one engine profile per engine. In the implementation, a window owns what it shows, a Persona owns its engine storage, and the session owns everything else.
 - Folders (III.3), split view (III.5), previews (III.11), live favorites (III.13), and the plugin core (V.11) were built while this note was written. It states the design as types and responsibilities, and Interactions with other features says how windows and Personas apply to them.
 - The default Persona keeps today's storage, so the upgrade moves no site data and signs nobody out.
 - Nothing here uses a private API or needs a flag on `flags://`.
