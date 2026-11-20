@@ -1820,11 +1820,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - ok
   - [x] X1.r2.10 3a115363 Docs: Say what each file and type is for (part 10)
     - ok
-  - [ ] X1.r2.11 84434d11 Docs: Say what each file and type is for (part 11)
-  - [ ] X1.r2.12 1960eade Docs: Say what each file and type is for (part 12)
-  - [ ] X1.r2.13 82a0a5bb Docs: Say what each file and type is for (part 13)
-  - [ ] X1.r2.14 cd2594f9 Docs: Say what each file and type is for (part 14)
-  - [ ] X1.r2.15 9d5ea0ce Docs: Say what each file and type is for (part 15)
+  - [x] X1.r2.11 84434d11 Docs: Say what each file and type is for (part 11)
+    - ok
+  - [x] X1.r2.12 1960eade Docs: Say what each file and type is for (part 12)
+    - ok
+  - [x] X1.r2.13 82a0a5bb Docs: Say what each file and type is for (part 13)
+    - fixed the reader conversation comment: a conversation stays with its tab across documents on one site.
+  - [x] X1.r2.14 cd2594f9 Docs: Say what each file and type is for (part 14)
+    - ok
+  - [x] X1.r2.15 9d5ea0ce Docs: Say what each file and type is for (part 15)
+    - ok
   - [ ] X1.r2.16 2262f204 Docs: Say what each file and type is for (part 16)
   - [ ] X1.r2.17 9743cc72 Docs: Say what each file and type is for (part 17)
   - [ ] X1.r2.18 edcb28b3 Docs: Say what each file and type is for (part 18)
