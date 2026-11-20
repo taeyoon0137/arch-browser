@@ -1099,7 +1099,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Corrected 2 stale claims about the outside-client endpoint and the hook button title.
   - [x] D1.7 docs/hooks.md
     - Corrected 9 stale claims about implementation status, menu titles, and conformance.
-  - [ ] D1.8 docs/import-browsers.md
+  - [x] D1.8 docs/import-browsers.md
+    - Corrected 1 stale claim about Chromium extension support.
   - [ ] D1.9 docs/password-managers.md
   - [ ] D1.10 docs/plan.md
   - [ ] D1.11 docs/plugins.md
