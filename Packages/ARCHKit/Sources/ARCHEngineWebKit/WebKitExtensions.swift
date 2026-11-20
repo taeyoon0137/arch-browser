@@ -1,4 +1,6 @@
-// Web extensions on WebKit, from macOS 15.4: each profile has one `WKWebExtensionController`, which every web view of the profile uses, and each extension the app loads runs in it as a `WKWebExtensionContext`. The profile's web contents are the extensions' tabs, and the windows the app reports are their windows. Popups, questions about access, and native messages go to the app through the delegate.
+// Web extensions use macOS 15.4's WebKit APIs. Each profile has one `WKWebExtensionController`, shared by its web views.
+// Each loaded extension runs as a `WKWebExtensionContext`. The profile's web contents act as extension tabs, and reported app windows act as extension windows.
+// The delegate sends popups, access questions, and native messages to the app.
 import AppKit
 import ARCHEngine
 import WebKit

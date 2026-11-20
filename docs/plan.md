@@ -1469,11 +1469,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the spelling menu rules into short sentences.
   - [x] E1.155 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitDelegateBridge.swift
     - Split the committed address and extension navigation rules into short sentences.
-  - [ ] E1.156 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitEngine.swift
-  - [ ] E1.157 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitExtensions.swift
-  - [ ] E1.158 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitPageScripts.swift
-  - [ ] E1.159 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitWebView.swift
-  - [ ] E1.160 Packages/ARCHKit/Sources/CEFBridge/CEFBridgeBrowser.mm
+  - [x] E1.156 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitEngine.swift
+    - Split the trusted key rule into short sentences.
+  - [x] E1.157 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitExtensions.swift
+    - Split the extension adapter overview into short sentences.
+  - [x] E1.158 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitPageScripts.swift
+    - Split the page script and user gesture rules into short sentences.
+  - [x] E1.159 Packages/ARCHKit/Sources/ARCHEngineWebKit/WebKitWebView.swift
+    - ok
+  - [x] E1.160 Packages/ARCHKit/Sources/CEFBridge/CEFBridgeBrowser.mm
+    - Split the file chooser contract into short sentences.
   - [ ] E1.161 Packages/ARCHKit/Sources/CEFBridge/include/CEFBridge.h
   - [ ] E1.162 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitFileChooserTests.swift
   - [ ] E1.163 Packages/ARCHKit/Tests/ARCHEngineWebKitTests/WebKitWebContentsTests.swift

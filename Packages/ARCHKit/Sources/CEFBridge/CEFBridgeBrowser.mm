@@ -514,7 +514,12 @@ public:
         return true;
     }
 
-    // CEF's file dialog factory takes every chooser and asks the dialog handler of the browser it finds for the chooser's web contents, then for its window, then the focused one, and cancels when it finds none (`file_dialog_runner.cc`). So this browser's file inputs and other choosers, such as a download's Save As, come here, and so can those of views without a browser of their own, such as an extension's popup or docked DevTools. The app shows its own panel and answers through the callback, which stays alive in the block until then; CEF cancels the chooser when the callback goes unanswered. Returning true keeps Chromium's own panel closed and CEF from asking again for the same chooser, also for a browser without an owner. The app gets the accepted types as the page names them and maps MIME types to file types itself, so CEF's expansion into extensions goes unused. CEF names no frame, so the app gets the main frame's committed address (`GetURL()` reads `GetLastCommittedURL()`), not the address a navigation the page started is loading.
+    // CEF asks the dialog handler of the chooser's web contents browser, then its window, then the focused browser (`file_dialog_runner.cc`). A missing handler cancels.
+    // This browser's file inputs, a download's Save As, and choosers in browserless views such as an extension popup or docked DevTools can arrive here.
+    // The app shows its own panel. Its callback stays alive in the block until the app answers; CEF cancels an unanswered callback when it is dropped.
+    // Returning true suppresses Chromium's panel and repeat handling, even for a browser without an owner.
+    // The app receives accepted types as the page names them and maps MIME types to file types itself. It does not use CEF's expansion into extensions.
+    // CEF names no frame. The app uses the main frame's committed address (`GetURL()` reads `GetLastCommittedURL()`), not a pending navigation address.
     bool OnFileDialog(CefRefPtr<CefBrowser> browser, FileDialogMode mode, const CefString &title, const CefString &default_file_path,
                       const std::vector<CefString> &accept_filters, const std::vector<CefString> &accept_extensions,
                       const std::vector<CefString> &accept_descriptions, CefRefPtr<CefFileDialogCallback> callback) override {

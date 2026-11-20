@@ -1,4 +1,7 @@
-// Page scripts on WebKit. Each world becomes a content world of its own, so the page and other worlds cannot see its globals, and a script message handler with reply, added to that world only, carries its channel to the app. `executeJavaScript` runs without a user gesture through a private member behind the private API flags, and otherwise with the gesture WebKit's public evaluation gives; `executeJavaScriptWithoutUserGesture` and `postPageScriptMessage` run only through that member, behind flags of their own, and otherwise run nothing.
+// Each WebKit page script world has separate globals that the page and other worlds cannot see.
+// A reply-capable message handler in that world carries its channel to the app.
+// `executeJavaScript` uses private evaluation without a user gesture when the private API flags allow it; otherwise public evaluation carries WebKit's gesture.
+// `executeJavaScriptWithoutUserGesture` and `postPageScriptMessage` require their own flags and that private member. Otherwise they run nothing.
 import ARCHEngine
 import ARCHPrivateAPI
 import WebKit
@@ -143,7 +146,10 @@ extension WebKitWebContents {
     }
 }
 
-/// WebKit's evaluation without a user gesture, a private member registered on the flags page with two features: the agents' page script, which falls back to the public evaluation without it, and the scripts that plugins run once in pages and the messages they post to page scripts, which neither run nor arrive without it. The public `evaluateJavaScript(_:in:in:completionHandler:)` and `callAsyncJavaScript(_:arguments:in:in:completionHandler:)` run a script as if the user had clicked, so a page's handlers for the events that script dispatches, and the timers they start within a second, get transient user activation, which lets a page write the clipboard or open a share sheet, a passkey prompt, or fullscreen.
+/// WebKit's private evaluation without a user gesture is registered on the flags page for two features.
+/// The agents' page script falls back to public evaluation. One-time plugin page scripts and messages to page scripts do not run without it.
+/// Public `evaluateJavaScript(_:in:in:completionHandler:)` and `callAsyncJavaScript(_:arguments:in:in:completionHandler:)` run as though the user clicked.
+/// Page handlers for events those scripts dispatch, and timers they start within a second, receive transient user activation. That can allow clipboard writes, a share sheet, a passkey prompt, or fullscreen.
 enum WebKitUserGestureAPI {
     static let apiID = "webkit.evaluateWithoutUserGesture"
     static let featureID = "webkit.pageScriptsWithoutUserGesture"
