@@ -1,4 +1,7 @@
-// The command palette floats over the window and uses its mode to edit the current tab's address or open a new tab. As the user types, it lists Install from the Web Store for an extension that the text names, Ask Agent for text of two or more words and agent sessions to show, matching plugin commands, Ask About This Page when the words begin its name, Install Extension from This Page on a Web Store page, open tabs to switch to, and pages from history. Text that starts with a site search keyword and a space searches that site.
+// The command palette floats over a window. Its mode edits the current tab's address or opens a new tab.
+// It lists a Web Store install for recognized extension text, Ask Agent for two or more words, sessions to show, matching plugin commands, and Ask About This Page when its name matches.
+// On a Web Store page it lists Install Extension from This Page. It also finds open tabs and history pages.
+// Text starting with a site-search keyword and a space searches that site.
 import Agent
 import AI
 import AppKit

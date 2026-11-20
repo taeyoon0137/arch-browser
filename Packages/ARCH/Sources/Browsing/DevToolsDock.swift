@@ -1,4 +1,6 @@
-// Places each browser window's selected tab's developer tools beside the page, on the side and at the size every window shares, or in a window of their own. The engine shows the tools inside a view: the page area makes room for that view on the docked side, and Undock moves the same view into an app window, so the tools keep their state.
+// Developer tools for a window's selected tab dock beside the page or open in their own window.
+// Docked tools use a side and size shared by the app's windows. The engine hosts them inside a view, and the page area makes room on that side.
+// Undock moves the same view to an app window, preserving the tools' state.
 import AppKit
 import ARCHEngine
 import Combine

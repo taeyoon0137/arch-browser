@@ -1,4 +1,7 @@
-// Main window content. The system's translucent window material fills the window with a wash of the current space's tint (`SpaceTheme.swift`). The sidebar (`SidebarView.swift`) sits over it and contains navigation, the address pill (`AddressPillView.swift`), favorites (`FavoritesGridView.swift`), the current space's tabs (`SpaceTabsView.swift`, `TabRowView.swift`) or the library, and the bottom bar with the library button and the space switcher (`SidebarBottomBar.swift`). The page area fills the remaining space with nothing above it: the selected tab's page, or the split view it belongs to (`SplitView.swift`). This file also holds the window's buttons, the page frame, and the backgrounds.
+// Main window content sits over translucent window material tinted by the current space (`SpaceTheme.swift`).
+// `SidebarView.swift` contains navigation, the address pill, favorites, current-space tabs or library, and the bottom bar's library button and space switcher.
+// Those parts live in `AddressPillView.swift`, `FavoritesGridView.swift`, `SpaceTabsView.swift`, `TabRowView.swift`, and `SidebarBottomBar.swift`.
+// The selected page or its `SplitView.swift` fills the remaining area with nothing above it. This file also holds window buttons, the page frame, and backgrounds.
 import AppKit
 import SwiftUI
 

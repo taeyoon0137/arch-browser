@@ -1229,11 +1229,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] E1.35 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
     - Split the window-state overview into short sentences.
-  - [ ] E1.36 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
-  - [ ] E1.37 Packages/ARCH/Sources/Browsing/CommandPaletteView.swift
-  - [ ] E1.38 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
-  - [ ] E1.39 Packages/ARCH/Sources/Browsing/DownloadNotifier.swift
-  - [ ] E1.40 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
+  - [x] E1.36 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
+    - Split the main-window layout overview into short sentences.
+  - [x] E1.37 Packages/ARCH/Sources/Browsing/CommandPaletteView.swift
+    - Split the palette's entries into short sentences.
+  - [x] E1.38 Packages/ARCH/Sources/Browsing/DevToolsDock.swift
+    - Split the developer-tools layout overview into short sentences.
+  - [x] E1.39 Packages/ARCH/Sources/Browsing/DownloadNotifier.swift
+    - ok
+  - [x] E1.40 Packages/ARCH/Sources/Browsing/DragAutoScroll.swift
+    - Split the drag-scroll overview into short sentences.
   - [ ] E1.41 Packages/ARCH/Sources/Browsing/FavoritesGridView.swift
   - [ ] E1.42 Packages/ARCH/Sources/Browsing/FindBarView.swift
   - [ ] E1.43 Packages/ARCH/Sources/Browsing/FlagsPageView.swift
