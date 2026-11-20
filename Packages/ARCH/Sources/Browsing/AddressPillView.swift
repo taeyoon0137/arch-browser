@@ -66,6 +66,7 @@ struct AddressPillView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 18)
+                        .accessibilityHidden(true)
                     Text(host)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -77,6 +78,7 @@ struct AddressPillView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Edit Address")
             .help(windowModel.internalPage?.address ?? url?.absoluteString ?? "")
             .accessibilityLabel(extensionName.map(Self.accessibilityLabel(ofExtensionPage:)) ?? host)
             if let tab, !windowModel.isSelectedPageCovered {

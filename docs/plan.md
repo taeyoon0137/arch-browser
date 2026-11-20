@@ -925,11 +925,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Truncated the client name and executable path, with the full path in Help.
   - [x] C1.5 Packages/ARCH/Sources/Agent/AgentHookRegistrar.swift
     - ok
-  - [ ] C1.6 Packages/ARCH/Sources/Agent/AgentPanel.swift
-  - [ ] C1.7 Packages/ARCH/Sources/Agent/AgentPanelParts.swift
-  - [ ] C1.8 Packages/ARCH/Sources/Browsing/AddressPillView.swift
-  - [ ] C1.9 Packages/ARCH/Sources/Browsing/AgentPanelColumn.swift
-  - [ ] C1.10 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
+  - [x] C1.6 Packages/ARCH/Sources/Agent/AgentPanel.swift
+    - ok
+  - [x] C1.7 Packages/ARCH/Sources/Agent/AgentPanelParts.swift
+    - Truncated a long session title.
+  - [x] C1.8 Packages/ARCH/Sources/Browsing/AddressPillView.swift
+    - Named the address action and hid its decorative symbol.
+  - [x] C1.9 Packages/ARCH/Sources/Browsing/AgentPanelColumn.swift
+    - Hid the decorative client symbol and truncated long client labels.
+  - [x] C1.10 Packages/ARCH/Sources/Browsing/BrowserWindowController.swift
+    - ok
   - [ ] C1.11 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
   - [ ] C1.12 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
   - [ ] C1.13 Packages/ARCH/Sources/Browsing/CaptureRegionOverlay.swift

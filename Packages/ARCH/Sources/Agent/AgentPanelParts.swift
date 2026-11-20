@@ -8,7 +8,7 @@ struct AgentStateHeader<Action: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
                 Spacer()
                 action
             }

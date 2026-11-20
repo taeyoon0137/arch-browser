@@ -131,9 +131,10 @@ private struct ConnectedAgentRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 18)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                        Text(access).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        Text(name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+                        Text(access).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     }
                     Spacer(minLength: 0)
                 }
