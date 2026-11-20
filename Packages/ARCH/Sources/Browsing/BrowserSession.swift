@@ -31,6 +31,7 @@ final class EngineRuntime {
     }
 }
 
+/// Owns engine runtimes, browser state, windows, downloads, and the session's feature hosts.
 @MainActor public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
     /// Whether this Mac's Persona deletions can sync, including changes made while offline.
@@ -124,6 +125,7 @@ final class EngineRuntime {
     private let admittedDownloads = NSHashTable<AnyObject>.weakObjects()
     private var pageSaveRequests: [ObjectIdentifier: URL] = [:]
 
+    /// Starts a page download and keeps its requested address until the engine handles it or the request expires.
     public func savePageAs(_ tab: Tab, url: URL) {
         let key = ObjectIdentifier(tab.webContents)
         pageSaveRequests[key] = url
@@ -163,6 +165,7 @@ final class EngineRuntime {
                       sessionSeal: .keychain, liveFolderAddresses: LiveFolderKeychain())
     }
 
+    /// Restores browser state, starts an available engine, and attaches the session's feature hosts.
     init(registry: EngineRegistry, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?, nativeMessagingHostFolders: [URL] = [],
          chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil, sessionSeal: SessionStateSeal, liveFolderAddresses: any LiveFolderAddressStore) throws {
         self.registry = registry
@@ -234,6 +237,7 @@ final class EngineRuntime {
         eventSource.attach(to: self)
     }
 
+    /// An error that prevents a browser session from starting.
     public enum SessionError: Error {
         case noEngineStarted
     }
@@ -890,6 +894,7 @@ final class EngineRuntime {
         Self.sidebarOrder(favoriteTabs: openFavoriteTabs, spaces: spaces, folders: folders, tabs: tabs)
     }
 
+    /// Orders favorite tabs before each space's pinned and unpinned tabs.
     static func sidebarOrder(favoriteTabs: [Tab], spaces: [Space], folders: [TabFolder], tabs: [Tab]) -> [Tab] {
         let tree = FolderTree(folders: folders, tabs: tabs)
         let spaceTabs = spaces.flatMap { space in
@@ -1110,6 +1115,7 @@ final class EngineRuntime {
         switchLoadedEngine(of: tab, to: kind, source: source) { [weak tab] in tab?.requestedEngineSwitch == kind }
     }
 
+    /// Copies cookies, then replaces a still-open tab's page with one from the requested engine.
     private func switchLoadedEngine(of tab: Tab, to kind: EngineKind, source: EngineRuntime, permits: @escaping () -> Bool) {
         let target = runtime(for: kind, in: tab.personaID)
         guard target.kind == kind else { return }
@@ -2070,6 +2076,7 @@ final class EngineRuntime {
         }
     }
 
+    /// Observes published browser and window state and schedules a session save after changes.
     private func observeChanges() {
         // Opening, closing, and bringing a window forward change the windows the file keeps and their order. The window controllers save frame changes themselves.
         let windowChanges = $windows.map { windows in
@@ -2103,6 +2110,7 @@ final class EngineRuntime {
         }
     }
 
+    /// Writes the current browser snapshot immediately and returns the save result.
     @discardableResult
     public func saveNow() -> Result<Void, Error> {
         store.saveNow(snapshot())
@@ -2333,6 +2341,7 @@ extension BrowserSession {
         applyPendingSyncEngines()
     }
 
+    /// Reorders only items named by synced IDs while preserving all other positions.
     private static func orderedSynced<Item: Identifiable>(_ items: [Item], by ids: [Item.ID]) -> [Item]? {
         let target = Set(ids)
         let slots = items.indices.filter { target.contains(items[$0].id) }
@@ -2346,6 +2355,7 @@ extension BrowserSession {
         return result
     }
 
+    /// Applies deferred engine changes to pinned tabs that no window is showing.
     func applyPendingSyncEngines() {
         for tab in tabs {
             guard tab.isPinned, let target = tab.pendingSyncEngine, target != tab.engineKind, window(showing: tab) == nil,
@@ -2415,11 +2425,13 @@ extension BrowserSession {
     }
 }
 
+/// Whether the command palette edits the current tab or opens a new one.
 public enum CommandPaletteMode {
     case editCurrent
     case newTab
 }
 
+/// Where the command palette's opening animation begins.
 public enum CommandPaletteOrigin {
     /// A shortcut or menu command: the palette rises from below.
     case keyboard
@@ -2598,6 +2610,7 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
         showDownloadPanel(for: entry, suggested: directory.appendingPathComponent(defaultFilename), completion: completion)
     }
 
+    /// Asks for a download destination and retries when another download reserved the chosen name.
     private func showDownloadPanel(for entry: DownloadEntry, suggested: URL, message: String? = nil, completion: @escaping (URL?) -> Void) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggested.lastPathComponent

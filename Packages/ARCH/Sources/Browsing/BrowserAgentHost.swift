@@ -10,6 +10,7 @@ import Combine
 import Events
 import Foundation
 
+/// Adapts a browser session's Personas, tabs, pages, and windows to the agent service.
 @MainActor public final class BrowserAgentHost: AgentBrowserHost {
     static let agentsPersonaName = "Agents"
 
@@ -84,6 +85,7 @@ import Foundation
 
     // MARK: Agent tabs
 
+    /// Opens and follows an agent-owned tab, returning its current browser facts.
     public func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo? {
         guard let tab = session.openAgentTab(url: url, engine: engine, owner: owner.id, folderName: owner.folderName, in: owner.spaceID) else { return nil }
         follow(tab, owner: owner.id)
@@ -113,12 +115,14 @@ import Foundation
         tab.webContents.readableContent(limit: limit, completion: completion)
     }
 
+    /// Gives a hidden tab a viewport before running an agent page script.
     public func runPageScript(_ source: String, world: String, in tabID: UUID, completion: @escaping (Result<String?, any Error>) -> Void) {
         guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(.failure(EngineReadableContentError.unreadable)) }
         giveViewport(to: tab)
         tab.webContents.executeJavaScript(source, inWorld: world, completion: completion)
     }
 
+    /// Gives a hidden tab a viewport and captures its page or viewport.
     public func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void) {
         guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(nil) }
         giveViewport(to: tab)
@@ -151,6 +155,7 @@ import Foundation
         if !tab.isInSmallWindow { window.nsWindow?.makeKeyAndOrderFront(nil) }
     }
 
+    /// Lists downloads whose source address was allowed for this owner.
     public func agentDownloads(of ownerID: UUID) -> [AgentDownloadInfo] {
         let addresses = downloadsByOwner[ownerID] ?? []
         return session.downloads.filter { addresses.contains($0.item.sourceURL) }
@@ -215,6 +220,7 @@ extension BrowserAgentHost: AgentTabMonitor {
         agentTabMayLoad?(owner, tab.id, url, kind) ?? false
     }
 
+    /// Records an approved agent-tab download so the owner can list it later.
     func agentTab(_ tab: Tab, owner: UUID, mayDownload url: URL) -> Bool {
         guard agentTabMayDownload?(owner, tab.id, url) == true else { return false }
         downloadsByOwner[owner, default: []].append(url)
@@ -226,6 +232,7 @@ extension BrowserAgentHost: AgentTabMonitor {
         agentTabChoosesFiles(owner, tab.id, chooser)
     }
 
+    /// Follows a newly opened popup, then forwards the tab's report to the agent service.
     func agentTab(_ tab: Tab, owner: UUID, didReport report: AgentTabReport) {
         if case .opened(let openedID) = report, let opened = session.tabs.first(where: { $0.id == openedID }) { follow(opened, owner: owner) }
         agentTabDidReport?(owner, tab.id, report)

@@ -1901,11 +1901,16 @@ Run rounds in order, then start again at X1 with the next round number, until `d
     - Added missing type and nontrivial function documentation.
   - [x] X2.r1.50 Packages/ARCH/Sources/AgentControl/AgentToolCatalog.swift
     - Added missing type and nontrivial function documentation.
-  - [ ] X2.r1.51 Packages/ARCH/Sources/AgentControl/AgentUntrusted.swift
-  - [ ] X2.r1.52 Packages/ARCH/Sources/Browsing/BookmarkMenu.swift
-  - [ ] X2.r1.53 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift
-  - [ ] X2.r1.54 Packages/ARCH/Sources/Browsing/BrowserHookHost.swift
-  - [ ] X2.r1.55 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+  - [x] X2.r1.51 Packages/ARCH/Sources/AgentControl/AgentUntrusted.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.52 Packages/ARCH/Sources/Browsing/BookmarkMenu.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.53 Packages/ARCH/Sources/Browsing/BrowserAgentHost.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.54 Packages/ARCH/Sources/Browsing/BrowserHookHost.swift
+    - Added missing type and nontrivial function documentation.
+  - [x] X2.r1.55 Packages/ARCH/Sources/Browsing/BrowserSession.swift
+    - Added missing type and nontrivial function documentation.
   - [ ] X2.r1.56 Packages/ARCH/Sources/Browsing/BrowserWindowModel.swift
   - [ ] X2.r1.57 Packages/ARCH/Sources/Browsing/BrowserWindowView.swift
   - [ ] X2.r1.58 Packages/ARCH/Sources/Browsing/DevToolsDock.swift

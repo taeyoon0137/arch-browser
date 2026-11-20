@@ -1,6 +1,7 @@
 // How page-derived text reaches an agent (docs/agents.md, Tools ▸ Untrusted marking): wrapped as `<untrusted source="page" url="https://host/path">…</untrusted>`, with `</untrusted` inside it escaped as `<\/untrusted` so that a page cannot end its block early, as the AI interface escapes `</page`. Addresses lose their query, fragment, and user name and password, which can carry what a page or the user put there.
 import Foundation
 
+/// Marks page-derived text as untrusted before it reaches an agent.
 public enum AgentUntrusted {
     static let tag = "untrusted"
 
@@ -12,6 +13,7 @@ public enum AgentUntrusted {
         return "<\(tag)\(attributes)>\(escaped)</\(tag)>"
     }
 
+    /// Escapes characters that could change the opening tag's address attribute.
     private static func escapedAttribute(_ value: String) -> String {
         value.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "\"", with: "&quot;")
@@ -21,6 +23,7 @@ public enum AgentUntrusted {
     }
 }
 
+/// Reduces page addresses and recognizes titles that repeat an address.
 public enum AgentAddress {
     /// The address without its query, fragment, user name, and password, as results show it. `ref` lets an agent follow a link whose full address it does not see.
     public static func reduced(_ url: URL) -> URL {

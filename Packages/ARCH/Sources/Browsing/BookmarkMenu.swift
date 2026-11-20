@@ -1,6 +1,7 @@
 // The Bookmarks menu in the menu bar (bookmark rule 7, `docs/bookmarks.md`, Bookmarks menu): the favorites of the sidebar target's Persona, then every space's pinned folders and tabs, one submenu per space, with live folders' unread counts and unread items. `BookmarkMenu.entries(for:personas:spaces:favorites:tree:)` gives its contents as values without AppKit, which the app turns into menu items each time the menu opens; the session selects what the user chooses.
 import AppKit
 
+/// Builds bookmark menu entries independently of AppKit menu items.
 public enum BookmarkMenu {
     /// An item of the menu or of one of its submenus.
     public enum Entry: Equatable {
