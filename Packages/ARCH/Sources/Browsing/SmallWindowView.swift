@@ -1,4 +1,6 @@
-// The content of a small window, which opens for a link from another app while Arch is in the background, for a page that a small window's page or preview opens, and for an extension's `windows.create`: one row on the line of the traffic light buttons with the page's site and controls, and below it the page area over the window material with the tint of the tab's space. The window shows only its own tab; find, prompt cards, page fullscreen, the docked developer tools, the page reader, the agent panel, and the palette that edits the address work here, and sidebar commands go to the main window.
+// A small window opens for a link from another app while Arch is in the background, a page opened by its page or preview, or an extension's `windows.create`.
+// Its top row aligns with the traffic light buttons and holds the page site and controls. Below, the page sits over material tinted by the tab's space.
+// The window shows one tab. Find, prompt cards, page fullscreen, docked developer tools, reader, agent panel, and address palette work there. Sidebar commands go to the main window.
 import SwiftUI
 
 struct SmallWindowView: View {

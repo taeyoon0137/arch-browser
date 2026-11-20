@@ -1279,11 +1279,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the sidebar-drag overview into short sentences.
   - [x] E1.60 Packages/ARCH/Sources/Browsing/SidebarView.swift
     - Split the sidebar-frame overview into short sentences.
-  - [ ] E1.61 Packages/ARCH/Sources/Browsing/SiteSettingsParts.swift
-  - [ ] E1.62 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
-  - [ ] E1.63 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift
-  - [ ] E1.64 Packages/ARCH/Sources/Browsing/SplitView.swift
-  - [ ] E1.65 Packages/ARCH/Sources/Browsing/Tab.swift
+  - [x] E1.61 Packages/ARCH/Sources/Browsing/SiteSettingsParts.swift
+    - Shortened the shared-parts overview.
+  - [x] E1.62 Packages/ARCH/Sources/Browsing/SmallWindowView.swift
+    - Split the small-window overview into short sentences.
+  - [x] E1.63 Packages/ARCH/Sources/Browsing/SpaceTabsView.swift
+    - ok
+  - [x] E1.64 Packages/ARCH/Sources/Browsing/SplitView.swift
+    - Split the split-view behavior into short sentences.
+  - [x] E1.65 Packages/ARCH/Sources/Browsing/Tab.swift
+    - ok
   - [ ] E1.66 Packages/ARCH/Sources/Browsing/TabCloseLog.swift
   - [ ] E1.67 Packages/ARCH/Sources/Browsing/TabFolderRowView.swift
   - [ ] E1.68 Packages/ARCH/Sources/Browsing/TabPromptContent.swift

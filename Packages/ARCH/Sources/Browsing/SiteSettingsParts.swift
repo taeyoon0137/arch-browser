@@ -1,4 +1,5 @@
-// The parts of the site settings popover: the header that names the tab's site, a group of rows in a rounded box with a title above it and a footnote below it, a row with a symbol, a label, and a control, a button's action, or a word at its end, and the hairline between two rows.
+// Shared parts for the site settings popover: a site header, titled groups with footnotes, rows for symbols, labels, and controls, and dividers between rows.
+// A row can end with an action or a value.
 import SwiftUI
 
 /// The measures that the popover's rows, the hairlines between them, and the text around the boxes share.
