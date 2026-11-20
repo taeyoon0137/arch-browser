@@ -1144,7 +1144,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.14 Hooks module
     - File and function names matched the sources.
-  - [ ] D2.15 Terminal module
+  - [x] D2.15 Terminal module
+    - File and function names matched the sources.
   - [ ] D2.16 LiveFolders module
   - [ ] D2.17 Preferences module
   - [ ] D2.18 Sync module
