@@ -1150,7 +1150,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - File and function names matched the sources.
   - [x] D2.17 Preferences module
     - File and function names matched the sources.
-  - [ ] D2.18 Sync module
+  - [x] D2.18 Sync module
+    - File and function names matched the sources.
   - [ ] D2.19 App shell
 - [ ] D3. **Push**.
 
