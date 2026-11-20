@@ -1,4 +1,7 @@
-// A script plugin's panel: one of its package's HTML files in a web view of the plugin sandbox, with a bridge of its own that acts through the instance's context. The popover beside the sidebar item holds it while it shows and lets it go when it closes, which ends its document's AI requests; while it shows, the instance does not stop for being idle, and once the instance stops, the popover closes. The panel keeps to its page, so its document is the only one its requests belong to.
+// A script plugin panel shows a package HTML file in a sandboxed web view.
+// Its own bridge acts through the plugin instance's context. A sidebar popover holds it while open.
+// Closing the popover ends the document's AI requests. An open panel keeps the instance active; stopping the instance closes the popover.
+// The panel stays on its page, so its requests belong only to that document.
 import AppKit
 import WebKit
 

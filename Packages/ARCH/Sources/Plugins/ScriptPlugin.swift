@@ -1,4 +1,8 @@
-// A running script plugin. Its background script runs in a hidden web view of its own, in the plugin sandbox, from the activation that the plugin's first command, panel, page script value, or event starts, and each panel shows one of its package's HTML files in a web view of the same sandbox while the popover holds it. A call the background script leaves unanswered past the hang limit, not counting the time it waits for the reply to an AI request that Arch accepted or, for at most as long, for a page to run its script, or the end of its web content process, fails the instance; an instance without calls for the idle limit and without a panel that shows stops. Either way it releases its web view, ends its panels' documents and closes their popovers, and tells its owner, the plugin manager or the hook runner, which starts a new instance at the next use.
+// A script plugin runs its background script in a hidden web view inside the plugin sandbox.
+// Its first command, panel, page script value, or event activates it. Each panel shows a package HTML file in the same sandbox while its popover is open.
+// An unanswered background call fails the instance after the hang limit. Time waiting for an accepted AI reply or a page script does not count, up to the same limit.
+// An instance also stops when its web content process ends, or after the idle limit with no calls or open panel.
+// Stopping releases its web view, ends its panel documents, closes their popovers, and tells its owner. The plugin manager or hook runner starts a new instance at the next use.
 import JavaScriptCore
 import WebKit
 

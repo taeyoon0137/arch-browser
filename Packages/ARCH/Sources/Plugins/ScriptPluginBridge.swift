@@ -1,4 +1,7 @@
-// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says. A panel's document gets the same `arch` without the listeners, since the app hands commands, page script values, and events to the background script only, and without page calls, which only the background script makes for now.
+// This bridge defines `arch` in each script plugin document and handles its calls.
+// It also delivers commands, page script values, and events to the background script.
+// A handler belongs to one web view. Its calls act for that view's plugin instance, regardless of the message contents.
+// A panel receives `arch` without listeners or page calls. Only the background script receives deliveries and makes page calls.
 import AI
 import ARCHEngine
 import WebKit

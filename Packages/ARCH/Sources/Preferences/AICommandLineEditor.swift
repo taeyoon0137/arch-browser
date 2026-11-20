@@ -1,4 +1,6 @@
-// Settings ▸ AI ▸ Providers: the sheet that adds or edits a command-line tool, with its executable, arguments, environment, output format, whether it runs without its own tools, its models, and its limits. Open Terminal and Check help set it up. For the Claude Code and Codex presets, Arch builds the arguments and reads the output, so the sheet shows the tool's version and sign-in with Sign In instead (`docs/agents.md`, Connecting a subscription).
+// Settings ▸ AI ▸ Providers uses this sheet to add or edit a command-line tool.
+// It sets the executable, arguments, environment, output format, tool use, models, and limits. Open Terminal and Check help set it up.
+// For the Claude Code and Codex presets, Arch builds the arguments and reads the output. The sheet shows the version and sign-in status, with Sign In (`docs/agents.md`, Connecting a subscription).
 import AI
 import AppKit
 import SwiftUI

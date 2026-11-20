@@ -1349,11 +1349,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - Split the page-script rules into short sentences.
   - [x] E1.95 Packages/ARCH/Sources/Plugins/PluginSandbox.swift
     - Split the sandbox rules into short sentences.
-  - [ ] E1.96 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
-  - [ ] E1.97 Packages/ARCH/Sources/Plugins/ScriptPluginBridge.swift
-  - [ ] E1.98 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
-  - [ ] E1.99 Packages/ARCH/Sources/Preferences/AICommandLineEditor.swift
-  - [ ] E1.100 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
+  - [x] E1.96 Packages/ARCH/Sources/Plugins/ScriptPlugin.swift
+    - Split the instance lifetime rules into short sentences.
+  - [x] E1.97 Packages/ARCH/Sources/Plugins/ScriptPluginBridge.swift
+    - Split the bridge ownership rules into short sentences.
+  - [x] E1.98 Packages/ARCH/Sources/Plugins/ScriptPluginPanel.swift
+    - Split the panel lifetime rules into short sentences.
+  - [x] E1.99 Packages/ARCH/Sources/Preferences/AICommandLineEditor.swift
+    - Split the editor overview into short sentences.
+  - [x] E1.100 Packages/ARCH/Sources/Preferences/AIProvidersView.swift
+    - Split the provider view overview into short sentences.
   - [ ] E1.101 Packages/ARCH/Sources/Preferences/AISettingsView.swift
   - [ ] E1.102 Packages/ARCH/Sources/Preferences/AgentHooksSettingsView.swift
   - [ ] E1.103 Packages/ARCH/Sources/Preferences/AgentSettingsView.swift

@@ -1,4 +1,6 @@
-// Settings ▸ AI ▸ Providers: the list of connected providers, the sheet that adds or edits an HTTP provider with its format, base URL, key, headers, models, and limits, the Claude Code and Codex presets, and the parts that the command-line tool editor shares.
+// Settings ▸ AI ▸ Providers lists connected providers and includes the Claude Code and Codex presets.
+// Its sheet adds or edits an HTTP provider's format, base URL, key, headers, models, and limits.
+// This file also holds parts shared with the command-line tool editor.
 import AI
 import LocalAuthentication
 import SwiftUI
