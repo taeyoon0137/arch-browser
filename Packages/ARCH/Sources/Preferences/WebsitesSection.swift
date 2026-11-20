@@ -83,6 +83,7 @@ struct WebsitesSection: View {
                     Text("Don\u{2019}t Allow").tag(SitePermissionStore.Decision.deny)
                 }
                 .labelsHidden()
+                .accessibilityLabel(Self.permissionTitle(for: type))
                 .fixedSize()
                 Button {
                     store.set(nil, for: [type], origin: origin)

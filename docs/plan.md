@@ -914,7 +914,7 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
 
 #### Group C: accessibility and shared parts in every view
 
-- [ ] C1. List: `grep -rlE 'struct [A-Za-z]+: View|NSViewRepresentable|NSViewController' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift' | sort`. For each file, read it in full and fix only these, changing no behavior: (a) a `Button` or tappable view whose label is only an image gets `.accessibilityLabel` and `.help` with a short English name of its action; (b) a decorative `Image` gets `.accessibilityHidden(true)`; (c) a control under `.labelsHidden()` gets an `.accessibilityLabel`; (d) a title that can be long gets `.lineLimit(1)` with `.truncationMode(.middle)` for file names and addresses or `.tail` otherwise, and a sentence gets `.fixedSize(horizontal: false, vertical: true)`; (e) a literal color used for a hover, selected, or field fill becomes the matching `SidebarFill` case, and a row built by hand as a symbol, a label, and a control inside a popover or sheet becomes `SiteSettingsRow` in a `SiteSettingsGroup` when its sizes already match; (f) a Persona named without its space where the view knows the space becomes "Persona / Space". Write `ok` or what changed under the sub-step. Subject: `Fix: Label controls for VoiceOver and build views from the shared parts`.
+- [x] C1. List: `grep -rlE 'struct [A-Za-z]+: View|NSViewRepresentable|NSViewController' Packages/ARCH/Sources Packages/ARCHApp/Sources --include='*.swift' | sort`. For each file, read it in full and fix only these, changing no behavior: (a) a `Button` or tappable view whose label is only an image gets `.accessibilityLabel` and `.help` with a short English name of its action; (b) a decorative `Image` gets `.accessibilityHidden(true)`; (c) a control under `.labelsHidden()` gets an `.accessibilityLabel`; (d) a title that can be long gets `.lineLimit(1)` with `.truncationMode(.middle)` for file names and addresses or `.tail` otherwise, and a sentence gets `.fixedSize(horizontal: false, vertical: true)`; (e) a literal color used for a hover, selected, or field fill becomes the matching `SidebarFill` case, and a row built by hand as a symbol, a label, and a control inside a popover or sheet becomes `SiteSettingsRow` in a `SiteSettingsGroup` when its sizes already match; (f) a Persona named without its space where the view knows the space becomes "Persona / Space". Write `ok` or what changed under the sub-step. Subject: `Fix: Label controls for VoiceOver and build views from the shared parts`.
   - [x] C1.1 Packages/ARCH/Sources/Agent/AgentApprovalCard.swift
     - ok
   - [x] C1.2 Packages/ARCH/Sources/Agent/AgentClientPanel.swift
@@ -1075,7 +1075,8 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] C1.80 Packages/ARCH/Sources/Preferences/WebStoreInstallSheet.swift
     - ok
-  - [ ] C1.81 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
+  - [x] C1.81 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
+    - Labeled the hidden permission picker.
 - [ ] C2. Menus: in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift` and every `.contextMenu` and `Menu` in `Packages/ARCH/Sources`, make titles consistent: title case; "…" (one character, never three periods) only where the command opens a sheet, panel, or dialog before acting; no trailing period; the same command has the same title everywhere (list the titles that differed under this step). `swift build`.
 - [ ] C3. **Commit** `Fix: Make menu titles consistent across the menu bar and context menus`. **Push**.
 - [ ] C4. **Preview** 4.
