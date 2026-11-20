@@ -858,11 +858,16 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - changed: 0; no unguarded array index or removal on stored data.
   - [x] B2.10 Packages/ARCH/Sources/Import/ImportController.swift
     - changed: 0; no unguarded array index or removal on stored data.
-  - [ ] B2.11 Packages/ARCH/Sources/Import/ImportedBrowser.swift
-  - [ ] B2.12 Packages/ARCH/Sources/Import/ImportedFile.swift
-  - [ ] B2.13 Packages/ARCH/Sources/Import/SearchKeywords.swift
-  - [ ] B2.14 Packages/ARCH/Sources/Import/SidebarFile.swift
-  - [ ] B2.15 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
+  - [x] B2.11 Packages/ARCH/Sources/Import/ImportedBrowser.swift
+    - changed: 0; array accesses follow a count check or firstIndex lookup.
+  - [x] B2.12 Packages/ARCH/Sources/Import/ImportedFile.swift
+    - changed: 0; array accesses follow a count check or firstIndex lookup.
+  - [x] B2.13 Packages/ARCH/Sources/Import/SearchKeywords.swift
+    - changed: 0; array accesses follow a count check or firstIndex lookup.
+  - [x] B2.14 Packages/ARCH/Sources/Import/SidebarFile.swift
+    - changed: 0; array accesses follow a count check or firstIndex lookup.
+  - [x] B2.15 Packages/ARCH/Sources/LiveFolders/FeedDiscovery.swift
+    - changed: 0; array accesses follow a count check or firstIndex lookup.
   - [ ] B2.16 Packages/ARCH/Sources/LiveFolders/FeedParser.swift
   - [ ] B2.17 Packages/ARCH/Sources/LiveFolders/GitHubCLI.swift
   - [ ] B2.18 Packages/ARCH/Sources/LiveFolders/LiveFolderKeychain.swift
