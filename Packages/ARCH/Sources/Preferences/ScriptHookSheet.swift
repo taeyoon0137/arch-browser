@@ -504,7 +504,7 @@ struct ScriptHookSheet: View {
                 if let route = draft.agentModel {
                     let refs = models(on: route)
                     if case .tier(let tier) = route, refs.isEmpty {
-                        Menu("Choose a model for the \(tier.title) tier") {
+                        Menu("Choose a Model for the \(tier.title) Tier") {
                             ForEach(connectedModels, id: \.self) { ref in Button(aiSettings.title(of: ref)) { aiSettings.setRoute(AIRoute(isEnabled: true, models: [ref]), for: .tier(tier)) } }
                         }
                     }
@@ -610,7 +610,7 @@ struct ScriptHookSheet: View {
         HStack {
             Button(draft.shell == nil ? "Choose File\u{2026}" : "Choose Another File\u{2026}") { chooseShellFile() }
             if draft.stored != nil, let source = draft.shell?.source {
-                Button("Update from File\u{2026}") { loadShellFile(at: URL(fileURLWithPath: source)) }
+                Button("Update from File") { loadShellFile(at: URL(fileURLWithPath: source)) }
             }
         }
         if let shell = draft.shell {

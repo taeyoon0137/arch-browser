@@ -1077,8 +1077,9 @@ A second Mac crashed at every launch after sync was turned on; the cause is not 
     - ok
   - [x] C1.81 Packages/ARCH/Sources/Preferences/WebsitesSection.swift
     - Labeled the hidden permission picker.
-- [ ] C2. Menus: in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift` and every `.contextMenu` and `Menu` in `Packages/ARCH/Sources`, make titles consistent: title case; "…" (one character, never three periods) only where the command opens a sheet, panel, or dialog before acting; no trailing period; the same command has the same title everywhere (list the titles that differed under this step). `swift build`.
-- [ ] C3. **Commit** `Fix: Make menu titles consistent across the menu bar and context menus`. **Push**.
+- [x] C2. Menus: in `Packages/ARCHApp/Sources/Arch/AppDelegate.swift` and every `.contextMenu` and `Menu` in `Packages/ARCH/Sources`, make titles consistent: title case; "…" (one character, never three periods) only where the command opens a sheet, panel, or dialog before acting; no trailing period; the same command has the same title everywhere (list the titles that differed under this step). `swift build`.
+  - Titles corrected: "Install in Another Persona…" to "Install in Another Persona" (the selected Persona now carries the ellipsis); "Choose a model for the … tier" to title case; "Update from File…" to "Update from File" because it rereads the same file directly.
+- [x] C3. **Commit** `Fix: Make menu titles consistent across the menu bar and context menus`. **Push**.
 - [ ] C4. **Preview** 4.
 
 #### Group D: documents against the code

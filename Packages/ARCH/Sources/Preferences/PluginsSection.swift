@@ -319,9 +319,9 @@ private struct PluginSection: View {
             if reloadable || !versionEngines.isEmpty || canJoin || separable || removable || copyable || plugin.manifest.settingsPage != nil {
                 CommandRowLayout {
                     if copyable {
-                        Menu("Install in Another Persona…") {
+                        Menu("Install in Another Persona") {
                             ForEach(session.personas.filter { $0.id != personaID }) { target in
-                                Button(target.name) { installAnotherPersona(plugin, target.id) }
+                                Button("\(target.name)…") { installAnotherPersona(plugin, target.id) }
                             }
                         }
                     }
