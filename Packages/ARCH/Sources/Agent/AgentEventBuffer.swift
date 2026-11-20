@@ -1,4 +1,4 @@
-// Outside programs see browser events from their granted Persona (docs/hooks.md, Outside programs).
+// Outside programs see browser events from their granted Persona (`docs/hooks.md`, Outside programs).
 // Their own agent tabs and shared tabs use handles and addresses without queries. Other tabs use watch IDs and hosts; windows use handles, never identifiers.
 // Each grant keeps its latest 500 events in memory for `--after` and `watch_events` to replay.
 // Each connection has at most 4 subscriptions. Their queue holds 1,000 events before dropping the oldest. Nothing is stored on disk.

@@ -1,5 +1,5 @@
 // The tool host checks and runs every tool call for every client (agent decision 5).
-// An outside grant can use catalog, session, list, guide, tab, reading, snapshot, screenshot, action, and user-request tools.
+// An outside grant can use catalog, session, list, `guide`, tab, reading, snapshot, screenshot, action, and user-request tools.
 // `AgentPageTools.swift` holds snapshots and actions; `AgentTrustedInput.swift` sends their trusted input; `AgentUserTools.swift` handles cards and `rename_tab` (P19).
 // The host applies event history, limits, and `AgentPolicy` rules. In-app calls use the same path with a site scope (P13), agent folder, and panel cards.
 // An outside call waiting for the user returns `approvalPending` after 45 seconds; `approval_wait` takes its result. An in-app call waits on its card.
