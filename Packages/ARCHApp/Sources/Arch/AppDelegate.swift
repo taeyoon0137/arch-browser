@@ -345,6 +345,7 @@ import Terminal
         session?.history.finishWrites()
         agents?.stop()
         shellHooks?.endAll()
+        sync?.applicationWillTerminate()
     }
 
     // Inside an app bundle the CEF framework and helpers sit in Contents/Frameworks; a bare build reads the paths from the environment.

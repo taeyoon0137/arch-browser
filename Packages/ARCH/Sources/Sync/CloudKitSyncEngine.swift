@@ -39,14 +39,17 @@ public final class CloudKitSyncEngine: SyncEngineClient {
         if !recordChanges.isEmpty { engine.state.remove(pendingRecordZoneChanges: recordChanges) }
     }
 
+    /// `CKSyncEngine` stops the app ("BUG IN CLIENT OF CLOUDKIT: Cannot await a call into CKSyncEngine from within a delegate callback") when a fetch or a send is awaited in a task that a delegate callback started, since the call would call back into the delegate. A task started with `Task {}` inside a callback counts as part of it, and the controller starts such tasks while it handles the engine's events, so both calls run in a detached task, as the message asks (`docs/sync.md`, Sync engine).
     public func fetchChanges() async throws {
         guard !relay.isStopped else { return }
-        try await engine.fetchChanges(Self.fetchOptions())
+        let engine = engine, options = Self.fetchOptions()
+        try await Task.detached { try await engine.fetchChanges(options) }.value
     }
 
     public func sendChanges() async throws {
         guard !relay.isStopped else { return }
-        try await engine.sendChanges()
+        let engine = engine
+        try await Task.detached { try await engine.sendChanges() }.value
     }
 
     public func stop() async {

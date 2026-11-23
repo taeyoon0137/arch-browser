@@ -153,7 +153,7 @@ import Foundation
         lastError = nil
         deletionSendInFlight = true
         defer { if self.engine === engine { deletionSendInFlight = false } }
-        do { try await engine.sendChanges() }
+        do { try await guarded { try await engine.sendChanges() } }
         catch {
             if self.engine === engine, !engine.pendingChanges.contains(.deleteZone) {
                 lastError = localized("Arch could not delete its iCloud data.")
@@ -295,7 +295,7 @@ import Foundation
             guard let self else { return }
             repeat {
                 needsRecoveryFetch = false
-                do { try await engine.fetchChanges() }
+                do { try await guarded { try await engine.fetchChanges() } }
                 catch {
                     if self.engine === engine, fetching { lastError = localized("The sync fetch did not finish.") }
                 }
@@ -325,6 +325,19 @@ import Foundation
         guard guardHolds > 0 else { return }
         guardHolds -= 1
         if guardHolds == 0 { defaults.removeObject(forKey: Self.applyingKey) }
+    }
+
+    /// Runs one fetch or send that Arch asks the engine for under the crash-loop guard, so that a crash inside the engine's call, as CloudKit's own check stops the app, keeps sync off at the next launch instead of stopping the app at every launch.
+    private func guarded(_ call: () async throws -> Void) async rethrows {
+        holdGuard()
+        defer { releaseGuard() }
+        try await call()
+    }
+
+    /// A quit that ends normally is no crash, so it clears the crash-loop guard that a fetch, a send, an apply, or a batch build still holds, and the next launch keeps sync on.
+    public func applicationWillTerminate() {
+        guardHolds = 0
+        defaults.removeObject(forKey: Self.applyingKey)
     }
 
     private var bases: [SyncRecord] { mirror.records.values.compactMap(SyncCloudKitRecords.syncRecord(from:)) }
@@ -679,7 +692,7 @@ import Foundation
         guard engine.pendingChanges.contains(where: { if case .saveRecord = $0 { true } else if case .deleteRecord = $0 { true } else { false } }) else { return }
         Task { @MainActor [weak self] in
             guard let self, self.engine === engine, canSendRecords, !awaitingZoneSave else { return }
-            try? await engine.sendChanges()
+            try? await guarded { try await engine.sendChanges() }
         }
     }
 
