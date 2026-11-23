@@ -36,8 +36,8 @@ import SwiftUI
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.prompt = "Import"
-        panel.message = "Choose exported bookmarks (an HTML, JSON, or property list file) or a History database. Passwords are imported in the Passwords app."
+        panel.prompt = localized("Import")
+        panel.message = localized("Choose exported bookmarks (an HTML, JSON, or property list file) or a History database. Passwords are imported in the Passwords app.")
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
             let urls = panel.urls
@@ -71,7 +71,7 @@ import SwiftUI
         }
         var emptyLine: String?
         if summary.lines.isEmpty && summary.failures.count < results.count {
-            emptyLine = pages.isEmpty ? "No bookmarks or history pages with web addresses were found." : "No history pages were added or updated."
+            emptyLine = pages.isEmpty ? localized("No bookmarks or history pages with web addresses were found.") : localized("No history pages were added or updated.")
         }
         summary.importHistory(pages, into: history) { [weak self] summary in
             self?.show(summary, emptyLine: emptyLine, in: window)
@@ -154,7 +154,7 @@ import SwiftUI
         if !selection.rows.isEmpty { record.write() }
         summary.failures = selection.failures
         summary.importHistory(selection.history, into: history) { [weak self] summary in
-            self?.show(summary, emptyLine: "Everything checked was in Arch already.", in: window)
+            self?.show(summary, emptyLine: localized("Everything checked was in Arch already."), in: window)
         }
     }
 
@@ -164,7 +164,7 @@ import SwiftUI
     private func show(_ summary: ImportSummary, emptyLine: String?, in window: NSWindow) {
         let lines = summary.hasAdditions ? summary.lines : emptyLine.map { [$0] } ?? summary.lines
         let alert = NSAlert()
-        alert.messageText = summary.hasAdditions ? "The import finished." : "Nothing was imported."
+        alert.messageText = summary.hasAdditions ? localized("The import finished.") : localized("Nothing was imported.")
         alert.informativeText = (lines + summary.failures).joined(separator: "\n")
         guard let host = window.isVisible ? window : session.lastMainWindow?.nsWindow, host.attachedSheet == nil else {
             alert.runModal()
@@ -220,29 +220,35 @@ struct ImportSummary {
     var lines: [String] {
         var lines: [String] = []
         if personas > 0 {
-            lines.append("Created \(Self.count(personas, "Persona", "Personas")).")
+            lines.append(localized("Created \(Self.count(personas, { localized("\($0) Persona") }, { localized("\($0) Personas") }))."))
         }
-        let pinned = [spaces > 0 ? Self.count(spaces, "space", "spaces") : nil, pinnedTabs > 0 ? Self.count(pinnedTabs, "pinned tab", "pinned tabs") : nil].compactMap { $0 }
-        if !pinned.isEmpty {
-            lines.append("Added \(pinned.joined(separator: " and ")).")
+        let addedSpaces = spaces > 0 ? Self.count(spaces, { localized("\($0) space") }, { localized("\($0) spaces") }) : nil
+        let addedTabs = pinnedTabs > 0 ? Self.count(pinnedTabs, { localized("\($0) pinned tab") }, { localized("\($0) pinned tabs") }) : nil
+        if let addedSpaces, let addedTabs {
+            lines.append(localized("Added \(addedSpaces) and \(addedTabs)."))
+        } else if let added = addedSpaces ?? addedTabs {
+            lines.append(localized("Added \(added)."))
         }
         if favorites + presentFavorites > 0 {
-            lines.append("Added \(Self.count(favorites, "favorite", "favorites"))." + (presentFavorites > 0 ? " \(Self.count(presentFavorites, "was", "were")) already in favorites." : ""))
+            let added = localized("Added \(Self.count(favorites, { localized("\($0) favorite") }, { localized("\($0) favorites") })).")
+            lines.append(presentFavorites > 0 ? added + " " + Self.count(presentFavorites, { localized("\($0) was already in favorites.") }, { localized("\($0) were already in favorites.") }) : added)
         }
         if historyPages > 0 {
-            lines.append("Imported \(Self.count(historyPages, "page", "pages")) into history.")
+            lines.append(localized("Imported \(Self.count(historyPages, { localized("\($0) page") }, { localized("\($0) pages") })) into history."))
         }
         if shortcuts + skippedShortcuts > 0 {
-            lines.append("Added \(Self.count(shortcuts, "search shortcut", "search shortcuts"))." + (skippedShortcuts > 0 ? " Skipped \(skippedShortcuts.formatted()) with a keyword in use or an address Arch cannot use." : ""))
+            let added = localized("Added \(Self.count(shortcuts, { localized("\($0) search shortcut") }, { localized("\($0) search shortcuts") })).")
+            lines.append(skippedShortcuts > 0 ? added + " " + localized("Skipped \(skippedShortcuts.formatted()) with a keyword in use or an address Arch cannot use.") : added)
         }
         if let searchEngine {
-            lines.append("The search engine is now \(searchEngine.title).")
+            lines.append(localized("The search engine is now \(searchEngine.title)."))
         }
         return lines
     }
 
-    /// The number with the noun that agrees with it, such as "1 page" or "5,210 pages".
-    static func count(_ value: Int, _ singular: String, _ plural: String) -> String {
-        "\(value.formatted()) \(value == 1 ? singular : plural)"
+    /// The number with the noun that agrees with it, such as "1 page" or "5,210 pages": `singular` or `plural` makes the text from the formatted number, each from its own catalog key, so that every language words both.
+    static func count(_ value: Int, _ singular: (String) -> String, _ plural: (String) -> String) -> String {
+        let number = value.formatted()
+        return value == 1 ? singular(number) : plural(number)
     }
 }

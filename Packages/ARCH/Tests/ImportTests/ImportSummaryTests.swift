@@ -15,13 +15,14 @@ import Testing
         summary.skippedShortcuts = 2
         summary.searchEngine = .bing
         summary.failures = ["A file could not be read."]
+        // In English: "Created 1 Persona.", "Added 2 spaces and 25 pinned tabs.", "Added 3 favorites. 3 were already in favorites.", "Imported 5,210 pages into history.", "Added 1 search shortcut. Skipped 2 with a keyword in use or an address Arch cannot use.", and "The search engine is now Bing."
         #expect(summary.lines == [
-            "Created 1 Persona.",
-            "Added 2 spaces and 25 pinned tabs.",
-            "Added 3 favorites. 3 were already in favorites.",
-            "Imported \(5_210.formatted()) pages into history.",
-            "Added 1 search shortcut. Skipped 2 with a keyword in use or an address Arch cannot use.",
-            "The search engine is now Bing.",
+            catalogText("Created %@.", catalogText("%@ Persona", "1")),
+            catalogText("Added %@ and %@.", catalogText("%@ spaces", "2"), catalogText("%@ pinned tabs", "25")),
+            catalogText("Added %@.", catalogText("%@ favorites", "3")) + " " + catalogText("%@ were already in favorites.", "3"),
+            catalogText("Imported %@ into history.", catalogText("%@ pages", 5_210.formatted())),
+            catalogText("Added %@.", catalogText("%@ search shortcut", "1")) + " " + catalogText("Skipped %@ with a keyword in use or an address Arch cannot use.", "2"),
+            catalogText("The search engine is now %@.", SearchEngine.bing.title),
         ])
     }
 
@@ -30,7 +31,8 @@ import Testing
         #expect(summary.lines.isEmpty)
         summary.presentFavorites = 1
         summary.pinnedTabs = 1
-        #expect(summary.lines == ["Added 1 pinned tab.", "Added 0 favorites. 1 was already in favorites."])
+        #expect(summary.lines == [catalogText("Added %@.", catalogText("%@ pinned tab", "1")),
+                                  catalogText("Added %@.", catalogText("%@ favorites", "0")) + " " + catalogText("%@ was already in favorites.", "1")])
     }
 
     @Test func aSecondIdenticalImportBringsNothing() async throws {

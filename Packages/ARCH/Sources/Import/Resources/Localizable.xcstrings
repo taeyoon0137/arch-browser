@@ -1,6 +1,706 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 %@개"
+          }
+        }
+      }
+    },
+    "%@ Personas" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 %@개"
+          }
+        }
+      }
+    },
+    "%@ bookmark" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 %@개"
+          }
+        }
+      }
+    },
+    "%@ bookmarks" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 %@개"
+          }
+        }
+      }
+    },
+    "%@ favorite" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "즐겨찾기 %@개"
+          }
+        }
+      }
+    },
+    "%@ favorites" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "즐겨찾기 %@개"
+          }
+        }
+      }
+    },
+    "%@ page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 %@개"
+          }
+        }
+      }
+    },
+    "%@ pages" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 %@개"
+          }
+        }
+      }
+    },
+    "%@ pinned tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정된 탭 %@개"
+          }
+        }
+      }
+    },
+    "%@ pinned tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정된 탭 %@개"
+          }
+        }
+      }
+    },
+    "%@ search shortcut" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색 단축어 %@개"
+          }
+        }
+      }
+    },
+    "%@ search shortcuts" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색 단축어 %@개"
+          }
+        }
+      }
+    },
+    "%@ space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %@개"
+          }
+        }
+      }
+    },
+    "%@ spaces" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %@개"
+          }
+        }
+      }
+    },
+    "%@ was already in favorites." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@개는 이미 즐겨찾기에 있었습니다."
+          }
+        }
+      }
+    },
+    "%@ were already in favorites." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@개는 이미 즐겨찾기에 있었습니다."
+          }
+        }
+      }
+    },
+    "Added %@ and %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 및 %2$@를 추가했습니다."
+          }
+        }
+      }
+    },
+    "Added %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@를 추가했습니다."
+          }
+        }
+      }
+    },
+    "Applies to every Persona." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 페르소나에 적용됩니다."
+          }
+        }
+      }
+    },
+    "Arch does not have permission to read “%@”." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch에 “%@” 파일을 읽을 권한이 없습니다."
+          }
+        }
+      }
+    },
+    "Arch needs %@ to read %@’s bookmarks and history." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@의 북마크와 방문 기록을 읽으려면 Arch에 다음 권한이 필요합니다: %1$@."
+          }
+        }
+      }
+    },
+    "Bookmark Folders" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 폴더"
+          }
+        }
+      }
+    },
+    "Bookmark Folders (%@) with %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 폴더 (%1$@), %2$@ 포함"
+          }
+        }
+      }
+    },
+    "Bookmarks" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크"
+          }
+        }
+      }
+    },
+    "Bookmarks Bar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 막대"
+          }
+        }
+      }
+    },
+    "Bookmarks Menu" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크 메뉴"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "취소"
+          }
+        }
+      }
+    },
+    "Choose Exported File…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내보낸 파일 선택…"
+          }
+        }
+      }
+    },
+    "Choose exported bookmarks (an HTML, JSON, or property list file) or a History database. Passwords are imported in the Passwords app." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내보낸 북마크(HTML, JSON 또는 속성 목록 파일)나 History 데이터베이스를 선택하세요. 암호는 암호 앱에서 가져옵니다."
+          }
+        }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫기"
+          }
+        }
+      }
+    },
+    "Created %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@를 만들었습니다."
+          }
+        }
+      }
+    },
+    "Each bookmark becomes a pinned tab. It loads when you open it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "각 북마크는 고정된 탭이 됩니다. 탭을 열 때 로드됩니다."
+          }
+        }
+      }
+    },
+    "Everything checked was in Arch already." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 항목이 모두 Arch에 이미 있습니다."
+          }
+        }
+      }
+    },
+    "Favorites" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "즐겨찾기"
+          }
+        }
+      }
+    },
+    "Full Disk Access" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전체 디스크 접근 권한"
+          }
+        }
+      }
+    },
+    "History" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록"
+          }
+        }
+      }
+    },
+    "History (%@)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록 (%@)"
+          }
+        }
+      }
+    },
+    "If you turned it on, quit and reopen Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "권한을 켰다면 Arch를 종료하고 다시 여세요."
+          }
+        }
+      }
+    },
+    "Import" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가져오기"
+          }
+        }
+      }
+    },
+    "Import from Browser" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "브라우저에서 가져오기"
+          }
+        }
+      }
+    },
+    "Imported %@ into history." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록에 %@를 가져왔습니다."
+          }
+        }
+      }
+    },
+    "Keep %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 유지"
+          }
+        }
+      }
+    },
+    "Looking for browsers…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "브라우저를 찾는 중…"
+          }
+        }
+      }
+    },
+    "Mobile Bookmarks" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모바일 북마크"
+          }
+        }
+      }
+    },
+    "New Persona “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 페르소나 “%@”"
+          }
+        }
+      }
+    },
+    "No bookmarks or history pages with web addresses were found." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 주소가 있는 북마크나 방문 기록 페이지를 찾을 수 없습니다."
+          }
+        }
+      }
+    },
+    "No bookmarks, history, or search shortcuts were found." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크, 방문 기록, 검색 단축어를 찾을 수 없습니다."
+          }
+        }
+      }
+    },
+    "No history pages were added or updated." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추가되거나 업데이트된 방문 기록 페이지가 없습니다."
+          }
+        }
+      }
+    },
+    "No other browsers were found on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에서 다른 브라우저를 찾을 수 없습니다."
+          }
+        }
+      }
+    },
+    "Nothing was imported." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가져온 항목이 없습니다."
+          }
+        }
+      }
+    },
+    "Open System Settings" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시스템 설정 열기"
+          }
+        }
+      }
+    },
+    "Other Bookmarks" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기타 북마크"
+          }
+        }
+      }
+    },
+    "Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나"
+          }
+        }
+      }
+    },
+    "Pinned tabs load when you open them." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정된 탭은 열 때 로드됩니다."
+          }
+        }
+      }
+    },
+    "Search Engine" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색 엔진"
+          }
+        }
+      }
+    },
+    "Search Shortcuts" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색 단축어"
+          }
+        }
+      }
+    },
+    "Search engine" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색 엔진"
+          }
+        }
+      }
+    },
+    "Skipped %@ with a keyword in use or an address Arch cannot use." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용 중인 키워드나 Arch에서 사용할 수 없는 주소를 가진 %@개는 건너뛰었습니다."
+          }
+        }
+      }
+    },
+    "Spaces" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스"
+          }
+        }
+      }
+    },
+    "Spaces (%@) with %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 (%1$@), %2$@ 포함"
+          }
+        }
+      }
+    },
+    "The bookmarks are encrypted with the browser’s own key." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "북마크가 브라우저 자체 키로 암호화되어 있습니다."
+          }
+        }
+      }
+    },
+    "The import finished." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가져오기를 완료했습니다."
+          }
+        }
+      }
+    },
+    "The search engine is now %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이제 %@에서 검색합니다."
+          }
+        }
+      }
+    },
+    "Untitled Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제목 없는 폴더"
+          }
+        }
+      }
+    },
+    "Use %@ as the search engine, as in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@에서처럼 %1$@ 검색 엔진 사용"
+          }
+        }
+      }
+    },
+    "Use %@, as in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 사용 (%2$@에서 사용 중)"
+          }
+        }
+      }
+    },
+    "macOS privacy protection keeps Arch from reading “%@”." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 개인정보 보호 기능 때문에 Arch에서 “%@” 파일을 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "“%@” could not be read as a History database." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 파일을 History 데이터베이스로 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "“%@” could not be read." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 파일을 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "“%@” is not a bookmarks file or a History database that Arch can read." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 파일은 Arch에서 읽을 수 있는 북마크 파일이나 History 데이터베이스가 아닙니다."
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }

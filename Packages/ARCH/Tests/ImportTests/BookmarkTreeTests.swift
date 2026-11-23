@@ -33,7 +33,7 @@ import Testing
         let (barItems, folders) = tree.split()
         #expect(barItems.map(\.title) == ["A", "h.example"])
         #expect(barItems.map(\.sourceID) == ["a", "h"])
-        #expect(folders.map(\.name) == ["Work", "Work \u{25B8} Docs", "Recipes", "Other Bookmarks", "Other Bookmarks \u{25B8} Recipes", "Mobile Bookmarks"])
+        #expect(folders.map(\.name) == ["Work", "Work \u{25B8} Docs", "Recipes", catalogText("Other Bookmarks"), catalogText("Other Bookmarks") + " \u{25B8} Recipes", catalogText("Mobile Bookmarks")])
         #expect(folders.map(\.sourceID) == ["work", "docs", "bar-recipes", "other", "other-recipes", "synced"])
         #expect(folders.map { $0.items.map(\.title) } == [["B"], ["C"], ["G"], ["D"], ["E"], ["F"]])
     }
@@ -65,7 +65,7 @@ import Testing
         let data = try PropertyListSerialization.data(fromPropertyList: webKitFile, format: .binary, options: 0)
         let (barItems, folders) = try #require(BookmarkFile.webKitTree(from: data)).split()
         #expect(barItems.map(\.title) == ["A"])
-        #expect(folders.map(\.name) == ["Bookmarks", "X", "Bookmarks Menu", "Bookmarks \u{25B8} Y"])
+        #expect(folders.map(\.name) == [catalogText("Bookmarks"), "X", catalogText("Bookmarks Menu"), catalogText("Bookmarks") + " \u{25B8} Y"])
         #expect(folders.map(\.sourceID) == ["top", "x", "menu", "y"])
         #expect(folders.map { $0.items.map(\.title) } == [["E"], ["B"], ["C"], ["D"]])
     }

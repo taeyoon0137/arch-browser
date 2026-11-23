@@ -96,7 +96,7 @@ import SwiftUI
     func title(of destination: SidebarImport.Destination, for profile: ImportedProfile) -> String {
         switch destination {
         case .persona(let id): return personas.first { $0.id == id }?.name ?? ""
-        case .newPersona: return "New Persona \u{201C}\(profile.name)\u{201D}"
+        case .newPersona: return localized("New Persona \u{201C}\(profile.name)\u{201D}")
         }
     }
 
@@ -337,8 +337,8 @@ private struct BrowserSection: View {
     /// Names the setting that lets Arch read the browser's files, with a way to it and the file import as the other way. After the user went to the setting, the sheet reads the browser again on returning; when the files are still blocked, the grant may apply only after Arch reopens.
     private var privacyNotice: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Arch needs \(browser.source.privacySetting.name) to read \(browser.source.name)\u{2019}s bookmarks and history."
-                 + (model.askedBrowserIDs.contains(browser.id) ? " If you turned it on, quit and reopen Arch." : ""))
+            Text(localized("Arch needs \(browser.source.privacySetting.name) to read \(browser.source.name)\u{2019}s bookmarks and history.")
+                 + (model.askedBrowserIDs.contains(browser.id) ? " " + localized("If you turned it on, quit and reopen Arch.") : ""))
             HStack {
                 Button(localized("Open System Settings")) { actions.openPrivacySetting(browser) }
                 Button(localized("Choose Exported File\u{2026}"), action: actions.chooseExportedFile)
@@ -400,9 +400,9 @@ private struct ProfileRow: View {
             note = error.localizedDescription
         } else {
             switch part {
-            case .spaces: note = "Pinned tabs load when you open them."
-            case .bookmarkFolders: note = "Each bookmark becomes a pinned tab. It loads when you open it."
-            case .history, .searchShortcuts: note = "Applies to every Persona."
+            case .spaces: note = localized("Pinned tabs load when you open them.")
+            case .bookmarkFolders: note = localized("Each bookmark becomes a pinned tab. It loads when you open it.")
+            case .history, .searchShortcuts: note = localized("Applies to every Persona.")
             case .favorites: note = nil
             }
         }
@@ -426,11 +426,11 @@ private struct ProfileRow: View {
 
     private static func name(of part: ImportedProfile.Part) -> String {
         switch part {
-        case .favorites: return "Favorites"
-        case .spaces: return "Spaces"
-        case .bookmarkFolders: return "Bookmark Folders"
-        case .history: return "History"
-        case .searchShortcuts: return "Search Shortcuts"
+        case .favorites: return localized("Favorites")
+        case .spaces: return localized("Spaces")
+        case .bookmarkFolders: return localized("Bookmark Folders")
+        case .history: return localized("History")
+        case .searchShortcuts: return localized("Search Shortcuts")
         }
     }
 
@@ -438,9 +438,9 @@ private struct ProfileRow: View {
     private static func title(of part: ImportedProfile.Part, count: Int, pinnedTabCount: Int) -> String {
         switch part {
         case .favorites, .searchShortcuts: return "\(name(of: part)) (\(count.formatted()))"
-        case .spaces: return "Spaces (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, "pinned tab", "pinned tabs"))"
-        case .bookmarkFolders: return "Bookmark Folders (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, "bookmark", "bookmarks"))"
-        case .history: return "History (\(ImportSummary.count(count, "page", "pages")))"
+        case .spaces: return localized("Spaces (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, { localized("\($0) pinned tab") }, { localized("\($0) pinned tabs") }))")
+        case .bookmarkFolders: return localized("Bookmark Folders (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, { localized("\($0) bookmark") }, { localized("\($0) bookmarks") }))")
+        case .history: return localized("History (\(ImportSummary.count(count, { localized("\($0) page") }, { localized("\($0) pages") })))")
         }
     }
 }

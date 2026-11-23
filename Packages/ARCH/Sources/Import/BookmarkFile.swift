@@ -79,7 +79,7 @@ struct BookmarkTree: Equatable {
             switch folder.kind {
             case .bar: path = []
             case .root: path = [name]
-            case .folder: path = parentPath + [name.isEmpty ? "Untitled Folder" : name]
+            case .folder: path = parentPath + [name.isEmpty ? localized("Untitled Folder") : name]
             }
             let items = folder.children.compactMap { node -> SidebarImport.Item? in
                 if case .item(let item) = node { return item }
@@ -136,7 +136,7 @@ enum BookmarkFile {
     static func chromiumTree(from data: Data) -> BookmarkTree? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let roots = object["roots"] as? [String: Any] else { return nil }
         let knownRoots: [(key: String, name: String, kind: BookmarkTree.Folder.Kind)] = [
-            ("bookmark_bar", "Bookmarks Bar", .bar), ("other", "Other Bookmarks", .root), ("synced", "Mobile Bookmarks", .root),
+            ("bookmark_bar", localized("Bookmarks Bar"), .bar), ("other", localized("Other Bookmarks"), .root), ("synced", localized("Mobile Bookmarks"), .root),
         ]
         let otherKeys = roots.keys.filter { key in !knownRoots.contains { $0.key == key } }.sorted()
         func folder(_ node: [String: Any], name: String, kind: BookmarkTree.Folder.Kind) -> BookmarkTree.Folder {
@@ -176,8 +176,8 @@ enum BookmarkFile {
                 let list: (name: String, kind: BookmarkTree.Folder.Kind)
                 switch title {
                 case "com.apple.ReadingList": return nil
-                case "BookmarksBar": list = ("Favorites", .bar)
-                case "BookmarksMenu": list = ("Bookmarks Menu", .root)
+                case "BookmarksBar": list = (localized("Favorites"), .bar)
+                case "BookmarksMenu": list = (localized("Bookmarks Menu"), .root)
                 default: list = (title, .folder)
                 }
                 let children = (entry["Children"] as? [[String: Any]] ?? []).compactMap(node)
@@ -186,7 +186,7 @@ enum BookmarkFile {
                 return nil
             }
         }
-        return BookmarkTree(roots: [BookmarkTree.Folder(sourceID: root["WebBookmarkUUID"] as? String, name: "Bookmarks", kind: .root, children: children.compactMap(node))])
+        return BookmarkTree(roots: [BookmarkTree.Folder(sourceID: root["WebBookmarkUUID"] as? String, name: localized("Bookmarks"), kind: .root, children: children.compactMap(node))])
     }
 
     // MARK: HTML

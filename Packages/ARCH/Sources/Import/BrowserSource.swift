@@ -80,7 +80,7 @@ struct PrivacySetting: Hashable, Sendable {
     /// Opens the setting's pane. The anchor is undocumented (see Open decisions in `docs/import-browsers.md`); without it, System Settings opens at Privacy & Security.
     let paneURL: URL
 
-    static let fullDiskAccess = PrivacySetting(name: "Full Disk Access", paneURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+    static let fullDiskAccess = PrivacySetting(name: localized("Full Disk Access"), paneURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
 }
 
 /// Whether Arch can read a file, from `access(2)`. It opens nothing, so checking a file that macOS protects shows no prompt.
