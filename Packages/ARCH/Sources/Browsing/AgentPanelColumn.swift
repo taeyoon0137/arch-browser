@@ -64,9 +64,7 @@ private struct AgentPanelFrame: View {
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if case .session = content {
-                    Button("New Task") { windowModel.showAgentComposer() }
-                        .controlSize(.small)
-                        .accessibilityLabel("New Agent Task")
+                    SidebarIconButton(symbol: "square.and.pencil", label: "New Agent Task") { windowModel.showAgentComposer() }
                 }
                 SidebarIconButton(symbol: "xmark", label: "Close Agent Panel", action: windowModel.hideAgentPanel)
             }
@@ -136,7 +134,7 @@ private struct ConnectedAgentRow: View {
                         .frame(width: 18)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+                        Text(name).font(.system(size: 14)).lineLimit(1).truncationMode(.tail)
                         Text(access).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     }
                     Spacer(minLength: 0)
@@ -157,7 +155,7 @@ private struct ConnectedAgentRow: View {
         .padding(.leading, 10)
         .padding(.trailing, 10)
         .frame(height: 40)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
         .onHover { isHovering = $0 }
     }
 }
