@@ -496,7 +496,7 @@ public enum BrowserWindowKind {
         hideFindBar()
         cancelRegionCapture()
         closePageQuestion()
-        let runtime = session.runtime(for: engine, in: personaID)
+        guard let runtime = session.runtime(for: engine, in: personaID) else { return NSSound.beep() }
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
         let preview = PagePreview(webContents: webContents, personaID: personaID, requestedEngine: engine, openedURL: url)
         // A page the preview opens, as for a link to a new window or a sign-in popup, comes from the preview's runtime and keeps the previewed page as its opener. The previewed page becomes a tab of the preview's Persona, as Open in Tab makes one but without loading again, and the page it opened becomes the selected tab after it, taking the panel's place. The engine is still in its callback, so the panel goes on the next turn of the run loop.
