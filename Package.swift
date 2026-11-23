@@ -32,6 +32,8 @@ let cefWrapperSources = [
 
 let package = Package(
     name: "ArchBrowser",
+    // Each module that shows text keeps its strings in `Resources/Localizable.xcstrings`, with English as the source (`docs/localization.md`).
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "ARCHEngine", targets: ["ARCHEngine"]),
@@ -57,9 +59,9 @@ let package = Package(
         .executable(name: "arch-cli", targets: ["ArchCLI"]),
     ],
     targets: [
-        .target(name: "ARCHEngine", path: "Packages/ARCHKit/Sources/ARCHEngine"),
+        .target(name: "ARCHEngine", path: "Packages/ARCHKit/Sources/ARCHEngine", resources: [.process("Resources")]),
         .target(name: "ARCHPrivateAPI", path: "Packages/ARCHKit/Sources/ARCHPrivateAPI"),
-        .target(name: "ARCHEngineWebKit", dependencies: ["ARCHEngine", "ARCHPrivateAPI"], path: "Packages/ARCHKit/Sources/ARCHEngineWebKit"),
+        .target(name: "ARCHEngineWebKit", dependencies: ["ARCHEngine", "ARCHPrivateAPI"], path: "Packages/ARCHKit/Sources/ARCHEngineWebKit", resources: [.process("Resources")]),
         .target(
             name: "CEFBridge",
             path: "Packages/ARCHKit/Sources/CEFBridge",
@@ -74,27 +76,27 @@ let package = Package(
             ],
             linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("IOSurface")]
         ),
-        .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium"),
-        .target(name: "History", path: "Packages/ARCH/Sources/History", linkerSettings: [.linkedLibrary("sqlite3")]),
+        .target(name: "ARCHEngineChromium", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "CEFBridge"], path: "Packages/ARCHKit/Sources/ARCHEngineChromium", resources: [.process("Resources")]),
+        .target(name: "History", path: "Packages/ARCH/Sources/History", resources: [.process("Resources")], linkerSettings: [.linkedLibrary("sqlite3")]),
         // `Events` gives script plugins their events (`docs/hooks.md`, Plugins).
-        .target(name: "Plugins", dependencies: ["ARCHEngine", "AI", "Events"], path: "Packages/ARCH/Sources/Plugins"),
-        .target(name: "Extensions", dependencies: ["ARCHEngine", "Plugins"], path: "Packages/ARCH/Sources/Extensions"),
-        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI", "LiveFolders", "Agent", "Events", "Hooks"], path: "Packages/ARCH/Sources/Browsing"),
-        .target(name: "AI", path: "Packages/ARCH/Sources/AI"),
-        .target(name: "LiveFolders", dependencies: ["AI"], path: "Packages/ARCH/Sources/LiveFolders"),
-        .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal"),
-        .target(name: "Sync", dependencies: ["Browsing", "ARCHEngine"], path: "Packages/ARCH/Sources/Sync"),
+        .target(name: "Plugins", dependencies: ["ARCHEngine", "AI", "Events"], path: "Packages/ARCH/Sources/Plugins", resources: [.process("Resources")]),
+        .target(name: "Extensions", dependencies: ["ARCHEngine", "Plugins"], path: "Packages/ARCH/Sources/Extensions", resources: [.process("Resources")]),
+        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI", "LiveFolders", "Agent", "Events", "Hooks"], path: "Packages/ARCH/Sources/Browsing", resources: [.process("Resources")]),
+        .target(name: "AI", path: "Packages/ARCH/Sources/AI", resources: [.process("Resources")]),
+        .target(name: "LiveFolders", dependencies: ["AI"], path: "Packages/ARCH/Sources/LiveFolders", resources: [.process("Resources")]),
+        .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal", resources: [.process("Resources")]),
+        .target(name: "Sync", dependencies: ["Browsing", "ARCHEngine"], path: "Packages/ARCH/Sources/Sync", resources: [.process("Resources")]),
         // libbsm reads process IDs from audit tokens.
         .target(name: "AgentControl", path: "Packages/ARCH/Sources/AgentControl", linkerSettings: [.linkedFramework("Security"), .linkedLibrary("bsm")]),
-        .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl", "Events"], path: "Packages/ARCH/Sources/Agent"),
+        .target(name: "Agent", dependencies: ["ARCHEngine", "AI", "AgentControl", "Events"], path: "Packages/ARCH/Sources/Agent", resources: [.process("Resources")]),
         // `AI` gives site patterns and `AgentControl` the agent channel's address reduction and untrusted blocks, which the outside view uses.
         .target(name: "Events", dependencies: ["ARCHEngine", "AI", "AgentControl"], path: "Packages/ARCH/Sources/Events"),
         // `Agent` gives the agent run's values and the sealed file, `AgentControl` the JSON values that keep a later build's members of `hooks.json`, and `Plugins` the script runtime that JavaScript hooks run in.
-        .target(name: "Hooks", dependencies: ["Events", "AI", "Plugins", "Agent", "AgentControl"], path: "Packages/ARCH/Sources/Hooks"),
-        .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins", "Extensions", "Agent", "AgentControl", "Events", "Hooks", "Sync"], path: "Packages/ARCH/Sources/Preferences"),
-        .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", linkerSettings: [.linkedLibrary("sqlite3")]),
+        .target(name: "Hooks", dependencies: ["Events", "AI", "Plugins", "Agent", "AgentControl"], path: "Packages/ARCH/Sources/Hooks", resources: [.process("Resources")]),
+        .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins", "Extensions", "Agent", "AgentControl", "Events", "Hooks", "Sync"], path: "Packages/ARCH/Sources/Preferences", resources: [.process("Resources")]),
+        .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", resources: [.process("Resources")], linkerSettings: [.linkedLibrary("sqlite3")]),
         // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
-        .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "Agent", "Hooks", "Sync", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"]),
+        .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "Agent", "Hooks", "Sync", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"], resources: [.process("Resources")]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         // `scripts/bundle_app.sh` copies it into Contents/Helpers as arch-cli, with arch-mcp as a link to it.
         .executableTarget(name: "ArchCLI", dependencies: ["AgentControl"], path: "Packages/ARCHApp/Sources/ArchCLI"),

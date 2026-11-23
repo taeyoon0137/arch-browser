@@ -18,6 +18,7 @@ MIN_MACOS="14.0"
 [ -d "$CEF" ] || { echo "missing CEF framework at $CEF" >&2; exit 1; }
 [ -f "$ICON_SOURCE" ] || { echo "missing app icon source at $ICON_SOURCE" >&2; exit 1; }
 [ -f "$SDEF" ] || { echo "missing scripting definition at $SDEF" >&2; exit 1; }
+[ -d "$BIN/ArchBrowser_Arch.bundle" ] || { echo "missing the modules' resource bundles in $BIN; run swift build -c $CONFIG first" >&2; exit 1; }
 
 write_plist() {
   # Arguments: `$1` is the output path, `$2` the executable name, `$3` the bundle identifier, and `$4` the user interface element flag (0/1). `$5` holds extra keys for the main app.
@@ -45,8 +46,9 @@ ${5:-}
 PLIST
 }
 
-# The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, location, or Bluetooth access on a page's behalf; without one, macOS ends the app when Chromium reaches for that device, as it does for Bluetooth when a page signs in with a passkey on a phone. AppleScript reads the app's terms from the scripting definition in Resources.
+# The languages the app lists are the ones its modules' string catalogs translate into; the system picks the app's language among them (`docs/localization.md`). The main app registers to handle web links so the system can offer it as the default browser. Usage descriptions are required before the system requests camera, microphone, location, or Bluetooth access on a page's behalf; without one, macOS ends the app when Chromium reaches for that device, as it does for Bluetooth when a page signs in with a passkey on a phone. AppleScript reads the app's terms from the scripting definition in Resources.
 APP_KEYS='	<key>CFBundleIconFile</key><string>Arch</string>
+	<key>CFBundleLocalizations</key><array><string>en</string><string>ko</string></array>
 	<key>NSAppleScriptEnabled</key><true/>
 	<key>OSAScriptingDefinition</key><string>Arch.sdef</string>
 	<key>NSCameraUsageDescription</key><string>Web pages can use the camera after you allow them.</string>
@@ -75,6 +77,11 @@ mv "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
 write_plist "$APP/Contents/Info.plist" "Arch" "xyz.taeyoon.arch" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp "$SDEF" "$APP/Contents/Resources/Arch.sdef"
+# Each module's strings are in its own resource bundle, which the module looks for in Contents/Resources (`docs/localization.md`). The test targets' bundles stay out.
+for bundle in "$BIN"/ArchBrowser_*.bundle; do
+  case "$bundle" in *Tests.bundle) continue ;; esac
+  cp -R "$bundle" "$APP/Contents/Resources/"
+done
 cp -R "$CEF" "$APP/Contents/Frameworks/"
 
 # Build the icon set from the 1024-pixel symbol. `opaque_icon.swift` fills its transparent corners so that macOS clips it to the system shape instead of placing it on a gray plate. Each size appears at 1x and 2x, as `iconutil` requires.
