@@ -126,7 +126,7 @@ public struct AgentKeychainError: LocalizedError {
     public var status: OSStatus
 
     public var errorDescription: String? {
-        (SecCopyErrorMessageString(status, nil) as String?) ?? "Keychain error \(status)."
+        (SecCopyErrorMessageString(status, nil) as String?) ?? localized("Keychain error \(status).")
     }
 }
 
@@ -251,7 +251,7 @@ public enum SealedSettingsFileError: LocalizedError {
     case noKey
 
     public var errorDescription: String? {
-        "Arch has no key from the Keychain to protect these settings."
+        localized("Arch has no key from the Keychain to protect these settings.")
     }
 }
 

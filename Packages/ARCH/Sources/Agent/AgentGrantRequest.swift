@@ -46,9 +46,9 @@ public struct AgentGrantChoice: Equatable, Sendable {
 
         public var title: String {
             switch self {
-            case .untilQuit: return "Until Arch Quits"
-            case .day: return "For 24 Hours"
-            case .untilRevoked: return "Until I Revoke It"
+            case .untilQuit: return localized("Until Arch Quits")
+            case .day: return localized("For 24 Hours")
+            case .untilRevoked: return localized("Until I Revoke It")
             }
         }
 

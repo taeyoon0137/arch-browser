@@ -5,3 +5,8 @@ import Foundation
 func localized(_ key: String.LocalizationValue) -> String {
     String(localized: key, bundle: .module)
 }
+
+/// The English text of `key`, for text that also goes to outside clients over the agent channel: a table the module does not have, whose lookup falls back to the key.
+func sourceText(_ key: String.LocalizationValue) -> String {
+    String(localized: key, table: "SourceText", bundle: .module)
+}

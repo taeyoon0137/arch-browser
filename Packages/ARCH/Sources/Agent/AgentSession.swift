@@ -172,15 +172,15 @@ extension AgentAPISession: AgentSessionRunning {
 
     /// The status shown beside the conversation and its sidebar folder.
     public var statusText: String {
-        if isTakenOver && !hasEnded { return "You have control" }
+        if isTakenOver && !hasEnded { return localized("You have control") }
         switch state {
-        case .starting: return "Starting"
-        case .running: return "Working"
-        case .waitingForUser: return "Waiting for you"
-        case .done: return "Done"
-        case .turnFailed: return "Turn failed"
-        case .stopped: return "Stopped"
-        case .failed: return "Failed"
+        case .starting: return localized("Starting")
+        case .running: return localized("Working")
+        case .waitingForUser: return localized("Waiting for you")
+        case .done: return localized("Done")
+        case .turnFailed: return localized("Turn failed")
+        case .stopped: return localized("Stopped")
+        case .failed: return localized("Failed")
         }
     }
 
@@ -297,7 +297,7 @@ extension AgentAPISession: AgentSessionRunning {
             case .completed: taskEvent?(.turnFinished, "The turn ended.")
             case .stopped: taskEvent?(.turnFinished, "The turn was stopped.")
             case .turnLimit:
-                transcript.append(.notice("The tool's limit of model requests for one message ended the turn."))
+                transcript.append(.notice(localized("The tool's limit of model requests for one message ended the turn.")))
                 taskEvent?(.turnFinished, "The tool's limit of model requests for one message ended the turn.")
             }
             turnEnded(end == .stopped ? .stopped : .done)
@@ -471,14 +471,14 @@ extension AgentAPISession: AgentSessionRunning {
     /// A tool step from the host.
     func record(_ step: AgentStep) {
         transcript.append(.step(step))
-        taskEvent?(.step, step.sentence)
+        taskEvent?(.step, step.sourceSentence ?? step.sentence)
     }
 
     /// A ticket from a process outside the session's tree, once per session.
     func noteForeignTicketUse() {
         guard !hasNotedForeignTicket else { return }
         hasNotedForeignTicket = true
-        transcript.append(.notice("Another program tried to use this session\u{2019}s access."))
+        transcript.append(.notice(localized("Another program tried to use this session\u{2019}s access.")))
     }
 
     /// A tab the user shares later, with its handle; its site joins the scope.

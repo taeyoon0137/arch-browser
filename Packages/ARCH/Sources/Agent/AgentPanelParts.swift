@@ -39,12 +39,12 @@ extension AgentResultStatus {
     var plainWords: String? {
         switch self {
         case .ok: return nil
-        case .denied: return "You declined"
-        case .refused: return "Not allowed"
-        case .stale: return "The page changed"
-        case .timeout: return "Timed out"
-        case .approvalPending: return "Waiting for you"
-        case .error: return "Didn\u{2019}t work"
+        case .denied: return localized("You declined")
+        case .refused: return localized("Not allowed")
+        case .stale: return localized("The page changed")
+        case .timeout: return localized("Timed out")
+        case .approvalPending: return localized("Waiting for you")
+        case .error: return localized("Didn\u{2019}t work")
         }
     }
 

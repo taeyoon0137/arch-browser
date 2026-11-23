@@ -157,7 +157,7 @@ public struct AgentComposer: View {
             if !models.isEmpty {
                 HStack {
                     Spacer()
-                    AgentPrimaryAction(title: "Start", action: start)
+                    AgentPrimaryAction(title: localized("Start"), action: start)
                         .keyboardShortcut(.defaultAction)
                         .disabled(selectedModel == nil || context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -189,7 +189,7 @@ public struct AgentComposer: View {
                 HStack {
                     Button(localized("Reattach Reviewed Tab")) {
                         guard service.canReattach(tab, in: context.personaID) else {
-                            context.problem = "The reviewed page changed or is no longer available."
+                            context.problem = localized("The reviewed page changed or is no longer available.")
                             return
                         }
                         context.attachesTab = true
@@ -205,7 +205,7 @@ public struct AgentComposer: View {
                     Toggle(localized("Share reader excerpt"), isOn: $context.sharesExcerpt)
                         .toggleStyle(.checkbox)
                         .font(.system(size: AgentPanelMetrics.supportingSize))
-                    AgentTechnicalDetails(title: "Preview excerpt") {
+                    AgentTechnicalDetails(title: localized("Preview excerpt")) {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 6) {
                                 if let selection = excerpt.selection { Text("Selected text", bundle: .module).fontWeight(.medium); Text(verbatim: selection) }
@@ -233,7 +233,7 @@ public struct AgentComposer: View {
                 }
                 .font(.system(size: AgentPanelMetrics.supportingSize))
                 // Why Start is off, and what the chosen tool adds, stay in view while Options is closed.
-                if selectedModel == nil { note("The selected model is no longer available. Choose another model in Options to continue.") }
+                if selectedModel == nil { note(localized("The selected model is no longer available. Choose another model in Options to continue.")) }
                 if let warning = codexInstructionsWarning { note(warning) }
             }
             if let problem = context.problem {
@@ -250,13 +250,13 @@ public struct AgentComposer: View {
     private var modelSetup: some View {
         let isEnabled = settings.route(for: .agent).isEnabled
         return VStack(alignment: .leading, spacing: 8) {
-            Text(isEnabled ? "Connect an agent model in Settings ▸ AI" : "Agent Tasks is turned off")
+            Text(isEnabled ? localized("Connect an agent model in Settings ▸ AI") : localized("Agent Tasks is turned off"))
                 .font(.system(size: AgentPanelMetrics.bodySize, weight: .medium))
-            Text(isEnabled ? "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue.")
+            Text(isEnabled ? localized("Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal.") : localized("Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue."))
                 .font(.system(size: AgentPanelMetrics.supportingSize))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(isEnabled ? "Open Providers" : "Open Features") {
+            Button(isEnabled ? localized("Open Providers") : localized("Open Features")) {
                 actions.openModelSettings(isEnabled ? .providers : .features)
             }
             .controlSize(.small)
@@ -271,7 +271,7 @@ public struct AgentComposer: View {
                 .font(.system(size: AgentPanelMetrics.supportingSize))
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
-                    label("Mode")
+                    label(localized("Mode"))
                     // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
                     Picker(localized("Mode"), selection: Binding(get: { chosenMode }, set: { context.mode = $0 })) {
                         ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
@@ -281,7 +281,7 @@ public struct AgentComposer: View {
                     .controlSize(.small)
                 }
                 GridRow {
-                    label("Model")
+                    label(localized("Model"))
                     Picker(localized("Model"), selection: Binding(get: { selectedModel }, set: { context.model = $0; context.effort = nil })) {
                         if selectedModel == nil { Text("Choose a model…", bundle: .module).tag(nil as AIModelRef?).disabled(true) }
                         ForEach(models, id: \.self) { Text(settings.title(of: $0)).tag(Optional($0)) }
@@ -292,7 +292,7 @@ public struct AgentComposer: View {
                 }
                 if !effortLevels.isEmpty {
                     GridRow {
-                        label("Effort")
+                        label(localized("Effort"))
                         Picker(localized("Effort"), selection: $context.effort) {
                             Text("Tool\u{2019}s default", bundle: .module).tag(String?.none)
                             ForEach(effortLevels, id: \.self) { Text($0).tag(Optional($0)) }
@@ -375,7 +375,7 @@ public struct AgentComposer: View {
         for name in ["AGENTS.override.md", "AGENTS.md"] {
             let file = home.appendingPathComponent(name)
             if let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? NSNumber, size.intValue > 0 {
-                return "Codex adds your own instructions from \(file.path) to Arch\u{2019}s sessions. Arch\u{2019}s rules apply whatever the model was told."
+                return localized("Codex adds your own instructions from \(file.path) to Arch\u{2019}s sessions. Arch\u{2019}s rules apply whatever the model was told.")
             }
         }
         return nil
@@ -417,7 +417,7 @@ extension AgentTabInfo {
 
     /// Uses a reduced address when the title is empty or duplicates the address.
     private func attachmentLabel(address: String?) -> String {
-        guard let address else { return title.isEmpty ? "Tab" : title }
+        guard let address else { return title.isEmpty ? localized("Tab") : title }
         if title.isEmpty || title == url?.host || url.map({ AgentAddress.isOwnAddress(title, of: $0) }) == true { return address }
         return "\(title) · \(address)"
     }
@@ -430,7 +430,7 @@ extension AgentTabInfo {
             let byAddress = Dictionary(grouping: group) { needsFullAddress ? $0.attachmentLabel(address: $0.attachmentAddress) : label }
             for (addressLabel, matches) in byAddress {
                 for (index, tab) in matches.enumerated() {
-                    labels[tab.id] = matches.count > 1 ? "Tab \(index + 1) · \(addressLabel)" : addressLabel
+                    labels[tab.id] = matches.count > 1 ? localized("Tab \(index + 1) · \(addressLabel)") : addressLabel
                 }
             }
         }

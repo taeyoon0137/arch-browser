@@ -48,7 +48,7 @@ struct AgentApprovalCard: View {
             Text(approval.action)
                 .font(.system(size: AgentPanelMetrics.bodySize, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
-            AgentDetailRow(title: "Requested by") {
+            AgentDetailRow(title: localized("Requested by")) {
                 Text(approval.clientName).lineLimit(1).truncationMode(.tail).help(approval.clientName)
                 if let handle = approval.tabHandle, approval.tabID != nil {
                     Button(localized("Show \(handle)"), action: showTab).buttonStyle(.link)
@@ -156,7 +156,7 @@ struct AgentApprovalCard: View {
             TextField(localized("A note for the agent (optional)"), text: $written, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
         case .renameSharedTab:
-            Text(verbatim: "Allow for This Tab lets \(approval.clientName) rename this tab again without asking. A name you give the tab yourself always stays.")
+            Text(verbatim: localized("Allow for This Tab lets \(approval.clientName) rename this tab again without asking. A name you give the tab yourself always stays."))
                 .font(.system(size: AgentPanelMetrics.detailSize))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -211,20 +211,20 @@ struct AgentApprovalCard: View {
     @ViewBuilder private var buttonList: some View {
         switch approval.kind {
         case .question:
-            AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel("")) }
-            AgentPointerButton(title: "Answer", requiresPointer: false) { answer(.answer(questionAnswer.wrappedValue)) }
+            AgentPointerButton(title: localized("Cancel"), requiresPointer: false) { answer(.cancel("")) }
+            AgentPointerButton(title: localized("Answer"), requiresPointer: false) { answer(.answer(questionAnswer.wrappedValue)) }
                 .disabled(questionAnswer.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         case .handToUser:
-            AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
-            AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
+            AgentPointerButton(title: localized("Cancel"), requiresPointer: false) { answer(.cancel(written)) }
+            AgentPointerButton(title: localized("Done"), requiresPointer: true) { answer(.done(written)) }
         case .shareSessionTab, .requestTab:
-            AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
-            AgentPointerButton(title: "Share", requiresPointer: true) { if let chosenTab { answer(.tab(chosenTab)) } }
+            AgentPointerButton(title: localized("Don\u{2019}t Share"), requiresPointer: false) { answer(.deny) }
+            AgentPointerButton(title: localized("Share"), requiresPointer: true) { if let chosenTab { answer(.tab(chosenTab)) } }
                 .disabled(chosenTab == nil)
         default:
             ForEach(Array(approval.offers.enumerated()), id: \.offset) { _, offer in
                 if case .reply = offer {
-                    AgentPointerButton(title: isReplying ? "Send Reply" : offer.title(site: approval.site), requiresPointer: false) {
+                    AgentPointerButton(title: isReplying ? localized("Send Reply") : offer.title(site: approval.site), requiresPointer: false) {
                         if isReplying, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { answer(.reply(reply)) } else { isReplying = true }
                     }
                 } else {

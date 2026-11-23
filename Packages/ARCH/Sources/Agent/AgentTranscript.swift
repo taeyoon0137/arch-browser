@@ -13,6 +13,8 @@ public struct AgentStep: Equatable, Sendable {
     public var tabHandle: String?
     public var tabID: UUID?
     public var status: AgentResultStatus
+    /// The sentence in English, for the task events that outside clients read; nil when it is `sentence`.
+    public var sourceSentence: String? = nil
 }
 
 /// A successful read's local document identity. These values never enter a model message.
@@ -155,48 +157,50 @@ struct AgentTranscript: Equatable {
 enum AgentStepText {
     /// `hostStep` is the tool host's sentence for a step that acts or navigates, such as "Clicked “Next” on example.org", whose page names stand in quotes.
     static func step(for call: AgentToolCall, result: AgentToolResult, tabHandle: String?, tabID: UUID?, hostStep: String? = nil) -> AgentStep {
-        AgentStep(tool: call.name, sentence: sentence(for: call, result: result, hostStep: hostStep), tabHandle: tabHandle, tabID: tabID, status: result.status)
+        AgentStep(tool: call.name, sentence: sentence(for: call, result: result, hostStep: hostStep), tabHandle: tabHandle, tabID: tabID, status: result.status,
+                  sourceSentence: sentence(for: call, result: result, hostStep: hostStep, localizes: false))
     }
 
-    /// Names the tool step and translates known result states into a short panel sentence.
-    static func sentence(for call: AgentToolCall, result: AgentToolResult, hostStep: String? = nil) -> String {
+    /// Names the tool step and translates known result states into a short panel sentence, in the language Arch runs in, or in English with `localizes` false for the task events that outside clients read.
+    static func sentence(for call: AgentToolCall, result: AgentToolResult, hostStep: String? = nil, localizes: Bool = true) -> String {
+        func text(_ key: String.LocalizationValue) -> String { localizes ? localized(key) : sourceText(key) }
         let done: String
         switch call.name {
-        case "ask_user": done = "Asked you a question"
-        case "request_tab": done = "Asked you to share a tab"
-        case "read_text": done = "Read the page text"
-        case "snapshot": done = "Read the page outline"
-        case "session_info": done = "Read the session\u{2019}s details"
-        case "list_spaces": done = "Listed the spaces"
-        case "list_tabs": done = call.arguments["scope"]?.stringValue == "shared" ? "Listed the tabs you shared" : "Listed the agent tabs"
+        case "ask_user": done = text("Asked you a question")
+        case "request_tab": done = text("Asked you to share a tab")
+        case "read_text": done = text("Read the page text")
+        case "snapshot": done = text("Read the page outline")
+        case "session_info": done = text("Read the session\u{2019}s details")
+        case "list_spaces": done = text("Listed the spaces")
+        case "list_tabs": done = call.arguments["scope"]?.stringValue == "shared" ? text("Listed the tabs you shared") : text("Listed the agent tabs")
         case "guide":
             // The model wrote the topic, so only a topic the guide has appears in the sentence.
-            done = call.arguments["topic"]?.stringValue.flatMap(AgentGuideTopic.init(rawValue:)).map { "Read the guide\u{2019}s \($0.rawValue) topic" } ?? "Read the guide"
+            done = call.arguments["topic"]?.stringValue.flatMap(AgentGuideTopic.init(rawValue:)).map { text("Read the guide\u{2019}s \($0.rawValue) topic") } ?? text("Read the guide")
         // A step that did not happen reads as what the agent asked for, such as "Open a page: you said no".
-        case "open_tab": done = result.status == .ok ? "Opened a tab" : "Open a tab"
-        case "navigate": done = result.status == .ok ? "Opened a page" : "Open a page"
-        case "close_tab": done = result.status == .ok ? "Closed a tab" : "Close a tab"
+        case "open_tab": done = result.status == .ok ? text("Opened a tab") : text("Open a tab")
+        case "navigate": done = result.status == .ok ? text("Opened a page") : text("Open a page")
+        case "close_tab": done = result.status == .ok ? text("Closed a tab") : text("Close a tab")
         default:
-            guard let tool = AgentToolCatalog.tool(named: call.name) else { return "Unrecognized tool" }
-            done = hostStep ?? "Requested " + tool.name.replacingOccurrences(of: "_", with: " ")
+            guard let tool = AgentToolCatalog.tool(named: call.name) else { return text("Unrecognized tool") }
+            done = hostStep ?? text("Requested \(tool.name.replacingOccurrences(of: "_", with: " "))")
         }
         // The sentence names a known code in words and never quotes the result's text; the activity log keeps the code.
         let reason: String? = switch result.code {
-        case "stopped", "ended": "stopped with the turn"
-        case "limitReached": "reached the call limit"
-        case "tabNotFound": "the tab is gone"
-        case "pageChanged": "the page changed"
-        case "invalidArguments", "unknownTool", "notAvailable": "not available in this session"
-        case let code? where code.first == "P" && Int(code.dropFirst()) != nil: "refused by an Arch rule"
+        case "stopped", "ended": text("stopped with the turn")
+        case "limitReached": text("reached the call limit")
+        case "tabNotFound": text("the tab is gone")
+        case "pageChanged": text("the page changed")
+        case "invalidArguments", "unknownTool", "notAvailable": text("not available in this session")
+        case let code? where code.first == "P" && Int(code.dropFirst()) != nil: text("refused by an Arch rule")
         default: nil
         }
         switch result.status {
         case .ok, .approvalPending: return done
-        case .denied where result.code == nil: return "\(done): you said no"
-        case .refused, .denied: return "\(done): \(reason ?? "refused")"
-        case .timeout: return "\(done): timed out"
-        case .stale: return "\(done): the page changed"
-        case .error: return "\(done): \(reason ?? "failed")"
+        case .denied where result.code == nil: return text("\(done): you said no")
+        case .refused, .denied: return text("\(done): \(reason ?? text("refused"))")
+        case .timeout: return text("\(done): timed out")
+        case .stale: return text("\(done): the page changed")
+        case .error: return text("\(done): \(reason ?? text("failed"))")
         }
     }
 }

@@ -93,7 +93,7 @@ public enum AgentAttention {
 
     static func request(for ownerID: UUID) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
-        content.title = "An agent is waiting for you in Arch"
+        content.title = localized("An agent is waiting for you in Arch")
         return UNNotificationRequest(identifier: identifier(for: ownerID), content: content, trigger: nil)
     }
 
@@ -136,7 +136,7 @@ public struct AgentPanel: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(owner?.name ?? "Agent")
+                    Text(owner?.name ?? localized("Agent"))
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
