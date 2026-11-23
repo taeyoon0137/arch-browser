@@ -1,4 +1,13 @@
-// How a WebKit page reaches its web contents: the web view of a tab and of a popup knows the web contents that made it, a page opens a popup only from a user gesture, a popup shares its opener's page script list, a page script's message reaches the page script delegate of that web contents, and the favicon lookup reads the page's declared icon from a world of the app's own. Find counts only the matches WebKit's find sees. Closing all of a browser's web contents ends each page. The tests use a private profile, which keeps nothing on disk, and load no page from the network.
+// Tests how a WebKit page reaches its web contents.
+// A tab's or popup's web view knows the web contents that made it.
+// A page opens a popup only from a user gesture.
+// A popup shares its opener's page script list.
+// A page script's message reaches the page script delegate of that web contents.
+// The favicon lookup reads the page's declared icon from the app's own world.
+// Find counts only the matches WebKit's find sees.
+// Closing all of a browser's web contents ends each page.
+// The tests use a private profile that keeps nothing on disk.
+// They load no page from the network.
 import ARCHEngine
 @testable import ARCHEngineWebKit
 import Foundation
@@ -48,7 +57,9 @@ import Testing
         #expect((popup.webView as? WebKitWebView)?.contents === popup)
     }
 
-    /// A popup uses its opener's content controller, so the two share one list of page scripts and say so, while another web contents has its own.
+    /// A popup uses its opener's content controller.
+    /// The two report that they share one list of page scripts.
+    /// Another web contents has its own list.
     @Test func aPopupSharesItsOpenersPageScriptList() throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
         let other = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
@@ -59,7 +70,10 @@ import Testing
         #expect(tab.userContent.pageScripts == [script] && other.userContent.pageScripts.isEmpty)
     }
 
-    /// A page opens a window only from a user gesture, as Chromium's pages do: its own script at load opens none, while a script that the app runs with a gesture, as `evaluateJavaScript` does, opens one, which reaches the UI delegate.
+    /// A page opens a window only from a user gesture, as Chromium's pages do.
+    /// Its own script at load opens none.
+    /// A script that the app runs with a gesture, as `evaluateJavaScript` does, opens one.
+    /// That window reaches the UI delegate.
     @Test func aPageOpensAWindowOnlyFromAUserGesture() async throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
         let recorder = PopupRecorder()
@@ -84,7 +98,9 @@ import Testing
         #expect(recorder.sender === tab)
     }
 
-    /// WebKit's find matches no text that spans two blocks, so the count leaves such text out too, while text in inline elements runs on.
+    /// WebKit's find matches no text that spans two blocks.
+    /// The count leaves such text out too.
+    /// Text continues across inline elements.
     @Test func findCountsNoMatchAcrossBlocks() async throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
         tab.webView.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -100,7 +116,8 @@ import Testing
         #expect(result?.numberOfMatches == 2)
     }
 
-    /// The favicon lookup runs in a world of the app's own and still reads the page's declared icon, here a one-pixel image in a data address.
+    /// The favicon lookup runs in the app's own world.
+    /// It still reads the page's declared icon, here a one-pixel image in a data address.
     @Test func theIconLookupReadsThePagesDeclaredIcon() async throws {
         let tab = try #require(browser.createWebContents(EngineWebContentsConfiguration()) as? WebKitWebContents)
         let icon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -136,7 +153,9 @@ import Testing
         }
     }
 
-    /// Waits up to ten seconds for `condition`, checking every tenth of a second, and reports whether it held.
+    /// Waits up to ten seconds for `condition`.
+    /// Checks every tenth of a second.
+    /// Reports whether the condition held.
     private func eventually(_ condition: () -> Bool) async -> Bool {
         for _ in 0..<100 where !condition() {
             try? await Task.sleep(for: .milliseconds(100))
