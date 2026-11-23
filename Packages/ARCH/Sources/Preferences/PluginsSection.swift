@@ -2,7 +2,7 @@
 // Install Plugin… stages a folder, `.zip`, or `.crx` for review. Install from the Web Store… stages an extension through its store sheet.
 // Check for Updates appears for Personas with store extensions. The section checks once per Persona per run when shown and displays the time or failure.
 // A newer version offers Review Update… in its plugin section. New Feature with AI… appears when a provider can write a plugin for review.
-// Installed plugins can be removed. A failed `plugins.json` write shows its reason and Try Again. Grants are stated without controls to narrow them.
+// Installed plugins can be removed. A failed `plugins.json` write shows its reason and Try Again. An installed plugin's permissions and sites each have Revoke.
 // Two web extension versions of one extension share a section, with a row for each. An unpaired version offers Join With… and Install <Engine> Version….
 // The latter menu offers From a File… and From the Web Store…. Extensions that may reach native apps list those apps and their Arch requirements (`NativeAppGuide`).
 import AI
@@ -279,6 +279,8 @@ private struct PluginSection: View {
     @State private var isConfirmingRemoval = false
     @State private var isJoining = false
     @State private var settingsPage: SettingsPageSheet?
+    /// Whether Open Settings… waits for the plugin to start, during which a second click would open a second page.
+    @State private var isOpeningSettings = false
     /// The version whose removal the user confirms.
     @State private var removingVersion: InstalledPlugin?
     /// The registered AI features, whose triggers the note on a plugin's models follows, and the providers, without which the note does not show.
@@ -302,7 +304,7 @@ private struct PluginSection: View {
         let canJoin = !isPair && plugin.kind == .webExtension && !joinCandidates.isEmpty
         let separable = versions.first { $0.id != plugin.id }.map { $0.manifest.id != plugin.manifest.id } ?? false
         let removable = plugin.origin != .bundled
-        let copyable = removable && !isPair && (plugin.kind == .script || plugin.kind == .webExtension) && session.personas.contains { $0.id != personaID }
+        let copyable = plugins.packageFolderForCopy(of: plugin.id) != nil && session.personas.contains { $0.id != personaID }
         Section {
             Toggle(isOn: Binding(get: { versions.contains(where: \.isEnabled) }, set: { plugins.setEnabled($0, for: plugin.id) })) {
                 Text(plugin.manifest.name)
@@ -333,11 +335,13 @@ private struct PluginSection: View {
                     }
                     if plugin.kind == .script, plugin.manifest.settingsPage != nil {
                         Button("Open Settings…") {
+                            isOpeningSettings = true
                             Task {
+                                defer { isOpeningSettings = false }
                                 if let controller = await plugins.settingsPage(for: plugin.id) { settingsPage = SettingsPageSheet(controller: controller) }
                             }
                         }
-                        .disabled(!plugin.isEnabled)
+                        .disabled(!plugin.isEnabled || isOpeningSettings)
                     }
                     if reloadable {
                         Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
@@ -424,11 +428,13 @@ private struct PluginSection: View {
                     Spacer()
                     Button("Done") { settingsPage = nil }
                         .keyboardShortcut(.defaultAction)
-                        .padding(.trailing, 16)
                 }
+                .padding(.horizontal, 20)
                 .frame(height: 40)
             }
             .frame(width: 480, height: 520)
+            // Escape closes the sheet as Cancel closes the install sheet; Done has Return.
+            .onExitCommand { settingsPage = nil }
             .onAppear { (page.controller as? PluginEndingPanel)?.onEnd = { settingsPage = nil } }
             .onDisappear { (page.controller as? PluginEndingPanel)?.onEnd = nil }
         }
@@ -578,13 +584,15 @@ private struct UpdateRow: View {
     }
 }
 
-/// What the plugin's grant lets it do: a sentence for each permission and each site, or, with more than `InstalledPlugin.listedSiteLimit` sites, one sentence for the sites that names the broadest (`InstalledPlugin.accessBrief`), with every site's sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down while each permission stays in view.
+/// What the plugin's grant lets it do: a sentence for each permission and each site, or, with more than `InstalledPlugin.listedSiteLimit` sites, one sentence for the sites that names the broadest (`InstalledPlugin.accessBrief`), with every site's sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down while each permission stays in view. A built-in plugin's access is one row of sentences; an installed plugin's has a row for each sentence, with Revoke on its permissions and sites.
 private struct AccessRow: View {
     let plugins: PluginManager
     let plugin: InstalledPlugin
 
     var body: some View {
-        if let brief = plugin.accessBrief {
+        if plugin.origin != .bundled && !plugin.accessSummaries.isEmpty {
+            revocableRows
+        } else if let brief = plugin.accessBrief {
             DisclosureGroup {
                 Text(plugin.grant.sites.map(\.accessSummary).joined(separator: "\n"))
                     .font(.callout)
@@ -605,17 +613,51 @@ private struct AccessRow: View {
                     .multilineTextAlignment(.trailing)
             }
         }
-        if plugin.origin != .bundled {
-            ForEach(PluginPermission.allCases.filter(plugin.grant.permissions.contains), id: \.self) { permission in
-                LabeledContent(permission == .network ? plugin.grant.networkSummary : permission.summary) {
+    }
+
+    /// An installed plugin's access as one row per sentence, in the order of `accessSummaries`, each permission and site with Revoke beside it, and with more than `InstalledPlugin.listedSiteLimit` sites the sites behind a disclosure under their brief sentence, as secondary text. `tabs.rename` has no Revoke while `tabs.manage` covers it (`InstalledPlugin.revocablePermissions`).
+    @ViewBuilder
+    private var revocableRows: some View {
+        let revocable = plugin.revocablePermissions
+        Text("Access")
+        ForEach(PluginPermission.allCases.filter(plugin.grant.permissions.contains), id: \.self) { permission in
+            LabeledContent {
+                if revocable.contains(permission) {
                     Button("Revoke") { plugins.revoke(permission, from: plugin.id) }
                 }
+            } label: {
+                Text(plugin.summary(of: permission))
             }
-            ForEach(plugin.grant.sites, id: \.self) { site in
-                LabeledContent(site.accessSummary) {
-                    Button("Revoke") { plugins.revoke(site, from: plugin.id) }
+        }
+        ForEach(plugin.includedSummaries, id: \.self) { summary in
+            Text(summary)
+        }
+        if let brief = plugin.sitesBrief {
+            DisclosureGroup {
+                ForEach(plugin.grant.sites, id: \.self) { site in
+                    siteRow(site, isSecondary: true)
                 }
+            } label: {
+                Text(brief)
             }
+        } else {
+            ForEach(plugin.grant.sites, id: \.self) { site in
+                siteRow(site, isSecondary: false)
+            }
+        }
+        ForEach(plugin.grant.siteAccessSummaries, id: \.self) { summary in
+            Text(summary)
+        }
+    }
+
+    /// A site's sentence with Revoke; inside the disclosure, as callout text in the secondary color.
+    private func siteRow(_ site: MatchPattern, isSecondary: Bool) -> some View {
+        LabeledContent {
+            Button("Revoke") { plugins.revoke(site, from: plugin.id) }
+        } label: {
+            Text(site.accessSummary)
+                .font(isSecondary ? .callout : nil)
+                .foregroundStyle(isSecondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
         }
     }
 }

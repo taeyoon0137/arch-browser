@@ -438,9 +438,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         if let headers = fields.removeValue(forKey: "headers") {
             guard case let .object(values) = headers else { throw PluginError.invalidRequest }
             for (name, value) in values {
-                guard case let .string(text) = value, !name.isEmpty, !name.contains(where: { $0 == "\r" || $0 == "\n" || $0 == ":" }),
-                      !text.contains(where: { $0 == "\r" || $0 == "\n" }),
-                      !["cookie", "host", "origin", "referer", "content-length"].contains(name.lowercased()) else { throw PluginError.invalidRequest }
+                guard case let .string(text) = value, PluginNetworkFetch.isAllowedHeader(name: name, value: text) else { throw PluginError.invalidRequest }
                 request.setValue(text, forHTTPHeaderField: name)
             }
         }
@@ -449,6 +447,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             request.httpBody = Data(text.utf8)
         }
         guard fields.isEmpty else { throw BridgeFailure.invalidCall }
+        try PluginNetworkFetch.validate(request)
         return request
     }
 
@@ -487,6 +486,8 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "ui.setEnabled":
             context.setEnabled(try call.bool(1), command: try call.text(0))
         case "ui.showPanel":
+            // A command reaches only the background script, so a panel's or settings page's call never comes from the user's command.
+            guard role == .background else { break }
             context.showPanel(try call.text(0))
         case "ui.notify":
             try context.notify(title: try call.text(0), body: try call.text(1))

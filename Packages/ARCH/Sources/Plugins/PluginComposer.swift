@@ -94,11 +94,14 @@ public final class PluginComposer {
             throw PluginError.invalidPackage("plugin.json: \(key) is not offered to plugins that AI writes.")
         }
         // Nor do they reach models or hosts, with permission names or permission objects.
-        if case let .array(permissions)? = manifest["permissions"], permissions.contains(where: { permission in
-            if case let .object(fields) = permission { return fields[PluginPermission.ai.rawValue] != nil || fields[PluginPermission.network.rawValue] != nil }
-            return permission == .string(PluginPermission.ai.rawValue) || permission == .string(PluginPermission.network.rawValue)
-        }) {
-            throw PluginError.invalidPackage("plugin.json: ai and network permissions are not offered to plugins that AI writes.")
+        if case let .array(permissions)? = manifest["permissions"] {
+            for permission in permissions {
+                for name in [PluginPermission.ai.rawValue, PluginPermission.network.rawValue] {
+                    var asks = permission == .string(name)
+                    if case let .object(fields) = permission { asks = fields[name] != nil }
+                    if asks { throw PluginError.invalidPackage("plugin.json: permissions lists “\(name)”, which is not offered to plugins that AI writes.") }
+                }
+            }
         }
         manifest["id"] = .string(pluginID.rawValue)
         manifest["apiVersion"] = .number(Double(PluginManifest.apiVersion))

@@ -456,9 +456,9 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidAddress(String)
     /// The plugin has opened as many tabs within the last minute as it may, 10 (`PluginManager.tabOpenLimit`).
     case tooManyTabs
-    /// The network request names a host outside the grant or one resolving to a local address.
+    /// The network request names an address that is not HTTPS on port 443 at a granted host, or a host that does not resolve or resolves to an address that is not public.
     case hostRefused
-    /// Network fetch is unavailable until Arch can bind the checked address to the connection.
+    /// The request reached no host or lost its connection: no network, a refused connection, a certificate that is not valid for the host, or a connection that broke before the response ended.
     case networkUnavailable
     /// A redirect leaves the grant, uses another scheme, or exceeds five hops.
     case redirectRefused
@@ -498,7 +498,7 @@ extension PluginError: LocalizedError {
         case let .invalidAddress(text): return "\u{201C}\(text)\u{201D} is not the address of a web page."
         case .tooManyTabs: return "The plugin opened as many tabs within a minute as it may."
         case .hostRefused: return "The plugin may not reach this network host."
-        case .networkUnavailable: return "Plugin network requests are unavailable in this build."
+        case .networkUnavailable: return "The plugin's network request could not reach its host."
         case .redirectRefused: return "The network redirect is outside the plugin's grant."
         case .rateLimited: return "The plugin has made as many requests within a minute as it may."
         case .responseTooLarge: return "The network response is too large."
