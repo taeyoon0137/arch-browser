@@ -10,6 +10,7 @@ import Browsing
 import History
 import Hooks
 import Import
+import os
 import Plugins
 import Preferences
 import Sync
@@ -93,6 +94,22 @@ import Terminal
         }
     }
 
+    private static let launchLog = Logger(subsystem: "xyz.taeyoon.arch", category: "Launch")
+
+    private static func quit(afterSessionFailure error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Arch couldn’t start a browser engine."
+        if case BrowserSession.SessionError.noEngineStarted = error {
+            alert.informativeText = "Neither Chromium nor WebKit could start, so Arch will quit. Reinstalling Arch may fix this. The system log lists the reason under Launch."
+        } else {
+            alert.informativeText = error.localizedDescription
+        }
+        alert.addButton(withTitle: "Quit")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        NSApp.terminate(nil)
+    }
+
     private func startSession(in supportDirectory: URL) {
         // Data kept under the previous bundle identifier, then plugin data kept under the previous plugin identifiers, moves before the engines start and the preferences are read.
         BundleIdentifierMigration.runAtLaunch()
@@ -111,7 +128,11 @@ import Terminal
                                          chromiumNativeMessagingHosts: chromium?.systemNativeMessagingHosts,
                                          agentOnlyPersonaID: AgentService.recordedAgentsPersonaID(in: supportDirectory))
         } catch {
-            NSApp.terminate(nil)
+            // No engine could start, so the app cannot open a window. The reason goes to the system log and to an alert, after AppKit's launch callback, before the app quits.
+            Self.launchLog.error("The browser session could not start: \(String(describing: error), privacy: .public)")
+            isAbandoningLaunch = true
+            pendingURLs.removeAll()
+            DispatchQueue.main.async { Self.quit(afterSessionFailure: error) }
             return
         }
         self.session = session
