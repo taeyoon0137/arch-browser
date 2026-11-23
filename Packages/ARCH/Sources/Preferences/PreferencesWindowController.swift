@@ -35,9 +35,9 @@ public enum AppearanceSetting: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .system: return "System"
-        case .light: return "Light"
-        case .dark: return "Dark"
+        case .system: return localized("System")
+        case .light: return localized("Light")
+        case .dark: return localized("Dark")
         }
     }
 }
@@ -78,27 +78,27 @@ public final class PreferencesWindowController: NSWindowController {
         let sections = NSTabViewController()
         sections.tabStyle = .toolbar
         let session = Self.session
-        sections.addTabViewItem(Self.section("General", symbol: "gearshape", GeneralSection()))
+        sections.addTabViewItem(Self.section(localized("General"), symbol: "gearshape", GeneralSection()))
         if let sync = Self.syncController {
-            sections.addTabViewItem(Self.section("Sync", symbol: "icloud", SyncSection(controller: sync)))
+            sections.addTabViewItem(Self.section(localized("Sync"), symbol: "icloud", SyncSection(controller: sync)))
         }
         if let session {
-            sections.addTabViewItem(Self.section("Site Search", symbol: "magnifyingglass", SiteSearchSection(store: session.siteSearch)))
+            sections.addTabViewItem(Self.section(localized("Site Search"), symbol: "magnifyingglass", SiteSearchSection(store: session.siteSearch)))
         }
-        sections.addTabViewItem(Self.section("Sidebar", symbol: "sidebar.left", SidebarSection()))
-        sections.addTabViewItem(Self.section("Appearance", symbol: "paintpalette", AppearanceSection()))
-        sections.addTabViewItem(Self.section("Shortcuts", symbol: "keyboard", ShortcutsSection()))
+        sections.addTabViewItem(Self.section(localized("Sidebar"), symbol: "sidebar.left", SidebarSection()))
+        sections.addTabViewItem(Self.section(localized("Appearance"), symbol: "paintpalette", AppearanceSection()))
+        sections.addTabViewItem(Self.section(localized("Shortcuts"), symbol: "keyboard", ShortcutsSection()))
         if let session {
-            sections.addTabViewItem(Self.section("Websites", symbol: "globe", WebsitesSection(store: session.sitePermissions, notifications: session.notificationAuthorization, session: session)))
+            sections.addTabViewItem(Self.section(localized("Websites"), symbol: "globe", WebsitesSection(store: session.sitePermissions, notifications: session.notificationAuthorization, session: session)))
             // AI writes plugins only from Settings ▸ Plugins, so its feature joins Settings ▸ AI with the section.
             AIService.shared.register(.pluginComposer)
-            let plugins = Self.section("Plugins", symbol: "puzzlepiece.extension", PluginsSection(session: session))
+            let plugins = Self.section(localized("Plugins"), symbol: "puzzlepiece.extension", PluginsSection(session: session))
             pluginsSection = plugins
             sections.addTabViewItem(plugins)
         }
         let navigation = AISettingsView.Navigation()
         aiNavigation = navigation
-        aiSection = Self.section("AI", symbol: "sparkles", AISettingsView(agents: Self.agents, hooks: Self.hooks, navigation: navigation))
+        aiSection = Self.section(localized("AI"), symbol: "sparkles", AISettingsView(agents: Self.agents, hooks: Self.hooks, navigation: navigation))
         sections.addTabViewItem(aiSection)
         let window = NSWindow(contentViewController: sections)
         window.styleMask = [.titled, .closable]

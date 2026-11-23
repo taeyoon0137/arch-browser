@@ -240,7 +240,7 @@ private struct PluginList: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowedContentTypes = [.folder, .zip, PluginPackage.crxType]
-        panel.prompt = "Review"
+        panel.prompt = localized("Review")
         isChoosing = true
         let finish = { (response: NSApplication.ModalResponse) in
             guard response == .OK, let url = panel.url else {
@@ -367,7 +367,7 @@ private struct PluginSection: View {
                             .confirmationDialog(localized("Remove \u{201C}\(plugin.manifest.name)\u{201D}?"), isPresented: $isConfirmingRemoval) {
                                 Button(localized("Remove"), role: .destructive, action: remove)
                             } message: {
-                                Text(isPair ? "Both versions\u{2019} files, storage, and saved secrets in this Persona are deleted." : "Its files, storage, and saved secrets in this Persona are deleted.")
+                                Text(isPair ? localized("Both versions\u{2019} files, storage, and saved secrets in this Persona are deleted.") : localized("Its files, storage, and saved secrets in this Persona are deleted."))
                             }
                     }
                 }
@@ -438,7 +438,7 @@ private struct PluginSection: View {
             .onAppear { (page.controller as? PluginEndingPanel)?.onEnd = { settingsPage = nil } }
             .onDisappear { (page.controller as? PluginEndingPanel)?.onEnd = nil }
         }
-        .confirmationDialog(removingVersion.map { "Remove the \($0.pairEngine?.displayName ?? "") Version of \u{201C}\(plugin.manifest.name)\u{201D}?" } ?? "",
+        .confirmationDialog(removingVersion.map { localized("Remove the \($0.pairEngine?.displayName ?? "") Version of \u{201C}\(plugin.manifest.name)\u{201D}?") } ?? "",
                             isPresented: Binding(get: { removingVersion != nil }, set: { if !$0 { removingVersion = nil } })) {
             Button(localized("Remove Version"), role: .destructive) {
                 guard let version = removingVersion else { return }
@@ -563,8 +563,8 @@ private struct UpdateCheckRow: View {
 
     /// "Last checked at 10:42.", with the date for a check on another day, as a run can span days.
     private static func lastChecked(_ date: Date) -> String {
-        guard Calendar.current.isDateInToday(date) else { return "Last checked on \(date.formatted(date: .abbreviated, time: .shortened))." }
-        return "Last checked at \(date.formatted(date: .omitted, time: .shortened))."
+        guard Calendar.current.isDateInToday(date) else { return localized("Last checked on \(date.formatted(date: .abbreviated, time: .shortened)).") }
+        return localized("Last checked at \(date.formatted(date: .omitted, time: .shortened)).")
     }
 }
 
@@ -609,7 +609,7 @@ private struct AccessRow: View {
         } else {
             LabeledContent(localized("Access")) {
                 let summaries = plugin.accessSummaries
-                Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
+                Text(summaries.isEmpty ? localized("None") : summaries.joined(separator: "\n"))
                     .multilineTextAlignment(.trailing)
             }
         }
@@ -709,7 +709,7 @@ private struct VersionRow: View {
             Button(localized("Remove Version\u{2026}"), action: remove)
         } label: {
             Text("\(version.pairEngine?.displayName ?? "") version", bundle: .module)
-            Text(["Version \(version.manifest.version), \(origin(of: version)).", plugins.enginesNote(of: version.id)].compactMap { $0 }.joined(separator: " "))
+            Text([localized("Version \(version.manifest.version), \(origin(of: version))."), plugins.enginesNote(of: version.id)].compactMap { $0 }.joined(separator: " "))
         }
         AccessRow(plugins: plugins, plugin: version)
         // Each failure is a red row of its own. A container would take a row in the form even without a failure.
@@ -788,7 +788,7 @@ private struct JoinSheet: View {
     private func title(of plugin: InstalledPlugin) -> String {
         switch plugin.origin {
         case let .file(url): return "\(plugin.manifest.name) \(plugin.manifest.version) (\(url.lastPathComponent))"
-        case .webStore: return "\(plugin.manifest.name) \(plugin.manifest.version) (Web Store)"
+        case .webStore: return localized("\(plugin.manifest.name) \(plugin.manifest.version) (Web Store)")
         case .bundled, .generated: return plugin.manifest.name
         }
     }
@@ -796,16 +796,19 @@ private struct JoinSheet: View {
 
 /// Where the plugin came from, as its footer or row says it.
 private func origin(of plugin: InstalledPlugin) -> String {
-    let installDate = plugin.installedAt.map { " on \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+    let date = plugin.installedAt?.formatted(date: .abbreviated, time: .omitted)
     switch plugin.origin {
     case .bundled:
-        return "built into Arch"
+        return localized("built into Arch")
     case let .file(url):
-        return "installed from \(url.lastPathComponent)\(installDate)"
+        let file = url.lastPathComponent
+        return date.map { localized("installed from \(file) on \($0)") } ?? localized("installed from \(file)")
     case .webStore:
-        return "installed from the Web Store\(installDate)"
+        return date.map { localized("installed from the Web Store on \($0)") } ?? localized("installed from the Web Store")
     case let .generated(composition):
-        return "written by AI with \(composition.model)\(installDate) from \(composition.requests.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", then "))"
+        let model = composition.model
+        let requests = composition.requests.map { localized("\u{201C}\($0)\u{201D}") }.joined(separator: localized(", then "))
+        return date.map { localized("written by AI with \(model) on \($0) from \(requests)") } ?? localized("written by AI with \(model) from \(requests)")
     }
 }
 
@@ -874,7 +877,7 @@ private struct PluginSecretRow<Title: View>: View {
         let isSaved = (try? plugins.hasSecret(setting, for: plugin)) == true
         LabeledContent {
             HStack(spacing: 6) {
-                SecureField(localized("Secret"), text: $draft, prompt: Text(isSaved ? "Saved" : "Not set"))
+                SecureField(localized("Secret"), text: $draft, prompt: Text(isSaved ? localized("Saved") : localized("Not set")))
                     .labelsHidden()
                     .accessibilityLabel(localized("Secret"))
                     .frame(width: 160)
@@ -910,7 +913,7 @@ private struct PluginSecretRow<Title: View>: View {
 extension PluginKind {
     /// What Settings and the install sheet say about plugins of the kind, if anything, before where the plugin runs.
     var note: String? {
-        self == .webExtension ? "A web extension." : nil
+        self == .webExtension ? localized("A web extension.") : nil
     }
 }
 
@@ -918,9 +921,9 @@ extension InstalledPlugin {
     /// Which models a plugin with `ai` uses, for its section: those Settings ▸ AI ▸ Features gives its feature, which it needs of its own when its events run as hooks or when its feature is automatic, as the feature shared with the same plugin in another Persona that runs hooks is.
     func aiNote(isAutomatic: Bool) -> String? {
         guard grant.permissions.contains(.ai) else { return nil }
-        if runsHooks { return "Its browser events reach it, and its AI requests go out, once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own." }
-        return isAutomatic ? "Its AI requests go out once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own."
-                           : "Its AI requests use the model that Settings \u{25B8} AI \u{25B8} Features gives it, or the default model."
+        if runsHooks { return localized("Its browser events reach it, and its AI requests go out, once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own.") }
+        return isAutomatic ? localized("Its AI requests go out once Settings \u{25B8} AI \u{25B8} Features gives it a model of its own.")
+                           : localized("Its AI requests use the model that Settings \u{25B8} AI \u{25B8} Features gives it, or the default model.")
     }
 }
 

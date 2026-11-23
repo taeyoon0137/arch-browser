@@ -37,7 +37,7 @@ struct AICommandLineDraft: Identifiable {
     init() {
         id = AIProviderID()
         isNew = true
-        name = "New Tool"
+        name = localized("New Tool")
         executable = ""
         arguments = []
         environment = []
@@ -120,7 +120,7 @@ struct AICommandLineEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(draft.isNew ? "Add Command-Line Tool" : "Edit Command-Line Tool")
+            Text(draft.isNew ? localized("Add Command-Line Tool") : localized("Edit Command-Line Tool"))
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding([.horizontal, .top], 20)
@@ -132,20 +132,20 @@ struct AICommandLineEditor: View {
                     argumentsSection
                 }
                 Section {
-                    AINameValueRows(rows: $draft.environment, addTitle: "Add Variable", removeTitle: "Remove Variable")
+                    AINameValueRows(rows: $draft.environment, addTitle: localized("Add Variable"), removeTitle: localized("Remove Variable"))
                 } header: {
                     Text("Environment", bundle: .module)
                 } footer: {
                     formFootnote(draft.agent == nil
-                               ? "The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets."
-                               : "The tool runs with only HOME, USER, LOGNAME, SHELL, and PATH, with CLAUDE_CONFIG_DIR or CODEX_HOME from your login shell, LANG, TMPDIR, and TERM, Arch's settings, and these variables, which take precedence. They are saved in ai.json, so they must not hold secrets. ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, and CODEX_API_KEY are never passed, so the tool uses its own sign-in.")
+                               ? localized("The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets.")
+                               : localized("The tool runs with only HOME, USER, LOGNAME, SHELL, and PATH, with CLAUDE_CONFIG_DIR or CODEX_HOME from your login shell, LANG, TMPDIR, and TERM, Arch's settings, and these variables, which take precedence. They are saved in ai.json, so they must not hold secrets. ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY, and CODEX_API_KEY are never passed, so the tool uses its own sign-in."))
                 }
                 if draft.agent == nil {
                     outputSection
                     Section {
                         Toggle(localized("Runs without its own tools"), isOn: $draft.runsWithoutTools)
                     } footer: {
-                        formFootnote("Turn this on only if the arguments stop the tool from running commands, editing files, or using other tools of its own. Text in a page could otherwise steer the tool, so until then it gets no page, selection, file, or download data. Arch cannot check this; it only runs the tool in an empty folder with a small environment.")
+                        formFootnote(localized("Turn this on only if the arguments stop the tool from running commands, editing files, or using other tools of its own. Text in a page could otherwise steer the tool, so until then it gets no page, selection, file, or download data. Arch cannot check this; it only runs the tool in an empty folder with a small environment."))
                     }
                 }
                 Section {
@@ -166,7 +166,7 @@ struct AICommandLineEditor: View {
             .formStyle(.grouped)
             Divider()
             AIProviderEditorButtons(name: draft.name, isNew: draft.isNew, canSave: draft.configuration != nil, failure: message,
-                                    removalNote: "Features that used its models fall back to their other models. The tool and its sign-in stay on this Mac.",
+                                    removalNote: localized("Features that used its models fall back to their other models. The tool and its sign-in stay on this Mac."),
                                     remove: remove, save: save)
         }
         .frame(width: 480, height: 500)
@@ -189,7 +189,7 @@ struct AICommandLineEditor: View {
             }
             // The button keeps its width while it runs, so the field beside it stays still. Until Find fails, the line under the field is guidance, not an error.
             if isLocating {
-                AIProgressRow(text: "Looking in your login shell\u{2019}s PATH\u{2026}")
+                AIProgressRow(text: localized("Looking in your login shell\u{2019}s PATH\u{2026}"))
             } else if let locateFailure {
                 Text(locateFailure).font(.callout).foregroundStyle(.red)
             } else if !draft.executable.isEmpty, draft.executableURL == nil {
@@ -204,7 +204,7 @@ struct AICommandLineEditor: View {
         } header: {
             Text("Tool", bundle: .module)
         } footer: {
-            formFootnote("Install the tool and sign in to it in the terminal. The tool keeps its own sign-in; Arch never reads it.")
+            formFootnote(localized("Install the tool and sign in to it in the terminal. The tool keeps its own sign-in; Arch never reads it."))
         }
     }
 
@@ -220,7 +220,7 @@ struct AICommandLineEditor: View {
         if let url {
             draft.executable = url.path
         } else {
-            locateFailure = "\(name) is not in your login shell\u{2019}s PATH. Install it in the terminal, or choose the file with Choose\u{2026}."
+            locateFailure = localized("\(name) is not in your login shell\u{2019}s PATH. Install it in the terminal, or choose the file with Choose\u{2026}.")
         }
     }
 
@@ -231,7 +231,7 @@ struct AICommandLineEditor: View {
         panel.canChooseDirectories = false
         panel.showsHiddenFiles = true
         panel.directoryURL = draft.executableURL?.deletingLastPathComponent() ?? URL(fileURLWithPath: NSHomeDirectory())
-        panel.prompt = "Choose"
+        panel.prompt = localized("Choose")
         let finish = { (response: NSApplication.ModalResponse) in
             if response == .OK, let url = panel.url { draft.executable = url.path }
         }
@@ -247,7 +247,7 @@ struct AICommandLineEditor: View {
     /// The version and sign-in from the tool's own status commands, read again when the executable changes.
     @ViewBuilder private func statusSection(_ agent: AIAgentKind) -> some View {
         Section {
-            LabeledContent(localized("Version"), value: status?.version ?? (statusError == nil && draft.executableURL != nil ? "Checking\u{2026}" : "\u{2014}"))
+            LabeledContent(localized("Version"), value: status?.version ?? (statusError == nil && draft.executableURL != nil ? localized("Checking\u{2026}") : "\u{2014}"))
             LabeledContent(localized("Sign-in"), value: signInText)
             if let statusError {
                 Text(statusError).font(.callout).foregroundStyle(.red)
@@ -263,24 +263,24 @@ struct AICommandLineEditor: View {
         } header: {
             Text("Status", bundle: .module)
         } footer: {
-            formFootnote("Arch reads the version and the sign-in from \(agent.title)'s own status commands and never reads its credentials. Arch builds every argument: the tool's own tools, settings, hooks, plugins, and other servers stay off, so its ordinary requests may get page data, and agent sessions get only Arch's tools. Sign In types the tool's sign-in command in the terminal; press Return there to run it.")
+            formFootnote(localized("Arch reads the version and the sign-in from \(agent.title)'s own status commands and never reads its credentials. Arch builds every argument: the tool's own tools, settings, hooks, plugins, and other servers stay off, so its ordinary requests may get page data, and agent sessions get only Arch's tools. Sign In types the tool's sign-in command in the terminal; press Return there to run it."))
         }
         .task(id: draft.executableURL) { await loadStatus() }
     }
 
     private var signInText: String {
         switch status?.isSignedIn {
-        case true?: return "Signed In"
-        case false?: return "Not Signed In"
-        case nil: return status == nil ? "\u{2014}" : "Unknown"
+        case true?: return localized("Signed In")
+        case false?: return localized("Not Signed In")
+        case nil: return status == nil ? "\u{2014}" : localized("Unknown")
         }
     }
 
     private var modelsNote: String {
         switch draft.agent {
-        case .claudeCode?: return "Name models as Claude Code accepts them, such as sonnet or opus, or keep the default model, the tool's own choice."
-        case .codex?: return "Name models by their Codex names, or keep the default model, the tool's own choice."
-        case nil: return "The default model leaves out the arguments that name a model, so the tool uses its own choice."
+        case .claudeCode?: return localized("Name models as Claude Code accepts them, such as sonnet or opus, or keep the default model, the tool's own choice.")
+        case .codex?: return localized("Name models by their Codex names, or keep the default model, the tool's own choice.")
+        case nil: return localized("The default model leaves out the arguments that name a model, so the tool uses its own choice.")
         }
     }
 
@@ -347,7 +347,7 @@ struct AICommandLineEditor: View {
         } header: {
             Text("Arguments", bundle: .module)
         } footer: {
-            formFootnote("Each row is one argument. \(AICommandLineConfiguration.modelPlaceholder) becomes the model\u{2019}s name, and an argument that contains it is left out for the default model, so write an option and its model as one argument, such as --model=\(AICommandLineConfiguration.modelPlaceholder). The prompt goes to the tool\u{2019}s standard input, never into its arguments.")
+            formFootnote(localized("Each row is one argument. \(AICommandLineConfiguration.modelPlaceholder) becomes the model\u{2019}s name, and an argument that contains it is left out for the default model, so write an option and its model as one argument, such as --model=\(AICommandLineConfiguration.modelPlaceholder). The prompt goes to the tool\u{2019}s standard input, never into its arguments."))
         }
     }
 
@@ -358,18 +358,18 @@ struct AICommandLineEditor: View {
                 Text("JSON Lines", bundle: .module).tag(AICommandLineDraft.OutputFormat.jsonLines)
             }
             if draft.outputFormat == .jsonLines {
-                TextField(localized("Text delta"), text: pathBinding(\.textDelta), prompt: Text("delta.text", bundle: .module))
-                TextField(localized("Final text"), text: pathBinding(\.finalText), prompt: Text("result", bundle: .module))
-                TextField(localized("Input tokens"), text: pathBinding(\.inputTokens), prompt: Text("usage.input_tokens", bundle: .module))
-                TextField(localized("Output tokens"), text: pathBinding(\.outputTokens), prompt: Text("usage.output_tokens", bundle: .module))
-                TextField(localized("Error"), text: pathBinding(\.error), prompt: Text("error.message", bundle: .module))
+                TextField(localized("Text delta"), text: pathBinding(\.textDelta), prompt: Text(verbatim: "delta.text"))
+                TextField(localized("Final text"), text: pathBinding(\.finalText), prompt: Text(verbatim: "result"))
+                TextField(localized("Input tokens"), text: pathBinding(\.inputTokens), prompt: Text(verbatim: "usage.input_tokens"))
+                TextField(localized("Output tokens"), text: pathBinding(\.outputTokens), prompt: Text(verbatim: "usage.output_tokens"))
+                TextField(localized("Error"), text: pathBinding(\.error), prompt: Text(verbatim: "error.message"))
             }
         } header: {
             Text("Output", bundle: .module)
         } footer: {
             formFootnote(draft.outputFormat == .text
-                         ? "The tool\u{2019}s standard output is the reply."
-                         : "Each line is a JSON object. Enter the dotted path of each field the tool prints; a number picks an array element. Lines that are not JSON are skipped, and the final text is used when no delta arrives.")
+                         ? localized("The tool\u{2019}s standard output is the reply.")
+                         : localized("Each line is a JSON object. Enter the dotted path of each field the tool prints; a number picks an array element. Lines that are not JSON are skipped, and the final text is used when no delta arrives."))
         }
     }
 
@@ -398,8 +398,8 @@ struct AICommandLineEditor: View {
             }
         } footer: {
             formFootnote(draft.agent == nil
-                       ? "Check sends a short request to the first model and shows the reply or the error."
-                       : "Check runs the tool's status command and Arch's checks of the flags, features, and settings it passes, never a model, so it uses none of your subscription.")
+                       ? localized("Check sends a short request to the first model and shows the reply or the error.")
+                       : localized("Check runs the tool's status command and Arch's checks of the flags, features, and settings it passes, never a model, so it uses none of your subscription."))
         }
     }
 

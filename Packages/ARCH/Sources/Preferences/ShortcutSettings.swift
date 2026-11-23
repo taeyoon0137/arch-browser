@@ -29,7 +29,7 @@ public final class ShortcutSettings: ObservableObject {
     public static let shared = ShortcutSettings()
     static let defaultsKey = "ARCHShortcuts"
     /// Brings Arch forward and opens the new tab palette from any app.
-    static let globalCommand = ShortcutCommand(id: "newTabFromAnyApp", menu: "", title: "New Tab from Any App", defaultShortcut: KeyShortcut(key: " ", modifiers: .option, keyCode: 49), item: nil)
+    static let globalCommand = ShortcutCommand(id: "newTabFromAnyApp", menu: "", title: localized("New Tab from Any App"), defaultShortcut: KeyShortcut(key: " ", modifiers: .option, keyCode: 49), item: nil)
 
     /// Runs when the global shortcut is pressed.
     public var onGlobalShortcut: () -> Void = {}
@@ -193,9 +193,9 @@ public final class ShortcutSettings: ObservableObject {
         guard let shortcut = self.shortcut(for: Self.globalCommand), let keyCode = shortcut.keyCode else { return }
         let status = hotKey.register(keyCode: keyCode, modifiers: shortcut.modifiers)
         if status == GlobalHotKey.inUseStatus {
-            globalShortcutError = "Another app uses this shortcut."
+            globalShortcutError = localized("Another app uses this shortcut.")
         } else if status != noErr {
-            globalShortcutError = "macOS did not accept this shortcut (error \(status))."
+            globalShortcutError = localized("macOS did not accept this shortcut (error \(status)).")
         }
     }
 }

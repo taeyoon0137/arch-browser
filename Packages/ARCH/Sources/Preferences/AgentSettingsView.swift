@@ -50,7 +50,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Outside Clients", bundle: .module)
         } footer: {
-            formFootnote("Programs you run, such as Claude Code or Codex in a terminal, can then ask to use Arch through arch-cli and arch-mcp, which come with Arch. The first time each program asks, Arch shows which program it is and lets you choose its Persona, space, and access; the Agents Persona, with no sign-ins, and Read Only come first. Pages a program reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that. Programs that run as you can still start arch-cli, so Arch's checks make misuse harder but are not a wall against your own account.")
+            formFootnote(localized("Programs you run, such as Claude Code or Codex in a terminal, can then ask to use Arch through arch-cli and arch-mcp, which come with Arch. The first time each program asks, Arch shows which program it is and lets you choose its Persona, space, and access; the Agents Persona, with no sign-ins, and Read Only come first. Pages a program reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that. Programs that run as you can still start arch-cli, so Arch's checks make misuse harder but are not a wall against your own account."))
         }
         AgentCommandLineToolsSection()
         AgentSkillsSection()
@@ -70,7 +70,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Agent Sessions", bundle: .module)
         } footer: {
-            formFootnote("A session you start begins in this mode. You can lower it at any time; raising it asks first. Sessions a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; a delete that fails or that quitting cuts off leaves the copy. Claude Code keeps none of Arch\u{2019}s sessions.")
+            formFootnote(localized("A session you start begins in this mode. You can lower it at any time; raising it asks first. Sessions a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; a delete that fails or that quitting cuts off leaves the copy. Claude Code keeps none of Arch\u{2019}s sessions."))
         }
         .disabled(!service.canChangeSettings)
     }
@@ -78,9 +78,9 @@ struct AgentSettingsPage: View {
     private var settingsNotice: String? {
         switch service.state {
         case .ready: return nil
-        case .reading: return "Checking agent.json\u{2026}"
-        case .replacedUnreadable: return "agent.json could not be verified, so Arch renamed it agent.json.unreadable and started with outside access off and no grants."
-        case .keyUnavailable(let reason): return "Arch could not read the key that protects its agent settings from the Keychain: \(reason) Until it can, outside access is off, no grant is used, new sessions start in Read Only, and Codex keeps its copy of agent conversations."
+        case .reading: return localized("Checking agent.json\u{2026}")
+        case .replacedUnreadable: return localized("agent.json could not be verified, so Arch renamed it agent.json.unreadable and started with outside access off and no grants.")
+        case .keyUnavailable(let reason): return localized("Arch could not read the key that protects its agent settings from the Keychain: \(reason) Until it can, outside access is off, no grant is used, new sessions start in Read Only, and Codex keeps its copy of agent conversations.")
         }
     }
 
@@ -133,7 +133,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Grants", bundle: .module)
         } footer: {
-            formFootnote("Revoking ends a program's access at once: its connections close, and its next command asks again.")
+            formFootnote(localized("Revoking ends a program's access at once: its connections close, and its next command asks again."))
         }
     }
 
@@ -157,20 +157,20 @@ struct AgentSettingsPage: View {
     }
 
     private func details(of grant: AgentGrant) -> String {
-        let persona = service.host.personas.first { $0.id == grant.personaID }?.name ?? "Deleted Persona"
+        let persona = service.host.personas.first { $0.id == grant.personaID }?.name ?? localized("Deleted Persona")
         let spaces = service.host.spaces(in: grant.personaID)
         let space = (spaces.first { $0.id == grant.spaceID } ?? spaces.first)?.name
         // A Persona's place reads as "Persona / Space".
         var parts = [grant.level.title, space.map { "\(persona) / \($0)" } ?? persona]
-        if grant.scopes.searchHistory { parts.append("searches history") }
-        if grant.scopes.startTasks { parts.append("starts agent tasks") }
-        if grant.scopes.watchEvents { parts.append("watches browser events") }
+        if grant.scopes.searchHistory { parts.append(localized("searches history")) }
+        if grant.scopes.startTasks { parts.append(localized("starts agent tasks")) }
+        if grant.scopes.watchEvents { parts.append(localized("watches browser events")) }
         switch grant.expiry {
-        case .whenArchQuits: parts.append("until Arch quits")
-        case .whenRevoked: parts.append("until revoked")
-        case .at(let date): parts.append("until \(date.formatted(date: .abbreviated, time: .shortened))")
+        case .whenArchQuits: parts.append(localized("until Arch quits"))
+        case .whenRevoked: parts.append(localized("until revoked"))
+        case .at(let date): parts.append(localized("until \(date.formatted(date: .abbreviated, time: .shortened))"))
         }
-        parts.append(grant.lastUsedAt.map { "last used \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "not used yet")
+        parts.append(grant.lastUsedAt.map { localized("last used \($0.formatted(date: .abbreviated, time: .shortened))") } ?? localized("not used yet"))
         return parts.joined(separator: " \u{00B7} ")
     }
 
@@ -216,7 +216,7 @@ struct AgentSettingsPage: View {
         } header: {
             Text("Activity", bundle: .module)
         } footer: {
-            formFootnote("Arch keeps \(AgentActivityLog.keptDays) days of what agents did and what you decided, without page text, typed text, addresses' paths, or screenshots.")
+            formFootnote(localized("Arch keeps \(AgentActivityLog.keptDays) days of what agents did and what you decided, without page text, typed text, addresses' paths, or screenshots."))
         }
     }
 
@@ -242,21 +242,21 @@ struct AgentSettingsPage: View {
     private static func summary(of entry: AgentActivityEntry) -> String {
         switch entry.event {
         case .toolCall:
-            var parts = [entry.tool ?? "unknown tool"]
+            var parts = [entry.tool ?? localized("unknown tool")]
             if let site = entry.site { parts.append(site) }
-            if let rule = entry.rule { parts.append("refused by \(rule)") } else if let outcome = entry.outcome { parts.append(outcome) }
+            if let rule = entry.rule { parts.append(localized("refused by \(rule)")) } else if let outcome = entry.outcome { parts.append(outcome) }
             return parts.joined(separator: " \u{00B7} ")
-        case .granted: return entry.decision == .approvedWithTouchID ? "Allowed with Touch ID or password" : "Allowed"
-        case .firstUse: return "First use since Arch started"
-        case .revoked: return "Revoked"
-        case .released: return "Gave up its access"
-        case .expired: return "Access expired"
-        case .declined: return "Not allowed"
-        case .refusedPeer: return "Connection refused: \(entry.outcome ?? "")"
+        case .granted: return entry.decision == .approvedWithTouchID ? localized("Allowed with Touch ID or password") : localized("Allowed")
+        case .firstUse: return localized("First use since Arch started")
+        case .revoked: return localized("Revoked")
+        case .released: return localized("Gave up its access")
+        case .expired: return localized("Access expired")
+        case .declined: return localized("Not allowed")
+        case .refusedPeer: return localized("Connection refused: \(entry.outcome ?? "")")
         case .agentRun:
-            var parts = ["Agent run"]
+            var parts = [localized("Agent run")]
             if let model = entry.model { parts.append(model) }
-            if let rule = entry.rule { parts.append("refused: \(rule)") } else if let outcome = entry.outcome { parts.append(outcome) }
+            if let rule = entry.rule { parts.append(localized("refused: \(rule)")) } else if let outcome = entry.outcome { parts.append(outcome) }
             return parts.joined(separator: " \u{00B7} ")
         }
     }
@@ -285,7 +285,7 @@ struct AgentCommandLineTools {
         bundle.bundleURL.pathComponents.contains("AppTranslocation")
     }
 
-    static let translocatedSentence = "macOS runs this copy of Arch from a temporary folder that changes at each launch, so Arch gives its path to no other tool. Move Arch to the Applications folder in Finder, then open it again."
+    static var translocatedSentence: String { localized("macOS runs this copy of Arch from a temporary folder that changes at each launch, so Arch gives its path to no other tool. Move Arch to the Applications folder in Finder, then open it again.") }
 
     /// Both links in the folder that `AgentLinkInstaller` picks from PATH, `~/.local/bin` first.
     func plannedLinks() throws -> [AgentLinkInstaller.Link] {
@@ -319,7 +319,7 @@ struct AgentCommandLineTools {
     /// What the confirmation shows before anything is written: where the tools are, and each link with the file it will point to.
     static func confirmation(for links: [AgentLinkInstaller.Link], bundle: AgentBundleLayout) -> String {
         let folder = links.first?.location.deletingLastPathComponent().path ?? ""
-        return (["arch-cli and arch-mcp are in \(bundle.helpersURL.path). Arch links them into \(folder):"] + links.map(line)).joined(separator: "\n")
+        return ([localized("arch-cli and arch-mcp are in \(bundle.helpersURL.path). Arch links them into \(folder):")] + links.map(line)).joined(separator: "\n")
     }
 
     static func line(_ link: AgentLinkInstaller.Link) -> String {
@@ -330,22 +330,25 @@ struct AgentCommandLineTools {
     func installedSentence(for links: [AgentLinkInstaller.Link]) -> String {
         let folder = links.first?.location.deletingLastPathComponent().path ?? ""
         let shadows = links.compactMap(installer.shadow(of:)).map { shadow in
-            "\(shadow.file.path) comes first on your PATH and runs instead" + (shadow.isRemovable ? "; Remove, then Install again, to replace it." : ".")
+            shadow.isRemovable
+                ? localized("\(shadow.file.path) comes first on your PATH and runs instead; Remove, then Install again, to replace it.")
+                : localized("\(shadow.file.path) comes first on your PATH and runs instead.")
         }
-        return (["Linked arch-cli and arch-mcp into \(folder)."] + shadows).joined(separator: " ")
+        return ([localized("Linked arch-cli and arch-mcp into \(folder).")] + shadows).joined(separator: " ")
     }
 
     /// The installer's sentence. With no writable folder, Settings has no `--dir`, so the sentence names the bundle's `arch-cli links install --dir`; and Arch reads the login shell's PATH once per launch, so a folder added to PATH counts only after Arch is opened again.
     static func sentence(for failure: AgentLinkInstaller.Failure, bundle: AgentBundleLayout) -> String {
         guard failure == .noFolder else { return failure.message }
         let command = AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "links", "install", "--dir"]) + " <folder>"
-        return AgentLinkInstaller.Failure.noFolderMessage(orElse: "run \(command) in a terminal") + " Arch reads PATH from your login shell once per launch, so quit and reopen Arch after changing it."
+        return AgentLinkInstaller.Failure.noFolderMessage(orElse: localized("run \(command) in a terminal")) + localized(" Arch reads PATH from your login shell once per launch, so quit and reopen Arch after changing it.")
     }
 
     /// What the section says when it cannot read the login shell's PATH, and so cannot tell which links are there: the bundle's commands that link and unlink with a terminal's PATH.
     static func unreadPathSentence(bundle: AgentBundleLayout) -> String {
         let command = { (action: String) in AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "links", action]) }
-        return "Arch could not read PATH from your login shell. In a terminal, \(command("install")) links the tools with that shell's PATH, and \(command("remove")) removes Arch's links."
+        let install = command("install"), remove = command("remove")
+        return localized("Arch could not read PATH from your login shell. In a terminal, \(install) links the tools with that shell's PATH, and \(remove) removes Arch's links.")
     }
 }
 
@@ -392,7 +395,7 @@ struct AgentCommandLineToolsSection: View {
         } header: {
             Text("Command-Line Tools", bundle: .module)
         } footer: {
-            formFootnote("Install links both tools into a folder on your PATH inside your home folder, ~/.local/bin first, so that terminals and agents run them by name; Arch replaces and removes only links into Arch. Arch never edits Claude Code's or Codex's settings: run the Claude Code command in a terminal, or add the table to Codex's config.toml. Either reaches Arch only while Allow Outside Clients is on.")
+            formFootnote(localized("Install links both tools into a folder on your PATH inside your home folder, ~/.local/bin first, so that terminals and agents run them by name; Arch replaces and removes only links into Arch. Arch never edits Claude Code's or Codex's settings: run the Claude Code command in a terminal, or add the table to Codex's config.toml. Either reaches Arch only while Allow Outside Clients is on."))
         }
     }
 
@@ -445,7 +448,7 @@ struct AgentCommandLineToolsSection: View {
         isReadingPath = true
         defer { isReadingPath = false }
         guard let home = AgentLinkInstaller.userHomeFolder else {
-            problem = "Arch could not read your home folder."
+            problem = localized("Arch could not read your home folder.")
             return
         }
         guard let searchPath = await AILoginShell.path() else {
@@ -489,7 +492,7 @@ struct AgentCommandLineToolsSection: View {
         problem = nil
         do {
             let removed = try tools.removeLinks()
-            outcome = removed.isEmpty ? "No links to Arch's tools were found." : "Removed \(removed.map(\.path).formatted(.list(type: .and)))."
+            outcome = removed.isEmpty ? localized("No links to Arch's tools were found.") : localized("Removed \(removed.map(\.path).formatted(.list(type: .and))).")
         } catch {
             problem = sentence(for: error)
         }
@@ -550,7 +553,7 @@ struct AgentSkillPlaces {
         return rows
     }
 
-    static let codexHomeCopySentence = "Not installed here. Codex reads the skill under CODEX_HOME, and would list a second copy here twice."
+    static var codexHomeCopySentence: String { localized("Not installed here. Codex reads the skill under CODEX_HOME, and would list a second copy here twice.") }
 
     /// A tool's row with the buttons its state offers; Settings writes nothing under `CODEX_HOME`, and nothing that names a translocated bundle.
     private func row(for target: AgentSkillInstaller.Target) -> Row {
@@ -576,9 +579,9 @@ struct AgentSkillPlaces {
 
         var buttonTitle: String {
             switch self {
-            case .install: return "Install\u{2026}"
-            case .update: return "Update\u{2026}"
-            case .remove: return "Remove"
+            case .install: return localized("Install\u{2026}")
+            case .update: return localized("Update\u{2026}")
+            case .remove: return localized("Remove")
             }
         }
     }
@@ -604,19 +607,19 @@ struct AgentSkillPlaces {
 
     static func sentence(for state: AgentSkillInstaller.State) -> String {
         switch state {
-        case .absent: return "Not installed."
-        case .current: return "Installed, with this Arch's text."
-        case .outdated: return "Installed, but older than this Arch or written by a copy of Arch elsewhere."
-        case .modified: return "Arch's copy with changes made after Arch wrote it, which Arch leaves alone."
-        case .foreign: return "A folder that Arch did not write, which Arch leaves alone."
+        case .absent: return localized("Not installed.")
+        case .current: return localized("Installed, with this Arch's text.")
+        case .outdated: return localized("Installed, but older than this Arch or written by a copy of Arch elsewhere.")
+        case .modified: return localized("Arch's copy with changes made after Arch wrote it, which Arch leaves alone.")
+        case .foreign: return localized("A folder that Arch did not write, which Arch leaves alone.")
         }
     }
 
     /// What the confirmation shows before Install or Update writes: the file, and the `arch-cli` that the skill names.
     func confirmation(for action: Action, at destination: AgentSkillInstaller.Destination) -> String {
         switch action {
-        case .update: return "Arch replaces its copy at \(destination.file.path) with this Arch's skill, which names \(cliPath)."
-        case .install, .remove: return "Arch writes its skill to \(destination.file.path), a copy that names \(cliPath)."
+        case .update: return localized("Arch replaces its copy at \(destination.file.path) with this Arch's skill, which names \(cliPath).")
+        case .install, .remove: return localized("Arch writes its skill to \(destination.file.path), a copy that names \(cliPath).")
         }
     }
 
@@ -631,20 +634,20 @@ struct AgentSkillPlaces {
     }
 
     static func installedSentence(at destination: AgentSkillInstaller.Destination, for target: AgentSkillInstaller.Target) -> String {
-        "Wrote \(destination.file.path). New \(target.title) sessions read it."
+        localized("Wrote \(destination.file.path). New \(target.title) sessions read it.")
     }
 
     static func removedSentence(at destination: AgentSkillInstaller.Destination, removed: Bool) -> String {
-        removed ? "Removed \(destination.folder.path)." : "No skill of Arch's is at \(destination.folder.path)."
+        removed ? localized("Removed \(destination.folder.path).") : localized("No skill of Arch's is at \(destination.folder.path).")
     }
 
     /// The installer's sentence as Settings says it: Arch, not arch-cli, leaves the folder alone.
     static func sentence(for error: Error) -> String {
         guard let failure = error as? AgentSkillInstaller.Failure else { return error.localizedDescription }
         switch failure {
-        case .insideAppBundle(let path): return "\(path) is inside an app bundle, whose signature covers its files, so Arch leaves it alone."
-        case .foreignFolder(let path): return "\(path) holds files that Arch did not write, so Arch leaves it alone."
-        case .modifiedSkill(let path): return "\(path) holds Arch's skill with changes made after Arch wrote it, so Arch leaves it alone."
+        case .insideAppBundle(let path): return localized("\(path) is inside an app bundle, whose signature covers its files, so Arch leaves it alone.")
+        case .foreignFolder(let path): return localized("\(path) holds files that Arch did not write, so Arch leaves it alone.")
+        case .modifiedSkill(let path): return localized("\(path) holds Arch's skill with changes made after Arch wrote it, so Arch leaves it alone.")
         case .notAbsolute, .notAFolder, .system: return failure.message
         }
     }
@@ -652,7 +655,8 @@ struct AgentSkillPlaces {
     /// What the section says when it cannot read the login shell's environment, and so cannot tell where the tools read skills: the bundle's commands that write and remove the skill with a terminal's environment.
     static func unreadEnvironmentSentence(bundle: AgentBundleLayout) -> String {
         let command = { (action: String) in AgentMCPConfiguration.shellCommand([bundle.cliExecutableURL.path, "skills", action, "--target", "claude", "--target", "codex"]) }
-        return "Arch could not read your login shell's environment, which tells where Claude Code and Codex read skills. In a terminal, \(command("install")) writes the skill, and \(command("remove")) removes Arch's copies."
+        let install = command("install"), remove = command("remove")
+        return localized("Arch could not read your login shell's environment, which tells where Claude Code and Codex read skills. In a terminal, \(install) writes the skill, and \(remove) removes Arch's copies.")
     }
 }
 
@@ -683,8 +687,8 @@ struct AgentSkillsSection: View {
                     AgentPathText(bundle.cliExecutableURL.path)
                 }
                 .task { await read() }
-                .alert(pendingWrite.map { "\($0.action == .update ? "Update" : "Install") the Skill for \($0.target.title)?" } ?? "", isPresented: $isConfirmingWrite, presenting: pendingWrite) { pending in
-                    Button(pending.action == .update ? "Update" : "Install") { write(pending) }
+                .alert(pendingWrite.map { $0.action == .update ? localized("Update the Skill for \($0.target.title)?") : localized("Install the Skill for \($0.target.title)?") } ?? "", isPresented: $isConfirmingWrite, presenting: pendingWrite) { pending in
+                    Button(pending.action == .update ? localized("Update") : localized("Install")) { write(pending) }
                     Button(localized("Cancel"), role: .cancel) {}
                 } message: { pending in
                     Text(places?.confirmation(for: pending.action, at: pending.destination) ?? "")
@@ -709,7 +713,7 @@ struct AgentSkillsSection: View {
         } header: {
             Text("Skills", bundle: .module)
         } footer: {
-            formFootnote("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills, and not while a skill of that name is under CODEX_HOME.")
+            formFootnote(localized("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills, and not while a skill of that name is under CODEX_HOME."))
         }
     }
 
@@ -719,7 +723,7 @@ struct AgentSkillsSection: View {
         problem = nil
         defer { isReading = false }
         guard let home = AgentLinkInstaller.userHomeFolder else {
-            problem = "Arch could not read your home folder."
+            problem = localized("Arch could not read your home folder.")
             return
         }
         guard let environment = await AILoginShell.environment() else {

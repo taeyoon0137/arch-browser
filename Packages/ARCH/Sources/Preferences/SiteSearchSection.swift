@@ -63,14 +63,14 @@ private struct SiteSearchEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(isNew ? "Add Site Search Shortcut" : "Edit Site Search Shortcut")
+            Text(isNew ? localized("Add Site Search Shortcut") : localized("Edit Site Search Shortcut"))
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding([.horizontal, .top], 20)
             Form {
                 Section {
                     TextField(localized("Name"), text: $shortcut.name, prompt: Text("Example", bundle: .module))
-                    TextField(localized("Keyword"), text: $shortcut.keyword, prompt: Text("ex", bundle: .module))
+                    TextField(localized("Keyword"), text: $shortcut.keyword, prompt: Text(verbatim: "ex"))
                     if store.isKeywordInUse(shortcut.keyword, except: shortcut.id) {
                         Text("Another shortcut uses this keyword.", bundle: .module).font(.callout).foregroundStyle(.red)
                     }
@@ -92,7 +92,7 @@ private struct SiteSearchEditor: View {
                 Spacer()
                 Button(localized("Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(isNew ? "Add" : "Save") {
+                Button(isNew ? localized("Add") : localized("Save")) {
                     store.save(shortcut)
                     dismiss()
                 }

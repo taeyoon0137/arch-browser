@@ -119,7 +119,9 @@ struct WebsitesSection: View {
     }
 
     private var footer: some View {
-        formFootnote("Arch remembers your answer\(hasSeveralPersonas ? " in every Persona" : "") when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs.")
+        formFootnote(hasSeveralPersonas
+            ? localized("Arch remembers your answer in every Persona when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs.")
+            : localized("Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs."))
     }
 
     /// The origin's permission types in the order of their titles.
@@ -135,13 +137,13 @@ struct WebsitesSection: View {
 
     private static func permissionTitle(for type: EnginePermissionType) -> String {
         switch type {
-        case .camera: return "Camera"
-        case .microphone: return "Microphone"
-        case .screenCapture: return "Screen recording"
-        case .geolocation: return "Location"
-        case .notifications: return "Notifications"
-        case .clipboard: return "Clipboard"
-        case .midi: return "MIDI devices"
+        case .camera: return localized("Camera")
+        case .microphone: return localized("Microphone")
+        case .screenCapture: return localized("Screen recording")
+        case .geolocation: return localized("Location")
+        case .notifications: return localized("Notifications")
+        case .clipboard: return localized("Clipboard")
+        case .midi: return localized("MIDI devices")
         }
     }
 }
