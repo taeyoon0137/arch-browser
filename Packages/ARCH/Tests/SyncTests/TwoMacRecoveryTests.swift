@@ -9,7 +9,7 @@ import Testing
 @MainActor @Suite struct TwoMacRecoveryTests {
     /// Two independent controllers share only this zone's records and change history.
     /// The token belongs to each fake engine. An absent token requests the complete zone.
-    @MainActor private final class Zone {
+    @MainActor final class Zone {
         let database = SyncDatabase(containerIdentifier: "fixture.two-macs", environment: "Test")
         var records: [String: CKRecord] = [:]
         var pages: [SyncFetchedChanges] = []
@@ -29,7 +29,7 @@ import Testing
     }
 
     /// This test never opens a page. Restored pins remain unloaded and use about: addresses.
-    private final class NoPages: Engine, EngineApplication, EngineBrowserContext, EngineBrowser {
+    final class NoPages: Engine, EngineApplication, EngineBrowserContext, EngineBrowser {
         let kind: EngineKind = .webKit
         var engineKind: EngineKind { kind }
         let capabilities: Set<EngineCapability> = []
@@ -59,7 +59,7 @@ import Testing
         func removeSiteData(for origins: [URL], completion: @escaping () -> Void) { completion() }
     }
 
-    @MainActor private final class Mac {
+    @MainActor final class Mac {
         let name = UUID().uuidString
         let directory: URL
         private let addresses = InMemoryLiveFolderKeychain()
