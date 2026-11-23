@@ -12,6 +12,19 @@ import UserNotifications
 /// A view and every view inside it.
 @MainActor private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
+/// Whether a view has a size and lies whole inside `root` and inside every scroll view's visible part around it.
+@MainActor private func isFullyShown(_ view: NSView, in root: NSView) -> Bool {
+    guard !view.bounds.isEmpty else { return false }
+    let frame = view.convert(view.bounds, to: root).insetBy(dx: 0.5, dy: 0.5)
+    guard root.bounds.contains(frame) else { return false }
+    var ancestor = view.superview
+    while let current = ancestor, current !== root {
+        if let clip = current as? NSClipView, !clip.convert(clip.bounds, to: root).contains(frame) { return false }
+        ancestor = current.superview
+    }
+    return true
+}
+
 /// Panel actions that do nothing.
 @MainActor private func noActions() -> AgentPanelActions {
     AgentPanelActions(formatReply: { AttributedString($0) }, openLink: { _ in }, showTab: { _ in }, openAISettings: {}, signIn: { _ in })
@@ -106,19 +119,65 @@ import UserNotifications
         window.setContentSize(NSSize(width: 360, height: 430))
         host.view.layoutSubtreeIfNeeded()
 
+        // The long transcript opens at its newest item.
         let scroll = try #require(descendants(host.view).compactMap { $0 as? NSScrollView }.first { scroll in
             (scroll.documentView?.bounds.height ?? 0) > scroll.contentSize.height * 2
         })
         let document = try #require(scroll.documentView)
         try await waitUntil {
             let visible = scroll.documentVisibleRect
-            if hasQuestions {
-                guard let firstAnswer = descendants(document).compactMap({ $0 as? NSTextField }).first(where: { $0.stringValue == "Draft 1" }) else { return false }
-                return visible.contains(firstAnswer.convert(firstAnswer.bounds, to: document))
-            }
             let bottomGap = document.isFlipped ? document.bounds.maxY - visible.maxY : visible.minY - document.bounds.minY
             return bottomGap < 32
         }
+        if hasQuestions {
+            // The oldest question is pinned above the message field, whole and with its buttons; the later ones wait their turn.
+            let fields = { descendants(host.view).compactMap { $0 as? NSTextField } }
+            try await waitUntil { fields().contains { $0.stringValue == "Draft 1" } }
+            let firstAnswer = try #require(fields().first { $0.stringValue == "Draft 1" })
+            #expect(isFullyShown(firstAnswer, in: host.view))
+            #expect(!fields().contains { $0.stringValue == "Draft 2" })
+            let buttons = descendants(host.view).compactMap { $0 as? NSButton }.filter { ["Cancel", "Answer"].contains($0.title) }
+            #expect(buttons.count == 2 && buttons.allSatisfy { isFullyShown($0, in: host.view) })
+        }
+        #expect(!window.isVisible)
+        await service.deleteSession(session.id)
+    }
+
+    /// A tall card scrolls its facts and keeps Allow and Deny in view; a short card takes only its own height.
+    @Test(arguments: [false, true]) func aWaitingCardKeepsItsButtonsInViewAndTakesOnlyItsHeight(isTall: Bool) async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        let (session, runner) = try start(service, harness)
+        for line in 1...32 { runner.emit(.notice("Step \(line)")) }
+        try await waitUntil { session.items.last?.kind == .notice("Step 32") }
+        let capture = NSImage(size: NSSize(width: 1200, height: 1600), flipped: false) { rect in
+            NSColor.gray.setFill()
+            rect.fill()
+            return true
+        }
+        let long = String(repeating: "The agent explains this step at length. ", count: 30)
+        let now = Date()
+        let card = AgentApproval(ownerID: session.id, clientName: "Fixture", isOutsideClient: false, kind: .step, isSensitive: false,
+                                 offers: [.allowOnce, .deny], action: "Click \u{201C}Send\u{201D} on shop.example",
+                                 exactText: isTall ? long : nil, agentSays: isTall ? long : nil, capture: isTall ? capture : nil,
+                                 createdAt: now, deadline: now.addingTimeInterval(600))
+        service.approvals.open(card) { _ in }
+
+        let host = NSHostingController(rootView: AgentSessionPanel(service: service, session: session, actions: noActions()))
+        let window = NSWindow(contentViewController: host)
+        window.setContentSize(NSSize(width: 360, height: 430))
+        host.view.layoutSubtreeIfNeeded()
+
+        let buttons = { descendants(host.view).compactMap { $0 as? NSButton }.filter { ["Allow Once", "Deny"].contains($0.title) } }
+        try await waitUntil { buttons().count == 2 }
+        for button in buttons() {
+            #expect(isFullyShown(button, in: host.view))
+            #expect(host.view.bounds.contains(button.convert(button.bounds, to: host.view)))
+        }
+        // The transcript keeps the room the card does not need.
+        let transcript = try #require(descendants(host.view).compactMap { $0 as? NSScrollView }.first { ($0.documentView?.bounds.height ?? 0) > 400 })
+        #expect(transcript.contentSize.height > (isTall ? 30 : 150))
         #expect(!window.isVisible)
         await service.deleteSession(session.id)
     }
@@ -216,8 +275,10 @@ import UserNotifications
         runner.emit(.text("Another page I mention: t8 https://model.example/invented."))
         runner.emit(.turnFinished(.completed))
         try await waitUntil { session.state == .done }
-        let list = try #require(session.items.last).pagesRead
+        let list = try #require(session.latestTurnPagesRead)
         try #require(list.map(\.handle) == ["t1", "t2"])
+        // The sources sit under the turn's reply, not repeated under its footer.
+        #expect(session.items.last?.pagesRead == [])
         #expect(list.compactMap { service.currentReadPage($0, in: session)?.id } == [one.id, two.id])
         // The list stays through Take Over and Hand Back.
         session.takeOver()
@@ -239,7 +300,7 @@ import UserNotifications
         runner.emit(.text("t1 and t2"))
         runner.emit(.turnFinished(.completed))
         try await waitUntil { session.state == .done }
-        #expect(session.items.last?.pagesRead == [])
+        #expect(session.latestTurnPagesRead == [])
         try session.send("Try again.")
         _ = try await read("t1")
         runner.emit(.turnFailed(.cancelled))
@@ -248,7 +309,7 @@ import UserNotifications
         try #require(try await read("t2").status == .ok)
         runner.emit(.turnFinished(.completed))
         try await waitUntil { session.state == .done }
-        #expect(session.items.last?.pagesRead.map(\.handle) == ["t2"])
+        #expect(session.latestTurnPagesRead?.map(\.handle) == ["t2"])
 
         host.tabs[0].documentID = UUID()
         #expect(service.currentReadPage(list[0], in: session) == nil)

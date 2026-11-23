@@ -584,6 +584,17 @@ final class Shared<Value>: @unchecked Sendable {
     }
 }
 
+extension AgentSession {
+    /// The pages the latest finished turn read, as the panel lists them: under that turn's last reply, or under its footer when it had none.
+    var latestTurnPagesRead: [AgentReadPage]? {
+        func isUser(_ item: AgentTranscriptItem) -> Bool { if case .user = item.kind { return true }; return false }
+        func isReply(_ item: AgentTranscriptItem) -> Bool { if case .reply = item.kind { return true }; return false }
+        guard let footer = items.lastIndex(where: { if case .turnFooter = $0.kind { return true }; return false }) else { return nil }
+        let start = items[..<footer].lastIndex(where: isUser) ?? 0
+        return (items[start...footer].last(where: isReply) ?? items[footer]).pagesRead
+    }
+}
+
 /// Polls on the main actor, which lets the endpoint's reports in, for at most five seconds.
 @MainActor func waitUntil(_ condition: () -> Bool) async throws {
     for _ in 0 ..< 500 {
