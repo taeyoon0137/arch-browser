@@ -638,11 +638,14 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: package.rootURL)
     }
 
-    /// The installed package folder that another Persona can stage for its own grant review.
+    /// The installed package folder that another Persona can stage for its own grant review, as from a folder. None for a plugin that AI wrote, whose review there would show a file install without its requests and sources.
     public func packageFolderForCopy(of id: PluginID) -> URL? {
-        guard !isClosed, let installed = plugins.first(where: { $0.id == id }), installed.origin != .bundled,
+        guard !isClosed, let installed = plugins.first(where: { $0.id == id }),
               installed.counterpart == nil, installed.kind == .script || installed.kind == .webExtension else { return nil }
-        return packages[id]?.rootURL
+        switch installed.origin {
+        case .bundled, .generated: return nil
+        case .file, .webStore: return packages[id]?.rootURL
+        }
     }
 
     /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. A new plugin takes nothing from an install entry or a pair record with its identifier that the list leaves out, as a removal whose write failed leaves them: its entry goes after the others without the old dismissed notes, and the records go, so that it joins a pair only as the user chooses. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID, and the file system's error when the package cannot move or `plugins.json` cannot record the install, as on a full disk. In the last case the staged package goes back to staging, the package it replaced back to its place, and the lists back to how they were, so that the review can install it again or discard it.

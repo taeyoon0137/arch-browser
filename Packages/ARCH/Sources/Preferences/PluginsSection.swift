@@ -302,7 +302,7 @@ private struct PluginSection: View {
         let canJoin = !isPair && plugin.kind == .webExtension && !joinCandidates.isEmpty
         let separable = versions.first { $0.id != plugin.id }.map { $0.manifest.id != plugin.manifest.id } ?? false
         let removable = plugin.origin != .bundled
-        let copyable = removable && !isPair && (plugin.kind == .script || plugin.kind == .webExtension) && session.personas.contains { $0.id != personaID }
+        let copyable = plugins.packageFolderForCopy(of: plugin.id) != nil && session.personas.contains { $0.id != personaID }
         Section {
             Toggle(isOn: Binding(get: { versions.contains(where: \.isEnabled) }, set: { plugins.setEnabled($0, for: plugin.id) })) {
                 Text(plugin.manifest.name)

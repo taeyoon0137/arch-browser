@@ -561,6 +561,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: false)
         #expect(manager.plugins.map(\.origin) == [.generated(composition)] && !manager.plugins[0].isEnabled)
         #expect(manager.contributions.paletteCommands(matching: "copy").isEmpty)
+        // Another Persona's review would show it as a file install without its requests, so it offers no copy.
+        #expect(manager.packageFolderForCopy(of: package.manifest.id) == nil)
         let relaunched = self.manager()
         #expect(relaunched.plugins.map(\.origin) == [.generated(composition)])
         try relaunched.remove(package.manifest.id)
@@ -574,6 +576,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         let installed = try #require(relaunched.plugins.first)
         #expect(relaunched.plugins.count == 1 && installed.isEnabled && installed.origin == .file(sampleFolder))
         #expect(installed.grant == PluginGrant(permissions: [], sites: installed.manifest.sites))
+        #expect(relaunched.packageFolderForCopy(of: installed.id) != nil)
         await run("remember", in: relaunched)
         #expect(try stored("remembered", in: relaunched) != nil)
     }
