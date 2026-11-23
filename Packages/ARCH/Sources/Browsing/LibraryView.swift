@@ -132,7 +132,7 @@ struct LibraryButton: View {
                 }
             }
             .frame(width: 30, height: 28)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(windowModel.isLibraryVisible ? SidebarFill.selected.color(in: colorScheme) : isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(windowModel.isLibraryVisible ? SidebarFill.buttonOn.color(in: colorScheme) : isHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
             .overlay(alignment: .topTrailing) {
                 if !downloads.isDownloading, !session.unseenDownloadIDs.isEmpty {
                     Text("\(session.unseenDownloadIDs.count)")

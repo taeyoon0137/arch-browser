@@ -746,7 +746,7 @@ struct SpaceHeaderView: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 26, height: 22)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isMenuHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isMenuHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                     .contentShape(Rectangle())
             }
             .menuStyle(.button)

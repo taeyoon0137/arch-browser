@@ -93,7 +93,7 @@ private struct SmallWindowTopRow: View {
                 .padding(.horizontal, 6)
                 .frame(height: 28)
                 // The row's buttons show the same fill under the pointer.
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHoveringSite ? SidebarFill.hover.color(in: colorScheme) : .clear))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHoveringSite ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
