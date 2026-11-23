@@ -47,7 +47,7 @@ import Testing
         let removals = KeychainRemovals()
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let session = try BrowserSession(testRegistry: registry, directory: directory, removeLiveFolderKeychainItems: removals.record)
+        let session = try BrowserSession(testRegistry: registry, directory: directory, removeLiveFolderKeychainItems: { removals.record() })
         #expect(session.folders.map(\.id) == [folder] && session.folders.allSatisfy(\.isPinned))
         #expect(session.tabs.map(\.id) == [kept] && session.tabs.allSatisfy { $0.folderID == folder && $0.isPinned })
         // The split view of an item tab and the user's tab has one tab left, so it goes.
@@ -77,7 +77,7 @@ import Testing
         let removals = KeychainRemovals()
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let session = try BrowserSession(testRegistry: registry, directory: directory, removeLiveFolderKeychainItems: removals.record)
+        let session = try BrowserSession(testRegistry: registry, directory: directory, removeLiveFolderKeychainItems: { removals.record() })
         try session.saveNow().get()
         #expect(removals.count == (leftover ? 1 : 0))
         #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("live-folders.unreadable.json").path))

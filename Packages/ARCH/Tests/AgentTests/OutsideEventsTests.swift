@@ -7,7 +7,7 @@ import Testing
 @testable import Agent
 
 @MainActor @Suite(.serialized) struct OutsideEventsTests {
-    private static let persona = FakeHost.defaultPersona.id
+    nonisolated private static let persona = FakeHost.defaultPersona.id
 
     /// A service with outside access on, attached to a bus, and a client whose grant in the default Persona has Watch Browser Events.
     private func watching(_ harness: Harness, scopes: AgentGrantScopes = AgentGrantScopes(watchEvents: true)) async throws -> (AgentService, BrowserEventBus, TestClient) {

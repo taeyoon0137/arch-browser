@@ -395,7 +395,7 @@ import Testing
         try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
         let snapshot = try #require(store.load())
         let runs = Runs()
-        store.runAfterNextWrite(runs.record)
+        store.runAfterNextWrite { runs.record() }
         #expect(throws: (any Error).self) { try store.saveNow(snapshot).get() }
         #expect(runs.count == 0)
         try FileManager.default.removeItem(at: backup)
