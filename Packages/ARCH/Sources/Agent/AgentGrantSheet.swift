@@ -19,6 +19,7 @@ extension AgentAccessLevel {
     }
 }
 
+/// Asks the user about an outside client's grant with a sheet on the front main window, and posts a notification while Arch is in the background.
 @MainActor final class AgentGrantSheetPresenter: AgentGrantPrompting {
     private weak var host: (any AgentBrowserHost)?
     /// Each open sheet's way to close as an answer.
@@ -66,6 +67,7 @@ extension AgentAccessLevel {
     }
 }
 
+/// The grant sheet's content: the client, what the grant lets it read, and the choices of Persona, space, access, scopes, and duration.
 struct AgentGrantSheetView: View {
     let request: AgentGrantRequest
     let finish: (AgentGrantChoice?) -> Void

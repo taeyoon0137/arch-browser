@@ -108,6 +108,7 @@ enum AgentScopeDecision: Equatable {
 
 /// A P13 question: the full address, the parts of it the session has not seen, and whether its site is outside the scope.
 struct AgentAddressQuestion: Equatable {
+    /// A part of the address that the session has not seen.
     enum Part: String, Equatable {
         /// A host the session never saw, which could carry data in its name as a query can: another host of a site in scope, or any such host of a site outside it.
         case host, path, query, fragment
@@ -140,6 +141,7 @@ struct AgentAddressQuestion: Equatable {
     }
 }
 
+/// An in-app session's site scope and the addresses it has seen, which rule P13 checks the session's navigations against.
 struct AgentSiteScope: Equatable {
     /// The scope's sites in the order they joined.
     private(set) var sites: [String] = []

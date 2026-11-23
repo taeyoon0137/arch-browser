@@ -223,6 +223,7 @@ public final class AgentRunner: ObservableObject {
         return a == b
     }
 
+    /// The state of one run while it runs: its request, tabs, actions, messages, and limits.
     @MainActor
     private final class Execution {
         let request: AgentRunRequest

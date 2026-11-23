@@ -106,6 +106,7 @@ extension AgentToolHost {
         }
     }
 
+    /// How the client may use the tab that an outline describes, which the outline's header says.
     enum OutlineAccess {
         /// `run` is a hook's agent run, which reads and never acts or asks.
         case owned, shared, run
@@ -613,12 +614,14 @@ extension AgentToolHost {
 
 /// Screenshots as agents get them (docs/agents.md, Fields the script never reveals; Tools ▸ Limits): the boxes of hidden and personal fields, other sites' frames, extension frames, and file inputs that hold files, and in a tab the user shared every field's, painted over before scaling and encoding, a full page cut at `AgentLimits.screenshotFullPageCSSHeight` CSS pixels, the longest side at most `AgentLimits.screenshotLongestSide` pixels, and JPEG at `AgentLimits.screenshotJPEGQuality` within `AgentLimits.screenshotBytes`, lower in quality and then in size when needed. The capture on a card, which only the user sees, is marked instead.
 enum AgentScreenshot {
+    /// An engine's capture of the tab, with the boxes to cover and whether it shows the full page.
     struct Capture {
         var image: CGImage
         var boxes: AgentBoxesReply
         var fullPage: Bool
     }
 
+    /// The encoded screenshot that the client receives, with its size in pixels.
     struct Shot {
         var data: Data
         var width: Int

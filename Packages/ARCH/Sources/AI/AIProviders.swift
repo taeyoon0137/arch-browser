@@ -59,6 +59,7 @@ public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatabl
         case .http(let http):
             return http.baseURL.absoluteString
         case .commandLine(let tool):
+            /// The parts of a command-line tool's invocation that the identity hashes besides its path.
             struct Invocation: Encodable {
                 var agent: AIAgentKind?
                 var arguments: [String]
@@ -337,6 +338,7 @@ public enum AICommandLineOutput: Codable, Sendable, Equatable {
         case jsonLines
     }
 
+    /// An empty object, which the `text` case encodes as its value.
     private struct NoFields: Codable {}
 
     public init(from decoder: any Decoder) throws {

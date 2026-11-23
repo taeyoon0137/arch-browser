@@ -14,6 +14,7 @@ public final class AISettingsStore: ObservableObject {
     /// Whether `ai.json` failed to decode at launch and was renamed `ai.json.unreadable`, so Settings ▸ AI can say so.
     @Published public private(set) var replacedUnreadableFile = false
 
+    /// The contents of `ai.json`.
     private struct File: Codable {
         static let currentVersion = 1
 

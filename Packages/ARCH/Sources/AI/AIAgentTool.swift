@@ -116,6 +116,7 @@ struct AIAgentCommandResult: Sendable {
     var succeeded: Bool { status == .exited(0) }
 }
 
+/// Runs a preset's tool once for its version, status, help, or probe output, which the Claude Code and Codex presets read before Arch trusts the tool.
 enum AIAgentCommand {
     /// Runs the tool with no input in a new empty folder under TMPDIR, as requests do, and ends it after `timeout`. Throws `AIAgentToolError` when it cannot start or does not finish in time.
     static func run(_ executable: URL, _ arguments: [String], environment: [String: String], timeout: Duration = .seconds(30)) async throws -> AIAgentCommandResult {

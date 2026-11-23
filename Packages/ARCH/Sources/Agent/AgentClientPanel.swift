@@ -191,6 +191,7 @@ public struct AgentPanel: View {
     }
 }
 
+/// One step of an outside client in the panel, with its status and a button that shows its tab.
 private struct AgentStepRow: View {
     let step: AgentStepRecord
     let show: () -> Void

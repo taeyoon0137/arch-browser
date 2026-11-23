@@ -3,6 +3,7 @@ import AgentControl
 import Darwin
 import Foundation
 
+/// Why the control socket does not listen.
 enum AgentEndpointError: Error, Equatable {
     /// The socket's folder is a symbolic link, not a folder, another user's, or open to others; nothing was bound.
     case unsafeFolder(String)
@@ -31,6 +32,7 @@ enum AgentEndpointError: Error, Equatable {
     func endpoint(_ endpoint: AgentEndpoint, didRefusePeer name: String, reason: String)
 }
 
+/// The control socket that `AgentService` listens on: it binds the socket, checks each peer, and moves frames for each connection.
 final class AgentEndpoint: @unchecked Sendable {
     /// How the endpoint reads and checks a peer; the service passes the code identity check against the bundled `arch-cli`, and tests replace either part.
     struct PeerChecks: Sendable {

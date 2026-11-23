@@ -1,6 +1,7 @@
 // One rate limiter per provider: a number of concurrent slots, an optional requests-per-minute bucket, and a cool-down after the provider answers 429. Requests the user starts take free slots before automatic ones.
 import Foundation
 
+/// Holds the slots, the per-minute bucket, and the cool-down of one provider, which each request waits on before it is sent.
 actor AIRateLimiter {
     /// How a request that held a slot ended, for `release(after:)`.
     enum Outcome {
@@ -12,6 +13,7 @@ actor AIRateLimiter {
         case other
     }
 
+    /// A request waiting for a slot, and whether the user started it.
     private struct Waiter {
         var id: UUID
         var isUser: Bool

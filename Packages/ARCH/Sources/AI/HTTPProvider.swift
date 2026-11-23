@@ -13,6 +13,7 @@ protocol AIWireCodec: Sendable {
     mutating func finish() throws -> [AIEvent]
 }
 
+/// A provider reached over HTTP in the `messages` or `chatCompletions` format, with its key and timeouts.
 struct HTTPProvider: AIProvider {
     let configuration: AIProviderConfiguration
     let http: AIHTTPConfiguration
@@ -228,6 +229,7 @@ struct ServerSentLines<Base: AsyncSequence>: AsyncSequence where Base.Element ==
 
     let base: Base
 
+    /// Gathers the bytes up to each newline into a line.
     struct AsyncIterator: AsyncIteratorProtocol {
         var base: Base.AsyncIterator
         var line: [UInt8] = []
@@ -309,6 +311,7 @@ final class AIRedirectGuard: NSObject, URLSessionTaskDelegate {
 
 // MARK: - Server-sent events
 
+/// One server-sent event of a provider's reply stream.
 struct ServerSentEvent: Equatable {
     var event: String?
     /// The event's `data:` lines joined with newlines.

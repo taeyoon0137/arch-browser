@@ -93,12 +93,14 @@ public struct AgentMCPServer {
     /// Whether the client has received a tool list, which a new connection may change.
     private var hasListedTools = false
 
+    /// Where the server's connection to Arch stands.
     private enum Link {
         case disconnected, connecting, connected
     }
 
     /// A client request that Arch answers.
     private struct Request {
+        /// What the client asks for: the tool list or a tool call.
         enum Kind {
             case list
             case call(AgentToolCall, progressToken: AgentJSON?)

@@ -1,6 +1,7 @@
 // Claude Code's `claude` as Arch runs it: the exact arguments and environment of a session and of an ordinary request, the session's MCP configuration, the `--help` probe, the start check on every `init` event, and the decoder of its stream-json output (`docs/agents.md`, Claude Code). The recorded streams in `AITests/Fixtures/Agent` are the reference for every event read here.
 import Foundation
 
+/// The arguments, configuration, probes, and checks with which Arch runs Claude Code's `claude` for sessions and ordinary requests.
 enum ClaudeCodeAgent {
     /// The listed flags Arch passes, which `claude --help` must list; `--max-turns` is not in `--help`, so its missing-value diagnostic checks support for a bounded run.
     static let requiredFlags = ["--print", "--verbose", "--input-format", "--output-format", "--include-partial-messages", "--no-session-persistence",
@@ -131,6 +132,7 @@ struct ClaudeCodeStartCheck {
     /// nil for an ordinary request, which may list no tool and no server.
     var session: Session?
 
+    /// What a session's `init` must report: the tools that the server offered and the session's skills.
     struct Session {
         /// The server's `tools/list` answers on the session's connection, the first one first, by MCP name.
         var offeredTools: [[String]]

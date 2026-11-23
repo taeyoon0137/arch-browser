@@ -1,6 +1,7 @@
 // The `chatCompletions` HTTP message format: `POST {base}/chat/completions` with role messages, and a stream of `data:` lines that ends with `data: [DONE]`. Many model servers on the Mac itself serve it on a loopback address.
 import Foundation
 
+/// Encodes requests in the `chatCompletions` format and decodes its stream into `AIEvent`s, for `HTTPProvider`.
 struct ChatCompletionsCodec: AIWireCodec {
     static let path = "chat/completions"
 
@@ -92,6 +93,7 @@ struct ChatCompletionsCodec: AIWireCodec {
 
     // MARK: Stream
 
+    /// A tool call whose pieces are still arriving.
     private struct PartialToolCall {
         var id = ""
         var name = ""
@@ -189,6 +191,7 @@ struct ChatCompletionsCodec: AIWireCodec {
 final class MaxTokensRefusals: @unchecked Sendable {
     static let shared = MaxTokensRefusals()
 
+    /// A model of one provider at one base URL.
     struct Model: Hashable {
         var provider: AIProviderID
         var baseURL: URL

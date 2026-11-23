@@ -71,6 +71,7 @@ struct AgentTranscript: Equatable {
     private var turnStartIndex = 0
     private var growing: Growing?
 
+    /// The kind of the last item while streamed text still grows it.
     private enum Growing: Equatable {
         case reply, thinking
     }

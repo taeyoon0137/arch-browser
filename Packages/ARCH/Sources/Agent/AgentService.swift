@@ -1787,6 +1787,7 @@ import Foundation
 
 /// One accepted connection as the service sees it.
 private final class ClientConnection {
+    /// Where the connection is in its greeting.
     enum Stage {
         case new
         /// `hello` arrived and Arch is answering it.

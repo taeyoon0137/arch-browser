@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// The arguments, feature list, probes, and checks with which Arch runs Codex's `codex` for sessions and ordinary requests.
 enum CodexAgent {
     /// Features a turn needs that Arch leaves on, each with its reason. A feature joins only when a turn needs it and it adds no tool of its own.
     static let keptFeatures: [String: String] = [

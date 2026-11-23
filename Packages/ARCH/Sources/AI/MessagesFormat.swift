@@ -1,6 +1,7 @@
 // The `messages` HTTP message format: `POST {base}/messages` with typed content blocks, and a stream of named events from `message_start` to `message_stop`. JSON output is one forced tool call whose input becomes the reply text.
 import Foundation
 
+/// Encodes requests in the `messages` format and decodes its stream into `AIEvent`s, for `HTTPProvider`.
 struct MessagesCodec: AIWireCodec {
     static let path = "messages"
     /// The forced tool that carries a JSON reply.
@@ -62,6 +63,7 @@ struct MessagesCodec: AIWireCodec {
 
     // MARK: Stream
 
+    /// What a content block of the reply holds, by its index.
     private enum Block {
         case text
         case tool(id: String, name: String, arguments: String)
