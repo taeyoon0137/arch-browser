@@ -648,6 +648,60 @@ public final class PluginManager: ObservableObject {
         }
     }
 
+    /// The two versions of an installed pair, as another Persona's manager stages them together (`stage(_:)` with a `PluginPairCopy`): each version's package folder, origin, proof, and engine, the version listed first leading. Nil for a plugin outside a pair and once the manager is closed.
+    public func pairForCopy(of id: PluginID) -> PluginPairCopy? {
+        guard !isClosed, let lead = leadVersion(of: id), let counterpart = plugins.first(where: { $0.id == lead.counterpart }) else { return nil }
+        let versions = [lead, counterpart].compactMap { plugin -> PluginPairCopy.Version? in
+            guard let engine = plugin.pairEngine, let folder = packages[plugin.id]?.rootURL else { return nil }
+            return PluginPairCopy.Version(folder: folder, origin: plugin.origin, proof: plugin.proof, engine: engine)
+        }
+        return versions.count == 2 ? PluginPairCopy(versions: versions) : nil
+    }
+
+    /// Stages both versions of another Persona's pair for one review, as `stage(_:)` stages a package, each with its installed origin and proof, the leading version first, with the engine it is the version for. When the second cannot stage, the first goes too.
+    public func stage(_ copy: PluginPairCopy) async throws -> [PluginStagedVersion] {
+        let runtimes = Array(runtimes.values)
+        var staged: [PluginStagedVersion] = []
+        do {
+            for version in copy.versions {
+                let package = try await stage { root in
+                    try PluginPackage.stage(copyOf: version.folder, at: root, origin: version.origin, proof: version.proof, runtimes: runtimes)
+                }
+                staged.append(PluginStagedVersion(package: package, engine: version.engine))
+            }
+        } catch {
+            staged.forEach { discard($0.package) }
+            throw error
+        }
+        return staged
+    }
+
+    /// Why the two staged versions of a pair cannot install together in this Persona: a plugin of either's identifier is installed here already, which the copy would update rather than add, or an engine that runs them does not run its version; nil otherwise.
+    public func pairInstallRefusal(for versions: [PluginStagedVersion]) -> String? {
+        guard versions.count == 2, let lead = versions.first else { return localized("Only the two versions of a pair install together.") }
+        if let installed = versions.lazy.compactMap({ version in self.plugins.first { $0.manifest.id == version.package.manifest.id || $0.id == version.package.manifest.id } }).first {
+            return localized("\u{201C}\(installed.manifest.name)\u{201D} is installed in this Persona already. Remove it first to install both versions here.")
+        }
+        for version in versions where version.package.kind == .webExtension && !version.package.engineChecks.isEmpty {
+            if case let .refused(reason)? = version.package.engineChecks[version.engine] { return reason }
+        }
+        return lead.package.kind == .webExtension ? nil : localized("Only the two versions of a pair install together.")
+    }
+
+    /// Installs both staged versions of a pair as one new plugin with the parts of `grant` that each manifest asks for: the first as a new plugin, then the second as its version for its engine (`install(_:grant:isEnabled:asVersionOf:for:)`). When the second fails, the first is removed again, and the second's package stays staged, so that the review can try again or discard both. Throws `PluginError.invalidPackage` with `pairInstallRefusal(for:)`'s reason, and as `install(_:grant:isEnabled:asVersionOf:for:)` throws.
+    @discardableResult
+    public func installPair(_ versions: [PluginStagedVersion], grant: PluginGrant, isEnabled: Bool) throws -> PluginID {
+        if let refusal = pairInstallRefusal(for: versions) { throw PluginError.invalidPackage(refusal) }
+        let lead = try install(versions[0].package, grant: grant, isEnabled: isEnabled)
+        do {
+            try install(versions[1].package, grant: grant, isEnabled: isEnabled, asVersionOf: lead, for: versions[1].engine)
+        } catch {
+            try? remove(lead)
+            throw error
+        }
+        return lead
+    }
+
     /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. A new plugin takes nothing from an install entry or a pair record with its identifier that the list leaves out, as a removal whose write failed leaves them: its entry goes after the others without the old dismissed notes, and the records go, so that it joins a pair only as the user chooses. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID, and the file system's error when the package cannot move or `plugins.json` cannot record the install, as on a full disk. In the last case the staged package goes back to staging, the package it replaced back to its place, and the lists back to how they were, so that the review can install it again or discard it.
     @discardableResult
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf version: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID {

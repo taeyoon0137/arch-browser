@@ -196,15 +196,24 @@ private struct PluginList: View {
         failure = nil
     }
 
-    /// Stages only the package files in the chosen Persona, then opens that Persona's normal install review.
+    /// Stages only the package files in the chosen Persona, then opens that Persona's normal install review; for a pair, both versions, with their proofs, for one review that installs them together.
     private func copy(_ plugin: InstalledPlugin, to persona: Persona.ID) {
-        guard let folder = plugins.packageFolderForCopy(of: plugin.id), session.personas.contains(where: { $0.id == persona }) else { return }
+        let pair = plugins.pairForCopy(of: plugin.id)
+        let folder = pair == nil ? plugins.packageFolderForCopy(of: plugin.id) : nil
+        guard pair != nil || folder != nil, session.personas.contains(where: { $0.id == persona }) else { return }
         let target = session.plugins(in: persona)
         isChoosing = true
         Task {
             do {
-                let package = try await target.stage(folder)
-                sheet = InstallSheet(start: .review(PluginReview(package: package)),
+                let start: PluginInstallSheet.Start
+                if let pair {
+                    start = .pairReview(try await target.stage(pair))
+                } else if let folder {
+                    start = .review(PluginReview(package: try await target.stage(folder)))
+                } else {
+                    return
+                }
+                sheet = InstallSheet(start: start,
                                      personaSentence: PluginInstallSheet.personaSentence(persona: persona, space: nil, among: session.personas), target: target)
                 failure = nil
             } catch { failure = error.localizedDescription }
@@ -304,7 +313,7 @@ private struct PluginSection: View {
         let canJoin = !isPair && plugin.kind == .webExtension && !joinCandidates.isEmpty
         let separable = versions.first { $0.id != plugin.id }.map { $0.manifest.id != plugin.manifest.id } ?? false
         let removable = plugin.origin != .bundled
-        let copyable = plugins.packageFolderForCopy(of: plugin.id) != nil && session.personas.contains { $0.id != personaID }
+        let copyable = (plugins.packageFolderForCopy(of: plugin.id) != nil || plugins.pairForCopy(of: plugin.id) != nil) && session.personas.contains { $0.id != personaID }
         Section {
             Toggle(isOn: Binding(get: { versions.contains(where: \.isEnabled) }, set: { plugins.setEnabled($0, for: plugin.id) })) {
                 Text(plugin.manifest.name)

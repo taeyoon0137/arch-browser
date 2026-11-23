@@ -2681,6 +2681,16 @@
         }
       }
     },
+    "Files of the %@ Version" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전의 파일"
+          }
+        }
+      }
+    },
     "Final text" : {
       "localizations" : {
         "ko" : {
@@ -2971,6 +2981,16 @@
         }
       }
     },
+    "Install Both Versions of “%@”?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”의 두 버전을 모두 설치하겠습니까?"
+          }
+        }
+      }
+    },
     "Install Command-Line Tools?" : {
       "localizations" : {
         "ko" : {
@@ -3177,6 +3197,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@”에 설치되어 모든 스페이스에서 사용됩니다."
+          }
+        }
+      }
+    },
+    "Installs the %@ versions together as one plugin." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전을 하나의 플러그인으로 함께 설치합니다."
           }
         }
       }

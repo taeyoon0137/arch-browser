@@ -8,6 +8,7 @@
 // An unsigned update of a signed package adds another warning. A web extension may join an installed plugin as its other engine version.
 // That join warns when the new version comes from another source under the same identifier and takes over extension data on that engine.
 // After a new web extension installs, the final step may offer to install its other engine version.
+// Install in Another Persona for a pair reviews both versions on one sheet, asking once for the union of their permissions and sites.
 import ARCHEngine
 import Browsing
 import Extensions
@@ -40,11 +41,14 @@ struct PluginInstallSheet: View {
         case review(PluginReview)
         /// The store sheet, which stages a package from the Web Store for the review.
         case webStore(WebStoreStart)
+        /// Both staged versions of another Persona's pair, which install together.
+        case pairReview([PluginStagedVersion])
     }
 
     private enum Step {
         case webStore(WebStoreStart)
         case review(PluginReview)
+        case pairReview([PluginStagedVersion])
         /// The plugin installed and asks for the engine's version.
         case installed(PluginID, EngineKind)
     }
@@ -58,6 +62,7 @@ struct PluginInstallSheet: View {
         switch start {
         case let .review(review): _step = State(initialValue: .review(review))
         case let .webStore(storeStart): _step = State(initialValue: .webStore(storeStart))
+        case let .pairReview(versions): _step = State(initialValue: .pairReview(versions))
         }
     }
 
@@ -91,6 +96,9 @@ struct PluginInstallSheet: View {
                 // A review that takes the last step's place starts with its own sites and choice.
                 .id(review.id)
                 .frame(height: Self.reviewHeight)
+            case let .pairReview(versions):
+                PluginPairReviewView(plugins: plugins, versions: versions, personaSentence: personaSentence, close: { dismiss() })
+                    .frame(height: Self.reviewHeight)
             case let .installed(id, engine):
                 VersionLastStep(plugins: plugins, plugin: id, engine: engine, offersWebStore: webStore != nil, close: { dismiss() },
                                 review: { step = .review($0) }, storeSheet: { step = .webStore($0) })
@@ -454,6 +462,153 @@ private struct PluginReviewView: View {
     /// Touch ID or the login password through LocalAuthentication.
     private static func authorize(_ reason: String) async -> Bool {
         (try? await LAContext().evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
+    }
+}
+
+/// The review of both versions of another Persona's pair, which install together as one plugin: each version's package, origin, and engine notes, and once the union of their permissions and sites, from which the user leaves sites out. Each version's grant is the part of the chosen grant that its manifest asks for.
+private struct PluginPairReviewView: View {
+    @ObservedObject var plugins: PluginManager
+    let versions: [PluginStagedVersion]
+    let personaSentence: String?
+    let close: () -> Void
+    /// The sites the user grants: at first all that either manifest asks for.
+    @State private var sites: Set<MatchPattern>
+    /// Why the last install failed.
+    @State private var failure: String?
+
+    init(plugins: PluginManager, versions: [PluginStagedVersion], personaSentence: String?, close: @escaping () -> Void) {
+        self.plugins = plugins
+        self.versions = versions
+        self.personaSentence = personaSentence
+        self.close = close
+        _sites = State(initialValue: Set(versions.flatMap(\.package.manifest.sites)))
+    }
+
+    private var manifests: [PluginManifest] { versions.map(\.package.manifest) }
+
+    /// The sites either manifest asks for, each once, in the order the manifests list them.
+    private var allSites: [MatchPattern] {
+        var seen: Set<MatchPattern> = []
+        return manifests.flatMap(\.sites).filter { seen.insert($0).inserted }
+    }
+
+    /// The permissions either manifest asks for, in a fixed order.
+    private var permissions: [PluginPermission] {
+        PluginPermission.allCases.filter { permission in manifests.contains { $0.permissions.contains(permission) } }
+    }
+
+    /// The network hosts either manifest asks for, each once.
+    private var network: [PluginNetworkHost] {
+        var seen: Set<PluginNetworkHost> = []
+        return manifests.flatMap(\.network).filter { seen.insert($0).inserted }
+    }
+
+    /// The summaries of what the manifests ask for besides permissions and sites, each once.
+    private var otherSummaries: [String] {
+        var seen: Set<String> = []
+        return manifests.flatMap { [$0.aiDataSummary, $0.extensionPermissionsSummary].compactMap { $0 } }.filter { seen.insert($0).inserted }
+    }
+
+    private var name: String { versions.first?.package.manifest.name ?? "" }
+
+    var body: some View {
+        let refusal = plugins.pairInstallRefusal(for: versions)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Install Both Versions of \u{201C}\(name)\u{201D}?", bundle: .module)
+                    .font(.headline)
+                Text("Installs the \(EngineKind.tabsList(Set(versions.map(\.engine)))) versions together as one plugin.", bundle: .module)
+                    .foregroundStyle(.secondary)
+                if let personaSentence {
+                    Text(personaSentence)
+                        .foregroundStyle(.secondary)
+                }
+                if let refusal {
+                    Text(refusal)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding([.horizontal, .top], 20)
+            Form {
+                ForEach(versions) { version in
+                    Section(localized("The \(version.engine.displayName) Version")) {
+                        Text("Version \(version.package.manifest.version) \(origin(of: version.package)). \(version.package.manifest.summary)", bundle: .module)
+                        ForEach(plugins.engineNotes(of: version.package), id: \.self) { note in
+                            Text(note)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Section(localized("Access")) {
+                    if permissions.isEmpty && allSites.isEmpty && otherSummaries.isEmpty {
+                        Text("None", bundle: .module)
+                    }
+                    ForEach(permissions, id: \.self) { permission in
+                        Text(permission == .network ? localized("Send requests to \(network.map(\.description).joined(separator: ", "))") : permission.summary)
+                    }
+                    ForEach(otherSummaries, id: \.self) { Text($0) }
+                    ForEach(allSites, id: \.self) { site in
+                        Toggle(isOn: Binding(get: { sites.contains(site) }, set: { if $0 { sites.insert(site) } else { sites.remove(site) } })) {
+                            Text(site.accessSummary)
+                            Text(site.description)
+                        }
+                    }
+                }
+                ForEach(versions) { version in
+                    Section(localized("Files of the \(version.engine.displayName) Version")) {
+                        ForEach(version.package.files, id: \.self) { path in
+                            Text(path).font(.system(.body, design: .monospaced))
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            if let failure {
+                Text(failure)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 20)
+            }
+            HStack {
+                Spacer()
+                Button(localized("Cancel"), role: .cancel) {
+                    versions.forEach { plugins.discard($0.package) }
+                    close()
+                }
+                .keyboardShortcut(.cancelAction)
+                if refusal == nil {
+                    Button(localized("Install")) { install(isEnabled: false) }
+                    Button(localized("Install and Enable")) { install(isEnabled: true) }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding([.horizontal, .bottom], 20)
+        }
+    }
+
+    /// Where a version came from, as the single review's subtitle says it.
+    private func origin(of package: PluginPackage) -> String {
+        switch package.origin {
+        case .bundled: return localized("built into Arch")
+        case let .file(url): return localized("from \(url.lastPathComponent)")
+        case .webStore: return localized("from the Web Store")
+        case let .generated(composition): return localized("written by AI with \(composition.model)")
+        }
+    }
+
+    /// Installs both versions with every permission and network host either asks for and the chosen sites, once the user confirms a grant of every website as listed or of native apps.
+    private func install(isEnabled: Bool) {
+        let grant = PluginGrant(permissions: Set(permissions), sites: allSites.filter(sites.contains), network: network)
+        Task {
+            if let reason = grant.confirmationReason(for: name) {
+                guard (try? await LAContext().evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false else { return }
+            }
+            do {
+                try plugins.installPair(versions, grant: grant, isEnabled: isEnabled)
+                close()
+            } catch {
+                failure = error.localizedDescription
+            }
+        }
     }
 }
 
