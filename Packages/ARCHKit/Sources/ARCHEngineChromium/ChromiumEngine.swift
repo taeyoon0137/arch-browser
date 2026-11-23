@@ -32,7 +32,10 @@ public final class ChromiumEngine: Engine {
         // A removal that a quit cut short leaves a renamed profile, which goes here even when no list names its Persona any more, as after a session that did not load.
         Self.deleteRemovedProfiles(in: configuration.chromiumProfileRoots)
         Self.linkNativeMessagingHosts(configuration)
-        guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: configuration.chromiumRootCache.path) else {
+        // Pages see the languages WebKit's pages see: the app's preferred languages, which Settings ▸ General ▸ Language sets for the next launch.
+        let languages = Locale.preferredLanguages
+        guard ARCHCEFRuntime.initialize(withFrameworkPath: frameworkPath, helperPath: helperPath, cachePath: configuration.chromiumRootCache.path,
+                                        acceptLanguageList: ChromiumLanguages.acceptLanguageList(from: languages), locale: ChromiumLanguages.locale(from: languages)) else {
             throw StartError.initializationFailed
         }
         // The engine starts on the main thread, where the flags live.

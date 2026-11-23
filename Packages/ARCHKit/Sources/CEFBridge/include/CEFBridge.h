@@ -431,10 +431,12 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @end
 
 @interface ARCHCEFRuntime : NSObject
-/// Loads the framework from `frameworkPath` and initializes CEF. The main run loop drives CEF's external message pump.
+/// Loads the framework from `frameworkPath` and initializes CEF. The main run loop drives CEF's external message pump. `acceptLanguageList` is the comma-separated languages every profile's pages see in `Accept-Language` and `navigator.languages`, and `locale` the language of Chromium's own text; empty values leave CEF's `en-US`.
 + (BOOL)initializeWithFrameworkPath:(NSString *)frameworkPath
                          helperPath:(nullable NSString *)helperPath
-                          cachePath:(NSString *)cachePath;
+                          cachePath:(NSString *)cachePath
+                 acceptLanguageList:(NSString *)acceptLanguageList
+                             locale:(NSString *)locale;
 + (BOOL)isInitialized;
 /// Whether the main thread is running CEF's work from the message pump, as when a key that a page leaves unhandled reaches the main menu.
 @property (class, nonatomic, readonly) BOOL isRunningWork;
