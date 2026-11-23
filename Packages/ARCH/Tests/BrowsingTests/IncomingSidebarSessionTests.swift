@@ -468,7 +468,11 @@ import Testing
             #expect(session.folders.contains { $0.id == agent.id && $0.name == "Agent" && $0.isAgentFolder })
             #expect(!session.folders.contains { $0.id == unsafe.id })
             #expect(session.tabs.contains { $0 === agentTab } && agentTab.folderID == agent.id && agentTab.customTitle == nil)
-            #expect(session.tabs.contains { $0 === openTab } && !openTab.isPinned && !session.hasClosedTabs)
+            // The open tab is another item, which never syncs: it takes a new ID with its page, and the pin joins under the ID (`docs/sync.md`, IDs listed twice).
+            let kept = try #require(session.tabs.first { !$0.isPinned && $0.agentOwnerID == nil })
+            #expect(kept.id != openTab.id && kept.customTitle == nil && !session.hasClosedTabs)
+            #expect(session.tabs.contains { $0.id == openTab.id && $0.isPinned && $0.customTitle == "Claimed" })
+            #expect(Set(session.allTabs.map(\.id)).count == session.allTabs.count)
         }
     }
 

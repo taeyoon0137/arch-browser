@@ -2269,6 +2269,7 @@ extension BrowserSession {
     public func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) {
         let state = state.withFirstCopies
         let current = sidebarSyncState
+        yieldIDs(to: state, current: current)
         guard state != current || !deletions.personas.isDisjoint(with: personas.map(\.id))
                 || !deletions.spaces.isDisjoint(with: current.spaces.map(\.id))
                 || !deletions.folders.isDisjoint(with: current.folders.map(\.id))
@@ -2375,6 +2376,48 @@ extension BrowserSession {
         if let reordered = Self.orderedSynced(favorites, by: state.favorites.map(\.id).filter(appliedFavorites.contains)) { favorites = reordered }
         if let reordered = Self.orderedSynced(tabs, by: state.pinnedTabs.map(\.id).filter(appliedTabs.contains)) { tabs = reordered }
         applyPendingSyncEngines()
+    }
+
+    /// An open tab or open folder of this Mac whose ID an incoming pinned tab or pinned folder carries, as when this Mac's data came from the Mac that pinned it, is another item, which never syncs: it takes a new ID and keeps its page, place, contents, and selection, so the pin joins beside it and no comparison takes the pin for one deleted here (`docs/sync.md`, Mapping the session store to records ▸ IDs listed twice). Agent tabs and folders, which `session.json` never keeps, and live folder items are left alone.
+    private func yieldIDs(to state: SidebarSyncState, current: SidebarSyncState) {
+        let pinIDs = Set(state.pinnedTabs.map(\.id)).subtracting(current.pinnedTabs.map(\.id))
+        for old in allTabs where pinIDs.contains(old.id) && !old.isPinned && old.agentOwnerID == nil && old.liveItemID == nil {
+            let page = old.webContents
+            old.replaceWebContents(with: UnloadedWebContents(url: old.url, title: old.title, engine: old.engineKind, state: nil))
+            let copy = makeTab(page, id: UUID(), spaceID: old.spaceID, personaID: old.personaID, pinned: false)
+            copy.webContentsDidChangeFavicon(page)
+            copy.folderID = old.folderID
+            copy.customTitle = old.customTitle
+            copy.suggestedTitle = old.suggestedTitle
+            copy.preferredEngine = old.preferredEngine
+            copy.lastActivatedAt = old.lastActivatedAt
+            copy.isInSmallWindow = old.isInSmallWindow
+            for (space, panes) in splitTabIDs where panes.contains(old.id) { splitTabIDs[space] = panes.map { $0 == old.id ? copy.id : $0 } }
+            for index in windowsToReopen.indices where windowsToReopen[index].selectedTabID == old.id { windowsToReopen[index].selectedTabID = copy.id }
+            let showing = windows.filter { $0.selectedTabID == old.id }
+            if let favorite = favoriteTabs.first(where: { $0.value === old })?.key {
+                favoriteTabs[favorite] = copy
+                showing.forEach { $0.selectTab(copy.id) }
+                prompts.dismiss(tabID: old.id)
+                tabObservers[old.id] = nil
+                retire(old.webContents, of: old.personaID)
+            } else if let index = tabs.firstIndex(where: { $0 === old }) {
+                // It joins as a restored tab does, so the hooks post no new tab for it.
+                copy.isRestored = true
+                tabs.insert(copy, at: index)
+                copy.isRestored = false
+                showing.forEach { $0.selectTab(copy.id) }
+                _ = removeTab(old, closedRecord: nil, reason: .sync)
+            }
+        }
+        let pinnedFolderIDs = Set(state.folders.map(\.id)).subtracting(current.folders.map(\.id))
+        for index in folders.indices where pinnedFolderIDs.contains(folders[index].id) && !folders[index].isPinned && !folders[index].isAgentFolder {
+            let old = folders[index].id, new = UUID()
+            folders[index].id = new
+            for child in folders.indices where folders[child].parentID == old { folders[child].parentID = new }
+            for tab in tabs where tab.folderID == old { tab.folderID = new }
+            windows.forEach { $0.endRenamingFolder(old) }
+        }
     }
 
     /// Reorders only items named by synced IDs while preserving all other positions.
