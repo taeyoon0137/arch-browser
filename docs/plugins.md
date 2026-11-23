@@ -70,10 +70,11 @@ A script plugin's `plugin.json`:
 | `permissions` | Capabilities from the permission table below |
 | `sites` | Match patterns (see below) for the pages the plugin's page scripts and page calls may reach |
 | `siteAccess` | `listedSites` (every page that matches `sites`, the default) or `whenInvoked` (only a tab where the user runs one of the plugin's commands, on the host of the page it ran on, until the tab leaves that host) |
-| `network` | Hosts the plugin may fetch from through `arch.net.fetch` |
+| `network` | No top-level key: hosts belong to the `network` object in `permissions` |
 | `events` | Events that start the plugin's background code |
 | `background` | The background script. A plugin without one can still add page scripts, settings, and panels |
-| `contributes` | Commands, menu items, sidebar items, settings, a settings page, and page scripts |
+| `settingsPage` | Optional HTML file in the package for a settings sheet |
+| `contributes` | Commands, menu items, sidebar items, settings, and page scripts |
 
 Symbols use SF Symbols names, so plugins need no image files. A package may still carry an `icon` image for its Settings row.
 
@@ -85,11 +86,11 @@ The runtime reads `id`, `name`, `version`, `apiVersion`, `summary`, `permissions
 |---|---|
 | `commands` | `id`, `title`, `symbol`, `keywords`, `shortcut` |
 | `menus` | `command`, `location` (`pluginsMenu`, `pageContextMenu` with its `contexts`, `tabContextMenu`, or `spaceMenu`), `title` |
-| `sidebarItems` | `id`, `title`, `symbol`, and `command` or `panel`, the package path of an HTML file |
+| `sidebarItems` | `id`, `title`, `symbol`, and `command` or `panel`, the package path of an HTML file; a panel may use `presentation: "sidebar"` instead of the default popover |
 | `settings` | `key`, `title`, `help`, `type` (`toggle`, `text`, `number` with optional `min` and `max`, `choice` with its `options`, or `secret`), `default` (false, empty text, the minimum or 0, or the first option when missing; none for a secret) |
 | `pageScripts` | `matches`, `excludes`, `js`, `css`, `runAt` (`documentStart`, or `documentEnd` by default), `allFrames` |
 
-- Arch refuses every other key until its implementation reads it, such as `network`, `settingsPage`, a command's `takesArgument`, and `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the permissions that `PluginPermission` has, so far `tabs`, `tabs.rename`, `tabs.manage`, `clipboard`, and `ai`, by name, and `ai` also as an object with one key, `{"ai": ["page", "selection"]}`, that lists the data kinds beyond text that its requests carry: `page` for the text of pages that its page calls read and `selection` for selected text, and no other kind. `events` refuses a kind the bus does not have, other than `settingChanged`.
+- Arch refuses every other key until its implementation reads it, such as `icon`, so a plugin never runs without a field it relies on. A key with `null` counts as missing. `permissions` takes the names that `PluginPermission` has; `ai` also takes an object with one key, `{"ai": ["page", "selection"]}`, listing the data kinds beyond text that its requests carry, and `network` requires an object listing hosts. `events` refuses a kind the bus does not have, other than `settingChanged`.
 - A `name` loses the spaces at either end, so every view shows it alike, and one of nothing but spaces gives the plugin its `id` as its name, which every view then shows, as a web extension takes its identifier. An empty `name` is refused, as empty text in any field is (`name must not be empty`), and as Chromium refuses an extension's empty name.
 - Commands need a background script; panels do not. Menu items name listed commands, and a sidebar item names a listed command or an HTML file of the package, not both. Command and sidebar item identifiers and setting keys are unique.
 - A path names a regular file of the package: names separated by `/`, none empty, `.`, or `..`, and no link leading out of the package. Each file in a page script's `js` becomes a separate page script with the entry's patterns and timing. It must be UTF-8 text that parses as a function body on its own, which both the review and the index check. An entry lists `js`, `css`, or both: its `css` files, UTF-8 text too, become one page script before those of its `js`, with the same patterns and timing, that adds them in their order (see Page scripts).
@@ -132,8 +133,8 @@ Each contribution names its plugin wherever it appears: in the palette row's sub
 | Shortcut | The command's item in the Plugins menu, which a command with a shortcut gets after the plugin's own items when its manifest lists none, or the first of its items there | Settings ▸ Shortcuts lists the item under Plugins with the plugin's name, and the user can change the shortcut there. App shortcuts take priority over plugin shortcuts, and between plugins the first installed keeps a shortcut: a command goes without its default shortcut while an app command, a command the user gave it, or an earlier plugin's command has it, and without the shortcut the user gave it while an app command or an earlier plugin's command the user gave it has it, since the user may have chosen the two while the menu, such as another Persona's, showed only one of them. Its row in Settings ▸ Shortcuts names that command |
 | Menu item | A Plugins menu in the menu bar, before the Window menu, for the active window's Persona; the page context menu, after the app's items, when the click is on one of the listed contexts (page, link, image, selection, editable); a tab row's context menu and the space menu, after their items | In each menu, a plugin's items form a section under the plugin's name. A click is on `page` when it is on no link, image, media, selection, or field. Page context menu items run app-side, so they work alike on both engines, as row 49 requires. The command runs on the active window's selected tab from the Plugins menu, on the page's tab with the link, image, and selected text from the page context menu, on the row's tab from a tab row, and on the window's selected tab with the space from the space menu. The window's selected tab reaches a command only while it belongs to the plugin's Persona and no internal page or preview panel covers its page |
 | Sidebar item | A row below the favorites with a symbol, a title, and the badge the plugin sets | It runs a command on the window's selected tab or opens a panel |
-| Panel | A popover beside the sidebar item | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each time the item opens it. The popover lets it go when it closes, and a click on the item while the panel shows closes it. A script plugin's panel shows the HTML file of its package that the item's `panel` names, in a web view of the sandbox, 300 by 400 points, the width of the address pill's site settings popover; the next opening makes a new one. A panel that can end while it shows conforms to `PluginEndingPanel`, and the popover closes when it ends, as a script plugin's does once its instance stops. A panel that takes the sidebar's place, as the library does, can follow once a plugin needs one |
-| Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin will be able to add an HTML settings page below the form |
+| Panel | A popover beside the sidebar item, or the sidebar column when its `presentation` is `sidebar` | A built-in plugin's panel is the view controller that `Plugin.panel(for:)` returns, which the manager asks for each opening. A script plugin's panel shows the HTML file of its package in a sandboxed web view; popovers use 300 by 400 points. A panel that can end while it shows conforms to `PluginEndingPanel`, and its presentation closes when it ends |
+| Settings | Settings ▸ Plugins ▸ the plugin's name, rendered by Arch as a native form | Toggle, text, number, choice, and secret fields. Values go to the plugin's storage and secrets to the Keychain (see Storage). A script plugin may add an HTML settings page in a sheet below the form |
 | Page script | Pages that match the plugin's grant, on both engines | See Page scripts |
 | Event | Not shown | Browser event bus kinds (`docs/hooks.md`, Browser events): `tabOpened`, `tabClosed`, `pageLoaded`, `addressChanged`, `titleChanged`, `tabSelected`, `downloadFinished`, and `spaceSwitched`; and the plugin's own `settingChanged`, which comes from Settings ▸ Plugins rather than the bus: once the user's changes to one of its settings there have settled for half a second, unless they brought the value back, and outside loop protection's rate and the hook scheduler. A change made while the plugin is switched off, or one that settles after it is switched off, updated without the setting, or removed, never arrives, so a plugin reads its settings with `arch.settings.get` when it needs them |
 
@@ -159,22 +160,37 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `tabs.manage` | Open, close, select, move, and rename the Persona's tabs (`openTab(_:_:)`, `closeTab(_:)`, `selectTab(_:)`, `moveTab(_:to:)`, and what `tabs.rename` grants). Their events carry the plugin as their cause, so the plugin does not hear them: an opened tab's `tabOpened`, `tabSelected`, and first `addressChanged` and `pageLoaded`, a close's `tabClosed` and the `tabSelected` of each window that moves to another tab, a selection's `tabSelected` and the `spaceSwitched` that it brings, and the `spaceSwitched` of each window that follows a moved tab to its space. Its tabs load with the Persona's cookies from any host, signed in as the user, so the install sheet states it as "Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs". A tab that it opens, and a tab that a page of that tab opens before the user acts in it, downloads no file at its address, closing at once, and its pages' downloads, the first included, ask with a card over the tab until the user acts in its page, with a click that reaches the page or Return, Enter, or Space while it has the keys, or loads an address in it (`PageDownloadGate.holdUntilUserActs()`), so the plugin cannot fill the downloads folder. A file that such a page opens in a new tab after that downloads as the page's own download, so each act lets one file through. The hold lasts while Arch runs: a tab that the session restores at launch starts without it. A plugin opens at most 10 tabs within a minute, after which `openTab(_:_:)` throws `tooManyTabs` (`PluginManager.tabOpenLimit`), since each new tab is an event subject of its own, so the event rate's cap for one subject would not stop plugins that open a tab for each other's `tabOpened`. A move keeps a tab pinned or open: since a plugin's close only unloads a pinned tab, a move neither drops a pinned tab's saved page among the open tabs nor pins a tab, which stay the user's, with Pin Tab and Unpin Tab and drags between the lists. It moves no live folder item's tab, whose folder keeps its source's order and makes a new tab for an item whose tab leaves it (live folder rule 4) | Calls throw `permissionDenied` |
 | `tabs.rename` | Rename tabs; included in `tabs.manage`. A name set by code is the tab's suggested name, so the user's own name wins (`docs/hooks.md`, hook decision 13) | Calls throw `permissionDenied` |
 | Sites (`sites` with `siteAccess`) | Page scripts, page messages, and running package scripts in matching pages | No page access |
-| `network` hosts | `fetch` to the listed hosts through an ephemeral `URLSession` with no cookies | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) and the pages of the tabs that a plugin with `tabs.manage` opens, whose addresses can carry what it knows to any host |
+| `network` hosts | HTTPS requests to the listed hosts with `arch.net.fetch`, without cookies (see below) | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) and the pages of the tabs that a plugin with `tabs.manage` opens, whose addresses can carry what it knows to any host |
 | `history` | Search browsing history | Calls throw `permissionDenied` |
-| `downloads` | `downloadFinished` events with file names and addresses; renaming finished downloads | No download events |
+| `downloads` | Read download names, states, and byte counts with `arch.downloads.list()`; no paths or contents | Calls throw `permissionDenied` |
+| `downloads.rename` | Rename one completed download in the Persona to a safe unused name, keeping its extension | Calls throw `permissionDenied` |
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
-| `notifications` | Local notifications through UserNotifications | Calls throw `permissionDenied` |
+| `notifications` | Local notifications under the plugin’s name through UserNotifications, at most one per plugin every 10 seconds | Calls throw `permissionDenied` |
 | `ai` | Requests through the AI interface (VII.1) under the plugin's own feature, `plugin.<id>`, with text, and with the data kinds beyond text that it lists, `page` and `selection`, as `{"ai": ["page"]}` in `permissions`; with bus kinds in `events`, its listeners run as hooks on the shared hook scheduler (see AI hooks and plugins that AI writes) | Calls throw `permissionDenied` |
 | `agent` | Agent runs through `arch.agent.run` within the grant's tools, tab access, record level, limits, and daily count (`docs/hooks.md`, Agent run API). Hook scripts get it from their hook's grant; staging refuses it for installed plugins until their install sheet states that grant | No agent runs |
 | `nativeMessaging` | Messages to a native helper app that the extension names | Web extensions only; Arch refuses it in other kinds |
+
+An installed script plugin requests network access with `{"network": ["api.example.com", "*.example.com"]}` in `permissions`. A host entry is a name or `*.` followed by a name for its subdomains. IP literals in every notation that `inet_aton` reads, such as `127.1` or `0x7f.0.0.1`, names whose last label is a number, `localhost`, ports, and paths are refused. A wildcard is not checked against public suffixes, so `*.co.uk` is accepted, and the review states its breadth only by naming it, as Send requests to `*.co.uk`. Hook scripts and plugins written by AI cannot request this permission. The install review and Settings say "Send requests to \<hosts>" for the granted hosts.
+
+`arch.net.fetch(url, options)` takes an HTTPS address on the default port, 443, at a host the grant covers. `options` may contain `method` (GET by default, or POST, PUT, PATCH, DELETE), `headers` (string names and values), and `body` (UTF-8 text of at most 1 MB, refused on GET). A header name must be an HTTP token, a value has no control characters other than tab, and all headers together come to at most 64 KB. Cookie, Host, Origin, Referer, Content-Length, Transfer-Encoding, Connection, Keep-Alive, Upgrade, TE, Trailer, Expect, Accept-Encoding, and every `Proxy-` header are refused, since Arch writes the message's framing itself; any of these rejects with `invalidRequest`.
+
+Each request is checked when it starts, against the plugin as it is installed then: the plugin must still be installed and switched on with the grant its running instance got, so a revoke or an update stops a running instance's requests at once, and the grant must have `network` (otherwise `permissionDenied`). The address must be HTTPS on port 443 at a granted host (otherwise `hostRefused`). At most 60 requests start per plugin within a minute; later calls reject with `rateLimited` (`PluginManager.networkRequestLimit`). Requests stop, rejecting with `stopped`, when the plugin instance stops.
+
+Arch does not hand the address to a URL loader, which would resolve the host again. It resolves the host once with `getaddrinfo` and rejects with `hostRefused` when any answer is not a public unicast address: IPv4 this network, private, shared (100.64/10), loopback, link-local, the IETF and documentation blocks, the 6to4 relay, benchmarking (198.18/15), multicast, reserved, and broadcast addresses; IPv6 addresses outside global unicast (2000::/3), such as loopback, unique-local, link-local, site-local, multicast, and IPv4-compatible ones; the IETF block with Teredo, documentation prefixes, and 6to4 or NAT64 (64:ff9b::/96) addresses that embed a refused IPv4 address, and the local NAT64 prefix. IPv4-mapped addresses are judged by their IPv4 address. It then opens a Network framework connection to one of the checked addresses itself, with no proxy, sends the host's name in TLS (TLS 1.2 or later), and verifies the certificate against that name, so a second DNS answer can never choose where the request goes. The request is HTTP/1.1 with `Connection: close` and `Accept-Encoding: identity`, and `Accept: */*` and `User-Agent: Arch` unless the plugin sets them. It carries no cookies and uses no cache or stored credentials. Each redirect (301, 302, 303, 307, 308) is checked and connected the same way and must stay HTTPS on port 443 at a granted host, or the call rejects with `redirectRefused`, as it does after five redirects. 303, and 301 or 302 after a POST, continue as GET without a body; a redirect to another host drops `Authorization`. A request that reaches no host, as without a network, with a refused connection, or with a certificate that is not valid for the host, rejects with `networkUnavailable`.
+
+The response body must be UTF-8 text of at most 5 MB, framed by its length, by chunks, or by the end of the connection, not compressed, and the whole request must finish within 30 seconds; otherwise the call rejects with `invalidResponse`, `responseTooLarge`, or `timedOut`. It resolves with `{status, headers, text}`. The Swift `fetch(_:)` member returns the response data and its HTTP response under the same rules.
 
 - Installation shows a sheet that states each permission in a plain sentence, such as "Read the titles and addresses of your tabs" or "Run scripts on pages from example.com", with a switch for each site, so the user can leave sites out before installing. For a script plugin with sites and commands, a switch after them, "Only in a tab where you use one of its commands, until the tab leaves the website", sets `siteAccess` to `whenInvoked`. Without commands, the switch would leave the plugin no page to reach, so it shows only where it starts on, as in an update of a plugin that the user limited, for the user to switch it off (`PluginGrant.offersSiteAccessSwitch(for:kind:)`). A manifest that asks for `whenInvoked` shows the sentence without the switch, and one that asks for every website and has commands starts with it on (`PluginGrant(offeredBy:kind:)`), so that such a grant reaches pages one tab at a time unless the user switches it off and confirms. An update starts as the installed grant reaches its sites, unless its manifest asks for `whenInvoked`. The result is the plugin's `PluginGrant`, which never exceeds what the manifest asks for: a manifest that asks for `whenInvoked` gets no more, and a web extension, whose engines keep its site access, always gets `listedSites`. `plugins.json` keeps a `whenInvoked` grant's sites under `sitesWhenInvoked` in place of `sites`, so that a build before site access modes keeps the entry as one it cannot read rather than run the plugin in every page of its sites.
 - With `whenInvoked`, running one of the plugin's commands in a tab gives the plugin access there, on the host of the document the command ran on, when the tab is one of its Persona's and the granted sites cover that document: any command, from the palette, a menu, a shortcut, or a sidebar item, on the tab it runs on, which for a tab row's menu need not be the selected tab. The access is for the document the user chose the command on: when the tab shows another document by the time the command runs, as one that the page or one of its scripts loads while its context menu is open, or when no match pattern can name the document's host, as for an IPv6 address or a name with `_`, the command does not run and Arch beeps. Its page scripts run there (see Page scripts), and its page calls, page script values, and the tab's title and address in its calls and events reach it only in that tab, on that host and on the granted sites, frames of another host included. The access ends when the tab commits a document of another host, gets another page, as when it unloads or changes engines, or closes, or when the plugin is switched off, updated, also by an update that keeps `plugin.json`, since it can change the rest of the code, or removed; coming back to the host takes another command. The manager checks the access at each use and at each of the tab's events, which drops the tab's scripts: `addressChanged` by the address it carries, since a tab posts it before it takes that address. Until then a tab whose access no longer holds takes none of its scripts (`PluginManager.accessPageScripts(forTab:)`), so a web contents that the tab gets after unloading never takes them from a later change to another tab's. Settings ▸ Plugins states the mode in the same sentence as the review, after the sites'.
 - Granting access to all sites as listed, which a pattern for every host under a top-level domain such as `*://*.com/*` counts as, or `nativeMessaging` asks for Touch ID through LocalAuthentication, following the Platform integration table. `PluginGrant.confirmationReason(for:)` holds the rule for the install sheet and for a web extension's requests at run time.
 - The data kinds that `ai` lists come with it, as a web extension's other API permissions come with its install: the install sheet and Settings state them in one sentence after the permissions, such as "Send the text of pages and selected text to the AI models you connected" (`PluginManifest.aiDataSummary`), and the review of an update marks it New when the update lists a kind the installed version did not. The kinds name the parts that a request may carry, not what can reach a model: a plugin with `ai` and sites can also put what its page calls read into a text part, so the sentence of `ai` with those of the sites already says that the text of those pages can reach the models.
 - A web extension's `tabs`, `clipboardWrite`, and `nativeMessaging` are Arch's `tabs`, `clipboard`, and `nativeMessaging`. Its other API permissions, such as `storage` or `cookies`, come with the install, as in other browsers: the install sheet and Settings list them in one sentence (`PluginManifest.extensionPermissions`), and only its sites can be left out.
-- Settings ▸ Plugins lists each grant. Revoking any part of it is not built yet; once it is, calls that need a revoked permission get `permissionDenied`, and contributions that need it are hidden.
-- An update shows the sheet again, with the permissions and sites that the installed version did not ask for marked New. A site that the installed version asked for starts as the user left it, and a new site starts on. The new grant keeps only what the new manifest asks for, so an update that asks for less narrows it.
+- Settings ▸ Plugins lists each grant. An installed plugin's access has a row for each sentence: each permission and each site has Revoke beside it, which removes that part of its grant in its Persona and ends its running instance; later calls that need it refuse, also those of the ended instance's leftover tasks, since each network request checks the current grant. With more than three sites, the sites' rows sit behind a disclosure under one sentence that names the broadest. `tabs.rename` has no Revoke while `tabs.manage` is granted, which includes renaming, so revoking it alone would change nothing. Built-in plugins keep their compiled grants, stated in one row.
+
+A script plugin may name `"settingsPage": "settings.html"` at the top of its manifest. The file must be HTML inside the package. Settings ▸ Plugins shows Open Settings… in that plugin's command row. It opens a 480 by 520 point sheet with the page in the plugin sandbox's web view and a Done button below it. The page has its own bridge through the running instance's context, without `pages`, `commands`, or `events`. Like a sidebar panel, it keeps to its first document, holds the instance awake while shown, ends its requests when closed, and closes when the instance stops.
+
+A sidebar item with a `panel` may set `"presentation": "sidebar"`; the default is `"popover"`. Clicking a sidebar presentation places the same script plugin panel in the sidebar column in place of the space's tab list. The favorites and address pill remain. Its header has the sidebar's back button with `chevron.left` and the item's title in 13-point semibold. Back, Escape while focus is in the panel, switching spaces, opening the library, hiding the sidebar, a page entering fullscreen, or the plugin stopping returns to the tab list; the panel's page ends whenever it leaves the window, so it never shows ended. Escape elsewhere in the window goes to the control that has focus. The panel takes the column's available size.
+- An update shows the sheet again, with the permissions and sites that the installed version did not ask for marked New. A site that the installed version asked for starts as the user left it, and a new site starts on. A permission or network host that the installed version asked for and the user revoked stays out, since the review has no switch for permissions; removing the plugin and installing it again offers everything. The new grant keeps only what the new manifest asks for, so an update that asks for less narrows it.
 - Built-in plugins declare permissions the same way. The app does not sandbox their code, but `PluginContext` checks their grant like any other. Settings shows the grant, and the user can switch the plugin off.
 - A plugin never sees cookies, passwords, or API keys. Its fetches carry no Persona cookies, so its own requests cannot act as the user on a site. The tabs that a plugin with `tabs.manage` opens are the user's tabs, though: they load with the Persona's cookies, from any host, the local network's among them, so an address that the plugin opens acts as the user there, as a sign-out link does, which the install sheet's sentence for `tabs.manage` states. Site data stays in the engines.
 
@@ -183,12 +199,12 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 - Built-in plugins run in the app process. They are trusted, reviewed with the app, and limited to `PluginContext` by convention.
 - Script plugins run their background script in a hidden `WKWebView` owned by the `Plugins` module. The code runs in a separate WebKit web content process, regardless of the tabs' engine:
   - Its documents load from `arch-plugin://<plugin id>/` through a `WKURLSchemeHandler` that serves only the installed package. The root of that origin is a document the handler writes, which runs the background script as a classic script; every other path is a package path, and other hosts and paths that name no file of the package get 404.
-  - Every response carries the content security policy `default-src 'self'`, which limits scripts, styles, and connections to the package and allows neither inline code nor `eval`. Network access goes through `arch.net.fetch`, which the host checks against the grant's hosts.
+  - Every response carries the content security policy `default-src 'self'`, which limits scripts, styles, and connections to the package and allows neither inline code nor `eval`. Network access goes through `arch.net.fetch`, which Arch checks against the grant and makes itself (see Permissions).
   - A `WKContentRuleList` blocks every load outside the plugin's scheme as a second layer.
   - Neither the policy nor the rule list covers WebRTC, whose connections would reach any host. The web view runs in Lockdown Mode (`WKWebpagePreferences.isLockdownModeEnabled`), which removes WebRTC from its documents and their frames, along with other web technologies such as JIT compilation, WebAssembly, and WebGL. Whether DNS prefetching and `preconnect` links can still reach a host outside the scheme needs verification.
   - Each of a plugin's web views uses its own `WKWebsiteDataStore.nonPersistent()`, so it shares no cookies or site storage with any Persona, any other plugin, or the plugin's other web views: a panel and the background script share neither `localStorage` nor a `BroadcastChannel`. Its lasting state goes through `arch.storage`.
   - The bridge is a `WKScriptMessageHandlerWithReply` on that web view only. A user script defines `arch` in the page's world at the start of each document, and the app hands the background script commands and page script values through `callAsyncJavaScript`. The host identifies the calling plugin by the sending web view, never by the message.
-  - Panels, and HTML settings pages once they exist, use the same configuration, each web view with a data store and a bridge of its own. A panel's `arch` has no `commands`, `events`, or `pages`: the app hands commands, page script values, and events to the background script only, and page calls, which only the background script makes in this build, can come to panels once a plugin needs them there. A panel's main frame loads its page once and then moves only within that document, so a reload or a link to another document goes nowhere.
+  - Panels and HTML settings pages use the same configuration, each web view with a data store and a bridge of its own. A panel's `arch` has no `commands`, `events`, or `pages`: the app hands commands, page script values, and events to the background script only. A panel's main frame loads its page once and then moves only within that document, so a reload or a link to another document goes nowhere.
 - Web extensions run in the engines' own extension sandboxes: WebKit's for `WKWebExtensionController`, Chromium's for CEF's extension runtime.
 - Hangs and crashes: a background is hung if it leaves its start (the load of its document), an event, a command, or a page message unanswered for 10 seconds, not counting the time it waits for Arch's answer to an AI request it made or for a page to run a script it asked for (`arch.pages.run`), which a page that is busy can hold up. A page run waits at most for the hang limit and then rejects with `timedOut`, so a script that loops in a page keeps the limit off for no longer than that. A request that Arch refuses or that fails at once leaves almost all of that time counted. The host releases its web view (whether WebKit then ends the process at once needs verification), fails the calls that wait for it, and starts it again at the next event. `webViewWebContentProcessDidTerminate` reports crashes the same way. WebKit immediately fails a call whose promise can no longer settle, so only a promise that stays pending or a script that keeps running counts as hung. After three failures within five minutes, the host disables the plugin. Its Settings row says why for the rest of that run, unless the user switches it on again.
 - Resources: a background starts at its first event, command, page message, or panel opening and stops after 30 seconds without work, which a wait for an AI reply or a page run is not. Its badges stay. A panel's web view lives only while the panel is open, and while a panel shows, the instance does not stop for being idle. Closing the panel stops the AI requests of its document, and once the instance stops, the panel closes.
@@ -237,9 +253,9 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 
 ## Personas
 
-- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, history, and downloads. It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it, and `selectedTab()` gives the selected tab of the window that last became main under the same rule. A plugin with `tabs.manage` opens and moves tabs only in its Persona's spaces and selects a tab only in a window of its Persona, so a window of another Persona keeps its Persona / Space.
+- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, and downloads, and, once `history` is built, only its Persona's visits. History stays app-wide for the user (`docs/windows-personas.md`, Persona rule 6), and visits do not record their Persona yet, so `history` waits for that record (open decision 2 there, which recommends a nullable `persona` column) rather than show a plugin every Persona's history. It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it, and `selectedTab()` gives the selected tab of the window that last became main under the same rule. A plugin with `tabs.manage` opens and moves tabs only in its Persona's spaces and selects a tab only in a window of its Persona, so a window of another Persona keeps its Persona / Space.
 - The session creates a Persona's manager when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`) and keeps it in the Persona's `PersonaEngines`. A window shows contributions from its current space's Persona, or its tab's Persona for a small window, and runs its palette commands and sidebar items through that Persona's manager. A tab's page scripts and the plugin items of its page's and its row's context menus come from the tab's Persona, and those of a space's menu from the space's. The Plugins menu follows the active window's Persona, or the default one while no window is open. Settings ▸ Plugins shows one Persona's plugins, with a picker once there are two Personas, and installs plugins into that Persona. A review sheet still open when the user deletes its Persona closes without installing, and an install that was waiting for Touch ID then throws `PluginError.closed`.
-- Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. Once there are two Personas, Settings will offer Install in Another Persona, which copies the package and asks for a new grant; it is not built yet.
+- Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. When another Persona exists, an installed, unpaired script plugin or web extension offers Install in Another Persona in its Settings section. A pair offers none, since copying both versions is still open. The menu lists the other Personas by name, without a space, and each choice has an ellipsis because it opens a review sheet. A plugin that AI wrote offers none either, since the copy's review would show a file install without the requests and sources that a written plugin's review states. Choosing one stages the installed package's folder in that Persona and opens the same review as Install Plugin… from a folder, so a web extension from the Web Store installs there as from a folder, without its proof or store updates. The target gets a fresh grant review; settings, storage, and secrets are not copied. If the target already has the identifier, the review offers Update as for any install.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
 - Deleting a Persona closes its manager (`close()`): its plugins leave the list, removing their contributions and preventing them from starting again. Their running instances stop, along with each script plugin's background web view, their contexts stop acting, and storage changes that have not reached the files are dropped. From then on the manager stages, installs, and stores nothing, and throws `PluginError.closed` for such calls; `isClosed` tells callers that fetch a package for it, such as the Web Store installer, to stop before they ask for or download one. The session then stops passing the manager's page scripts to tabs and drops it. At the next launch, before any engine starts, the removal pass calls `PluginManager.removeData(ofPersona:in:)`, which deletes the Keychain items of every plugin whose account starts with `<persona id>/` and then the Persona's `Plugins/<persona id>/` folder, with its installed packages and the packages left in `Staging/`. The Persona stays in `removedPersonaIDs`, and the engines keep its storage, until both are gone.
 
@@ -299,7 +315,7 @@ Many developers ship a separate package for each engine, and some packages load 
   - Storage: each version keeps its own `<plugin id>/` folder and its own extension storage in the engine it runs on. Nothing moves between versions, so the user sets up each version once, as with one package's copies on two engines. The one exception is a version under its counterpart's identifier, which starts on its engine with what the counterpart's copy left there (see Identifiers above).
   - The action: the site settings popover lists the pair once, under the identifier and name of the version installed first, whichever version has the action, with the action of the version that runs on the tab's engine, and a click runs that version's action. The palette lists the pair's `action` command once, under the identifier and name of the version installed first while that one is on, whichever version has the action, and runs it with the version for the invocation tab's engine, through the plugin instance of the version installed first, as a click in the popover does. The contributing version brings, after its own commands, those of the other version whose identifiers its own lacks (`InstalledPlugin.commands(among:)`), with the titles and keywords of the other version's manifest, and `PluginManager.run(_:_:)` accepts the same commands. It does so only while the other version is on, as the popover counts only the actions of versions that are on, so while the version that has the action is off after failing to start, the palette lists no action for the pair; while the version installed first is off, the other contributes alone. The pair's other contributions also appear once: from the version installed first while it is on, otherwise from the other version; a menu item or sidebar item among them shows when its command is one of the pair's commands.
   - Native messaging: each version reaches native apps under its own identifier, so a host manifest's `allowed_origins` must list the identifier of each version that the helper should answer.
-  - Personas: a pair belongs to one Persona. Install in Another Persona, once built, copies both versions and the pair.
+  - Personas: a pair belongs to one Persona. Install in Another Persona offers nothing for a pair; copying both versions and the pair needs a review sequence for two packages, which is open.
 
 #### Guidance
 
@@ -376,12 +392,12 @@ VI.1 then added Chromium's `EngineExtensions` with `check(_:)` and lists `extens
 - The composer (VII.7, `docs/ai.md`) writes a script plugin only, never a built-in plugin or a web extension, with no sites, page scripts, or `ai` permission and with its background script as its only file, and stages its files with `PluginManager.stage(_:writtenBy:)` under an identifier that Arch gives it.
 - A plugin that AI wrote uses the same review sheet, which also shows the requests it came from and every file's full source. Install installs it switched off and Install and Enable switched on, with the origin `generated`, and Settings says that AI wrote it.
 - Ask for Changes in the review has AI write a new version with the same identifier, which replaces the one under review. Changing an installed plugin with AI, with a review of what changed, is not built yet. Removing a plugin that AI wrote works like removing any plugin.
-- Script plugins load code only from their package, so only reviewed files run. A plugin can still act on data it fetches, so its `network` hosts will be part of the review.
+- Script plugins load code only from their package, so only reviewed files run. A plugin can act on data it fetches, so its `network` hosts are part of the review.
 - The composer gives the model a reference in `PluginComposerInstructions.swift` for the manifest keys that plugins AI writes may use and the JavaScript API below.
 
 ## Swift API
 
-The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine`, on `AI`, through which the composer writes plugins, and on `Events`, whose bus brings plugins their events. `Browsing` and `Preferences` depend on it to show contributions, and `Hooks` to run hook scripts. `Browsing` hands the manager each tab that a call carries, such as an invocation's, and the tab members of `PluginContext` reach the browser through `PluginBrowserHost`, which `Browsing` implements as `SessionPluginBrowserHost`, so that `Plugins` does not depend on `Browsing`; the download members will too. `Extensions` depends on `ARCHEngine` and `Plugins` and supplies the web extension runtime, which `Browsing` makes for each Persona; it reaches the Persona's engines, tabs, and windows through `WebExtensionHost`, which `Browsing` implements. All types below are public. The listings design the whole API: a member whose comment, or the comment above its group, says `Not built yet` has no code so far, and the Plugins module in `docs/plan.md` Current State describes what is built.
+The `Plugins` module lives in `Packages/ARCH/Sources/Plugins` and depends on `ARCHEngine`, on `AI`, through which the composer writes plugins, and on `Events`, whose bus brings plugins their events. `Browsing` and `Preferences` depend on it to show contributions, and `Hooks` to run hook scripts. `Browsing` hands the manager each tab that a call carries, such as an invocation's, and the tab members of `PluginContext` reach the browser through `PluginBrowserHost`, which `Browsing` implements as `SessionPluginBrowserHost`, so that `Plugins` does not depend on `Browsing`, as do the download and notification members. `Extensions` depends on `ARCHEngine` and `Plugins` and supplies the web extension runtime, which `Browsing` makes for each Persona; it reaches the Persona's engines, tabs, and windows through `WebExtensionHost`, which `Browsing` implements. All types below are public. The listings design the whole API: a member whose comment, or the comment above its group, says `Not built yet` has no code so far, and the Plugins module in `docs/plan.md` Current State describes what is built.
 
 ### Identity and manifest
 
@@ -427,6 +443,10 @@ public struct PluginManifest: Hashable, Codable, Sendable {
     public var version: String
     public var summary: String
     public var permissions: Set<PluginPermission>
+    /// The hosts that a script plugin's `network` permission lists; empty without it.
+    public var network: [PluginNetworkHost]
+    /// A package path to an HTML page that Settings opens in a sheet with the plugin's bridge. Script plugins only.
+    public var settingsPage: String?
     /// The data kinds beyond text that the plugin's AI requests carry, which its `ai` permission lists; empty without `ai`.
     public var aiDataKinds: Set<AIDataKind>
     public var sites: [MatchPattern]
@@ -442,9 +462,8 @@ public struct PluginManifest: Hashable, Codable, Sendable {
     public var receivesSettingChanges: Bool
     /// How the plugin reaches its sites; a web extension's is `listedSites`.
     public var siteAccess: SiteAccess
-    // Not built yet: the version a script plugin's `plugin.json` names, which staging checks against `apiVersion` and keeps nowhere so far, and the network hosts.
+    // Not built yet: the version a script plugin's `plugin.json` names, which staging checks against `apiVersion` and keeps nowhere so far.
     public var apiVersion: Int
-    public var network: [String]
 }
 
 public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable {
@@ -452,9 +471,13 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case renameTabs = "tabs.rename"
     /// Includes `renameTabs`.
     case manageTabs = "tabs.manage"
-    case clipboard, nativeMessaging, ai
-    // Not built yet.
-    case history, downloads, notifications
+    case clipboard, nativeMessaging, ai, downloads
+    case renameDownloads = "downloads.rename"
+    case notifications
+    /// Requires the hosts in `PluginManifest.network`.
+    case network
+    // Not built yet: waits for visits that record their Persona (`docs/windows-personas.md`, open decision 2).
+    case history
     /// The permission as a plain sentence, such as "Read the titles and addresses of your tabs".
     public var summary: String { get }
 }
@@ -482,12 +505,14 @@ public struct PluginGrant: Hashable, Codable, Sendable {
     public var sites: [MatchPattern]
     /// `whenInvoked` when the manifest asks for it or the user chose it at install; `plugins.json` keeps such a grant's sites under `sitesWhenInvoked`.
     public var siteAccess: SiteAccess
-    public init(permissions: Set<PluginPermission>, sites: [MatchPattern], siteAccess: SiteAccess = .listedSites)
+    /// `network` stays only with `.network` among the permissions, and `.network` only with hosts.
+    public var network: [PluginNetworkHost]
+    public init(permissions: Set<PluginPermission>, sites: [MatchPattern], siteAccess: SiteAccess = .listedSites, network: [PluginNetworkHost] = [])
     /// Everything the manifest asks for.
     public init(requestedBy manifest: PluginManifest)
     /// What the review of a new plugin offers at first: everything the manifest asks for, with `whenInvoked` for a script plugin that asks for every website and has commands.
     public init(offeredBy manifest: PluginManifest, kind: PluginKind)
-    /// What the review of an update to `manifest` offers at first: everything it asks for, except the sites that the installed version asked for and the user left out, with the installed grant's site access unless the manifest asks for `whenInvoked`.
+    /// What the review of an update to `manifest` offers at first: everything it asks for, except the permissions, sites, and network hosts that the installed version asked for and the user left out or revoked, with the installed grant's site access unless the manifest asks for `whenInvoked`.
     public init(updating installed: InstalledPlugin, to manifest: PluginManifest)
     /// Whether the review, starting from this grant, shows the switch for `whenInvoked`: for a script plugin with sites, listed sites in its manifest, and commands, or where the grant starts with it on.
     public func offersSiteAccessSwitch(for manifest: PluginManifest, kind: PluginKind) -> Bool
@@ -495,8 +520,8 @@ public struct PluginGrant: Hashable, Codable, Sendable {
     public var summaries: [String] { get }
     /// What Touch ID or the login password states before the grant is given, or nil when it needs no confirmation: every website as listed and native apps need it.
     public func confirmationReason(for pluginName: String) -> String?
-    // Not built yet, with `network` in the initializer.
-    public var network: [String]
+    /// "Send requests to \<hosts>", the sentence of `network`.
+    public var networkSummary: String { get }
 }
 ```
 
@@ -509,8 +534,6 @@ public struct PluginContributions: Hashable, Codable, Sendable {
     public var sidebarItems: [PluginSidebarItem]
     public var settings: [PluginSetting]
     public var pageScripts: [PluginPageScript]
-    /// Not built yet: a package path to an HTML page shown below the settings form. Script plugins only.
-    public var settingsPage: String?
 }
 
 public struct PluginCommand: Identifiable, Hashable, Codable, Sendable {
@@ -520,7 +543,7 @@ public struct PluginCommand: Identifiable, Hashable, Codable, Sendable {
     public var keywords: [String]
     /// The shortcut of the command's first item in the Plugins menu. The user can change it in Settings ▸ Shortcuts.
     public var shortcut: PluginShortcut?
-    /// Not built yet.
+    /// The palette places the command title before the argument field and passes its text on invocation.
     public var takesArgument: Bool
 }
 
@@ -619,8 +642,6 @@ public protocol Plugin: AnyObject {
     func panel(for sidebarItemID: String) -> NSViewController?
     /// The manager hands it only the events the manifest lists, never one the plugin's own calls caused, and at most 10 for one subject and 60 in all within a minute, and the user's changes to its settings when the manifest asks for them, and ignores what it throws; a hook script's run fails with it. A script plugin throws `noListener` when its script set no listener for the kind and `listenerFailed` with what a listener threw.
     func handle(_ event: PluginEvent) async throws
-    // Not built yet.
-    func settingsPage() -> NSViewController?
 }
 
 extension Plugin {
@@ -628,8 +649,6 @@ extension Plugin {
     public func receive(_ message: PluginPageMessage) async throws -> PluginValue? { nil }
     public func panel(for sidebarItemID: String) -> NSViewController? { nil }
     public func handle(_ event: PluginEvent) async throws {}
-    // Not built yet.
-    public func settingsPage() -> NSViewController? { nil }
 }
 
 /// A plugin compiled into the app. The app shell passes the list of these types to each Persona's manager.
@@ -681,20 +700,28 @@ public protocol PluginContext: AnyObject {
     /// Delivers the value to the `arch.onMessage` listeners of the plugin's page scripts in the tab's main frame, without the user's gesture, and throws `pageRunUnavailable` where the tab's engine could deliver it only with the gesture.
     func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws
 
-    // Not built yet.
-    /// An agent run (`docs/hooks.md`, Agent run API); needs `agent`. The options and the result are the run's JSON.
-    func runAgent(_ options: PluginValue) async throws -> PluginValue
-
     // Data.
+    // Not built yet: waits for visits that record their Persona (`docs/windows-personas.md`, open decision 2).
     func history(matching text: String, limit: Int) throws -> [PluginHistoryEntry]
-    func renameDownload(_ id: PluginDownload.ID, to filename: String) throws
-    /// Uses an ephemeral session without cookies. The host must be in the grant's `network`.
+    func downloads() throws -> [PluginDownload]
+    func renameDownload(_ id: UUID, to name: String) throws -> Bool
+    /// One HTTPS request under the rules in Permissions: checked against the current grant and the rate when it starts, connected to the address Arch checked, without cookies.
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 
     // Interface.
+    /// A running plugin can hide or restore one of its commands in the palette, menus, and sidebar until its instance stops, when they come back.
     func setEnabled(_ isEnabled: Bool, command id: String)
+    /// While one of the plugin's commands that the user started is running, opens an owned sidebar item's panel. A panel's or settings page's call does nothing.
     func showPanel(_ sidebarItemID: String)
     func notify(title: String, body: String) throws
+}
+
+/// The context of a hook script whose hook grants `agent` (`docs/hooks.md`, Agent run API). Installed plugins never get one: staging refuses `agent` until their install sheet states that grant.
+@MainActor
+public protocol PluginAgentContext: PluginContext {
+    var permitsAgentRuns: Bool { get }
+    /// An agent run; the options and the result are the run's JSON.
+    func runAgent(_ options: PluginValue) async throws -> PluginValue
 }
 ```
 
@@ -747,15 +774,15 @@ public enum PluginTabPlace: Hashable, Sendable {
     case end(ofSpace: UUID?)
 }
 
-// Not built yet.
 public struct PluginDownload: Identifiable, Hashable, Sendable {
-    public let id: String
-    public var fileURL: URL
-    public var sourceURL: URL?
-    public var tabID: UUID?
+    public let id: UUID
+    public let name: String
+    public let state: String
+    public let completedBytes: Int64
+    public let totalBytes: Int64
 }
 
-// Not built yet.
+// Not built yet, as `history(matching:limit:)`.
 public struct PluginHistoryEntry: Hashable, Sendable {
     public var url: URL
     public var title: String
@@ -779,7 +806,6 @@ public struct PluginInvocation: Sendable {
     public var linkURL: URL?
     public var imageURL: URL?
     public var selection: String?
-    // Not built yet.
     public enum Source: String, Sendable { case palette, menu, contextMenu, shortcut, sidebar }
     public var source: Source
     public var argument: String?
@@ -854,8 +880,20 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidAddress(String)
     /// The plugin has opened 10 tabs within the last minute (`PluginManager.tabOpenLimit`).
     case tooManyTabs
-    // Not built yet: a host outside its `network`.
-    case networkHostNotGranted(String)
+    /// A network address that is not HTTPS on port 443 at a granted host, or a host that does not resolve or resolves to an address that is not public.
+    case hostRefused
+    /// The request reached no host or lost its connection, as without a network or with a certificate that is not valid for the host.
+    case networkUnavailable
+    /// A redirect off the grant, to another scheme or port, or after five redirects.
+    case redirectRefused
+    /// The plugin started 60 network requests within the last minute (`PluginManager.networkRequestLimit`).
+    case rateLimited
+    /// A response body over 5 MB or a response head over 64 KB.
+    case responseTooLarge
+    /// A response that is malformed, compressed, or not UTF-8 text.
+    case invalidResponse
+    /// A request with a method, header, or body that `arch.net.fetch` does not send.
+    case invalidRequest
 }
 ```
 
@@ -1033,8 +1071,11 @@ public protocol PluginBrowserHost: AnyObject {
     func closeTab(_ id: UUID, cause: BrowserEventCause)
     func selectTab(_ id: UUID, cause: BrowserEventCause)
     func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool
+    /// The Persona's downloads without paths, and a completed one's rename to a safe unused name that keeps its extension.
+    func downloads(in persona: PersonaID) -> [PluginDownload]
+    func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool
+    func postNotification(pluginName: String, title: String, body: String)
     // Not built yet.
-    func renameDownload(_ id: String, to filename: String) throws
     func present(_ panel: NSViewController, for item: Attributed<PluginSidebarItem>)
 }
 
@@ -1067,8 +1108,13 @@ public final class PluginManager: ObservableObject {
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf plugin: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID
     /// Records the choice in `plugins.json`. Switching a plugin off drops its contributions and badges and deactivates its running instance. Either version of a pair switches both.
     public func setEnabled(_ isEnabled: Bool, for id: PluginID)
-    /// Not built yet.
-    public func setGrant(_ grant: PluginGrant, for id: PluginID) async throws
+    /// Settings' Revoke: removes a permission or a site from an installed plugin's grant, saves the list, and stops its running instance, whose context then refuses what it lost. A grant widens only through an update's review or a new install, so there is no member that sets a whole grant.
+    public func revoke(_ permission: PluginPermission, from id: PluginID)
+    public func revoke(_ site: MatchPattern, from id: PluginID)
+    /// A script plugin's settings page, started with the plugin, or nil for a plugin that is off or has none.
+    public func settingsPage(for id: PluginID) async -> NSViewController?
+    /// The package folder that Install in Another Persona stages in another Persona, or nil for a built-in plugin, a version of a pair, a plugin that AI wrote, and kinds other than script plugins and web extensions.
+    public func packageFolderForCopy(of id: PluginID) -> URL?
     /// Removes one plugin, or one version of a pair, whose other version takes the pair's place and whose record goes.
     public func remove(_ id: PluginID) throws
     /// Writes `plugins.json` again after a write failed, for Settings' Try Again.
@@ -1196,7 +1242,7 @@ public var installEngineVersion: ((Persona.ID, Space.ID?, PluginID, EngineKind) 
 
 ### JavaScript API for script plugins
 
-The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `ui.setBadge`, and `ui.copy`; the rest of the table follows as `PluginContext` gains its members. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
+The runtime adds a bridge script to every plugin document to define `arch`. Each call is a promise that resolves with the Swift call's result or rejects with an `Error` whose message is the `PluginError` or `AIError` case name, such as `permissionDenied`, or `invalidCall` for a call the bridge cannot read or a value the storage cannot hold. The background script sets its listeners when it runs; a command without a listener fails. The bridge currently has `commands.onRun`, `events.on`, `tabs.list`, `tabs.get`, `tabs.selected`, `tabs.open`, `tabs.close`, `tabs.select`, `tabs.move`, `tabs.rename`, `ai.reply`, `ai.stream`, `pages.run`, `pages.post`, `pages.onMessage`, `storage`, `secrets`, `settings.get`, `downloads.list`, `downloads.rename`, `net.fetch`, `ui.setBadge`, `ui.setEnabled`, `ui.showPanel`, `ui.notify`, and `ui.copy`, and `agent.run` in a hook script whose hook grants `agent`; `history.search` follows once `history` is built. `ScriptPlugin` and `PluginPackage.init(manifest:background:source:rootURL:)`, a script package held in memory and served from there, are public, so that `Hooks` runs hook scripts in the same runtime (`docs/hooks.md`, JavaScript scripts); `ScriptPlugin.isHeld` keeps an instance from its idle stop while the hook runner uses it for a run.
 
 | JavaScript | Swift |
 |---|---|
@@ -1209,11 +1255,11 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.storage.get(key)`, `set(key, value)`, `keys()` | `PluginStorage` |
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
 | `arch.settings.get(key)` | `setting(_:)` |
-| `arch.net.fetch(url, init)` | `fetch(_:)` |
-| `arch.history.search(text, limit)`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `renameDownload(_:to:)` |
+| `arch.net.fetch(url, options)` | `fetch(_:)` |
+| `arch.history.search(text, limit)` (not built yet), `arch.downloads.list()`, `arch.downloads.rename(id, name)` | `history(matching:limit:)` (not built yet), `downloads()`, `renameDownload(_:to:)` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
-- A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection}`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.selected()` with the tab or `null`, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out.
+- A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection, source, argument}`, with `source` naming where the user ran it, `palette`, `menu`, `contextMenu`, `shortcut`, or `sidebar`, and `argument` the text typed after a command with `takesArgument`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.selected()` with the tab or `null`, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out.
 - `tabs.open(url, options)` takes `{spaceId, select, engine}`, each optional, with `null` as missing and the engine named as tab objects name it, `webKit` or `chromium`, and resolves with the new tab's identifier; `tabs.close(id)` and `tabs.select(id)` resolve with nothing. `tabs.move(id, place)` takes `{before}` or `{after}` with a tab's identifier, or `{spaceId}`, exactly one of them, with `null` as missing, and without a place, or with `null`, moves the tab last in its own space's list; it resolves with `true` or `false` as `moveTab(_:to:)` returns. A place that names none, such as `{before: undefined}`, whose key JSON leaves out, for a neighbor the script did not find, is refused rather than taken as the end of the list, which would take the tab out of its folder. They reject with `permissionDenied` without `tabs.manage`, `invalidCall` for text that is not an absolute address or a tab identifier and for an option or a place of another key or value, or with two places or none, `invalidAddress` for an address other than `http` or `https`, `tooManyTabs` for an open after the plugin's 10th within a minute, and `notGranted` for a space or tab outside the Persona. A panel's `arch` has them too. They act on the tab as it is when the call arrives, also while a hook step of the plugin runs, except that once the scheduler has stopped the step, its listener's `close`, `select`, and `move` of its event's tab reject with `stopped`, since the tab can show the user's next document by then; a panel's calls belong to no step. A page message listener's return value, or the value its promise resolves with, is the page script's reply.
 - An event's listeners run one after another. The delivery function returns what the first that throws or rejects threw, as an error's message after its name unless it is a plain `Error`, or as the thrown value's text, and that no listener was set for the kind, as JSON, which `Plugin.handle(_:)` throws as `PluginError.listenerFailed` and `noListener`. The manager ignores both; a hook script's run fails with them.
 - A plugin never receives an event its own calls caused, such as the title change of its own rename, and receives at most 10 events for one subject and 60 in all within a minute (`docs/hooks.md`, Plugins). Its listeners run outside hook chains, so this cap is what stops two plugins, or a plugin and a hook, that answer each other's renames.
@@ -1284,18 +1330,30 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
 5. The web extension runtime on WebKit as a `PluginRuntime` (`Extensions`), built; then engine versions in the two steps of Engine versions, both built; VI.1 added Chromium; IV.26 added package proof, IV.17 the Web Store's client and staging, IV.18 its entry points, IV.19 Chromium's store button, and IV.20 its updates; IV.21 added the password managers' host discovery and proof gate, and IV.22 the install script and the native app status in Settings; IV.17 then added the store's page hosts, and the password managers' checks with the app (IV.13) follow.
 6. VII.7 builds the composer on the staging and review path. The `ai` permission and plugin hooks on the shared hook scheduler (`docs/hooks.md`) are built. Script plugin panels and `arch.ai.stream` are built. The page members, `runPageScript(_:in:)` and `postMessage(_:toTab:)` with `arch.pages.run` and `post`, are built, and so are the data kinds that the `ai` permission lists, `page` and `selection`, with page and selection parts in `arch.ai.reply` and `arch.ai.stream`.
 7. Site access modes, `siteAccess` with `whenInvoked` in the manifest, the grant, the review, and Settings, are built, and so are page script styles, a page script's `css`, the plugin's own `settingChanged` event, and the tab members, `selectedTab()` and, with `tabs.manage`, `openTab(_:_:)`, `closeTab(_:)`, `selectTab(_:)`, and `moveTab(_:to:)`, with `arch.tabs.selected`, `open`, `close`, `select`, and `move`. The rest of what the plan's V.11 row lists as not built follows in the row's order.
+8. Network grants use `PluginNetworkHost` to parse the manifest's host entries, and `arch.net.fetch` is built: the manager checks the current grant, the address, and the rate at each request's start, and `PluginNetworkFetch` resolves each hop once, refuses addresses that are not public, and connects to a checked address itself over TLS with the host's name and no proxy (see Permissions).
+9. Script plugin settings pages use the panel sandbox in a Settings sheet. An unpaired plugin can stage its package in another Persona for a fresh review. A sidebar item can show its panel in place of the tab list. The `downloads.rename` permission reaches the existing safe rename path.
 
 ## Open decisions
 
 - Isolation on Chromium: plugin page scripts share the page's main world until a CEF patch adds isolated worlds. The alternative is to run plugin page scripts on WebKit tabs only.
 - Sandbox for script plugins: a hidden `WKWebView` per running plugin costs a web content process each. JavaScriptCore in the app process would cost less. It provides no process isolation, and its execution time limit is private API.
+  - Decided in X5: keep the hidden WKWebView sandbox so each running plugin has process isolation.
 - One extension, two runtimes: each engine keeps its own copy of an extension's state and storage, so the user may unlock a password manager once per engine.
+  - Decided in X5: keep engine state and storage separate, including per-engine unlocks.
 - Engine versions by name: without a shared `key`, two packages match only by name and a matching developer field, which a package can copy, as it can copy a `key`. The review's choice, which starts on joining only for packages whose checks complement each other, and Separate Versions are the safeguards. Whether a matching name alone should pair two packages whose manifests name no developer is open; until then the user joins them with Join With… or Install \<Engine> Version….
 - Plugin fetches carry no Persona cookies. A plugin that needs a signed-in site must use a page script on that site.
+  - Decided in X5: keep plugin fetches free of Persona cookies; signed-in site access belongs in a page script.
 - A plugin with `ai` but no bus events has a feature that the user starts, although its page script values can start requests as pages load, and its `settingChanged` listeners can start them as the user edits its settings, which is not asking for AI as running a command is. Those requests count as the user's: they use the default route until the feature has models of its own, take a provider's free slot ahead of waiting automatic requests, and do not count toward the daily limit for automatic requests. Whether such a plugin's feature should be automatic, so that it waits for a model of its own and counts toward that limit, or whether only a `settingChanged` listener's requests should count as automatic, is open.
 - A tab that a plugin opens takes the plugin's cause for its first address and load, as for its opening and selection, so the plugin hears neither its `tabOpened` nor that first `addressChanged` and `pageLoaded`, under the rule that a plugin never receives an event its own calls caused; a page script on its sites still sees the page. Whether that first load should reach the plugin, since the page's own loading follows the call, is open.
+  - Default kept in X5, still open for the user: the opening plugin's first address and load events are suppressed as events caused by its own call.
 - A request that a hook listener starts without waiting for it belongs to the listener's step for the pause, but once the listener returns, the step ends while the request runs on: the scheduler no longer stops it, and it can run beside the plugin's next step. Whether a step should wait for such requests or end them is open.
 - Page script styles go in `<style>` elements, which the page sees and a strict content security policy may refuse. Constructed style sheets in `document.adoptedStyleSheets`, which the policy may not govern (needs verification), are the alternative, though a page that sets that list drops them. Whether to use them, or to fall back to them where the policy refuses an element, is open.
 - A file that a link of a web extension's popup or options page opens in a new tab, or that a `tabs.create` from its action's click opens, downloads nothing and its tab closes at once, as for any tab that a plugin opens, since Arch cannot tell the user's click there from the extension's own call. Whether such a tab should instead stay open and ask with its card, which would keep the user's file, is open.
 - A plugin's move keeps a tab pinned or open, so no plugin pins or unpins tabs, which would let one turn a pinned tab, which its close only unloads, into an open tab that its close removes, with the tab's saved page. Whether `tabs.manage` should pin and unpin tabs, or a permission of its own should, is open.
+  - Default kept in X5, still open for the user: tab moves keep their pin status, and `tabs.manage` does not pin or unpin.
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, limit of 10 tabs that a plugin opens within a minute, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.
+  - Decided in X5: keep these limits as starting values until a concrete plugin needs a change.
+
+The `downloads` permission lets `arch.downloads.list()` read the current Persona’s download names, states, completed bytes, and total bytes. The result contains no file path, folder, or contents.
+
+`arch.ui.notify(title, body)` posts a local notification under the plugin’s name when the app has notification authorization. Calls within 10 seconds of the previous post from that plugin are ignored.

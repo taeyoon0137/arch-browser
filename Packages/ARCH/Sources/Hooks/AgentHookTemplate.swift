@@ -3,7 +3,9 @@ import Agent
 import Events
 import Foundation
 
+/// Generates hook scripts that start scoped agent runs for browser events.
 public enum AgentHookTemplate {
+    /// Builds the script for an event kind, skipping agent runs when no tab remains to act on.
     public static func script(for kind: BrowserEventKind) -> String {
         let body: String
         switch kind {

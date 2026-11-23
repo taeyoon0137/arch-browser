@@ -1,4 +1,7 @@
-// A script plugin's panel: one of its package's HTML files in a web view of the plugin sandbox, with a bridge of its own that acts through the instance's context. The popover beside the sidebar item holds it while it shows and lets it go when it closes, which ends its document's AI requests; while it shows, the instance does not stop for being idle, and once the instance stops, the popover closes. The panel keeps to its page, so its document is the only one its requests belong to.
+// A script plugin panel shows a package HTML file in a sandboxed web view.
+// Its own bridge acts through the plugin instance's context. A sidebar popover holds it while open.
+// Closing the popover ends the document's AI requests. An open panel keeps the instance active; stopping the instance closes the popover.
+// The panel stays on its page, so its requests belong only to that document.
 import AppKit
 import WebKit
 
@@ -8,6 +11,7 @@ final class ScriptPluginPanel: NSViewController, PluginEndingPanel, WKNavigation
     static let size = NSSize(width: 300, height: 400)
 
     private let page: URL
+    private let panelSize: NSSize
     private let configuration: WKWebViewConfiguration
     private let bridge: ScriptPluginBridge
     /// Told true as the panel starts to show and false once it has closed or its instance has stopped.
@@ -19,22 +23,23 @@ final class ScriptPluginPanel: NSViewController, PluginEndingPanel, WKNavigation
     private var hasStartedPage = false
 
     /// The page at `page`, in a web view of `configuration`, whose message handler is `bridge`.
-    init(title: String, page: URL, configuration: WKWebViewConfiguration, bridge: ScriptPluginBridge) {
+    init(title: String, page: URL, configuration: WKWebViewConfiguration, bridge: ScriptPluginBridge, size: NSSize) {
         self.page = page
+        panelSize = size
         self.configuration = configuration
         self.bridge = bridge
         super.init(nibName: nil, bundle: nil)
         self.title = title
-        preferredContentSize = Self.size
+        preferredContentSize = size
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("A panel is made in code.")
+        return nil
     }
 
     override func loadView() {
-        let webView = WKWebView(frame: NSRect(origin: .zero, size: Self.size), configuration: configuration)
+        let webView = WKWebView(frame: NSRect(origin: .zero, size: panelSize), configuration: configuration)
         webView.navigationDelegate = self
         view = webView
     }

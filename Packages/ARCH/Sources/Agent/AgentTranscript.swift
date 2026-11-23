@@ -1,4 +1,6 @@
-// An in-app session's conversation as the agent panel shows it (docs/agents.md, In the browser ▸ The agent panel): the user's messages, the agent's replies and thinking from the CLI's stream, one step per tool call from Arch's tool host, notices, errors with one action each, and the model and tokens under each turn. It stays in memory until the session is deleted or Arch quits. Tool steps come from the host, not from the stream, so the panel shows what Arch did.
+// The in-app conversation shown in the agent panel (docs/agents.md, The agent panel).
+// It holds user messages, CLI replies and thinking, host tool steps, notices, errors with one action, and each turn's model and tokens.
+// It remains in memory until the session is deleted or Arch quits. Tool steps come from the host, so the panel shows what Arch did.
 import AgentControl
 import AI
 import Foundation
@@ -31,7 +33,9 @@ public enum AgentErrorAction: Equatable, Sendable {
     case openAISettings
 }
 
+/// One identified item shown in an in-app session's transcript.
 public struct AgentTranscriptItem: Identifiable, Equatable, Sendable {
+    /// The message, step, notice, error, or footer represented by an item.
     public enum Kind: Equatable, Sendable {
         case user(String)
         case reply(String)
@@ -55,18 +59,21 @@ public struct AgentTranscriptItem: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Builds one session's in-memory transcript and tracks its current turn.
 struct AgentTranscript: Equatable {
     private(set) var items: [AgentTranscriptItem] = []
     private(set) var retryableErrorID: UUID?
     /// The current turn's usage and whether its reply or thinking is still growing.
     private var turnUsage: AIUsage?
     private var turnPages: [AgentReadPage] = []
+    private var turnStartIndex = 0
     private var growing: Growing?
 
     private enum Growing: Equatable {
         case reply, thinking
     }
 
+    /// Appends an item and tracks whether its error can be retried.
     mutating func append(_ kind: AgentTranscriptItem.Kind) {
         growing = nil
         let item = AgentTranscriptItem(kind)
@@ -76,7 +83,9 @@ struct AgentTranscript: Equatable {
         }
     }
 
+    /// Resets per-turn state and appends the user's message unless retrying.
     mutating func beginTurn(_ text: String, isRetry: Bool) {
+        turnStartIndex = items.count
         retryableErrorID = nil
         turnUsage = nil
         turnPages = []
@@ -93,6 +102,7 @@ struct AgentTranscript: Equatable {
         }
     }
 
+    /// Joins streamed thinking text to the current thinking item.
     mutating func thinkingText(_ text: String) {
         guard !text.isEmpty else { return }
         if growing == .thinking, case .thinking(let earlier)? = items.last?.kind {
@@ -107,10 +117,12 @@ struct AgentTranscript: Equatable {
         turnUsage = usage
     }
 
+    /// Reports whether any completed transcript item records a read of the tab.
     func containsRead(of tabID: UUID) -> Bool {
         items.contains { $0.pagesRead.contains { $0.tabID == tabID } }
     }
 
+    /// Records a distinct page read for the current turn.
     mutating func read(_ page: AgentReadPage) {
         if !turnPages.contains(page) { turnPages.append(page) }
     }
@@ -118,7 +130,14 @@ struct AgentTranscript: Equatable {
     /// The footer under a turn that ended, with the model that held it.
     mutating func endTurn(model: AIModelRef?) {
         append(.turnFooter(model: model, usage: turnUsage))
-        items[items.count - 1].pagesRead = turnPages
+        if let index = (turnStartIndex..<items.count - 1).reversed().first(where: {
+            if case .reply = items[$0].kind { return true }
+            return false
+        }) {
+            items[index].pagesRead = turnPages
+        } else {
+            items[items.count - 1].pagesRead = turnPages
+        }
         turnPages = []
         turnUsage = nil
     }
@@ -139,6 +158,7 @@ enum AgentStepText {
         AgentStep(tool: call.name, sentence: sentence(for: call, result: result, hostStep: hostStep), tabHandle: tabHandle, tabID: tabID, status: result.status)
     }
 
+    /// Names the tool step and translates known result states into a short panel sentence.
     static func sentence(for call: AgentToolCall, result: AgentToolResult, hostStep: String? = nil) -> String {
         let done: String
         switch call.name {

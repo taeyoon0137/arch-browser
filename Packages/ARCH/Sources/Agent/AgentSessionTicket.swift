@@ -1,4 +1,6 @@
-// An in-app session's ticket (docs/agents.md, In-app sessions: tickets): 32 random bytes, base64url-encoded, that reach the session's `arch-mcp --session` through the CLI's MCP configuration. Arch binds a connection to the session only when the ticket matches in a constant-time comparison and the session's running CLI process is an ancestor of the peer, by process ID and start time, so a ticket read from another process's environment binds nothing. The ticket dies with the session.
+// An in-app session's ticket has 32 random bytes encoded as base64url (docs/agents.md, In-app sessions: tickets).
+// The CLI's MCP configuration passes it to `arch-mcp --session`. Arch compares it in constant time and binds the connection only if the session's running CLI process is an ancestor of the peer.
+// The ancestor check uses process ID and start time, so a ticket copied from another process's environment binds nothing. The ticket dies with the session.
 import Darwin
 import Foundation
 import Security
@@ -7,12 +9,16 @@ struct AgentSessionTicket: Sendable {
     /// What `ARCH_AGENT_TICKET` carries.
     let text: String
 
-    /// A new ticket from the system's random number generator.
-    static func make() -> AgentSessionTicket {
+    /// A new ticket from Security's random number generator, or nil if it fails; each caller then refuses to start what the ticket was for.
+    static func make() -> AgentSessionTicket? {
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        precondition(status == errSecSuccess, "The system's random number generator failed.")
-        return AgentSessionTicket(text: Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: ""))
+        guard status == errSecSuccess else { return nil }
+        return AgentSessionTicket(bytes: bytes)
+    }
+
+    private init(bytes: [UInt8]) {
+        text = Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 
     /// Whether a presented ticket is this one. It takes the same time wherever the two differ.

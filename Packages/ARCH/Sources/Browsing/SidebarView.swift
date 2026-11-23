@@ -1,13 +1,16 @@
-// The sidebar's frame: its column, which the library pushes aside, the top row with the sidebar and navigation buttons, the swipe between space pages, the resize handle along its trailing edge, the fills of its controls, and the environment values its views share. `BrowserWindowView` places it in the window, docked or floating as a card.
+// The sidebar frame holds its column, top navigation row, space-page swipe, trailing resize handle, control fills, and shared environment values.
+// The library pushes the column aside. `BrowserWindowView` places the sidebar in a window, docked or floating as a card.
 import AppKit
 import SwiftUI
 
-/// Translucent fills for sidebar controls. They lighten the window material in both appearances instead of covering it with an opaque color.
+/// Translucent fills for sidebar controls. They lighten the window material in both appearances instead of covering it with an opaque color. A row under the pointer takes `hover`; a small borderless button under the pointer takes `buttonHover`, which stays visible on a hovered or selected row, and one that is on, as the Library button while the library is open, `buttonOn`.
 enum SidebarFill {
-    case field, hover, selected
+    case field, hover, selected, buttonHover, buttonOn
 
     func color(in scheme: ColorScheme) -> Color {
         switch (self, scheme) {
+        case (.buttonHover, _): return .primary.opacity(0.08)
+        case (.buttonOn, _): return .primary.opacity(0.1)
         case (.field, .dark): return .white.opacity(0.07)
         case (.field, _): return .black.opacity(0.05)
         case (.hover, .dark): return .white.opacity(0.05)
@@ -310,6 +313,7 @@ struct SidebarIconButton: View {
     var shortcut: String?
     let action: () -> Void
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
 
     var body: some View {
@@ -317,7 +321,7 @@ struct SidebarIconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .frame(width: 30, height: 28)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHovering && isEnabled ? 0.08 : 0)))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering && isEnabled ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

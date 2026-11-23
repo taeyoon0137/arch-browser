@@ -1,4 +1,9 @@
-// A card in the agent panel (docs/agents.md, Approval interface): it leads with the facts the host computed (the step in a sentence, the tab and site, the element marked on a capture of the viewport, and the exact text, address, or tab name that would be sent), then the agent's own words under "The agent says:". A card whose agent text names a secret leads with Arch's warning, and P19's card for a tab the user shared says what Allow for This Tab lets the client do. No card has a default button, so Return and Space answer none; on a sensitive card, Allow, and Share and Done, take only a pointer click on the button that no other program posted, and for outside clients Allow on a sensitive card and Share take Touch ID or the login password as well (`AgentApprovals.answer(_:with:)`).
+// Cards in the agent panel show the host's facts before the agent's own words (docs/agents.md, Approval interface).
+// The facts name the step, tab, site, marked viewport element, and exact text, address, or tab name to send.
+// A card warns first when the agent's words name a secret. The P19 card explains what Allow for This Tab permits.
+// No card has a default button, so Return and Space answer none.
+// Sensitive Allow, Share, and Done require a pointer click on their button that no other program posted (`AgentPointerCheck`).
+// For outside clients, sensitive Allow and Share also require Touch ID or the login password (`AgentApprovals.answer(_:with:)`).
 import AgentControl
 import AppKit
 import Darwin
@@ -13,68 +18,113 @@ struct AgentApprovalCard: View {
     @State private var isReplying = false
     @State private var written = ""
     @State private var chosenTab: UUID?
+    /// Kept here, since the facts are drawn twice: as they are, and in a scroll view.
+    @State private var showsRules = false
+    @State private var showsLargeCapture = false
 
     var body: some View {
+        AgentSectionBox {
+            VStack(alignment: .leading, spacing: 8) {
+                // Facts that do not fit scroll inside the card, so the decision below always stays in view.
+                ViewThatFits(in: .vertical) {
+                    facts
+                    ScrollView { facts }
+                }
+                decision
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: AgentPanelMetrics.boxRadius).strokeBorder(approval.isSensitive ? Color.orange.opacity(0.6) : Color.primary.opacity(0.1)))
+    }
+
+    /// The host's facts, then the agent's own words.
+    private var facts: some View {
         VStack(alignment: .leading, spacing: 8) {
             if approval.namesSecret {
                 Text(AgentPolicy.secretWarning)
-                    .font(.callout.weight(.semibold))
+                    .font(.system(size: AgentPanelMetrics.bodySize, weight: .semibold))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text(approval.action)
-                .font(.callout.weight(.semibold))
+                .font(.system(size: AgentPanelMetrics.bodySize, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
-                Text(approval.clientName)
+            AgentDetailRow(title: "Requested by") {
+                Text(approval.clientName).lineLimit(1).truncationMode(.tail).help(approval.clientName)
                 if let handle = approval.tabHandle, approval.tabID != nil {
                     Button("Show \(handle)", action: showTab).buttonStyle(.link)
                 }
-                if !approval.rules.isEmpty {
-                    Text(approval.rules.map(\.rawValue).joined(separator: ", "))
-                        .help(approval.rules.map { AgentPolicy.entry($0).sentence }.joined(separator: " "))
+            }
+            if !approval.rules.isEmpty {
+                DisclosureGroup(isExpanded: $showsRules) {
+                    Text(approval.rules.map { AgentPolicy.entry($0).sentence }.joined(separator: " "))
+                        .font(.system(size: AgentPanelMetrics.detailSize))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } label: {
+                    Text("Why Arch asks")
+                        .font(.system(size: AgentPanelMetrics.detailSize))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
             if let capture = approval.capture {
-                Image(nsImage: capture)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .accessibilityLabel("The page, with the element marked")
+                Button { showsLargeCapture = true } label: {
+                    Image(nsImage: capture)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .frame(maxWidth: .infinity, maxHeight: AgentPanelMetrics.captureMaxHeight)
+                }
+                .buttonStyle(.plain)
+                .help("Show Larger")
+                .accessibilityLabel("The page, with the element marked")
+                .accessibilityHint("Shows the capture larger")
+                .popover(isPresented: $showsLargeCapture) {
+                    Image(nsImage: capture)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: min(capture.size.width, AgentPanelMetrics.largeCaptureMaxSide),
+                               maxHeight: min(capture.size.height, AgentPanelMetrics.largeCaptureMaxSide))
+                        .padding(AgentPanelMetrics.boxPadding)
+                }
             }
             if let exactText = approval.exactText {
                 exactTextView(exactText)
-                    .font(.caption.monospaced())
+                    .font(.system(size: AgentPanelMetrics.supportingSize).monospaced())
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(AgentPanelFill.exactText))
             }
             if let note = approval.exactTextNote {
                 Text(note)
-                    .font(.caption)
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let says = approval.agentSays, !says.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("The agent says:")
-                        .font(.caption)
+                        .font(.system(size: AgentPanelMetrics.detailSize))
                         .foregroundStyle(.secondary)
                     Text(says)
-                        .font(.callout)
+                        .font(.system(size: AgentPanelMetrics.bodySize))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if case .question(let choices) = approval.kind, !choices.isEmpty {
+                FlowButtons(titles: choices) { answer(.answer($0)) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What the user answers with: what the answer permits, its fields, and its buttons.
+    private var decision: some View {
+        VStack(alignment: .leading, spacing: 8) {
             inputs
             buttons
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(approval.isSensitive ? Color.orange.opacity(0.6) : Color.primary.opacity(0.1)))
     }
 
     /// The exact text, and for an address the session has not seen (P13), the parts no page or the user showed, marked.
@@ -95,27 +145,25 @@ struct AgentApprovalCard: View {
 
     @ViewBuilder private var inputs: some View {
         switch approval.kind {
-        case .question(let choices):
-            if !choices.isEmpty {
-                FlowButtons(titles: choices) { answer(.answer($0)) }
-            }
+        case .question:
+            // The offered answers sit with the facts above, which scroll when they are many.
             TextField("Your answer", text: questionAnswer, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
         case .handToUser:
             Text("Do the step in the tab, then choose Done.")
-                .font(.caption)
+                .font(.system(size: AgentPanelMetrics.detailSize))
                 .foregroundStyle(.secondary)
             TextField("A note for the agent (optional)", text: $written, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
         case .renameSharedTab:
             Text(verbatim: "Allow for This Tab lets \(approval.clientName) rename this tab again without asking. A name you give the tab yourself always stays.")
-                .font(.caption)
+                .font(.system(size: AgentPanelMetrics.detailSize))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         case .shareSessionTab(let tabs), .requestTab(let tabs, _):
             if tabs.isEmpty {
                 Text("No eligible tabs to share in this Persona.")
-                    .font(.caption)
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.secondary)
             } else {
                 let labels = AgentTabInfo.attachmentLabels(for: tabs)
@@ -128,12 +176,12 @@ struct AgentApprovalCard: View {
                 // The chosen tab's full address, which the user reviews before Share.
                 if let selected = tabs.first(where: { $0.id == chosenTab }) {
                     Text(verbatim: selected.attachmentAddress ?? selected.attachmentLabel)
-                        .font(.caption.monospaced())
+                        .font(.system(size: AgentPanelMetrics.supportingSize).monospaced())
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(6)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+                        .background(RoundedRectangle(cornerRadius: 6).fill(AgentPanelFill.exactText))
                 }
             }
         default:
@@ -145,34 +193,45 @@ struct AgentApprovalCard: View {
         }
     }
 
+    /// One row of buttons at the trailing edge, or a column of them when one row does not fit the column.
     private var buttons: some View {
-        HStack(spacing: 6) {
-            Spacer(minLength: 0)
-            switch approval.kind {
-            case .question:
-                AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel("")) }
-                AgentPointerButton(title: "Answer", requiresPointer: false) { answer(.answer(questionAnswer.wrappedValue)) }
-                    .disabled(questionAnswer.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            case .handToUser:
-                AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
-                AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
-            case .shareSessionTab, .requestTab:
-                AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
-                AgentPointerButton(title: "Share", requiresPointer: true) { if let chosenTab { answer(.tab(chosenTab)) } }
-                    .disabled(chosenTab == nil)
-            default:
-                ForEach(Array(approval.offers.enumerated()), id: \.offset) { _, offer in
-                    if case .reply = offer {
-                        AgentPointerButton(title: isReplying ? "Send Reply" : offer.title(site: approval.site), requiresPointer: false) {
-                            if isReplying, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { answer(.reply(reply)) } else { isReplying = true }
-                        }
-                    } else {
-                        AgentPointerButton(title: offer.title(site: approval.site), requiresPointer: offer.allows && approval.isSensitive, inWindow: { answer(offer, in: $0) })
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                buttonList
+            }
+            VStack(alignment: .trailing, spacing: 4) {
+                buttonList
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .controlSize(.small)
+    }
+
+    @ViewBuilder private var buttonList: some View {
+        switch approval.kind {
+        case .question:
+            AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel("")) }
+            AgentPointerButton(title: "Answer", requiresPointer: false) { answer(.answer(questionAnswer.wrappedValue)) }
+                .disabled(questionAnswer.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        case .handToUser:
+            AgentPointerButton(title: "Cancel", requiresPointer: false) { answer(.cancel(written)) }
+            AgentPointerButton(title: "Done", requiresPointer: true) { answer(.done(written)) }
+        case .shareSessionTab, .requestTab:
+            AgentPointerButton(title: "Don\u{2019}t Share", requiresPointer: false) { answer(.deny) }
+            AgentPointerButton(title: "Share", requiresPointer: true) { if let chosenTab { answer(.tab(chosenTab)) } }
+                .disabled(chosenTab == nil)
+        default:
+            ForEach(Array(approval.offers.enumerated()), id: \.offset) { _, offer in
+                if case .reply = offer {
+                    AgentPointerButton(title: isReplying ? "Send Reply" : offer.title(site: approval.site), requiresPointer: false) {
+                        if isReplying, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { answer(.reply(reply)) } else { isReplying = true }
                     }
+                } else {
+                    AgentPointerButton(title: offer.title(site: approval.site), requiresPointer: offer.allows && approval.isSensitive, inWindow: { answer(offer, in: $0) })
                 }
             }
         }
-        .controlSize(.small)
     }
 
     /// Answers in the card's window, where a file chooser's Allow opens Arch's panel (P7).

@@ -1,7 +1,11 @@
-// Main window content. The system's translucent window material fills the window with a wash of the current space's tint (`SpaceTheme.swift`). The sidebar (`SidebarView.swift`) sits over it and contains navigation, the address pill (`AddressPillView.swift`), favorites (`FavoritesGridView.swift`), the current space's tabs (`SpaceTabsView.swift`, `TabRowView.swift`) or the library, and the bottom bar with the library button and the space switcher (`SidebarBottomBar.swift`). The page area fills the remaining space with nothing above it: the selected tab's page, or the split view it belongs to (`SplitView.swift`). This file also holds the window's buttons, the page frame, and the backgrounds.
+// Main window content sits over translucent window material tinted by the current space (`SpaceTheme.swift`).
+// `SidebarView.swift` contains navigation, the address pill, favorites, current-space tabs or library, and the bottom bar's library button and space switcher.
+// Those parts live in `AddressPillView.swift`, `FavoritesGridView.swift`, `SpaceTabsView.swift`, `TabRowView.swift`, and `SidebarBottomBar.swift`.
+// The selected page or its `SplitView.swift` fills the remaining area with nothing above it. This file also holds window buttons, the page frame, and backgrounds.
 import AppKit
 import SwiftUI
 
+/// Arranges the sidebar, page, panels, and transient overlays of a browser window.
 public struct BrowserWindowView: View {
     @ObservedObject var session: BrowserSession
     /// The window this view shows. Its subviews read it from the environment.
@@ -190,6 +194,7 @@ public struct BrowserWindowView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
+    /// Reveals the floating sidebar card and starts checking when it should close.
     private func peekSidebar() {
         guard !windowModel.isSidebarVisible else { return }
         peekCheck?.cancel()
@@ -200,11 +205,13 @@ public struct BrowserWindowView: View {
         scheduleCheckOfPeek()
     }
 
+    /// Remembers child windows already open before the sidebar card appears.
     private func recordChildWindows() {
         childWindowsBeforePeek = Set((windowReference.window?.childWindows ?? []).map(ObjectIdentifier.init))
     }
 
     // Check rather than track the pointer: a card sliding under it gets no hover until the pointer leaves.
+    /// Schedules another check of whether the sidebar card is still in use.
     private func scheduleCheckOfPeek() {
         let work = DispatchWorkItem { checkPeek() }
         peekCheck = work
@@ -252,6 +259,7 @@ struct WindowButtonsVisibility: NSViewRepresentable {
 
     private static let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
 
+    /// Tracks window button positions and supersedes earlier slide completions.
     final class Coordinator {
         var isHidden: Bool?
         /// The buttons' resting positions, recorded while they slide.
@@ -264,6 +272,7 @@ struct WindowButtonsVisibility: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
+    /// Moves the standard window buttons with the sidebar when their visibility changes.
     func updateNSView(_ view: NSView, context: Context) {
         let isHidden = isHidden
         let slideDistance = slideDistance
@@ -384,6 +393,7 @@ struct PageCrashNoticeView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 30))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Text("This page stopped working")
                     .font(.system(size: 15, weight: .semibold))
                 Text("Reload to open it again.")

@@ -1,4 +1,6 @@
-// Unloading (`docs/bookmarks.md`, Unloading; bookmark rules 4 and 5): what each way of closing a tab does to it, which tabs that no window shows unload on their own, the page script that tells the app the user typed in a page, the memory pressure source, and the stand-ins a tab takes when its page unloads. The session applies them (`BrowserSession.swift`, its Tabs and Unloading sections); these parts need no session, so tests drive them directly.
+// Unloading implements bookmark rules 4 and 5 (`docs/bookmarks.md`, Unloading).
+// It decides what each close does, when unseen tabs unload, and which stand-in replaces an unloaded page.
+// It tracks typed input through a page script and reacts to memory pressure. `BrowserSession.swift` applies the parts; tests can drive them without a session.
 import Agent
 import AppKit
 import ARCHEngine
@@ -83,6 +85,7 @@ extension Tab {
 
 /// A loaded tab that no window shows, as automatic unloading weighs it: its ID, its kind, when a window last showed it, and what keeps it loaded. The session makes these, so tests can drive `TabUnloading.tabsToUnload` without one.
 struct UnloadCandidate {
+    /// The sidebar list that contains a candidate tab.
     enum Kind {
         case pinned
         case favorite
@@ -96,6 +99,7 @@ struct UnloadCandidate {
     var exclusions: Set<UnloadExclusion> = []
 }
 
+/// The settings, page script, and selection rules for unloading unseen tabs.
 public enum TabUnloading {
     /// Settings ▸ Sidebar saves under this key the hours after which pinned tabs and favorites' tabs that no window shows unload; 0 turns automatic unloading off, under memory pressure too.
     public static let unloadAfterHoursKey = "ARCHUnloadAfterHours"

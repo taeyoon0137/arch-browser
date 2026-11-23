@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// Locates the app and agent helper executables within one Arch bundle.
 public struct AgentBundleLayout: Equatable, Sendable {
     public var bundleURL: URL
 

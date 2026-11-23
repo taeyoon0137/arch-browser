@@ -39,6 +39,7 @@ public struct AIAgentSkills: Sendable, Equatable {
     }
 }
 
+/// The model route, tool server, limits, and working folder for one CLI agent session.
 public struct AIAgentSessionRequest: Sendable {
     public var feature: AIFeatureID
     /// The session's model, a route of that one model under the rules for `route`; nil uses `route`, or the feature's route without one, whose later models serve only when the earlier fail before `ready`, the first model output.
@@ -77,6 +78,7 @@ public struct AIAgentSessionRequest: Sendable {
     }
 }
 
+/// The reason a CLI agent turn ended without an error.
 public enum AIAgentTurnEnd: Sendable, Equatable {
     case completed
     /// Stop ended the turn.
@@ -85,6 +87,7 @@ public enum AIAgentTurnEnd: Sendable, Equatable {
     case turnLimit
 }
 
+/// Session events delivered to the caller as the CLI starts, replies, and ends a turn.
 public enum AIAgentEvent: Sendable {
     /// The model's first output in the session (Claude Code's first `message_start` after an `init` that passed the start check, or Codex's first item other than an error), with the model that now holds the conversation. A model that fails before it gives way to the route's next.
     case ready(AIModelRef)
@@ -117,6 +120,7 @@ enum AIAgentStreamEvent {
     case turnFailed(AIError)
 }
 
+/// Runs CLI agent turns and translates their output into session events.
 @MainActor
 public final class AIAgentSession {
     /// Ends when the session ends: without an error after `end(keepingThread:)`, and with one when no model produced output in the first turn or a start check or the stream watcher refused the tool.
@@ -179,6 +183,7 @@ public final class AIAgentSession {
     private var stopCount = 0
     private var isClosed = false
 
+    /// Creates the session folder and locks it before any turn starts.
     init(request: AIAgentSessionRequest, feature: AIFeature, candidates: [AIRouteModel], service: AIService) throws {
         (events, continuation) = AsyncThrowingStream.makeStream()
         self.request = request
@@ -319,6 +324,7 @@ public final class AIAgentSession {
         idleTimer?.cancel()
     }
 
+    /// Resumes the idle timer after the last active host tool call ends.
     public func toolCallDidEnd() {
         activeToolCalls = max(activeToolCalls - 1, 0)
         if activeToolCalls == 0 { armIdleTimer(outputTimeout) }
@@ -333,6 +339,7 @@ public final class AIAgentSession {
 
     // MARK: Turns
 
+    /// Tracks one candidate model's process, reply, and completion.
     private final class Turn {
         let candidate: AIRouteModel
         var continuation: CheckedContinuation<TurnOutcome, Never>?
@@ -351,6 +358,7 @@ public final class AIAgentSession {
         }
     }
 
+    /// Distinguishes an ordinary turn failure from a refused start.
     private enum TurnOutcome {
         case finished(AIAgentTurnEnd)
         case failed(AIError)
@@ -358,11 +366,13 @@ public final class AIAgentSession {
         case refused(AIError)
     }
 
+    /// Starts the oldest queued message when no turn is running.
     private func startNextTurn() {
         guard !isTurnRunning, !hasEnded, !queuedMessages.isEmpty else { return }
         startTurn(queuedMessages.removeFirst())
     }
 
+    /// Marks a turn active and starts its asynchronous work.
     private func startTurn(_ message: String, isRetry: Bool = false) {
         isTurnRunning = true
         turnTask = Task { await run(message, isRetry: isRetry) }
@@ -467,6 +477,7 @@ public final class AIAgentSession {
         return (outcome, turn.reply)
     }
 
+    /// Checks the CLI and starts or writes to its process for one candidate model.
     private func perform(_ message: String, on candidate: AIRouteModel, tool: AICommandLineConfiguration, kind: AIAgentKind, turn: Turn) async -> TurnOutcome {
         if turn.isStopping || hasEnded { return .finished(.stopped) }
         let provider = candidate.provider.id
@@ -562,6 +573,7 @@ public final class AIAgentSession {
 
     // MARK: Processes
 
+    /// Writes the session's MCP configuration and starts a persistent CLI process.
     private func startClaudeCode(on candidate: AIRouteModel, tool: AICommandLineConfiguration, environment: [String: String]) throws {
         let configuration = folder.appendingPathComponent("mcp.json")
         let data = try ClaudeCodeAgent.mcpConfiguration(request.toolServer)
@@ -580,6 +592,7 @@ public final class AIAgentSession {
                          environment: ClaudeCodeAgent.sessionEnvironment(environment, skills: request.skills), input: Data(), keepsInputOpen: true)
     }
 
+    /// Starts one CLI process for a new or resumed conversation turn.
     private func startCodexTurn(_ message: String, on candidate: AIRouteModel, tool: AICommandLineConfiguration, environment: [String: String], probe: AIAgentProbeResult) throws {
         let server = request.toolServer
         let arguments: [String]
@@ -596,6 +609,7 @@ public final class AIAgentSession {
                          environment: environment.merging(server.environment) { _, ticket in ticket }, input: Data(message.utf8), keepsInputOpen: false)
     }
 
+    /// Starts a CLI process and watches its output and termination for this run only.
     private func startProcess(kind: AIAgentKind, executable: URL, arguments: [String], environment: [String: String], input: Data, keepsInputOpen: Bool) throws {
         endProcess()
         let process: CommandLineProcess
@@ -632,6 +646,7 @@ public final class AIAgentSession {
         processRun += 1
     }
 
+    /// Decodes output only while it belongs to the current process run.
     private func receive(_ chunk: Data, run: Int) {
         guard run == processRun else { return }
         if turn?.pendingEnd == nil { armIdleTimer(outputTimeout) }
@@ -646,6 +661,7 @@ public final class AIAgentSession {
         receive(line: line)
     }
 
+    /// Turns one JSON output line into session events or a start refusal.
     private func receive(line: Data) {
         guard let object = agentJSONObject(line) else { return }
         do {
@@ -668,6 +684,7 @@ public final class AIAgentSession {
         }
     }
 
+    /// Applies a decoded CLI event to the current turn and emits public events.
     private func handle(_ event: AIAgentStreamEvent) {
         guard let turn else { return }
         switch event {
@@ -725,12 +742,14 @@ public final class AIAgentSession {
         }
     }
 
+    /// Publishes a model change only when the reported model differs.
     private func updateReportedModel(_ ref: AIModelRef) {
         guard model != ref else { return }
         model = ref
         continuation.yield(.modelChanged(ref))
     }
 
+    /// Finishes the current turn after its process exits, using the CLI's error if needed.
     private func processEnded(_ termination: CommandLineTermination, errorLine: String?, executable: URL, run: Int) {
         guard run == processRun else { return }
         process = nil
@@ -753,6 +772,7 @@ public final class AIAgentSession {
                 cachedInputTokens: max(total.cachedInputTokens - earlier.cachedInputTokens, 0))
     }
 
+    /// Watches a running process for silence outside host tool calls.
     private func armIdleTimer(_ timeout: Duration) {
         idleTimer?.cancel()
         guard activeToolCalls == 0, let turn, turn.outcome == nil, turn.pendingEnd == nil, turn.didStartProcess else { return }
@@ -762,6 +782,7 @@ public final class AIAgentSession {
         }
     }
 
+    /// Ends a turn when its provider stops responding.
     private func idleTimedOut() {
         guard let turn, turn.outcome == nil else { return }
         endProcess()
@@ -824,6 +845,7 @@ extension AIService {
         return candidates
     }
 
+    /// Lists connected models that meet the agent feature's capabilities.
     private func availableAgentModels(for feature: AIFeature) -> [AIRouteModel] {
         settings.providers.flatMap { provider in
             provider.models.compactMap { model -> AIRouteModel? in

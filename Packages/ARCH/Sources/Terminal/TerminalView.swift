@@ -1,4 +1,6 @@
-// The terminal's view inside a scroll view: it draws the scrollback and the screen, sends typed keys and pasted text to the program, and selects text to copy. Input methods compose text at the cursor, so Hangul and other composed input work.
+// The terminal view draws scrollback and the current screen inside a scroll view.
+// It sends typed keys and pasted text to the program, and lets the user select text to copy.
+// Input methods compose text at the cursor, including Hangul and other composed input.
 import AppKit
 
 final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
@@ -27,7 +29,7 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("TerminalView is created with a screen")
+        return nil
     }
 
     override var isFlipped: Bool { true }

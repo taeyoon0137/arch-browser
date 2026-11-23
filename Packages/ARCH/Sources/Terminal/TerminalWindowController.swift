@@ -1,6 +1,9 @@
-// The built-in terminal: one window with the user's login shell, where the user installs command-line AI tools and signs in to them. Closing the window or quitting the app ends the shell. Showing the terminal again after its shell ended starts a new one.
+// The built-in terminal opens the user's login shell in one window.
+// The user can install command-line AI tools and sign in to them there.
+// Closing the window or quitting Arch ends the shell. Showing the terminal again after its shell ends starts a new shell.
 import AppKit
 
+/// Owns the built-in terminal window and its current login shell.
 public final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     /// The controller, created when the terminal first shows.
     public static var shared: TerminalWindowController {
@@ -37,7 +40,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("TerminalWindowController is created through shared")
+        return nil
     }
 
     /// Brings the terminal to the front, starting a login shell when none runs.
@@ -126,6 +129,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         return false
     }
 
+    /// Cancels pending typing and closes the shell when the window closes.
     public func windowWillClose(_ notification: Notification) {
         closesWithRunningProgram = false
         typingWork?.cancel()
@@ -144,6 +148,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         instance?.window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Builds the confirmation alert shown before ending a foreground terminal program.
     private static func runningProgramAlert(message: String, action: String) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = message

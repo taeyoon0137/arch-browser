@@ -60,8 +60,10 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             ("unread key", ["plugin.json": manifest + #", "network": ["example.org"]}"#], .invalidPackage("plugin.json: network is not a field Arch reads.")),
             ("empty name", ["plugin.json": #"{"id": "org.example.bad", "name": "", "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must not be empty.")),
             ("name not text", ["plugin.json": #"{"id": "org.example.bad", "name": 1, "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must be text.")),
-            ("unknown permission", ["plugin.json": manifest + #", "permissions": ["notifications"]}"#],
-             .invalidPackage("plugin.json: permissions lists “notifications”, which Arch does not grant.")),
+            ("unknown permission", ["plugin.json": manifest + #", "permissions": ["camera"]}"#],
+             .invalidPackage("plugin.json: permissions lists “camera”, which Arch does not grant.")),
+            ("network without hosts", ["plugin.json": manifest + #", "permissions": ["network"]}"#],
+             .invalidPackage("plugin.json: permissions lists “network”, which needs its host list.")),
             ("native messaging", ["plugin.json": manifest + #", "permissions": ["nativeMessaging"]}"#],
              .invalidPackage("plugin.json: permissions lists “nativeMessaging”, which only web extensions may ask for.")),
             ("command without background", ["plugin.json": manifest + #", "contributes": {"commands": [{"id": "a", "title": "A"}]}}"#],
@@ -311,6 +313,27 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         ]))
     }
 
+    /// A command that the plugin disables stays hidden only for the run: once the instance stops, here at its idle limit, the command comes back, so a plugin without events can start again.
+    @Test func showsDisabledCommandsAgainOnceTheInstanceStops() async throws {
+        let root = folder.url.appendingPathComponent("Packages/Hide", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let files = [
+            "plugin.json": #"{"id": "org.example.hide", "name": "Hide", "version": "1", "apiVersion": 1, "summary": "Hides.", "background": "b.js", "contributes": {"commands": [{"id": "hide", "title": "Hide Me"}]}}"#,
+            "b.js": #"arch.commands.onRun("hide", () => arch.ui.setEnabled("hide", false));"#,
+        ]
+        for (path, text) in files {
+            try Data(text.utf8).write(to: root.appendingPathComponent(path))
+        }
+        let manager = manager(ScriptPluginLimits(hang: 10, idle: 0.3))
+        defer { manager.close() }
+        let package = try await manager.stage(root)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        #expect(manager.contributions.paletteCommands(matching: "Hide").count == 1)
+        await manager.run(PluginCommandRef(plugin: package.manifest.id, command: "hide"), PluginInvocation(tab: nil))
+        #expect(await eventually { manager.contributions.paletteCommands(matching: "Hide").isEmpty })
+        #expect(await eventually { manager.contributions.paletteCommands(matching: "Hide").count == 1 })
+    }
+
     /// A panel shows its page with the bridge's calls but not the background script's listeners, and keeps the instance from its idle stop while it shows.
     @Test func showsAPanelAndKeepsTheInstanceWhileItShows() async throws {
         let id = PluginID(rawValue: "org.example.panel")!
@@ -338,7 +361,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         panel.viewWillAppear()
         #expect(await eventually { storage.value(forKey: "panel") != nil })
         #expect(storage.value(forKey: "panel") == .object([
-            "members": .array(["ai", "secrets", "settings", "storage", "tabs", "ui"].map(PluginValue.string)), "stream": .string("function"), "deliver": .string("undefined"),
+            "members": .array(["ai", "downloads", "net", "secrets", "settings", "storage", "tabs", "ui"].map(PluginValue.string)), "stream": .string("function"), "deliver": .string("undefined"),
         ]))
         let count = PluginCommandRef(plugin: id, command: "count")
         await manager.run(count, PluginInvocation(tab: nil))
@@ -538,6 +561,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: false)
         #expect(manager.plugins.map(\.origin) == [.generated(composition)] && !manager.plugins[0].isEnabled)
         #expect(manager.contributions.paletteCommands(matching: "copy").isEmpty)
+        // Another Persona's review would show it as a file install without its requests, so it offers no copy.
+        #expect(manager.packageFolderForCopy(of: package.manifest.id) == nil)
         let relaunched = self.manager()
         #expect(relaunched.plugins.map(\.origin) == [.generated(composition)])
         try relaunched.remove(package.manifest.id)
@@ -551,6 +576,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         let installed = try #require(relaunched.plugins.first)
         #expect(relaunched.plugins.count == 1 && installed.isEnabled && installed.origin == .file(sampleFolder))
         #expect(installed.grant == PluginGrant(permissions: [], sites: installed.manifest.sites))
+        #expect(relaunched.packageFolderForCopy(of: installed.id) != nil)
         await run("remember", in: relaunched)
         #expect(try stored("remembered", in: relaunched) != nil)
     }

@@ -1,4 +1,5 @@
-// Registers the engines, creates the browser session, which opens the browser windows, the agents' service, and the hook registry, and connects the menu bar to them.
+// Registers the engines and creates the browser session, agent service, and hook registry.
+// The session opens browser windows. The menu bar connects to these parts.
 import Agent
 import AI
 import AppKit
@@ -9,6 +10,7 @@ import Browsing
 import History
 import Hooks
 import Import
+import os
 import Plugins
 import Preferences
 import Sync
@@ -92,6 +94,22 @@ import Terminal
         }
     }
 
+    private static let launchLog = Logger(subsystem: "xyz.taeyoon.arch", category: "Launch")
+
+    private static func quit(afterSessionFailure error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Arch couldn’t start a browser engine."
+        if case BrowserSession.SessionError.noEngineStarted = error {
+            alert.informativeText = "Neither Chromium nor WebKit could start, so Arch will quit. Reinstalling Arch may fix this. The system log lists the reason under Launch."
+        } else {
+            alert.informativeText = error.localizedDescription
+        }
+        alert.addButton(withTitle: "Quit")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        NSApp.terminate(nil)
+    }
+
     private func startSession(in supportDirectory: URL) {
         // Data kept under the previous bundle identifier, then plugin data kept under the previous plugin identifiers, moves before the engines start and the preferences are read.
         BundleIdentifierMigration.runAtLaunch()
@@ -110,7 +128,12 @@ import Terminal
                                          chromiumNativeMessagingHosts: chromium?.systemNativeMessagingHosts,
                                          agentOnlyPersonaID: AgentService.recordedAgentsPersonaID(in: supportDirectory))
         } catch {
-            fatalError("The browser session could not start: \(error)")
+            // No engine could start, so the app cannot open a window. The reason goes to the system log and to an alert, after AppKit's launch callback, before the app quits.
+            Self.launchLog.error("The browser session could not start: \(String(describing: error), privacy: .public)")
+            isAbandoningLaunch = true
+            pendingURLs.removeAll()
+            DispatchQueue.main.async { Self.quit(afterSessionFailure: error) }
+            return
         }
         self.session = session
         let sync = SyncController(sidebar: session, directory: supportDirectory)
@@ -178,6 +201,7 @@ import Terminal
         installFullscreenEscape()
         installTabSwitcher()
         installShortcuts()
+        installDoubleFindShortcut()
         installPluginsMenu()
         // Set after the shortcut settings list the menu bar, so that the window list AppKit adds to the Window menu, the services it lists in the Services menu, and the search field it puts in the Help menu stay out of Settings ▸ Shortcuts.
         NSApp.windowsMenu = windowMenu
@@ -371,7 +395,8 @@ import Terminal
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
         closingItems = [closeTabItem, closeOthersItem, reopenItem]
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "New Agent Task", action: #selector(newAgentTask), keyEquivalent: "")
+        // A menu cannot show a double press as its key equivalent, so ⌘F pressed twice (`installDoubleFindShortcut`) is in the tooltip.
+        fileMenu.addItem(withTitle: "New Agent Task", action: #selector(newAgentTask), keyEquivalent: "").toolTip = "Press ⌘F twice to start a task."
         fileMenu.addItem(withTitle: "Stop All Agents", action: #selector(stopAllAgents), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
@@ -379,6 +404,8 @@ import Terminal
         fileMenu.addItem(withTitle: "Import from Browser\u{2026}", action: #selector(importFromBrowser), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Import Bookmarks and History\u{2026}", action: #selector(importBookmarksAndHistory), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
+        // ⌘S stays Show Sidebar's.
+        fileMenu.addItem(withTitle: "Save Page As\u{2026}", action: #selector(savePageAs), keyEquivalent: "S").keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
         mainMenu.addItem(submenu(fileMenu, title: "File"))
@@ -396,7 +423,7 @@ import Terminal
         editMenu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Find\u{2026}", action: #selector(showFindBar), keyEquivalent: "f")
+        findItem = editMenu.addItem(withTitle: "Find\u{2026}", action: #selector(showFindBar), keyEquivalent: "f")
         editMenu.addItem(withTitle: "Find Next", action: #selector(findNext), keyEquivalent: "g")
         let findPreviousItem = editMenu.addItem(withTitle: "Find Previous", action: #selector(findPrevious), keyEquivalent: "G")
         findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
@@ -411,6 +438,7 @@ import Terminal
         libraryItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(withTitle: "Show Page Reader", action: #selector(togglePageReader), keyEquivalent: "")
         viewMenu.addItem(withTitle: "Show Agent Panel", action: #selector(toggleAgentPanel), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Picture in Picture", action: #selector(startPictureInPicture), keyEquivalent: "")
         viewMenu.addItem(.separator())
         // Targeted, so that a focused web view, which answers `reload:` itself, cannot take it past the window's rules.
         viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r").target = self
@@ -572,6 +600,7 @@ import Terminal
     // Not named `print(_:)`: windows and views answer that selector first in the responder chain.
     @objc private func printPage() { session.activeWindow?.printPage() }
     @objc private func exportAsPDF() { session.activeWindow?.exportPageAsPDF() }
+    @objc private func savePageAs() { session.activeWindow?.savePageAs() }
     @objc private func sharePage() { session.activeWindow?.shareSelectedPage() }
     @objc private func toggleSidebar() { frontSidebarTarget().toggleSidebar() }
     /// While the window of floating tools is key, ⌥⌘I closes those tools, whichever tab the active window shows.
@@ -589,14 +618,32 @@ import Terminal
     @objc private func toggleDownloads() { frontSidebarTarget().toggleLibrary() }
     @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
-    @objc private func newAgentTask() { (session.activeWindow ?? frontSidebarTarget()).showAgentComposer() }
-    @objc private func toggleAgentPanel() { (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel() }
+    @objc private func newAgentTask() {
+        guard agents?.agentModels().isEmpty == false else { return showAgentModelSetup() }
+        (session.activeWindow ?? frontSidebarTarget()).showAgentComposer()
+    }
+    /// An open panel hides, and a draft shows, also once no model is connected.
+    @objc private func toggleAgentPanel() {
+        let window = session.activeWindow ?? frontSidebarTarget()
+        guard window.canToggleAgentPanel else { return showAgentModelSetup() }
+        window.toggleAgentPanel()
+    }
+    /// Leads to the setting that makes an agent model available, as the composer's own setup does: Features while Agent Tasks is off, Providers otherwise.
+    private func showAgentModelSetup() {
+        let isEnabled = AIService.shared.settings.route(for: .agent).isEnabled
+        PreferencesWindowController.shared.showAgentModelSettings(isEnabled ? .providers : .features)
+    }
     /// The agents' service pauses the agent hooks too (`AgentService.didStopAll`).
     @objc private func stopAllAgents() {
         agents?.stopAllAgents()
     }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func stopLoading() { session.activeWindow?.stopLoading() }
+    /// Named for what it first did: Settings ▸ Shortcuts keeps a shortcut under the action's name.
+    @objc private func startPictureInPicture() {
+        guard let window = session.activeWindow, let tab = window.selectedTab else { return NSSound.beep() }
+        window.togglePictureInPicture(tab)
+    }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
     @objc private func resetZoom() { session.activeWindow?.resetZoom() }
@@ -774,7 +821,14 @@ import Terminal
         NSApp.appearance = setting.appearance
     }
 
-    /// The Appearance checkmark reflects the stored value, which the Settings window can also change. Only an app bundle can become the default browser. Developer tools need an engine that offers them, or the key window of floating tools, which the Developer menu then acts on. Zooming needs a selected tab that no internal page or preview covers. Printing needs a page in front, no prompt waiting on its tab, and no sheet on its window. Sharing needs a page. Home needs a home page for the current space and no internal page or preview over the tab. Capturing needs a selected tab that no internal page or preview covers. Open in Split View needs a selected tab that no internal page covers and that can open as a pane. Toggles name what they will do. Page commands check the active window and sidebar commands the last main window.
+    /// Validates menu commands against the current page and window.
+    /// The Appearance checkmark follows the stored value, which Settings can change. Only an app bundle can become the default browser.
+    /// Developer tools need a capable engine or a floating tools window, which the Developer menu then controls.
+    /// Zoom and capture need a selected tab uncovered by an internal page or preview.
+    /// Print needs a front page, no pending prompt on its tab, and no sheet on its window. Share needs a page.
+    /// Home needs a home page for the current space and no internal page or preview.
+    /// Split View needs a selected tab that can open as a pane and has no internal page over it.
+    /// Toggles name their next action. Page commands use the active window; sidebar commands use the last main window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let activeWindow = session?.activeWindow
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
@@ -785,6 +839,11 @@ import Terminal
         }
         if item.action == #selector(printPage) || item.action == #selector(exportAsPDF) {
             return activeWindow?.canPrint == true
+        }
+        if item.action == #selector(savePageAs) { return activeWindow?.canSavePageAs == true }
+        if item.action == #selector(startPictureInPicture) {
+            guard let activeWindow, let tab = activeWindow.selectedTab else { return false }
+            return activeWindow.canTogglePictureInPicture(tab)
         }
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off
@@ -879,12 +938,12 @@ import Terminal
         if item.action == #selector(toggleAgentPanel) {
             let window = activeWindow ?? session?.lastMainWindow
             item.title = window?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
-            item.isHidden = !(window?.canToggleAgentPanel ?? (agents?.agentModels().isEmpty == false))
-            return !item.isHidden
+            item.isHidden = false
+            return agents?.agentModels().isEmpty != false || window?.canToggleAgentPanel == true
         }
         if item.action == #selector(newAgentTask) {
-            item.isHidden = agents?.agentModels().isEmpty ?? true
-            return !item.isHidden
+            item.isHidden = false
+            return true
         }
         if item.action == #selector(stopAllAgents) {
             return agents?.isAnyAgentActing ?? false
@@ -945,6 +1004,36 @@ import Terminal
                 tab.userDidActInPage()
             }
             return event
+        }
+    }
+
+    /// Edit ▸ Find…, whose shortcut Settings ▸ Shortcuts can change.
+    private var findItem: NSMenuItem?
+    private var findPresses = DoublePressCounter()
+    /// A search the user had open before the first press stays open after the second.
+    private var findBarShowedBeforeFirstPress = false
+
+    /// Find's shortcut, ⌘F unless the user changed it, pressed twice within 0.35 seconds opens New Agent Task, and the first press opens Find at once. The press matches as the menu matches it, by the character the keyboard layout gives the key. WebKit hands a key its page leaves unhandled back through `NSApp.sendEvent`, so the monitor can see one press twice; the counter counts it once. Another key down in between starts over.
+    private func installDoubleFindShortcut() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            guard let findShortcut = findItem.flatMap(KeyShortcut.init(menuItem:)), KeyShortcut(event: event) == findShortcut else {
+                findPresses.reset()
+                return event
+            }
+            guard !event.isARepeat else { return event }
+            let window = session.activeWindow
+            switch findPresses.press(at: event.timestamp) {
+            case .seenAgain:
+                return event
+            case .first:
+                findBarShowedBeforeFirstPress = window?.isFindBarVisible == true
+                return event
+            case .second:
+                if !findBarShowedBeforeFirstPress { window?.hideFindBar() }
+                newAgentTask()
+                return nil
+            }
         }
     }
 

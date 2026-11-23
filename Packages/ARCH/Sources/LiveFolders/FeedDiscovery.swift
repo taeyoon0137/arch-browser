@@ -12,6 +12,7 @@ public struct FeedLink: Hashable, Sendable {
     }
 }
 
+/// Finds RSS and Atom feed links in the beginning of an HTML page.
 public enum FeedDiscovery {
     /// The page's first bytes that are read for links.
     public static let readLimit = 512 * 1_024

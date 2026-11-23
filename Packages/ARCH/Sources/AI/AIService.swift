@@ -3,6 +3,7 @@ import Foundation
 
 /// One finished request in Settings ▸ AI ▸ Activity, kept in memory only.
 public struct AIActivityEntry: Identifiable, Sendable {
+    /// How a request ended for the in-memory activity list.
     public enum Result: Sendable {
         case completed(AIFinishReason)
         case failed(AIError)
@@ -22,6 +23,7 @@ public struct AIActivityEntry: Identifiable, Sendable {
     public var content: String
 }
 
+/// Resolves feature routes, enforces policy and budgets, sends requests, and records usage.
 @MainActor
 public final class AIService: ObservableObject, AIClient {
     /// Reads `ai.json` and `ai-usage.json` from the app's Application Support folder, the folder the app shell gives the browser session. Nothing goes to a provider until the user connects one and uses a feature.
@@ -114,6 +116,7 @@ public final class AIService: ObservableObject, AIClient {
 
     // MARK: Requests
 
+    /// Runs a request on the main actor, emits provider events, and records its final activity entry.
     nonisolated public func stream(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task { @MainActor in
@@ -352,6 +355,7 @@ public final class AIService: ObservableObject, AIClient {
         return usage.estimatedCost(in: limit.currency) >= limit.amount
     }
 
+    /// Returns the shared rate limiter for a provider, creating it on first use.
     func limiter(for provider: AIProviderID) -> AIRateLimiter {
         if let limiter = limiters[provider] { return limiter }
         let limiter = AIRateLimiter(provider: provider, limits: .http)
@@ -378,6 +382,7 @@ public final class AIService: ObservableObject, AIClient {
         return try await storedKey(for: configuration)
     }
 
+    /// Lists each message part's kind and character count for the activity entry.
     private static func partSummary(_ messages: [AIMessage]) -> [(kind: String, characters: Int)] {
         messages.flatMap(\.parts).map { part in
             let kind: String

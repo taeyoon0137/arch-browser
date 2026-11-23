@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// Installs and removes Arch-owned skill folders for in-app and outside agents.
 public struct AgentSkillInstaller {
     /// A tool's skill folder, named by `--target`. Written only when named.
     public enum Target: String, CaseIterable, Sendable {
@@ -44,6 +45,7 @@ public struct AgentSkillInstaller {
         public var file: URL { folder.appendingPathComponent(AgentSkill.fileName) }
     }
 
+    /// How a destination's contents compare with the skill Arch would install.
     public enum State: Equatable, Sendable {
         case absent
         /// Arch's copy with this app's text.
@@ -56,6 +58,7 @@ public struct AgentSkillInstaller {
         case foreign
     }
 
+    /// A path or ownership condition that prevents a skill operation.
     public enum Failure: Error, Equatable {
         /// `HOME`, `CLAUDE_CONFIG_DIR`, or `CODEX_HOME` is set to a path that is not absolute, which the tools do not expand, `~` included.
         case notAbsolute(variable: String, value: String)
@@ -170,6 +173,7 @@ public struct AgentSkillInstaller {
         }
     }
 
+    /// The contents and ownership of one destination folder.
     private enum Contents {
         case absent
         case foreign
@@ -247,6 +251,7 @@ public struct AgentSkillInstaller {
         }
     }
 
+    /// Creates a skill folder and writes its Markdown file atomically.
     private static func write(_ skill: AgentSkill, to folder: URL) throws {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -256,6 +261,7 @@ public struct AgentSkillInstaller {
         }
     }
 
+    /// The filesystem kind of a path without following its final link.
     private enum Kind {
         case none, link, file, folder, other
     }

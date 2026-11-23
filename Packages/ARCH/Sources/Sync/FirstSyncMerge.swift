@@ -2,6 +2,7 @@
 // and the browser's saved-page comparison. Planning neither changes the sidebar nor opens a database.
 import Foundation
 
+/// Plans the first sync by matching local sidebar records with server records before applying either side.
 public enum FirstSyncMerge {
     /// A local item takes the identity of an existing server item. A space or folder moves all of its
     /// contents, including local-only items. A tab or favorite transfers its selection or open tab.
@@ -11,6 +12,7 @@ public enum FirstSyncMerge {
         public let serverName: String
     }
 
+    /// The records to apply and upload, and the local identities to replace with server identities.
     public struct Plan: Equatable, Sendable {
         /// Every fetched record, including any fields a same-ID local copy filled in.
         public let recordsToApply: [String: SyncRecord]
@@ -20,6 +22,7 @@ public enum FirstSyncMerge {
         public let recordsToUpload: [SyncRecord]
     }
 
+    /// A conflict between record types assigned the same name by local and server data.
     public enum InvalidRecords: Error, Equatable {
         case conflictingTypes(String)
     }
@@ -102,6 +105,7 @@ public enum FirstSyncMerge {
         return Plan(recordsToApply: apply, replacements: replacements, recordsToUpload: upload)
     }
 
+    /// The hierarchy and values used to match an unshared local record to a server record.
     private enum MatchKey: Hashable {
         case space(persona: String, name: String)
         case folder(persona: String, space: String, parent: SyncValue?, name: String, live: SyncValue?)
@@ -109,6 +113,7 @@ public enum FirstSyncMerge {
         case tab(persona: String, space: String, folder: SyncValue?)
     }
 
+    /// Builds a matching key for a space, folder, favorite, or tab with valid parent fields.
     private static func matchKey(_ record: SyncRecord) -> MatchKey? {
         guard case .reference(let persona) = record[.persona] else { return nil }
         switch record.recordType {
@@ -143,6 +148,7 @@ public enum FirstSyncMerge {
         return url
     }
 
+    /// Replaces local space, parent, and folder references with claimed server identities.
     private static func remap(_ original: SyncRecord, using aliases: [String: String]) -> SyncRecord {
         var record = original
         for field: SyncField in [.space, .parent, .folder] {

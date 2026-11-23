@@ -1,5 +1,12 @@
-// Settings ▸ Plugins: the plugins of each Persona, web extensions among them, each with its switch, what its grant lets it do, and its settings as a form; Install Plugin…, which stages a folder, a `.zip` archive, or a `.crx` file and shows its review sheet; Install from the Web Store…, whose store sheet stages an extension's package from the Web Store for the review; Check for Updates while the Persona has extensions installed from the store, which the section also runs once per Persona per run as it shows the Persona, with when it checked or why it failed, and in each such plugin's section a newer version with Review Update…; and, while a provider can serve it, New Feature with AI…, where AI writes a plugin for the review sheet. Installed plugins can be removed. A write of `plugins.json` that failed shows why, with Try Again. The section states each grant without controls to narrow it. Two web extension plugins that are versions of one extension show as one section with a row for each version; an unpaired web extension plugin offers Join With… and Install <Engine> Version…, a menu with From a File… and From the Web Store…. A web extension that may reach native apps lists them with what they need of Arch (`NativeAppGuide`).
+// Settings ▸ Plugins shows each Persona's plugins, including web extensions, with switches, grants, and settings forms.
+// Install Plugin… stages a folder, `.zip`, or `.crx` for review. Install from the Web Store… stages an extension through its store sheet.
+// Check for Updates appears for Personas with store extensions. The section checks once per Persona per run when shown and displays the time or failure.
+// A newer version offers Review Update… in its plugin section. New Feature with AI… appears when a provider can write a plugin for review.
+// Installed plugins can be removed. A failed `plugins.json` write shows its reason and Try Again. An installed plugin's permissions and sites each have Revoke.
+// Two web extension versions of one extension share a section, with a row for each. An unpaired version offers Join With… and Install <Engine> Version….
+// The latter menu offers From a File… and From the Web Store…. Extensions that may reach native apps list those apps and their Arch requirements (`NativeAppGuide`).
 import AI
+import AppKit
 import ARCHEngine
 import Browsing
 import Extensions
@@ -98,6 +105,7 @@ private struct PluginList: View {
         let id = UUID()
         let start: PluginInstallSheet.Start
         let personaSentence: String?
+        var target: PluginManager?
     }
 
     var body: some View {
@@ -145,7 +153,7 @@ private struct PluginList: View {
             }
         }
         .sheet(item: $sheet) { sheet in
-            PluginInstallSheet(plugins: plugins, start: sheet.start, personaSentence: sheet.personaSentence, webStore: session.webStore)
+            PluginInstallSheet(plugins: sheet.target ?? plugins, start: sheet.start, personaSentence: sheet.personaSentence, webStore: session.webStore)
         }
         // Each Persona's list is a view of its own, so this runs as the section first shows the Persona, which the installer checks once in the run. The installer records the outcome, which `UpdateCheckRow` shows.
         .onAppear {
@@ -156,7 +164,9 @@ private struct PluginList: View {
         .onChange(of: isBusy, initial: true) { listIsBusy = $1 }
         .onChange(of: isBusy) { answer(PluginsRequests.shared.pending) }
         ForEach(plugins.plugins.filter { plugins.leadVersion(of: $0.id)?.id == $0.id }) { plugin in
-            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin, reviewUpdate: reviewUpdate(of:)) { installVersion(of: $0, for: $1, from: $2, space: nil) }
+            PluginSection(session: session, plugins: plugins, personaID: personaID, plugin: plugin, reviewUpdate: reviewUpdate(of:),
+                          installVersion: { installVersion(of: $0, for: $1, from: $2, space: nil) },
+                          installAnotherPersona: { copy($0, to: $1) })
                 .id(plugin.id)
         }
     }
@@ -184,6 +194,22 @@ private struct PluginList: View {
         let space = space.flatMap { id in session.spaces.first { $0.id == id } }
         sheet = InstallSheet(start: start, personaSentence: PluginInstallSheet.personaSentence(persona: personaID, space: space, among: session.personas))
         failure = nil
+    }
+
+    /// Stages only the package files in the chosen Persona, then opens that Persona's normal install review.
+    private func copy(_ plugin: InstalledPlugin, to persona: Persona.ID) {
+        guard let folder = plugins.packageFolderForCopy(of: plugin.id), session.personas.contains(where: { $0.id == persona }) else { return }
+        let target = session.plugins(in: persona)
+        isChoosing = true
+        Task {
+            do {
+                let package = try await target.stage(folder)
+                sheet = InstallSheet(start: .review(PluginReview(package: package)),
+                                     personaSentence: PluginInstallSheet.personaSentence(persona: persona, space: nil, among: session.personas), target: target)
+                failure = nil
+            } catch { failure = error.localizedDescription }
+            isChoosing = false
+        }
     }
 
     /// Review Update…: the store sheet downloads the update that the last check found and puts its review in its place.
@@ -247,10 +273,14 @@ private struct PluginSection: View {
     /// Review Update… of the plugin or of a version of the pair.
     let reviewUpdate: (PluginID) -> Void
     let installVersion: (InstalledPlugin, EngineKind, PackageSource) -> Void
+    let installAnotherPersona: (InstalledPlugin, Persona.ID) -> Void
     /// Why the last change to a setting, the removal, or a separation failed.
     @State private var failure: String?
     @State private var isConfirmingRemoval = false
     @State private var isJoining = false
+    @State private var settingsPage: SettingsPageSheet?
+    /// Whether Open Settings… waits for the plugin to start, during which a second click would open a second page.
+    @State private var isOpeningSettings = false
     /// The version whose removal the user confirms.
     @State private var removingVersion: InstalledPlugin?
     /// The registered AI features, whose triggers the note on a plugin's models follows, and the providers, without which the note does not show.
@@ -274,6 +304,7 @@ private struct PluginSection: View {
         let canJoin = !isPair && plugin.kind == .webExtension && !joinCandidates.isEmpty
         let separable = versions.first { $0.id != plugin.id }.map { $0.manifest.id != plugin.manifest.id } ?? false
         let removable = plugin.origin != .bundled
+        let copyable = plugins.packageFolderForCopy(of: plugin.id) != nil && session.personas.contains { $0.id != personaID }
         Section {
             Toggle(isOn: Binding(get: { versions.contains(where: \.isEnabled) }, set: { plugins.setEnabled($0, for: plugin.id) })) {
                 Text(plugin.manifest.name)
@@ -285,7 +316,7 @@ private struct PluginSection: View {
                     UpdateRow(webStore: session.webStore, plugins: plugins, plugin: version) { reviewUpdate(version.id) }
                 }
             } else {
-                AccessRow(plugin: plugin)
+                AccessRow(plugins: plugins, plugin: plugin)
                 UpdateRow(webStore: session.webStore, plugins: plugins, plugin: plugin) { reviewUpdate(plugin.id) }
             }
             ForEach(plugin.manifest.contributions.settings) { setting in
@@ -293,8 +324,25 @@ private struct PluginSection: View {
             }
             .disabled(!plugin.isEnabled)
             // The plugin's commands share one row at its trailing end, as the AI pages' commands do, each at its whole title, and those that do not fit continue on a line below. The row shows only with a command, since an empty one would still take a row in the form.
-            if reloadable || !versionEngines.isEmpty || canJoin || separable || removable {
+            if reloadable || !versionEngines.isEmpty || canJoin || separable || removable || copyable || plugin.manifest.settingsPage != nil {
                 CommandRowLayout {
+                    if copyable {
+                        Menu("Install in Another Persona") {
+                            ForEach(session.personas.filter { $0.id != personaID }) { target in
+                                Button("\(target.name)…") { installAnotherPersona(plugin, target.id) }
+                            }
+                        }
+                    }
+                    if plugin.kind == .script, plugin.manifest.settingsPage != nil {
+                        Button("Open Settings…") {
+                            isOpeningSettings = true
+                            Task {
+                                defer { isOpeningSettings = false }
+                                if let controller = await plugins.settingsPage(for: plugin.id) { settingsPage = SettingsPageSheet(controller: controller) }
+                            }
+                        }
+                        .disabled(!plugin.isEnabled || isOpeningSettings)
+                    }
                     if reloadable {
                         Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
                     }
@@ -372,6 +420,24 @@ private struct PluginSection: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sheet(item: $settingsPage) { page in
+            VStack(spacing: 0) {
+                SettingsPageController(controller: page.controller)
+                    .frame(width: 480, height: 480)
+                HStack {
+                    Spacer()
+                    Button("Done") { settingsPage = nil }
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(.horizontal, 20)
+                .frame(height: 40)
+            }
+            .frame(width: 480, height: 520)
+            // Escape closes the sheet as Cancel closes the install sheet; Done has Return.
+            .onExitCommand { settingsPage = nil }
+            .onAppear { (page.controller as? PluginEndingPanel)?.onEnd = { settingsPage = nil } }
+            .onDisappear { (page.controller as? PluginEndingPanel)?.onEnd = nil }
+        }
         .confirmationDialog(removingVersion.map { "Remove the \($0.pairEngine?.displayName ?? "") Version of \u{201C}\(plugin.manifest.name)\u{201D}?" } ?? "",
                             isPresented: Binding(get: { removingVersion != nil }, set: { if !$0 { removingVersion = nil } })) {
             Button("Remove Version", role: .destructive) {
@@ -395,6 +461,18 @@ private struct PluginSection: View {
             failure = error.localizedDescription
         }
     }
+}
+
+private struct SettingsPageSheet: Identifiable {
+    let id = UUID()
+    let controller: NSViewController
+}
+
+private struct SettingsPageController: NSViewControllerRepresentable {
+    let controller: NSViewController
+
+    func makeNSViewController(context: Context) -> NSViewController { controller }
+    func updateNSViewController(_ controller: NSViewController, context: Context) {}
 }
 
 /// The commands of a plugin's row at the row's trailing end, each at its ideal width, so that no title is cut, with the system's spacing between neighbors as an `HStack` gives it; a command that does not fit after the others on a line starts the next line, also at the trailing end.
@@ -506,12 +584,15 @@ private struct UpdateRow: View {
     }
 }
 
-/// What the plugin's grant lets it do: a sentence for each permission and each site, or, with more than `InstalledPlugin.listedSiteLimit` sites, one sentence for the sites that names the broadest (`InstalledPlugin.accessBrief`), with every site's sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down while each permission stays in view.
+/// What the plugin's grant lets it do: a sentence for each permission and each site, or, with more than `InstalledPlugin.listedSiteLimit` sites, one sentence for the sites that names the broadest (`InstalledPlugin.accessBrief`), with every site's sentence behind a disclosure, as secondary text as the footers have it, so that a long list of sites does not push the section's other rows down while each permission stays in view. A built-in plugin's access is one row of sentences; an installed plugin's has a row for each sentence, with Revoke on its permissions and sites.
 private struct AccessRow: View {
+    let plugins: PluginManager
     let plugin: InstalledPlugin
 
     var body: some View {
-        if let brief = plugin.accessBrief {
+        if plugin.origin != .bundled && !plugin.accessSummaries.isEmpty {
+            revocableRows
+        } else if let brief = plugin.accessBrief {
             DisclosureGroup {
                 Text(plugin.grant.sites.map(\.accessSummary).joined(separator: "\n"))
                     .font(.callout)
@@ -531,6 +612,52 @@ private struct AccessRow: View {
                 Text(summaries.isEmpty ? "None" : summaries.joined(separator: "\n"))
                     .multilineTextAlignment(.trailing)
             }
+        }
+    }
+
+    /// An installed plugin's access as one row per sentence, in the order of `accessSummaries`, each permission and site with Revoke beside it, and with more than `InstalledPlugin.listedSiteLimit` sites the sites behind a disclosure under their brief sentence, as secondary text. `tabs.rename` has no Revoke while `tabs.manage` covers it (`InstalledPlugin.revocablePermissions`).
+    @ViewBuilder
+    private var revocableRows: some View {
+        let revocable = plugin.revocablePermissions
+        Text("Access")
+        ForEach(PluginPermission.allCases.filter(plugin.grant.permissions.contains), id: \.self) { permission in
+            LabeledContent {
+                if revocable.contains(permission) {
+                    Button("Revoke") { plugins.revoke(permission, from: plugin.id) }
+                }
+            } label: {
+                Text(plugin.summary(of: permission))
+            }
+        }
+        ForEach(plugin.includedSummaries, id: \.self) { summary in
+            Text(summary)
+        }
+        if let brief = plugin.sitesBrief {
+            DisclosureGroup {
+                ForEach(plugin.grant.sites, id: \.self) { site in
+                    siteRow(site, isSecondary: true)
+                }
+            } label: {
+                Text(brief)
+            }
+        } else {
+            ForEach(plugin.grant.sites, id: \.self) { site in
+                siteRow(site, isSecondary: false)
+            }
+        }
+        ForEach(plugin.grant.siteAccessSummaries, id: \.self) { summary in
+            Text(summary)
+        }
+    }
+
+    /// A site's sentence with Revoke; inside the disclosure, as callout text in the secondary color.
+    private func siteRow(_ site: MatchPattern, isSecondary: Bool) -> some View {
+        LabeledContent {
+            Button("Revoke") { plugins.revoke(site, from: plugin.id) }
+        } label: {
+            Text(site.accessSummary)
+                .font(isSecondary ? .callout : nil)
+                .foregroundStyle(isSecondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
         }
     }
 }
@@ -584,7 +711,7 @@ private struct VersionRow: View {
             Text("\(version.pairEngine?.displayName ?? "") version")
             Text(["Version \(version.manifest.version), \(origin(of: version)).", plugins.enginesNote(of: version.id)].compactMap { $0 }.joined(separator: " "))
         }
-        AccessRow(plugin: version)
+        AccessRow(plugins: plugins, plugin: version)
         // Each failure is a red row of its own. A container would take a row in the form even without a failure.
         FailureNotes(plugin: version)
             .font(.callout)
@@ -749,6 +876,7 @@ private struct PluginSecretRow<Title: View>: View {
             HStack(spacing: 6) {
                 SecureField("Secret", text: $draft, prompt: Text(isSaved ? "Saved" : "Not set"))
                     .labelsHidden()
+                    .accessibilityLabel("Secret")
                     .frame(width: 160)
                     .onSubmit(save)
                 Button("Save", action: save)

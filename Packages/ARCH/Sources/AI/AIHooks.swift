@@ -58,6 +58,7 @@ public enum AIHookEvent: Sendable {
     }
 }
 
+/// A page-load event with the tab, address, restore state, and document identity.
 public struct AIPageLoad: Sendable {
     public var tabID: UUID
     public var url: URL
@@ -73,6 +74,7 @@ public struct AIPageLoad: Sendable {
     }
 }
 
+/// A newly opened tab and its address, if the engine has reported one.
 public struct AITabOpen: Sendable {
     public var tabID: UUID
     /// The address the tab opens with; nil while its engine has reported none.
@@ -84,6 +86,7 @@ public struct AITabOpen: Sendable {
     }
 }
 
+/// A completed download and the file and metadata available to hooks.
 public struct AIDownloadFinish: Sendable {
     public var downloadID: UUID
     public var fileURL: URL
@@ -137,12 +140,14 @@ public struct AIHookContext: Sendable {
     public let appliedActions: [AIHookAction]
 }
 
+/// A hook's actions, or no action, with an option to stop later hooks for the event.
 public enum AIHookResult: Sendable {
     case none
     /// `stop` keeps later hooks from running for this event.
     case actions([AIHookAction], stop: Bool)
 }
 
+/// The kinds of changes a hook may request from the host.
 public enum AIHookActionKind: Hashable, Sendable {
     case renameTab
     case renameDownload
@@ -235,6 +240,7 @@ public final class AIHookCenter: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Registers a hook and returns the subscription that can cancel it.
     @discardableResult
     public func subscribe(_ registration: AIHookRegistration) -> AIHookSubscription {
         let id = UUID()
@@ -307,6 +313,7 @@ public final class AIHookCenter: ObservableObject {
                           })
     }
 
+    /// Gives a hook its feature-scoped client, page source, and earlier applied actions while a host exists.
     private func context(for feature: AIFeatureID, in run: EventRun, requestDidEnd: @escaping @MainActor @Sendable ((any Error)?) -> Void) -> AIHookContext? {
         guard let host else { return nil }
         let client = AIHookClient(feature: feature, base: service) { [weak self] error in

@@ -1,4 +1,5 @@
-// The question popover: a question about the page, or about text selected in it, answered in a panel that floats over the page's top trailing corner, with Continue as Agent Task beside its Ask. The palette's Ask About This Page and the page context menu's Ask About Selection open it.
+// The question popover asks about a page or selected text in a panel at the page's top trailing corner.
+// Continue as Agent Task sits beside Ask. The palette's Ask About This Page and the page menu's Ask About Selection open it.
 import AI
 import SwiftUI
 
@@ -32,6 +33,7 @@ private struct PageQuestionPopover: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Text(question.selection == nil ? "Ask About This Page" : "Ask About Selection")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()

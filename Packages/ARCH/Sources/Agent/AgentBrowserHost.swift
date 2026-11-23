@@ -3,6 +3,7 @@ import AppKit
 import ARCHEngine
 import Foundation
 
+/// The ID and display name of a Persona available to an agent.
 public struct AgentPersonaInfo: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var name: String
@@ -13,6 +14,7 @@ public struct AgentPersonaInfo: Identifiable, Equatable, Sendable {
     }
 }
 
+/// The ID and display name of a space available to an agent.
 public struct AgentSpaceInfo: Identifiable, Equatable, Sendable {
     public var id: UUID
     public var name: String
@@ -23,6 +25,7 @@ public struct AgentSpaceInfo: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A tab's document, location, loading state, engine, and agent owner as the host reports them.
 public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     public var id: UUID
     /// Changes when a different document commits, including a reload of the same address.
@@ -54,10 +57,12 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
         self.agentOwnerID = agentOwnerID
     }
 
+    /// Allows sharing only a loaded user tab whose site policy permits its title.
     func canShareWithAgent(allowsAI: (URL) -> Bool) -> Bool {
         isLoaded && agentOwnerID == nil && AgentPolicy.showsTitle(of: url, allowsAI: allowsAI)
     }
 
+    /// Checks the tab ID, document ID, and URL before reusing reviewed content.
     func showsSameDocument(as other: Self) -> Bool {
         id == other.id && documentID == other.documentID && url == other.url
     }
@@ -77,6 +82,7 @@ public struct AgentTabOwner: Equatable, Sendable {
     }
 }
 
+/// A navigation the agent asks an owned tab to perform.
 public enum AgentNavigation: Equatable, Sendable {
     case load(URL)
     case back
@@ -119,6 +125,7 @@ public enum AgentTabReport: Equatable, Sendable {
     case externalAppAsked(URL)
 }
 
+/// The kind of page dialog that waits for the user on an agent tab.
 public enum AgentDialogKind: String, Equatable, Sendable {
     case confirm
     case prompt
@@ -198,6 +205,7 @@ public struct AgentDownloadInfo: Equatable, Sendable {
         didEnd?()
     }
 
+    /// Answers the page once and releases the chooser's panel and end callback.
     private func finish(_ files: [URL]?) {
         guard !hasEnded else { return }
         hasEnded = true
@@ -229,6 +237,7 @@ public struct AgentHistoryPage: Equatable, Sendable {
     }
 }
 
+/// Supplies browser state and page actions to `Agent` without depending on `Browsing`.
 @MainActor public protocol AgentBrowserHost: AnyObject {
     /// Every Persona, in the session's order.
     var personas: [AgentPersonaInfo] { get }

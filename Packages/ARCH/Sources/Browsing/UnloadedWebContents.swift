@@ -1,4 +1,6 @@
-// The stand-in for the page of a tab without one: a tab restored from `session.json` until a window first shows it, and a tab whose page unloaded (`docs/bookmarks.md`, Unloading). It keeps the address, title, engine, and page state of the tab's record or of the page that unloaded, so saving writes the record back unchanged, and it loads nothing, so no engine starts a page, or a renderer, for a tab that no window shows. The session puts the engine's web contents in its place as a window next shows the tab (`BrowserSession.loadPage(of:)`).
+// A tab without a page uses this stand-in after restore from `session.json` or unloading (`docs/bookmarks.md`, Unloading).
+// It preserves address, title, engine, and page state so a save keeps the record intact. It loads no page or renderer for a tab no window shows.
+// `BrowserSession.loadPage(of:)` replaces it with engine web contents when a window next shows the tab.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -32,6 +34,7 @@ final class UnloadedWebContents: EngineWebContents {
     var isCapturingMedia: Bool { false }
     var isInPictureInPicture: Bool { false }
     var closingStopsDownloads: Bool { false }
+    func download(_ url: URL) {}
     var devTools: (any EngineDevTools)? { nil }
 
     /// `icon` is the icon of the page that unloaded, which the tab's row keeps showing, or a live folder's icon.

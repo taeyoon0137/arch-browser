@@ -1,4 +1,6 @@
-// The Plugins menu in the menu bar: the Plugins menu items of the enabled plugins of the active window's Persona, under their plugins' names. It follows the active window, its current space, and those plugins, and hands each new set of items to the shortcut settings, which give each item its command's shortcut unless another command has it.
+// The menu bar's Plugins menu shows commands from enabled plugins in the active window's Persona.
+// It groups commands under their plugin names and follows the active window, current space, and plugins.
+// It gives each new set of items to shortcut settings, which assign a command's shortcut unless another command uses it.
 import AppKit
 import Browsing
 import Combine
@@ -68,7 +70,12 @@ final class PluginsMenu: NSObject, NSMenuItemValidation {
     /// A page command: it runs on the active window's selected tab.
     @objc private func runCommand(_ sender: NSMenuItem) {
         guard let identifier = sender.representedObject as? String, let command = commands[identifier] else { return }
-        session.activeWindow?.runPluginCommand(command)
+        let event = NSApp.currentEvent
+        let shortcutModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        let isShortcut = event?.type == .keyDown && !sender.keyEquivalent.isEmpty
+            && event?.charactersIgnoringModifiers?.lowercased() == sender.keyEquivalent.lowercased()
+            && event?.modifierFlags.intersection(shortcutModifiers) == sender.keyEquivalentModifierMask.intersection(shortcutModifiers)
+        session.activeWindow?.runPluginCommand(command, source: isShortcut ? .shortcut : .menu)
     }
 
     /// Plugin commands need a browser window.

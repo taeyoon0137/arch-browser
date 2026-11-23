@@ -15,6 +15,7 @@ struct FindBarView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             TextField("Find in page", text: $windowModel.findText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))

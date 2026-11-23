@@ -1,4 +1,6 @@
-// The agent run's plain values (`docs/hooks.md`, Agent run API): what a caller asks of one agent run, what its grant allows, and what the run returns. Hooks keep the options and grants in `hooks.json`, and scripts and outside programs send the options as JSON. `AgentRunner` (VII.27) runs them; nothing here runs an agent.
+// Plain values for a bounded agent run (`docs/hooks.md`, Agent run API).
+// They describe the caller's request, the grant's limits, and the result. Hooks store options and grants in `hooks.json`.
+// Scripts and outside programs send options as JSON. `AgentRunner` (VII.27) runs them; this file runs no agent.
 import AgentControl
 import AI
 import Foundation
@@ -63,6 +65,7 @@ public struct AgentRunLimits: Codable, Hashable, Sendable {
         case timeout, rounds, toolCalls
     }
 
+    /// Decodes second-based limits, using defaults for omitted values and refusing a nonfinite timeout.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AgentRunLimits()
@@ -78,6 +81,7 @@ public struct AgentRunLimits: Codable, Hashable, Sendable {
         toolCalls = try container.decodeIfPresent(Int.self, forKey: .toolCalls) ?? defaults.toolCalls
     }
 
+    /// Writes the timeout in seconds with the round and tool-call limits.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(timeout.agentRunSeconds, forKey: .timeout)
@@ -177,6 +181,7 @@ public struct AgentRunGrant: Codable, Hashable, Sendable {
         case tools, tabAccess, minimumRecord, maximumRecord, runsPerDay, limits, returnsReply
     }
 
+    /// Encodes the granted tools in sorted order with the access and run limits.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(tools.sorted(), forKey: .tools)
@@ -270,7 +275,9 @@ public enum AgentRunAction: Codable, Hashable, Sendable {
     }
 }
 
+/// The status, actions, reply, model, and usage returned by a bounded run.
 public struct AgentRunResult: Codable, Sendable {
+    /// Whether the run completed, failed, timed out, was cancelled, or was refused.
     public enum Status: String, Codable, Sendable {
         case completed, failed, timedOut, cancelled, refused
     }

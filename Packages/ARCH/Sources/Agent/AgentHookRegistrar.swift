@@ -1,4 +1,8 @@
-// Hooks from outside programs (`docs/hooks.md`, Hooks from outside programs; Control methods and the registrar): the service checks a proposal's form against the caps of such hooks, and the hook registry, which `Hooks` holds and `Agent` cannot depend on, shows the proposal sheet, asks for Touch ID or the login password, and adds the hook through this protocol. A proposed hook reaches no more than the proposing grant can: the event's tab only, `tabs.rename` and `agent` without `tabs`, agent runs at tab access `title` with at least Keep Activity Only and no reply, and the grant's Persona; it pauses when the program's grant ends.
+// Outside programs can propose hooks (`docs/hooks.md`, Hooks from outside programs; Control methods and the registrar).
+// The service checks each proposal against its caps. The hook registry, held by `Hooks`, shows the sheet and asks for Touch ID or the login password.
+// `Agent` reaches that registry through this protocol. A proposed hook sees only its grant's Persona and the event's tab.
+// It may use `tabs.rename` and `agent`, but not `tabs`. Agent runs use `title` access, keep at least Keep Activity Only, and return no reply.
+// The hook pauses when the proposing program's grant ends.
 import AgentControl
 import AI
 import Events

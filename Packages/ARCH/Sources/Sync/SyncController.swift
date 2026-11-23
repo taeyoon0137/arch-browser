@@ -5,6 +5,7 @@ import CloudKit
 import Combine
 import Foundation
 
+/// Coordinates account availability, local sidebar saves, and CloudKit sync engine events.
 @MainActor public final class SyncController: ObservableObject {
     public static let enabledKey = "ARCHSyncEnabled"
     @Published public private(set) var availability: SyncAvailability.Status = .unavailable(.temporarilyUnavailable)
@@ -46,9 +47,11 @@ import Foundation
     private static let discardStateKey = "ARCHSyncDiscardPreviousState"
     /// Set while a confirmed Delete iCloud Data waits for the server, so that a launch after a quit in that time can say the data is still there.
     private static let deletionRequestedKey = "ARCHSyncDeletionRequested"
-    /// Set while the controller applies a fetch or a first sync's plan, and removed once that ends (`docs/sync.md`, Crash-loop guard). A launch that finds it follows one that quit while applying, as a crash does. The next fetch would bring the same changes, so that launch keeps sync off until the user turns it on, which removes the key.
+    /// Set while the controller applies incoming changes or builds a batch of outgoing records (`docs/sync.md`, Crash-loop guard).
     static let applyingKey = "ARCHSyncApplyingChanges"
-    static let interruptedApplyMessage = "Sync turned off because Arch quit while it applied changes from iCloud. Turn it on to try again."
+    /// The key marks the time of an apply or a batch build, not a crash, so the message names only the quit.
+    static let interruptedApplyMessage = "Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again."
+    private var guardHolds = 0
     private var quitBeforeDeletion: (any SyncEngineClient)?
     private var first = false
     private var fetching = false
@@ -116,9 +119,10 @@ import Foundation
     }
     deinit { for observer in observers { notifications.removeObserver(observer) } }
 
+    /// Saves the user's sync choice, checking availability when turning it on and stopping the engine when turning it off.
     public func setEnabled(_ enabled: Bool) async {
         guard !isDeletingCloudData else { return }
-        if defaults.bool(forKey: Self.applyingKey) {
+        if guardHolds == 0, defaults.bool(forKey: Self.applyingKey) {
             // The user's choice ends the hold: turning sync on applies the changes again.
             defaults.removeObject(forKey: Self.applyingKey)
             lastError = nil
@@ -143,6 +147,7 @@ import Foundation
         await sendZoneDeletion(on: engine)
     }
 
+    /// Sends a confirmed zone deletion and resumes sync if the request fails.
     private func sendZoneDeletion(on engine: any SyncEngineClient) async {
         guard !deletionSendInFlight else { return }
         lastError = nil
@@ -246,10 +251,12 @@ import Foundation
         }
     }
 
+    /// Detaches and stops the active engine.
     private func stop() async {
         await detach()?.stop()
     }
 
+    /// Clears the active engine, fetch, mirror, and pending state before a stop or restart.
     private func detach() -> (any SyncEngineClient)? {
         let previous = engine
         sidebar.onSidebarSyncSave = nil
@@ -279,6 +286,7 @@ import Foundation
         return previous
     }
 
+    /// Fetches changes once per active request and repeats when recovery needs another fetch.
     private func requestFetch() async {
         if let fetchTask { await fetchTask.value; return }
         guard let engine else { return }
@@ -299,6 +307,7 @@ import Foundation
     }
 
     var canSendRecords: Bool { engine != nil && !first && !fetching && !applying && !isDeletingCloudData }
+    /// Builds a pending record only after the first fetch and outside an apply or deletion.
     func record(toSave name: String) -> CKRecord? {
         guard canSendRecords, let save = mirror.pendingSaves.first(where: { $0.recordName == name }) else { return nil }
         let base = mirror.records[name]
@@ -306,7 +315,20 @@ import Foundation
         return SyncCloudKitRecords.ckRecord(from: save, base: base)
     }
 
+    /// Holds the crash-loop guard: the first hold sets `applyingKey` and the last release removes it, so an apply and a batch build that overlap write it once and leave it set until both end.
+    private func holdGuard() {
+        if guardHolds == 0 { defaults.set(true, forKey: Self.applyingKey) }
+        guardHolds += 1
+    }
+
+    private func releaseGuard() {
+        guard guardHolds > 0 else { return }
+        guardHolds -= 1
+        if guardHolds == 0 { defaults.removeObject(forKey: Self.applyingKey) }
+    }
+
     private var bases: [SyncRecord] { mirror.records.values.compactMap(SyncCloudKitRecords.syncRecord(from:)) }
+    /// Compares a newly saved sidebar and checkpoints changes when the engine can send them.
     private func sidebarSaved(_ state: SidebarSyncState) {
         guard engine != nil, !applying else { return }
         durableSidebar = state
@@ -323,6 +345,7 @@ import Foundation
         if canSendRecords { persist() }
     }
 
+    /// Builds sidebar changes against the mirror while excluding records this build holds out.
     private func compareSidebar(_ state: SidebarSyncState, publish: Bool? = nil) throws {
         let date = now()
         let records = try SidebarRecords.records(from: state, foundAt: date)
@@ -334,12 +357,14 @@ import Foundation
         reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType != .setting })
     }
 
+    /// Builds changed setting records against the mirror and pending saves.
     private func compareSettings(publish: Bool? = nil) {
         let comparison = settings.comparison(mirror: bases, pending: mirror.pendingSaves)
         let changes = SyncDiff.changes(local: comparison.records, scope: comparison.contains, mirror: bases, pending: mirror.pendingSaves, foundAt: now())
         reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType == .setting })
     }
 
+    /// Replaces pending changes for one record scope and updates the engine's change queue.
     private func reconcile(_ changes: SyncChanges, publish: Bool, includes: (SyncRecord) -> Bool) {
         guard let engine else { return }
         let old = mirror.pendingSaves.filter(includes)
@@ -360,6 +385,7 @@ import Foundation
         if !add.isEmpty { engine.add(add) }
     }
 
+    /// Handles fetch, save, zone, and account events from the active sync engine.
     private func handle(_ event: SyncEvent) {
         guard engine != nil else { return }
         if isDeletingCloudData {
@@ -441,6 +467,7 @@ import Foundation
         }
     }
 
+    /// Accumulates fetched records and tombstones until the fetch ends.
     private func buffer(_ page: SyncFetchedChanges) {
         for row in page.records where SyncCloudKitRecords.isInZone(row.recordID) {
             let key = row.recordID.recordName
@@ -468,6 +495,7 @@ import Foundation
         defaults.set(reason?.rawValue, forKey: Self.offReasonKey)
     }
 
+    /// Turns sync off and discards prior state after account or zone loss.
     private func disableAfterLoss(_ reason: SyncOffReason) {
         recordOffReason(reason)
         defaults.removeObject(forKey: Self.deletionRequestedKey)
@@ -489,11 +517,12 @@ import Foundation
         defaults.removeObject(forKey: Self.discardStateKey)
     }
 
+    /// Applies a complete fetch, saves the sidebar and mirror, then releases pending changes.
     private func finishFetch() {
         guard let engine else { return }
         // Set before the settings check below, so that a change notification this write delivers at once counts as one that came before the fetch ended.
-        defaults.set(true, forKey: Self.applyingKey)
-        defer { defaults.removeObject(forKey: Self.applyingKey) }
+        holdGuard()
+        defer { releaseGuard() }
         applying = true
         do {
             let date = now()
@@ -551,6 +580,7 @@ import Foundation
         }
     }
 
+    /// Merges first-sync identities and applies the resulting sidebar and settings.
     private func applyFirst(local: [SyncRecord], server: [SyncRecord], date: Date) throws {
         let held = IncomingSidebarRecords.heldOut(server: server, local: local)
         let plan = try FirstSyncMerge.plan(local: local.filter { !held.contains($0.recordName) }, server: server.filter { !held.contains($0.recordName) },
@@ -574,6 +604,7 @@ import Foundation
         if !deleted.isEmpty || !incoming.recordsToDelete.isEmpty { sidebar.applySidebarSync(incoming.sidebar, deletions: incoming.deletions) }
     }
 
+    /// Three-way merges fetched sidebar records and settings with local edits.
     private func applyFetched(local: [SyncRecord], server: [SyncRecord], base: [SyncRecord], date: Date) throws {
         // Only a changed local field takes an edit time from this Mac. Preserve the server's
         // times and order keys for unedited values before a three-way merge.
@@ -601,6 +632,7 @@ import Foundation
         mirror.pendingSaves.append(contentsOf: incoming.repairs)
     }
 
+    /// Updates the mirror for sent changes and schedules conflict or missing-zone recovery.
     private func didSend(_ sent: SyncSentChanges) {
         guard let engine else { return }
         for row in sent.savedRecords where SyncCloudKitRecords.isInZone(row.recordID) { mirror.records[row.recordID.recordName] = row }
@@ -657,6 +689,7 @@ import Foundation
         catch { lastError = "The sync state could not be saved." }
     }
 
+    /// Writes the mirror with the latest pending engine state.
     private func writeMirror() throws {
         guard let database else { return }
         var checkpoint = mirror
@@ -678,6 +711,9 @@ import Foundation
             guard canSendRecords else { return nil }
             return owner?.record(toSave: name)
         }
+        // Not gated on `canSendRecords`: each call before a batch has its call after, even once the engine stops.
+        func willBuildBatch() { owner?.holdGuard() }
+        func didBuildBatch() { owner?.releaseGuard() }
         func handle(_ event: SyncEvent) {
             guard owner?.delegate === self else { return }
             owner?.handle(event)

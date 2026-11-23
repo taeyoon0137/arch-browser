@@ -1,4 +1,9 @@
-// The site settings popover's Extensions group for the web extensions of the tab's Persona: on a Web Store page, first the store's row, Install This Extension… or, while the Persona has the page's extension installed, its name with Installed; then a row for each enabled extension with an action, and for one without while the engine keeps it from the tab's site, a pair once, with the action's icon, label, and badge for the tab. A click closes the popover and runs the action, which shows the extension's popup from the site settings button or tells the extension of the click. An extension that the engine kept from running on the tab's site, as Chromium keeps one whose sites wait for a click, offers Allow on This Site. On a tab whose engine runs extensions but none of a plugin's versions, the row says where the plugin runs and, while the plugin asks for that engine's version, offers Install <Engine> Version… and Dismiss, side by side or, where they do not fit, one above the other.
+// The site settings popover shows web extensions of the tab's Persona.
+// On a Web Store page, its first row installs the extension or names its installed copy. Then enabled extensions with actions show their tab icon, label, and badge.
+// An extension without an action can appear once with its paired version while the engine keeps it from the tab's site.
+// A click closes the popover and runs the action, opening a popup or telling the extension. An extension held back from the site can offer Allow on This Site.
+// If this engine runs extensions but none of a plugin's versions, the row says where it runs and can offer Install <Engine> Version… and Dismiss.
+// Those two commands sit beside each other or stack when they do not fit.
 import ARCHEngine
 import Extensions
 import Plugins
@@ -20,7 +25,12 @@ struct WebExtensionActionsSection: View {
             let engines = Set(webExtensions.engines.keys)
             let engineRunsExtensions = engines.contains(tab.engineKind)
             SiteSettingsGroup("Extensions", footnote: items.isEmpty
-                ? storeRow?.note
+                ? storeRow.map { row in
+                    guard case .installed = row else { return row.note }
+                    let space = session.spaces.first { $0.id == tabSpace }
+                    let place = session.displayedPlace(ofPersona: tab.personaID, space: space) ?? space?.name ?? "this Persona"
+                    return "Manage it for \(place) in Settings ▸ Plugins."
+                }
                 : engineRunsExtensions
                 ? "Opens an extension\u{2019}s popup, or lets the extension act on this page."
                 : "Extensions run on \(Self.names(engines)) tabs. Switch this tab to \(Self.names(engines, joinedBy: "or")) to use them.") {

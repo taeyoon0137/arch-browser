@@ -1,4 +1,6 @@
-// Web extensions on WebKit, from macOS 15.4: each profile has one `WKWebExtensionController`, which every web view of the profile uses, and each extension the app loads runs in it as a `WKWebExtensionContext`. The profile's web contents are the extensions' tabs, and the windows the app reports are their windows. Popups, questions about access, and native messages go to the app through the delegate.
+// Web extensions use macOS 15.4's WebKit APIs. Each profile has one `WKWebExtensionController`, shared by its web views.
+// Each loaded extension runs as a `WKWebExtensionContext`. The profile's web contents act as extension tabs, and reported app windows act as extension windows.
+// The delegate sends popups, access questions, and native messages to the app.
 import AppKit
 import ARCHEngine
 import WebKit
@@ -164,7 +166,7 @@ final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControll
         let previousWindows = windows
         let previousFocus = focusedWindow
         let previousPlaces = Self.places(in: previousWindows)
-        let previousActiveTabs = Dictionary(uniqueKeysWithValues: previousWindows.map { ($0.id, $0.activeTab) })
+        let previousActiveTabs = Dictionary(previousWindows.map { ($0.id, $0.activeTab) }, uniquingKeysWith: { first, _ in first })
         var reportedIDs: Set<UUID> = []
         windows = reported.filter { reportedIDs.insert($0.id).inserted }.map { report in
             let window = previousWindows.first { $0.id == report.id } ?? WebKitExtensionWindow(id: report.id)

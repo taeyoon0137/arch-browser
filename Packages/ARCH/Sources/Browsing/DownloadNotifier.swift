@@ -32,6 +32,18 @@ final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    func pluginNotification(name: String, title: String, body: String) {
+        guard let center else { return }
+        let content = UNMutableNotificationContent()
+        content.title = name
+        content.subtitle = title
+        content.body = body
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        authorization.request { granted in
+            if granted { center.add(request) }
+        }
+    }
+
     /// The center can call its delegate off the main thread, so the Finder is asked on the main thread.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         defer { completionHandler() }

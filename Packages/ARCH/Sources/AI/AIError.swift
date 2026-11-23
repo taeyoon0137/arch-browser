@@ -1,6 +1,7 @@
 // The errors an AI request ends with, which of them move a request to the route's next model, and the sentence the interface shows for each.
 import Foundation
 
+/// The errors an AI request can report to its caller and the interface.
 public enum AIError: Error, Sendable {
     case notConfigured(AINotConfiguredReason)
     case blockedByPolicy(AIPolicyReason)
@@ -19,6 +20,7 @@ public enum AIError: Error, Sendable {
     case cancelled
 }
 
+/// A missing or disabled setting that prevents a feature from starting.
 public enum AINotConfiguredReason: Sendable {
     case switchedOff
     case noModel
@@ -28,6 +30,7 @@ public enum AINotConfiguredReason: Sendable {
     case emptyTier(AIModelTier)
 }
 
+/// A request refused by Arch's data or route policy.
 public enum AIPolicyReason: Sendable {
     /// The excluded host, or the scheme for an address without one.
     case siteExcluded(String)
@@ -43,6 +46,7 @@ public enum AIPolicyReason: Sendable {
     case routeNotAllowed
 }
 
+/// The automatic request or spending limit that has been reached.
 public enum AIBudget: Sendable {
     case automaticRequestsPerDay
     case monthlySpending

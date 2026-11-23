@@ -1,4 +1,7 @@
-// Outside programs' browser events (`docs/hooks.md`, Outside programs ▸ Grants; arch-cli events; arch-mcp): a grant with Watch Browser Events sees its Persona's events through the outside view, its own agent tabs and the tabs shared with it by their handles and addresses without queries, the user's other tabs by watch IDs and hosts, and windows by handles, never their identifiers. Each grant keeps its last 500 events in memory, which `--after` and `watch_events` replay, and each connection holds at most 4 subscriptions, whose events wait in a queue of 1,000 before the oldest drop. Nothing here reaches a disk.
+// A grant with Watch Browser Events sees its Persona's browser events (`docs/hooks.md`, Outside programs).
+// Their own agent tabs and shared tabs use handles and addresses without queries. Other tabs use watch IDs and hosts; windows use handles, never identifiers.
+// Each grant keeps its latest 500 events in memory for `--after` and `watch_events` to replay.
+// Each connection has at most 4 subscriptions. Their queue holds 1,000 events before dropping the oldest. Nothing is stored on disk.
 import AgentControl
 import AI
 import ARCHEngine

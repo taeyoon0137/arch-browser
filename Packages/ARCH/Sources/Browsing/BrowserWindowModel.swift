@@ -1,4 +1,6 @@
-// The state of one browser window and the commands that act on it. A window shows its current space, its selected tab with that tab's split view, an internal page, a page in fullscreen, the preview panel, the page reader, the question popover, and the prompt cards of the tabs on its screen, and it holds what the user does there: the command palette, find, renaming, region capture, the tab switcher, the docked developer tools, and sharing. A small window shows only the one tab it opened with. The session owns everything else: Personas, spaces, favorites, tabs, folders, split views, the closed list, downloads, the prompts waiting for their tabs, the page reader's conversations, engines, and persistence.
+// A browser window's state and commands live here. A main window shows a space, selected tab and split view, internal or fullscreen page, preview, reader, question popover, and prompt cards.
+// It also holds the palette, find, renaming, region capture, tab switcher, docked developer tools, and sharing. A small window shows only its one tab.
+// The session owns Personas, spaces, favorites, tabs, folders, split views, closed tabs, downloads, pending prompts, reader conversations, engines, and persistence.
 import Agent
 import AI
 import AppKit
@@ -11,6 +13,7 @@ import Plugins
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Whether a browser window has a sidebar or shows a single tab on its own.
 public enum BrowserWindowKind {
     /// A window with the sidebar. `session.json` keeps the main windows.
     case main
@@ -32,7 +35,9 @@ public enum BrowserWindowKind {
     // MARK: State: what the window shows
 
     /// The space the sidebar shows. A small window has no sidebar; its current space is the space its tab moves to, whose tint it shows.
-    @Published public var currentSpaceID: UUID
+    @Published public var currentSpaceID: UUID {
+        didSet { if oldValue != currentSpaceID { closeSidebarPanel() } }
+    }
     /// The selected tab, or nil for the empty page. Only `selectTab(_:)` changes it, because a selection does more than show the tab.
     @Published public private(set) var selectedTabID: UUID?
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
@@ -44,14 +49,23 @@ public enum BrowserWindowKind {
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window. The other panes of a split view leave the screen meanwhile, and their prompts wait until the panes return.
-    @Published public private(set) var fullscreenTabID: UUID?
+    @Published public private(set) var fullscreenTabID: UUID? {
+        // A page in fullscreen takes the docked sidebar off the screen, and a sidebar panel's page ends with it.
+        didSet { if fullscreenTabID != nil { closeSidebarPanel() } }
+    }
     /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
     @Published private(set) var preview: PagePreview?
-    @Published public var isSidebarVisible = true
+    /// Hiding the sidebar closes a sidebar panel: its page ends with the docked column, and the floating card does not take it over.
+    @Published public var isSidebarVisible = true {
+        didSet { if !isSidebarVisible { closeSidebarPanel() } }
+    }
     /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
     @Published public var isLibraryVisible = false {
-        didSet { if isLibraryVisible { session.markDownloadsSeen() } }
+        didSet { if isLibraryVisible { session.markDownloadsSeen(); closeSidebarPanel() } }
     }
+    /// A plugin panel shown in place of the current space's tab list.
+    @Published private(set) var sidebarPanel: SidebarPluginPanel?
+    private var sidebarPanelObserver: AnyCancellable?
     /// Whether the page reader shows beside the page.
     @Published public private(set) var isPageReaderVisible = false
     /// What the agent panel shows in the trailing column in place of the page reader, or nil while it is hidden; only one of the two shows.
@@ -190,6 +204,7 @@ public enum BrowserWindowKind {
         focusSelectedPane()
     }
 
+    /// Republishes changes from the selected tab through the window model.
     private func followSelectedTab() {
         selectedTabObserver = selectedTab?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
@@ -208,6 +223,7 @@ public enum BrowserWindowKind {
         switchToSpace(session.makeSpace(in: personaID).id)
     }
 
+    /// Shows a space and selects one of its free tabs when the current tab belongs elsewhere.
     public func switchToSpace(_ id: UUID) {
         guard session.spaces.contains(where: { $0.id == id }) else { return }
         isLibraryVisible = false
@@ -224,6 +240,7 @@ public enum BrowserWindowKind {
         return spaceTabs.first { !tree.isInCollapsedFolder($0) } ?? spaceTabs.first
     }
 
+    /// Moves to the next or previous space, wrapping at either end.
     public func switchToAdjacentSpace(forward: Bool) {
         let spaces = session.spaces
         guard let index = spaces.firstIndex(where: { $0.id == currentSpaceID }) else { return }
@@ -388,6 +405,7 @@ public enum BrowserWindowKind {
         !isSelectedPageCovered && selectedTab.map(session.isOffSavedPage) == true
     }
 
+    /// Returns the selected saved tab to its pinned or favorite address when it has moved away.
     public func goBackToSavedPage() {
         guard canGoBackToSavedPage, let tab = selectedTab else { return }
         session.goBackToSavedPage(tab)
@@ -398,6 +416,7 @@ public enum BrowserWindowKind {
         selectedTab.map(session.canUseCurrentPageAsSavedPage) == true
     }
 
+    /// Replaces the selected saved tab's saved page with its current page when allowed.
     public func useCurrentPageAsSavedPage() {
         selectedTab.map(session.useCurrentPageAsSavedPage)
     }
@@ -407,6 +426,7 @@ public enum BrowserWindowKind {
         selectedTab?.isPinned == true && selectedTab?.liveItemID == nil && nsWindow?.attachedSheet == nil
     }
 
+    /// Opens the saved address sheet for the selected pinned tab when available.
     public func promptToEditSavedAddress() {
         guard canEditSavedAddress, let tab = selectedTab else { return }
         promptToEditSavedAddress(of: tab)
@@ -482,7 +502,7 @@ public enum BrowserWindowKind {
         hideFindBar()
         cancelRegionCapture()
         closePageQuestion()
-        let runtime = session.runtime(for: engine, in: personaID)
+        guard let runtime = session.runtime(for: engine, in: personaID) else { return NSSound.beep() }
         let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
         let preview = PagePreview(webContents: webContents, personaID: personaID, requestedEngine: engine, openedURL: url)
         // A page the preview opens, as for a link to a new window or a sign-in popup, comes from the preview's runtime and keeps the previewed page as its opener. The previewed page becomes a tab of the preview's Persona, as Open in Tab makes one but without loading again, and the page it opened becomes the selected tab after it, taking the panel's place. The engine is still in its callback, so the panel goes on the next turn of the run loop.
@@ -583,12 +603,14 @@ public enum BrowserWindowKind {
         return (tree.tabs(in: currentSpaceID, pinned: true) + tree.tabs(in: currentSpaceID, pinned: false)).filter { $0.id == selectedTabID || !tree.isInCollapsedFolder($0) }
     }
 
+    /// Selects a tab by its visible sidebar position when the index exists.
     public func selectTab(at index: Int) {
         let ordered = orderedTabs
         guard ordered.indices.contains(index) else { return }
         selectTab(ordered[index].id)
     }
 
+    /// Selects the last visible tab in the current space.
     public func selectLastTab() {
         if let last = orderedTabs.last { selectTab(last.id) }
     }
@@ -601,6 +623,7 @@ public enum BrowserWindowKind {
         return index == ordered.count - 1 ? 9 : nil
     }
 
+    /// Selects the next or previous visible tab in sidebar order, wrapping at either end.
     public func selectAdjacentTab(forward: Bool) {
         let ordered = orderedTabs
         guard let index = ordered.firstIndex(where: { $0.id == selectedTabID }) else { return }
@@ -627,16 +650,19 @@ public enum BrowserWindowKind {
 
     // MARK: Command palette
 
+    /// Opens the palette in a mode and records where it appeared from.
     public func showCommandPalette(_ mode: CommandPaletteMode, from origin: CommandPaletteOrigin = .keyboard) {
         commandPaletteOrigin = origin
         if commandPaletteMode != mode { commandPaletteGeneration += 1 }
         commandPaletteMode = mode
     }
+    /// Closes the palette and returns keyboard focus to the page.
     public func dismissCommandPalette() {
         commandPaletteMode = nil
         focusPage()
     }
 
+    /// Opens an internal page, navigates the selected tab, or opens a new tab for the submitted text.
     public func submitCommandPalette(_ input: String) {
         defer {
             commandPaletteMode = nil
@@ -653,6 +679,7 @@ public enum BrowserWindowKind {
 
     public func focusCommandBar(from origin: CommandPaletteOrigin = .keyboard) { showCommandPalette(selectedTab == nil ? .newTab : .editCurrent, from: origin) }
 
+    /// Reveals the selected tab and returns keyboard focus to its page.
     public func closeInternalPage() {
         internalPage = nil
         focusPage()
@@ -693,6 +720,7 @@ public enum BrowserWindowKind {
         viewTakingFocus(in: view, skippingHidden: true) ?? viewTakingFocus(in: view, skippingHidden: false)
     }
 
+    /// Finds the frontmost descendant that accepts focus, optionally ignoring hidden views.
     private static func viewTakingFocus(in view: NSView, skippingHidden: Bool) -> NSView? {
         if view.acceptsFirstResponder { return view }
         return view.subviews.reversed().lazy
@@ -722,21 +750,47 @@ public enum BrowserWindowKind {
 
     // MARK: Plugins
 
+    /// A plugin panel shown in the sidebar for one space.
+    struct SidebarPluginPanel {
+        let spaceID: Space.ID
+        let title: String
+        let controller: NSViewController
+    }
+
+    /// Shows a plugin's sidebar panel while its space and plugin remain active.
+    func showSidebarPanel(_ controller: NSViewController, for item: Attributed<PluginSidebarItem>, in space: Space.ID, plugins: PluginManager) {
+        guard currentSpaceID == space else { return }
+        closeSidebarPanel()
+        sidebarPanel = SidebarPluginPanel(spaceID: space, title: item.item.title, controller: controller)
+        (controller as? any PluginEndingPanel)?.onEnd = { [weak self] in self?.closeSidebarPanel() }
+        sidebarPanelObserver = plugins.$plugins.sink { [weak self] installed in
+            guard let self, self.sidebarPanel?.controller === controller else { return }
+            if !installed.contains(where: { $0.id == item.plugin && $0.isEnabled }) { self.closeSidebarPanel() }
+        }
+    }
+
+    /// Detaches and dismisses the plugin panel shown in the sidebar. The panel's page ends when its view leaves the window, so the panel closes whenever the column that shows it goes: on Back, a change of space, the library, hiding the sidebar, a page entering fullscreen, or the floating card closing.
+    func closeSidebarPanel() {
+        (sidebarPanel?.controller as? any PluginEndingPanel)?.onEnd = nil
+        sidebarPanelObserver = nil
+        sidebarPanel = nil
+    }
+
     /// The plugins of the window's Persona, whose contributions the window shows.
     var plugins: PluginManager {
         session.plugins(in: personaID)
     }
 
     /// Runs a plugin command on the selected tab through the plugins of the window's Persona, as the palette, the Plugins menu, and sidebar items do.
-    public func runPluginCommand(_ command: PluginCommandRef) {
-        let invocation = PluginInvocation(tab: selectedPluginTab(of: personaID))
+    public func runPluginCommand(_ command: PluginCommandRef, source: PluginInvocation.Source = .menu, argument: String? = nil) {
+        let invocation = PluginInvocation(tab: selectedPluginTab(of: personaID), source: source, argument: argument)
         let plugins = self.plugins
         Task { await plugins.run(command, invocation) }
     }
 
     /// Runs a plugin command from a tab row's context menu on that tab, with the plugins of the tab's Persona.
     func runPluginCommand(_ command: PluginCommandRef, onTab tab: Tab) {
-        let invocation = PluginInvocation(tab: session.pluginTab(tab))
+        let invocation = PluginInvocation(tab: session.pluginTab(tab), source: .contextMenu)
         Task { await session.plugins(in: tab.personaID).run(command, invocation) }
     }
 
@@ -799,6 +853,7 @@ public enum BrowserWindowKind {
         return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas, allowsAI: settings.allowsAI(on:))
     }
 
+    /// Builds a draft for a sidebar tab only when it belongs to the space and can be attached.
     static func sidebarAgentDraft(for tab: AgentTabInfo, in space: Space, personas: [Persona], allowsAI: (URL) -> Bool) -> AgentComposerContext? {
         // An open favorite belongs to its Persona across spaces. Its window supplies the task's destination.
         guard tab.spaceID == nil || tab.spaceID == space.id else { return nil }
@@ -806,6 +861,7 @@ public enum BrowserWindowKind {
         return context.attachableTab(allowsAI: allowsAI) == nil ? nil : context
     }
 
+    /// Opens a reviewed sidebar tab in the agent composer, dropping its attachment if the page changed.
     func askAgentAboutSidebarTab(_ tab: Tab, reviewed: AgentComposerContext, settings: AISettingsStore? = nil) {
         guard let context = sidebarAgentDraft(for: tab, settings: settings), context.spaceID == reviewed.spaceID, context.personaID == reviewed.personaID,
               let document = context.tab, let original = reviewed.tab, document.id == original.id else { return }
@@ -875,8 +931,10 @@ public enum BrowserWindowKind {
         return owner
     }
 
+    /// Actions available for a folder owned by an agent session.
     enum AgentFolderAction { case show, stop, keepTabs, deleteSession }
 
+    /// Performs an agent folder action only while the reviewed session still owns it.
     func perform(_ action: AgentFolderAction, on folder: TabFolder, reviewed owner: AgentSession) async {
         guard agentSession(of: folder) === owner else { return }
         switch action {
@@ -978,15 +1036,18 @@ public enum BrowserWindowKind {
         }
     }
 
+    /// Hides the agent column with the sidebar's spring animation.
     public func hideAgentPanel() {
         withAnimation(SidebarView.pageSpring) { agentPanel = nil }
     }
 
+    /// Clears the submitted draft and shows its new agent session.
     func agentTaskDidStart(_ sessionID: UUID, from draft: AgentComposerContext) {
         if agentDrafts[draft.spaceID] === draft { agentDrafts[draft.spaceID] = nil }
         showAgentSession(sessionID)
     }
 
+    /// Shows agent content in the trailing column and preserves a composer's draft.
     private func showAgentPanel(_ content: AgentPanelContent) {
         if case .composer(let context) = content { agentDrafts[context.spaceID] = context }
         if isPageReaderVisible { session.pageReaderDidHide(in: self) }
@@ -1002,6 +1063,7 @@ public enum BrowserWindowKind {
         return PageAssistant.isQuestionAvailable && PageAssistant.canRead(url)
     }
 
+    /// Opens a question popover for the selected page when page questions are available.
     func askAboutPage() {
         guard canAskAboutPage, let tab = selectedTab else { return }
         openPageQuestion(in: tab, selection: nil)
@@ -1026,11 +1088,13 @@ public enum BrowserWindowKind {
         if pageQuestion?.tabID == id { closePageQuestion() }
     }
 
+    /// Replaces the question popover with a conversation for the tab's current document.
     func openPageQuestion(in tab: Tab, selection: AISelection?) {
         pageQuestion?.conversation.cancel()
         pageQuestion = PageQuestion(tabID: tab.id, documentID: tab.documentID, selection: selection, conversation: session.pageAssistant.makeQuestionConversation(for: tab))
     }
 
+    /// Cancels and removes the active page question conversation.
     private func closePageQuestion() {
         guard let pageQuestion else { return }
         pageQuestion.conversation.cancel()
@@ -1095,6 +1159,7 @@ public enum BrowserWindowKind {
         runFind(forward: true)
     }
 
+    /// Stops the current search and returns keyboard focus to the selected page.
     public func hideFindBar() {
         guard isFindBarVisible else { return }
         isFindBarVisible = false
@@ -1108,10 +1173,12 @@ public enum BrowserWindowKind {
         if !isFindBarVisible { showFindBar() } else { runFind(forward: true) }
     }
 
+    /// Moves to the previous match, opening the find bar first if needed.
     public func findPrevious() {
         if !isFindBarVisible { showFindBar() } else { runFind(forward: false) }
     }
 
+    /// Searches the selected page and accepts only the latest search result.
     private func runFind(forward: Bool) {
         guard isFindBarVisible, let tab = selectedTab else { return }
         findGeneration += 1
@@ -1152,6 +1219,7 @@ public enum BrowserWindowKind {
     // MARK: Navigation
 
     // Going to another page leaves an internal page, and reloading does not reach the page under it. While the preview panel shows, Back, Forward, and Reload act on its page instead of the tab under it. Each tells the tab that the user asked for the load (`Tab.userDidNavigate()`), Back and Forward only when there is a page to go to. The user's navigation drops the cause of one that code started (`Tab.pendingCause`).
+    /// Goes back in the preview or selected tab and leaves any internal page.
     public func goBack() {
         if let preview { return preview.webContents.navigationController.goBack() }
         internalPage = nil
@@ -1160,6 +1228,7 @@ public enum BrowserWindowKind {
         tab.pendingCause = nil
         tab.webContents.navigationController.goBack()
     }
+    /// Goes forward in the preview or selected tab and leaves any internal page.
     public func goForward() {
         if let preview { return preview.webContents.navigationController.goForward() }
         internalPage = nil
@@ -1182,6 +1251,7 @@ public enum BrowserWindowKind {
         tab.pendingCause = nil
         tab.webContents.navigationController.go(to: item)
     }
+    /// Reloads the preview or uncovered selected tab.
     public func reload() {
         if let preview { return preview.webContents.navigationController.reload() }
         guard internalPage == nil, let tab = selectedTab else { return }
@@ -1189,6 +1259,7 @@ public enum BrowserWindowKind {
         tab.pendingCause = nil
         tab.webContents.navigationController.reload()
     }
+    /// Stops loading the preview or selected tab.
     public func stopLoading() {
         if let preview { return preview.webContents.navigationController.stop() }
         selectedTab?.webContents.navigationController.stop()
@@ -1206,6 +1277,7 @@ public enum BrowserWindowKind {
     public var isShowingDeveloperTools: Bool { selectedTab?.webContents.devTools?.isOpen == true }
     /// Whether the docking side applies to the selected tab's tools. Tools that dock inside the page have their own controls.
     public var canChooseDevToolsSide: Bool { selectedTab?.webContents.devTools?.isPlacedByApp == true }
+    /// Opens or closes the selected tab's developer tools when its engine provides them.
     public func toggleDeveloperTools() {
         guard let devTools = selectedTab?.webContents.devTools else { return }
         devToolsDock.track(selectedTab)
@@ -1236,6 +1308,31 @@ public enum BrowserWindowKind {
     public var canPrint: Bool {
         guard selectedTab != nil, !isSelectedPageCovered, !hasPromptOnSelectedTab, !isRenderingPDF else { return false }
         return nsWindow?.attachedSheet == nil
+    }
+
+    public var canSavePageAs: Bool {
+        guard !isSelectedPageCovered, selectedTab?.isLoaded == true, let url = selectedTab?.committedURL, let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    /// View ▸ Picture in Picture and a tab row's menu: a loaded tab whose committed page is a web page or a file, and that no internal page covers when it is the selected tab.
+    public func canTogglePictureInPicture(_ tab: Tab) -> Bool {
+        guard tab.isLoaded, ["http", "https", "file"].contains(tab.committedURL?.scheme?.lowercased() ?? "") else { return false }
+        return tab !== selectedTab || !isSelectedPageCovered
+    }
+
+    /// Selects the tab first, so that only a page the user sees gets the user activation the request needs, then asks its video to enter picture in picture, or to leave it when one already shows. A beep reports a page without a video or one that refused.
+    public func togglePictureInPicture(_ tab: Tab) {
+        guard canTogglePictureInPicture(tab) else { return NSSound.beep() }
+        if tab !== selectedTab { selectTab(tab.id) }
+        guard selectedTab === tab, !isSelectedPageCovered else { return NSSound.beep() }
+        tab.webContents.togglePictureInPicture { done in if !done { NSSound.beep() } }
+    }
+
+    /// Starts saving the selected web page through the session when available.
+    public func savePageAs() {
+        guard canSavePageAs, let tab = selectedTab, let url = tab.committedURL else { return }
+        session.savePageAs(tab, url: url)
     }
 
     /// Prints the selected page through the system print panel, a sheet on the window. Both engines render the page as PDF first, so the panel and its preview work the same on either.
@@ -1338,6 +1435,7 @@ public enum BrowserWindowKind {
         }
     }
 
+    /// Shows a capture failure on its tab only while that tab still exists.
     private func showCaptureFailure(_ message: String, detail: String? = nil, for tab: Tab) {
         guard session.allTabs.contains(where: { $0 === tab }) else { return }
         showNotice(message, detail: detail, for: tab)
@@ -1384,6 +1482,7 @@ public enum BrowserWindowKind {
         return selected + candidates.filter { !selectedIDs.contains($0.id) }.sorted { $0.lastActivatedAt > $1.lastActivatedAt }
     }
 
+    /// Moves the selected tab to the front of this window's recent selection order.
     private func recordActivation() {
         guard let id = selectedTabID else { return }
         activationOrder.removeAll { $0 == id }
@@ -1522,6 +1621,7 @@ public enum BrowserWindowKind {
         }
     }
 
+    /// Builds the edit sheet from a live folder's current configuration and private address, if any.
     private func presentEditLiveFolderSheet(_ folderID: UUID, wholeAddress: URL?, keychainReadError: String?) {
         guard let folder = session.folders.first(where: { $0.id == folderID }), let live = folder.live,
               let space = session.spaces.first(where: { $0.id == folder.spaceID }) else { return }
@@ -1665,6 +1765,7 @@ public enum BrowserWindowKind {
         internalPage == nil && selectedTab.map(canOpenInSplitView) == true
     }
 
+    /// Adds the selected tab to a split view when it can join another pane.
     public func openSelectedTabInSplitView() {
         guard canOpenSelectedTabInSplitView, let tab = selectedTab else { return }
         openInSplitView(tab)

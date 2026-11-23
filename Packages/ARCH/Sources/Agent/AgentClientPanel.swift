@@ -1,4 +1,7 @@
-// The first agent panel, for outside clients (docs/agents.md, In the browser ▸ The agent panel): in a window's trailing column in place of the page reader, it shows one client's steps as the host describes them, each naming its tab with a button that shows it, and the client's cards, grouped by page, which the user answers there and nowhere over the page. A step whose page text speaks to AI agents says so. The service opens the panel on the front main window when a card waits and, while Arch is in the background, posts a notification without content. In-app sessions have a panel of their own, `AgentSessionPanel` in `AgentPanel.swift`, which shows their cards inline in the conversation.
+// The first panel for outside clients replaces the page reader in a window's trailing column (docs/agents.md, In the browser).
+// It shows each step as the host describes it, with a button for its tab. Cards are grouped by page and answered in the panel, never over the page.
+// A step marks page text addressed to AI agents. The service opens the panel in the front main window when a card waits.
+// While Arch is in the background, it posts a notification without content. In-app sessions use `AgentSessionPanel` in `AgentPanel.swift` instead.
 import AgentControl
 import AppKit
 import SwiftUI
@@ -54,6 +57,7 @@ public struct AgentPanelOwner: Equatable {
         self.approvals = approvals
     }
 
+    /// Adds a client's step and keeps at most 300 steps for that client.
     func record(_ step: AgentStepRecord, for ownerID: UUID) {
         var list = steps[ownerID] ?? []
         list.append(step)
@@ -61,6 +65,7 @@ public struct AgentPanelOwner: Equatable {
         steps[ownerID] = list
     }
 
+    /// Updates the client's displayed name, access, and place when they change.
     func describe(_ owner: AgentPanelOwner, for ownerID: UUID) {
         if owners[ownerID] != owner { owners[ownerID] = owner }
     }
@@ -80,6 +85,7 @@ public enum AgentAttention {
 
     public static func identifier(for ownerID: UUID) -> String { prefix + ownerID.uuidString }
 
+    /// Extracts a waiting agent's owner ID from a notification identifier.
     public static func ownerID(in identifier: String) -> UUID? {
         guard identifier.hasPrefix(prefix) else { return nil }
         return UUID(uuidString: String(identifier.dropFirst(prefix.count)))
@@ -91,6 +97,7 @@ public enum AgentAttention {
         return UNNotificationRequest(identifier: identifier(for: ownerID), content: content, trigger: nil)
     }
 
+    /// Posts a content-free notification when Arch is inactive and a client waits.
     static func notify(_ ownerID: UUID) {
         guard Bundle.main.bundleURL.pathExtension == "app", !NSApp.isActive else { return }
         let center = UNUserNotificationCenter.current()
@@ -108,6 +115,7 @@ public enum AgentAttention {
     }
 }
 
+/// Shows an outside client's steps and waiting approval cards in a trailing column.
 public struct AgentPanel: View {
     @ObservedObject var model: AgentPanelModel
     @ObservedObject var approvals: AgentApprovals
@@ -131,11 +139,13 @@ public struct AgentPanel: View {
                     Text(owner?.name ?? "Agent")
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
+                        .truncationMode(.tail)
                     if let owner {
                         Text("\(owner.access) \u{2014} \(owner.place)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
                 Spacer()
@@ -145,6 +155,7 @@ public struct AgentPanel: View {
                 Button(action: close) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("Close Agent Panel")
+                    .help("Close Agent Panel")
             }
             .padding(.leading, 14)
             .padding(.trailing, 8)
@@ -187,35 +198,33 @@ private struct AgentStepRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: symbol)
-                    .foregroundStyle(step.status == .ok ? Color.secondary : Color.orange)
-                    .font(.caption)
-                Text(step.sentence)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
+                Image(systemName: step.status.symbol)
+                    .foregroundStyle(step.status.tint)
+                    .font(.system(size: AgentPanelMetrics.detailSize))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(step.sentence)
+                        .font(.system(size: AgentPanelMetrics.supportingSize))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let words = step.status.plainWords {
+                        Text(words)
+                            .font(.system(size: AgentPanelMetrics.detailSize))
+                            .foregroundStyle(.orange)
+                    }
+                }
                 Spacer(minLength: 0)
                 if let handle = step.tabHandle, step.tabID != nil {
                     Button(handle, action: show)
                         .buttonStyle(.link)
-                        .font(.caption)
+                        .font(.system(size: AgentPanelMetrics.detailSize))
                         .help("Show this tab")
                 }
             }
             if step.addressesAgents {
                 Text("This page contains text addressed to AI agents.")
-                    .font(.caption)
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.orange)
             }
-        }
-    }
-
-    private var symbol: String {
-        switch step.status {
-        case .ok: return "checkmark.circle"
-        case .denied: return "hand.raised"
-        case .refused: return "nosign"
-        case .timeout, .approvalPending: return "clock"
-        case .stale, .error: return "exclamationmark.triangle"
         }
     }
 }

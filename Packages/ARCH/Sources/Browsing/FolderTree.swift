@@ -1,4 +1,6 @@
-// How folders nest in a space's pinned and open lists (bookmark rule 6, `docs/bookmarks.md`, Nested folders): which folder holds which, the sidebar's rows with their depths, the moves that Move to Folder, Move Out of Folder, and a folder row's drag make, Delete Folder, and the repairs that `session.json` gets. The session and the views ask a `FolderTree` instead of walking `TabFolder.parentID`.
+// Folders nest inside a space's pinned and open lists (bookmark rule 6, `docs/bookmarks.md`, Nested folders).
+// `FolderTree` maps parents, rows and depths, Move to Folder, Move Out of Folder, folder drags, and Delete Folder.
+// It also repairs folder data from `session.json`. The session and views ask this tree instead of walking `TabFolder.parentID`.
 import Foundation
 
 /// The session's folders and tabs as the sidebar nests them. A folder sits at the top of its space's pinned or open list or in another folder of that list, at most `maximumLevel` levels deep, and lists its folders before its tabs, as each list does. It is built from the session's lists for each use; its mutating methods change its copies of the lists and the moved tabs' folders, and the session takes the lists back.
@@ -378,7 +380,11 @@ import Foundation
         for folder in folders {
             while level(of: folder.id) > maximumLevel {
                 var ancestor = folder.id
-                for _ in 0..<(level(of: folder.id) - maximumLevel - 1) { ancestor = parents[ancestor]! }
+                for _ in 0..<(level(of: folder.id) - maximumLevel - 1) {
+                    // Unreachable after the cycle pass; if it ever runs, detaching the folder itself ends the outer loop.
+                    guard let parent = parents[ancestor] else { ancestor = folder.id; break }
+                    ancestor = parent
+                }
                 parents[ancestor] = nil
             }
         }

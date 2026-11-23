@@ -1,4 +1,6 @@
-// The tab switcher floats over the window while Control stays down after ⌃Tab. It lists the current space's listed tabs and the open tabs of the window's Persona's favorites (`BrowserWindowModel.recentTabs`), most recently selected first, and highlights the tab that releasing Control selects.
+// The tab switcher floats over the window while Control remains down after ⌃Tab.
+// It lists the current space's tabs and open favorites of the window's Persona (`BrowserWindowModel.recentTabs`), newest selection first.
+// Releasing Control selects the highlighted tab.
 import SwiftUI
 
 struct TabSwitcherView: View {
@@ -77,6 +79,7 @@ private struct TabSwitcherRow: View {
             Text(title)
                 .font(.system(size: 14))
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 8)
             if let site {
                 // Keeps its width, so a long title truncates first, as in the palette's rows.
@@ -84,6 +87,7 @@ private struct TabSwitcherRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                     .layoutPriority(1)
             }
         }

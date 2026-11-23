@@ -1,6 +1,7 @@
 // A JSON value for the parts of control messages whose shape the message does not fix: JSON-RPC params and results, tool arguments, and JSON Schemas (docs/agents.md, Local control channel ▸ Framing and methods).
 import Foundation
 
+/// JSON values used by control messages with dynamic params and results.
 public enum AgentJSON: Equatable, Sendable {
     case null
     case bool(Bool)
@@ -47,6 +48,7 @@ public enum AgentJSON: Equatable, Sendable {
 }
 
 extension AgentJSON: Codable {
+    /// Decodes one JSON value, including nested arrays and objects.
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
@@ -64,6 +66,7 @@ extension AgentJSON: Codable {
         }
     }
 
+    /// Encodes the value as a JSON scalar, array, or object.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {

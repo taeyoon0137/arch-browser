@@ -1,6 +1,7 @@
 // The AI settings in `ai.json`: providers, routes (the model tiers' among them), site exclusions, and limits. The file holds no secrets; keys go to the Keychain. Personas share one file.
 import Foundation
 
+/// Loads AI settings and saves provider, route, exclusion, and limit changes.
 @MainActor
 public final class AISettingsStore: ObservableObject {
     @Published public var providers: [AIProviderConfiguration] { didSet { scheduleSave() } }
@@ -49,6 +50,7 @@ public final class AISettingsStore: ObservableObject {
     let keys: any AIKeyStore
     private var pendingSave: DispatchWorkItem?
 
+    /// Loads settings from disk, setting an unreadable file aside before using defaults.
     init(fileURL: URL, keys: any AIKeyStore) {
         self.fileURL = fileURL
         self.keys = keys
@@ -134,6 +136,7 @@ public final class AISettingsStore: ObservableObject {
         setHasKey(true, for: provider)
     }
 
+    /// Removes a provider's Keychain key and clears its stored key state.
     public func removeKey(for provider: AIProviderID) async throws {
         try await keys.removeKey(for: provider)
         setHasKey(false, for: provider)
@@ -146,6 +149,7 @@ public final class AISettingsStore: ObservableObject {
         providers[index].kind = .http(http)
     }
 
+    /// Drops model references that no longer belong in stored routes.
     private func removeRouteModels(where shouldRemove: (AIModelRef) -> Bool) {
         var changed = routes
         for feature in routes.keys {
@@ -164,6 +168,7 @@ public final class AISettingsStore: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// Writes the current settings atomically after canceling a pending save.
     func saveNow() {
         pendingSave?.cancel()
         pendingSave = nil

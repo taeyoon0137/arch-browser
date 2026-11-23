@@ -48,10 +48,12 @@ public final class AgentKeychainSealKey: AgentSealKeyStore, @unchecked Sendable 
         queue = DispatchQueue(label: "\(service).keychain")
     }
 
+    /// Reads the existing seal key and generation without creating an item.
     public func key() async throws -> AgentSealKey? {
         try await onQueue { try self.read() }
     }
 
+    /// Reads the seal key or creates and stores a random key at generation zero.
     public func keyCreatingIfNeeded() async throws -> AgentSealKey {
         try await onQueue {
             if let key = try self.read() { return key }
@@ -70,6 +72,7 @@ public final class AgentKeychainSealKey: AgentSealKeyStore, @unchecked Sendable 
         }
     }
 
+    /// Writes the latest sealed-file generation with its key to the Keychain.
     public func record(_ key: AgentSealKey) async throws {
         try await onQueue {
             let status = SecItemUpdate(self.query as CFDictionary, [kSecValueData as String: Self.data(of: key)] as CFDictionary)
@@ -90,6 +93,7 @@ public final class AgentKeychainSealKey: AgentSealKeyStore, @unchecked Sendable 
         ]
     }
 
+    /// Decodes the key and generation from the matching Keychain item.
     private func read() throws -> AgentSealKey? {
         var query = self.query
         query[kSecReturnData as String] = true
@@ -109,6 +113,7 @@ public final class AgentKeychainSealKey: AgentSealKeyStore, @unchecked Sendable 
         }
     }
 
+    /// Runs a Keychain operation on the instance's serial queue.
     private func onQueue<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { continuation.resume(with: Result(catching: body)) }
@@ -241,6 +246,7 @@ public struct AgentKeychainError: LocalizedError {
     }
 }
 
+/// A sealed-file operation that cannot proceed without its Keychain key.
 public enum SealedSettingsFileError: LocalizedError {
     case noKey
 

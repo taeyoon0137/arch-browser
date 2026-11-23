@@ -1,4 +1,7 @@
-// New Live Folder… and Edit Live Folder… (`docs/bookmarks.md`, Live folders ▸ Interface; live folder rules 2, 3, 7, and 8): a sheet on the window that chooses a feed, found at the address the user gives, or a GitHub search that the user's `gh` runs, with the folder's name, item limit, and refresh interval. `LiveFolderSheetModel` holds what the sheet shows and decides, so tests drive it with stubbed lookups; `LiveFolderSheetView` draws it; `BrowserWindowModel` presents it, and the session applies what Add or Save hands over (`LiveFolderTabs.swift`).
+// New Live Folder… and Edit Live Folder… open a sheet on the window (`docs/bookmarks.md`, Live folders).
+// The sheet chooses a feed found at an address or a GitHub search run through the user's `gh`. It sets the folder name, item limit, and refresh interval.
+// `LiveFolderSheetModel` holds its state and decisions for tests with stubbed lookups. `LiveFolderSheetView` draws it; `BrowserWindowModel` presents it.
+// The session applies Add or Save through `LiveFolderTabs.swift` (live folder rules 2, 3, 7, and 8).
 import AppKit
 import LiveFolders
 import SwiftUI
@@ -500,26 +503,39 @@ struct LiveFolderSheetView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(model.title)
                 .font(.headline)
-            Form {
-                Picker("Source:", selection: $model.sourceKind) {
-                    Text("Feed").tag(LiveFolderSheetModel.SourceKind.feed)
-                    Text("GitHub").tag(LiveFolderSheetModel.SourceKind.gitHub)
+            SiteSettingsGroup("Folder") {
+                SiteSettingsRow(symbol: "square.stack", title: "Source") {
+                    Picker("Source", selection: $model.sourceKind) {
+                        Text("Feed").tag(LiveFolderSheetModel.SourceKind.feed)
+                        Text("GitHub").tag(LiveFolderSheetModel.SourceKind.gitHub)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityLabel("Source")
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
+                SiteSettingsDivider()
+                SiteSettingsRow(symbol: "textformat", title: "Name") {
+                    TextField("Name", text: $model.name, prompt: Text(model.namePlaceholder))
+                }
+                SiteSettingsDivider()
+                SiteSettingsRow(symbol: "number", title: "Items") {
+                    Picker("Items", selection: $model.itemLimit) {
+                        ForEach(LiveFolderConfiguration.itemLimits, id: \.self) { Text("\($0)").tag($0) }
+                    }.labelsHidden().accessibilityLabel("Items").fixedSize()
+                }
+                SiteSettingsDivider()
+                SiteSettingsRow(symbol: "arrow.clockwise", title: "Refresh") {
+                    Picker("Refresh", selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
+                        ForEach(LiveFolderConfiguration.refreshIntervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
+                    }.labelsHidden().accessibilityLabel("Refresh").fixedSize()
+                }
+            }
+            .disabled(model.isWorking)
+            Form {
                 switch model.sourceKind {
                 case .feed: feedRows
                 case .gitHub: gitHubRows
                 }
-                TextField("Name:", text: $model.name, prompt: Text(model.namePlaceholder))
-                Picker("Items:", selection: $model.itemLimit) {
-                    ForEach(LiveFolderConfiguration.itemLimits, id: \.self) { Text("\($0)").tag($0) }
-                }
-                .fixedSize()
-                Picker("Refresh:", selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
-                    ForEach(LiveFolderConfiguration.refreshIntervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
-                }
-                .fixedSize()
             }
             .formStyle(.columns)
             .disabled(model.isWorking)

@@ -3,7 +3,9 @@ import ARCHEngine
 import Combine
 import Foundation
 
+/// Persists website permission answers and removals by origin.
 public final class SitePermissionStore: ObservableObject {
+    /// Whether a website may use a requested permission.
     public enum Decision: String, Codable {
         case allow
         case deny
@@ -24,6 +26,7 @@ public final class SitePermissionStore: ObservableObject {
         var removed: [String: [String]]?
     }
 
+    /// Loads known permission answers and removals from the profile directory.
     init(directory: URL) {
         fileURL = directory.appendingPathComponent("permissions.json")
         guard let data = try? Data(contentsOf: fileURL), let file = try? JSONDecoder().decode(File.self, from: data) else { return }
@@ -38,6 +41,7 @@ public final class SitePermissionStore: ObservableObject {
         }
     }
 
+    /// Returns a saved answer for a permission at an origin, if present.
     public func decision(for type: EnginePermissionType, origin: String) -> Decision? {
         decisions[origin]?[type]
     }
@@ -64,6 +68,7 @@ public final class SitePermissionStore: ObservableObject {
         didChange.send((origin, types))
     }
 
+    /// Writes current answers and removals atomically to the permissions file.
     private func save() {
         let file = File(sites: decisions.mapValues { answers in Dictionary(uniqueKeysWithValues: answers.map { ($0.key.rawValue, $0.value) }) },
                         removed: removed.isEmpty ? nil : removed.mapValues { $0.map(\.rawValue).sorted() })

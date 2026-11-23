@@ -1,4 +1,7 @@
-// The harness tells agents how to work in Arch (docs/agents.md, Harness and skills). String literals let the app and `arch-cli` share the text without a resource bundle: static instructions, guide topics, the summary arch-mcp sends as its `instructions`, and skills made from the same text. These include the entry skill that `arch-cli skills install` writes for outside agents and the topic skills in an in-app session's own skill folder (agent decision 16). The outside `guide` tool and `arch-cli guide` return the same instructions and topics; in-app tasks get the session guide.
+// The harness tells agents how to work in Arch (docs/agents.md, Harness and skills).
+// String literals share static instructions, guide topics, MCP `instructions`, and skills between the app and `arch-cli` without a resource bundle.
+// `arch-cli skills install` writes the entry skill for outside agents. In-app sessions get topic skills in their own folder (agent decision 16).
+// The outside `guide` tool and `arch-cli guide` return the same instructions and topics. In-app tasks receive the session guide.
 import CryptoKit
 import Foundation
 
@@ -25,6 +28,7 @@ public enum AgentGuideTopic: String, CaseIterable, Sendable {
         }
     }
 
+    /// The guide text for this topic.
     public var text: String {
         switch self {
         case .browsing: return AgentHarness.browsingTopic
@@ -107,6 +111,7 @@ public struct AgentSkill: Equatable, Sendable {
     }
 }
 
+/// Shared instructions, guide topics, and skills supplied to in-app and outside agents.
 public enum AgentHarness {
     /// The guide or one of its topics.
     public static func text(for topic: AgentGuideTopic?) -> String {

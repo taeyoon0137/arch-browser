@@ -1,4 +1,6 @@
-// The `PluginContext` of a JavaScript hook script's instance (`docs/hooks.md`, JavaScript scripts; Run tabs): bound to one hook in one Persona with the hook's grant, it acts only during a run, for that run. `arch.tabs` reaches only the run's tabs, renames go to the run's document for each tab with the run's cause and its test flag, and for a hook with `agent` the tabs on sites excluded from AI show neither title nor address. Storage and secrets are empty and take no values; a hook script has no settings, badges, or clipboard.
+// A JavaScript hook instance receives this `PluginContext` for one hook and Persona (`docs/hooks.md`, JavaScript scripts; Run tabs).
+// It acts only during its run. `arch.tabs` reaches only run tabs; renames belong to each tab's run document and carry the run cause and test flag.
+// With `agent`, tabs on AI-excluded sites reveal no title or address. Storage and secrets stay empty; hooks have no settings, badges, or clipboard.
 import Agent
 import AI
 import Events

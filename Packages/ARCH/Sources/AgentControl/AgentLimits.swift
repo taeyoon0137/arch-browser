@@ -1,6 +1,7 @@
 // The limits every client of the tool host meets (docs/agents.md, Tools ▸ Limits). The tool catalog's schemas carry the per-call ones, so that a client sees them before it calls; the tool host enforces all of them.
 import Foundation
 
+/// Limits shared by agent tools, sessions, approvals, and event streams.
 public enum AgentLimits {
     /// A snapshot's characters when the call names no `max_chars`, and the most a call may ask for. A cut lands on an element boundary.
     public static let snapshotDefaultCharacters = 16_000

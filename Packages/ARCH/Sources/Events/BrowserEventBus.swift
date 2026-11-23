@@ -1,6 +1,7 @@
 // The browser event bus (`docs/hooks.md`, The bus; hook decision 1): one bus per session delivers every browser event to its subscribers, in sequence order, on the main actor.
 import Foundation
 
+/// Delivers browser events in sequence on the main actor to matching subscribers.
 @MainActor
 public final class BrowserEventBus {
     private struct Subscriber {
@@ -59,6 +60,7 @@ public final class BrowserEventBus {
     }
 }
 
+/// A handle that ends one browser event subscription when canceled.
 @MainActor
 public final class BrowserEventSubscription {
     private weak var bus: BrowserEventBus?

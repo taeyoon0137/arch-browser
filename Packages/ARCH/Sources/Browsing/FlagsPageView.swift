@@ -2,6 +2,7 @@
 import ARCHPrivateAPI
 import SwiftUI
 
+/// An internal browser page that opens from an address.
 public enum InternalPage {
     case flags
 
@@ -26,6 +27,7 @@ public enum InternalPage {
     }
 }
 
+/// Displays the view for the selected internal page.
 struct InternalPageView: View {
     let page: InternalPage
 
@@ -65,6 +67,7 @@ struct FlagsPageView: View {
                     Spacer()
                     Toggle("Use private APIs", isOn: Binding(get: { flags.allowsPrivateAPIs }, set: { flags.allowsPrivateAPIs = $0 }))
                         .labelsHidden()
+                        .accessibilityLabel("Use private APIs")
                         .toggleStyle(.switch)
                 }
                 FlagsSection(title: "Private APIs", emptyText: "Arch uses no private API yet.", isEmpty: flags.apis.isEmpty) {
@@ -89,6 +92,7 @@ struct FlagsPageView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    /// Names a private API's current availability check result.
     private func availabilityText(_ id: String) -> String {
         switch flags.availability[id] {
         case true?: return "Available"
@@ -97,12 +101,14 @@ struct FlagsPageView: View {
         }
     }
 
+    /// Summarizes a feature's active state and the private APIs it uses.
     private func featureDetail(_ feature: PrivateAPIFeature) -> String {
         let names = feature.apiIDs.map { id in flags.apis.first { $0.id == id }?.name ?? id }.joined(separator: ", ")
         return "\(flags.allows(feature.id) ? "Active" : "Inactive") · Uses \(names)"
     }
 }
 
+/// Groups private API or feature switches under a heading.
 private struct FlagsSection<Content: View>: View {
     let title: String
     let emptyText: String
@@ -137,9 +143,12 @@ private struct FlagRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(isMonospaced ? .system(size: 13, design: .monospaced) : .system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(detail)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             // Dims with the switch while Use private APIs is off, which text beside a control does not do by itself.
             .opacity(isEnabled ? 1 : 0.5)
@@ -148,6 +157,7 @@ private struct FlagRow: View {
             Spacer()
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
+                .accessibilityLabel(title)
                 .toggleStyle(.switch)
                 .accessibilityHint(detail)
         }

@@ -49,7 +49,9 @@ public struct AgentLineReader: Sendable {
     }
 }
 
+/// Translates MCP stdio requests and Arch control replies into effects for its I/O loop.
 public struct AgentMCPServer {
+    /// Whether the server serves an outside client or a ticketed in-app session.
     public enum Mode: Equatable, Sendable {
         /// An outside client, which Arch's grant governs.
         case outside
@@ -147,6 +149,7 @@ public struct AgentMCPServer {
         }
     }
 
+    /// Dispatches a client request to initialization, ping, or tool forwarding.
     private mutating func request(id: AgentRPCID, method: String, params: AgentJSON?) -> [Effect] {
         switch method {
         case "initialize":
@@ -169,6 +172,7 @@ public struct AgentMCPServer {
         .reply(.error(id: id, error: .invalidRequest("Send initialize first.")))
     }
 
+    /// Negotiates the protocol version and returns this server's capabilities.
     private mutating func initialize(id: AgentRPCID, params: AgentJSON?) -> [Effect] {
         guard protocolVersion == nil else { return [.reply(.error(id: id, error: .invalidRequest("initialize was already answered.")))] }
         guard let requested = params?["protocolVersion"]?.stringValue else {
@@ -184,6 +188,7 @@ public struct AgentMCPServer {
         ]))]
     }
 
+    /// Validates a tool call and forwards it with any progress token.
     private mutating func call(id: AgentRPCID, params: AgentJSON?) -> [Effect] {
         guard let name = params?["name"]?.stringValue else { return [.reply(.error(id: id, error: .invalidParams("tools/call needs a tool name.")))] }
         let arguments: [String: AgentJSON]
@@ -202,6 +207,7 @@ public struct AgentMCPServer {
         return forward(Request(id: id, kind: .call(AgentToolCall(name: name, arguments: arguments), progressToken: token)))
     }
 
+    /// Cancels a pending tool call when the client sends a cancellation notice.
     private mutating func notification(method: String, params: AgentJSON?) -> [Effect] {
         guard method == "notifications/cancelled", let id = params?["requestId"].flatMap(AgentRPCID.init) else { return [] }
         // A request still waiting for the connection never reaches Arch. `MCPServerLoop` connects before it reads the next line, so there the request has always been sent.
@@ -281,6 +287,7 @@ public struct AgentMCPServer {
         return AgentHello(client: .mcp, version: version)
     }
 
+    /// Sends a request now or queues it until Arch connects.
     private mutating func forward(_ request: Request) -> [Effect] {
         switch link {
         case .connected:
@@ -295,6 +302,7 @@ public struct AgentMCPServer {
         }
     }
 
+    /// Assigns a control request ID and forwards a tool request to Arch.
     private mutating func send(_ request: Request) -> [Effect] {
         let controlID = nextControlID
         nextControlID += 1
@@ -305,6 +313,7 @@ public struct AgentMCPServer {
         }
     }
 
+    /// Converts Arch's tool list or call result into the client's MCP reply.
     private mutating func answer(_ request: Request, with result: AgentJSON) -> Effect {
         switch request.kind {
         case .list:
@@ -320,6 +329,7 @@ public struct AgentMCPServer {
         }
     }
 
+    /// Emits a monotonic MCP progress notification for a pending call.
     private mutating func progressed(_ progress: AgentToolProgress) -> [Effect] {
         guard var request = pending[progress.call], case .call(_, let token?) = request.kind else { return [] }
         request.progress += 1
@@ -329,6 +339,7 @@ public struct AgentMCPServer {
         return [.reply(.notification(method: "notifications/progress", params: .object(params)))]
     }
 
+    /// Notifies an initialized client that Arch's available tools changed.
     private func listChanged() -> [Effect] {
         guard protocolVersion != nil else { return [] }
         return [.reply(.notification(method: "notifications/tools/list_changed", params: nil))]
@@ -336,6 +347,7 @@ public struct AgentMCPServer {
 
     // MARK: - Results
 
+    /// Checks whether the negotiated MCP version includes a capability.
     private func supports(_ version: String) -> Bool {
         (protocolVersion ?? AgentMCPVersion.newest) >= version
     }
@@ -362,6 +374,7 @@ public struct AgentMCPServer {
         return ["content": .array(content), "isError": .bool(result.status != .ok && result.status != .approvalPending)]
     }
 
+    /// Wraps an error message as an MCP tool result.
     private func errorResult(_ message: String) -> AgentJSON {
         ["content": [["type": "text", "text": .string(message)]], "isError": true]
     }

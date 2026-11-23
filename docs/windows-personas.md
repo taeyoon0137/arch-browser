@@ -3,7 +3,7 @@
 ## Purpose and scope
 
 - This note designs queue tasks III.6 (multiple windows), III.7 (small window), and III.12 (Personas) in `docs/plan.md`, rows 7, 6, and 9 of `docs/features.md`. It also fixes the parts of live favorites (III.13), sync (V.9), plugins (V.11), and the AI tasks (VII) that depend on windows or Personas.
-- The three tasks share one change. Today `BrowserSession` holds the user's data, the state of the one window, and one engine profile per engine. After this work, a window owns only what it shows, a Persona owns its engine storage, and the session owns everything else.
+- The three tasks shared one change. At design time, `BrowserSession` held the user's data, the state of one window, and one engine profile per engine. In the implementation, a window owns what it shows, a Persona owns its engine storage, and the session owns everything else.
 - Folders (III.3), split view (III.5), previews (III.11), live favorites (III.13), and the plugin core (V.11) were built while this note was written. It states the design as types and responsibilities, and Interactions with other features says how windows and Personas apply to them.
 - The default Persona keeps today's storage, so the upgrade moves no site data and signs nobody out.
 - Nothing here uses a private API or needs a flag on `flags://`.
@@ -160,7 +160,7 @@ Every piece of state has exactly one owner. Parallel tasks follow the same table
 | R17 | The last window closes before the quit saves; frames refer to removed displays; AppKit tabbing and restoration interfere; a window built in code is released when it closes | Keep the record of the last main window that closed; clamp frames; `NSWindow.allowsAutomaticWindowTabbing = false`, and `tabbingMode = .disallowed`, `isRestorable = false`, and `isReleasedWhenClosed = false` on every browser window | 9, 10 |
 | R18 | AppKit adds window items, and on recent systems window tiling items, to the Window menu, which `manage` would list as commands | Set `NSApp.windowsMenu` after `installShortcuts()`, and check Settings ▸ Shortcuts | 9 |
 | R19 | Small-window tabs must stay in `tabs` for sheets, permissions, downloads, Now Playing, and crash notices, but space lists would show, close, or select them | One predicate, `Tab.isListedInSidebar`, in every space-scoped filter (listed under Small window) | 11 |
-| R20 | A deleted Persona's download rows keep `unowned` references to its WebKit context | Its runtimes stay referenced, without tabs, until quit; its unfinished downloads are cancelled first | 13 |
+| R20 | A deleted Persona's download rows keep `unowned` references to its WebKit context | Its runtimes stay referenced, without tabs, until quit; its unfinished downloads are canceled first | 13 |
 | R21 | Two tasks raise the snapshot version at once | New fields are optional, `normalized()` keys off their presence, and each landing takes the next free number | 1, 2, 5, 10 |
 
 ## Types
@@ -680,7 +680,7 @@ Preference
   1. Previews of its pages close, and every main window on its spaces switches to the first space of the first remaining Persona; window rule 3 picks the tab.
   2. Its small windows close, and their tabs close as in item 3.
   3. Its pinned and open tabs close with reason `.persona` into the closed list, without asking their pages, as `docs/sync.md` states for a deleted Persona, and its favorites' tabs end (`TabCloseAction`, `docs/bookmarks.md`, Unloading). The undo count resets. The records keep `personaID`; reopening one whose space is gone uses its Persona's preferred space, or the sidebar target's current space once its Persona is gone.
-  4. Its unfinished downloads are cancelled, and its kept download pages close through their runtimes. Finished rows stay in the library.
+  4. Its unfinished downloads are canceled, and its kept download pages close through their runtimes. Finished rows stay in the library.
   5. Its spaces are removed with their folders and split views, and its favorites with the tabs saved for them.
   6. Each of its browsers closes every web contents it still owns (`closeAllWebContents`), its plugin manager closes and goes (`docs/plugins.md`, Personas), so its plugins stop and write nothing more, and its `PersonaEngines` moves to `retiredPersonaEngines` until quit, because download items hold their lists and contexts `unowned`.
   7. Its ID joins `removedPersonaIDs`, and the session saves at once.

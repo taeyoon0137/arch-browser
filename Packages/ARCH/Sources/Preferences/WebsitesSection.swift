@@ -1,4 +1,5 @@
-// The Websites section of Settings: each website with a remembered permission answer, where the user changes or removes the answer, and whether macOS lets Arch show the notifications of the websites allowed to send them.
+// Settings ▸ Websites lists sites with remembered permission answers. The user can change or remove each answer.
+// It also shows whether macOS permits Arch to display notifications from sites allowed to send them.
 import ARCHEngine
 import Browsing
 import SwiftUI
@@ -83,6 +84,7 @@ struct WebsitesSection: View {
                     Text("Don\u{2019}t Allow").tag(SitePermissionStore.Decision.deny)
                 }
                 .labelsHidden()
+                .accessibilityLabel(Self.permissionTitle(for: type))
                 .fixedSize()
                 Button {
                     store.set(nil, for: [type], origin: origin)

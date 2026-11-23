@@ -35,7 +35,9 @@ extension AgentAPISession: AgentSessionRunning {
     public func end(keepingThread: Bool) async { end() }
 }
 
+/// Keeps one in-app agent conversation, its runner, tools, transcript, and lifetime.
 @MainActor public final class AgentSession: ObservableObject, Identifiable {
+    /// Whether Arch or an outside client started the session.
     public enum Origin: Equatable, Sendable {
         /// The user started it in Arch.
         case app
@@ -43,6 +45,7 @@ extension AgentAPISession: AgentSessionRunning {
         case outsideClient(grantID: UUID, clientName: String, deniesApprovals: Bool)
     }
 
+    /// The current turn or session state shown in the panel.
     public enum State: Equatable, Sendable {
         /// The first turn runs, before the model's first output.
         case starting
@@ -266,6 +269,7 @@ extension AgentAPISession: AgentSessionRunning {
         return spawnedProcess
     }
 
+    /// Applies one runner event to the model, transcript, task stream, and turn state.
     private func handle(_ event: AIAgentEvent, from runner: any AgentSessionRunning) {
         guard runner === self.runner else { return }
         switch event {
@@ -341,6 +345,7 @@ extension AgentAPISession: AgentSessionRunning {
         messageDraft = ""
     }
 
+    /// Removes a queued message only when its index is still valid.
     public func removeQueuedMessage(at index: Int) {
         guard queuedMessages.indices.contains(index) else { return }
         queuedMessages.remove(at: index)
@@ -367,6 +372,7 @@ extension AgentAPISession: AgentSessionRunning {
         }
     }
 
+    /// Ends this turn's calls and starts the next queued message if the session remains open.
     private func turnEnded(_ next: State) {
         endCallsOfTheTurn()
         isTurnRunning = false
@@ -435,6 +441,7 @@ extension AgentAPISession: AgentSessionRunning {
         handedBack.close()
     }
 
+    /// Resumes calls paused when the user took over the session.
     public func handBack() {
         guard !hasEnded, isTakenOver else { return }
         isTakenOver = false
@@ -485,6 +492,7 @@ extension AgentAPISession: AgentSessionRunning {
         return handles.tabs.handle(for: tabID)
     }
 
+    /// Removes a shared tab, its handles and snapshots, and any reader excerpt from the session.
     func unshare(tabID: UUID) {
         guard handles.sharedTabIDs.contains(tabID) else { return }
         objectWillChange.send()

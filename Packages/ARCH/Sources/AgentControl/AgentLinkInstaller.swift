@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// Installs and removes links to Arch's bundled command-line tools in writable home folders.
 public struct AgentLinkInstaller {
     /// A link and the bundled executable it points to.
     public struct Link: Equatable, Sendable {
@@ -14,6 +15,7 @@ public struct AgentLinkInstaller {
         }
     }
 
+    /// Errors that explain why a requested link operation was refused or failed.
     public enum Failure: Error, Equatable {
         /// A folder the caller named lies outside the home folder.
         case outsideHome(String)
@@ -213,6 +215,7 @@ public struct AgentLinkInstaller {
         return status.st_mode & S_IFMT == S_IFLNK ? .link : .other
     }
 
+    /// Reads a symbolic link's destination without following unrelated files.
     private func linkDestination(at location: URL) -> String? {
         guard kind(at: location) == .link else { return nil }
         return try? FileManager.default.destinationOfSymbolicLink(atPath: location.path)

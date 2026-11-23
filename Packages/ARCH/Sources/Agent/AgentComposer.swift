@@ -1,4 +1,8 @@
-// The composer that starts an in-app session (docs/agents.md, In the browser ▸ Starting a session; Model choice and fallbacks): the task, the selected tab attached as a removable chip unless its site is excluded, the place as "Persona / Space" with Use the Agents Persona, the mode from Settings, the model menu with the `agent` route's first model, and the effort menu where the tool takes one. Without a model that can run a session, it says how to connect an API-key model, Claude Code, or Codex. A task that starts with `/` in a Claude Code session with Arch's skills is refused and stays in the field.
+// The composer starts an in-app session (docs/agents.md, Starting a session; Model choice and fallbacks).
+// It holds the task and the selected tab as a removable chip unless the site is excluded. It shows the Persona / Space and Use the Agents Persona choice.
+// The mode starts from Settings. The model menu starts with the `agent` route's first model; an effort menu appears when the tool supports it.
+// Without a usable model, it explains how to connect an API-key model, Claude Code, or Codex.
+// A task starting with `/` is refused and left in the field when a Claude Code session loads Arch's skills.
 import AgentControl
 import AI
 import SwiftUI
@@ -63,6 +67,7 @@ public struct AgentReaderExcerpt: Equatable {
         return nil
     }
 
+    /// Checks that the attached tab is still the same reviewed document and address.
     public func matches(_ tab: AgentTabInfo?) -> Bool {
         tab?.id == tabID && tab?.documentID == documentID && tab?.url == url
     }
@@ -117,6 +122,7 @@ public struct AgentReaderExcerpt: Equatable {
     }
 }
 
+/// Collects a task, destination, model, mode, and optional page context before starting a session.
 public struct AgentComposer: View {
     @ObservedObject var service: AgentService
     @ObservedObject private var settings = AIService.shared.settings
@@ -125,6 +131,7 @@ public struct AgentComposer: View {
     private let permissionNote: String?
     let didStart: (AgentSession) -> Void
     @FocusState private var isTaskFocused: Bool
+    @State private var optionsExpanded = false
     @State private var loadedEffort: (source: EffortSource, levels: [String])?
 
     public init(service: AgentService, context: AgentComposerContext, actions: AgentPanelActions, permissionNote: String? = nil, didStart: @escaping (AgentSession) -> Void) {
@@ -150,21 +157,25 @@ public struct AgentComposer: View {
             if !models.isEmpty {
                 HStack {
                     Spacer()
-                    Button("Start", action: start)
+                    AgentPrimaryAction(title: "Start", action: start)
                         .keyboardShortcut(.defaultAction)
                         .disabled(selectedModel == nil || context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .padding([.horizontal, .bottom], 14)
+                .padding([.horizontal, .bottom], AgentPanelMetrics.inset)
             }
         }
         .task(id: effortSource) { await loadEffortLevels() }
+        .onAppear { optionsExpanded = context.problem != nil || selectedModel == nil }
+        .onChange(of: context.problem) { if context.problem != nil { optionsExpanded = true } }
+        // A model that goes away while the draft is open leaves Start off; Options opens on the model menu.
+        .onChange(of: selectedModel == nil) { _, isGone in if isGone { optionsExpanded = true } }
     }
 
     private var form: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("What should the agent do?", text: $context.text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(.system(size: AgentPanelMetrics.bodySize))
                 .lineLimit(3...10)
                 .focused($isTaskFocused)
                 .onAppear { isTaskFocused = true }
@@ -173,24 +184,6 @@ public struct AgentComposer: View {
                 AgentTabChip(tab: tab) {
                     context.attachesTab = false
                     context.sharesExcerpt = false
-                }
-                if let excerpt = context.readerExcerpt, excerpt.matches(tab) {
-                    Toggle("Share reader excerpt", isOn: $context.sharesExcerpt)
-                        .toggleStyle(.checkbox)
-                    DisclosureGroup("Preview excerpt") {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 6) {
-                                if let selection = excerpt.selection {
-                                    Text("Selected text").fontWeight(.medium)
-                                    Text(verbatim: selection)
-                                }
-                                if let reply = excerpt.reply {
-                                    Text("Reader answer").fontWeight(.medium)
-                                    Text(verbatim: reply)
-                                }
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.frame(maxHeight: 120)
-                    }.font(.system(size: 12))
                 }
             } else if !context.attachesTab, !context.usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
                 HStack {
@@ -205,42 +198,64 @@ public struct AgentComposer: View {
                 }
                 .controlSize(.small)
             }
-            Divider()
+            // The page context that goes with the task stays beside its chip.
+            if let tab = attachableTab, context.attachesTab,
+               let excerpt = context.readerExcerpt, excerpt.matches(tab), !context.usesAgentsPersona {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Share reader excerpt", isOn: $context.sharesExcerpt)
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: AgentPanelMetrics.supportingSize))
+                    AgentTechnicalDetails(title: "Preview excerpt") {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let selection = excerpt.selection { Text("Selected text").fontWeight(.medium); Text(verbatim: selection) }
+                                if let reply = excerpt.reply { Text("Reader answer").fontWeight(.medium); Text(verbatim: reply) }
+                            }
+                            .font(.system(size: AgentPanelMetrics.detailSize))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(maxHeight: 120)
+                    }
+                }
+            }
+            Text(service.place(of: context))
+                .font(.system(size: AgentPanelMetrics.supportingSize))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(service.place(of: context))
+            // What the destination permits, beside it, where the user decides to start.
             if let selectedPermissionNote { note(selectedPermissionNote) }
             if models.isEmpty {
                 modelSetup
             } else {
-                options
-                if selectedModel == nil {
-                    note("The selected model is no longer available. Choose another model to continue.")
+                DisclosureGroup("Options", isExpanded: $optionsExpanded) {
+                    AgentSectionBox { options }
                 }
-                if let warning = codexInstructionsWarning {
-                    note(warning)
-                }
+                .font(.system(size: AgentPanelMetrics.supportingSize))
+                // Why Start is off, and what the chosen tool adds, stay in view while Options is closed.
+                if selectedModel == nil { note("The selected model is no longer available. Choose another model in Options to continue.") }
+                if let warning = codexInstructionsWarning { note(warning) }
             }
             if let problem = context.problem {
                 Text(problem)
-                    .font(.system(size: 12))
+                    .font(.system(size: AgentPanelMetrics.supportingSize))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
+        .padding(AgentPanelMetrics.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var modelSetup: some View {
         let isEnabled = settings.route(for: .agent).isEnabled
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                label("In")
-                destination
-            }
             Text(isEnabled ? "Connect an agent model in Settings ▸ AI" : "Agent Tasks is turned off")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: AgentPanelMetrics.bodySize, weight: .medium))
             Text(isEnabled ? "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue.")
-                .font(.system(size: 12))
+                .font(.system(size: AgentPanelMetrics.supportingSize))
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Button(isEnabled ? "Open Providers" : "Open Features") {
                 actions.openModelSettings(isEnabled ? .providers : .features)
             }
@@ -248,48 +263,44 @@ public struct AgentComposer: View {
         }
     }
 
-    private var destination: some View {
-        Text(service.place(of: context)).font(.system(size: 12))
-    }
-
     private var options: some View {
-        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
-            GridRow {
-                label("In")
-                VStack(alignment: .leading, spacing: 2) {
-                    destination
-                    Toggle("Use the Agents Persona", isOn: $context.usesAgentsPersona)
-                        .toggleStyle(.checkbox)
-                        .font(.system(size: 11))
-                }
-            }
-            GridRow {
-                label("Mode")
-                // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
-                Picker("Mode", selection: Binding(get: { chosenMode }, set: { context.mode = $0 })) {
-                    ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
-                }
-                .labelsHidden()
-                .controlSize(.small)
-            }
-            GridRow {
-                label("Model")
-                Picker("Model", selection: Binding(get: { selectedModel }, set: { context.model = $0; context.effort = nil })) {
-                    if selectedModel == nil { Text("Choose a model…").tag(nil as AIModelRef?).disabled(true) }
-                    ForEach(models, id: \.self) { Text(settings.title(of: $0)).tag(Optional($0)) }
-                }
-                .labelsHidden()
-                .controlSize(.small)
-            }
-            if !effortLevels.isEmpty {
+        VStack(alignment: .leading, spacing: 8) {
+            // The place line above names where the task runs; this only changes it.
+            Toggle("Use the Agents Persona", isOn: $context.usesAgentsPersona)
+                .toggleStyle(.checkbox)
+                .font(.system(size: AgentPanelMetrics.supportingSize))
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
-                    label("Effort")
-                    Picker("Effort", selection: $context.effort) {
-                        Text("Tool\u{2019}s default").tag(String?.none)
-                        ForEach(effortLevels, id: \.self) { Text($0).tag(Optional($0)) }
+                    label("Mode")
+                    // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
+                    Picker("Mode", selection: Binding(get: { chosenMode }, set: { context.mode = $0 })) {
+                        ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
                     }
                     .labelsHidden()
+                    .accessibilityLabel("Mode")
                     .controlSize(.small)
+                }
+                GridRow {
+                    label("Model")
+                    Picker("Model", selection: Binding(get: { selectedModel }, set: { context.model = $0; context.effort = nil })) {
+                        if selectedModel == nil { Text("Choose a model…").tag(nil as AIModelRef?).disabled(true) }
+                        ForEach(models, id: \.self) { Text(settings.title(of: $0)).tag(Optional($0)) }
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel("Model")
+                    .controlSize(.small)
+                }
+                if !effortLevels.isEmpty {
+                    GridRow {
+                        label("Effort")
+                        Picker("Effort", selection: $context.effort) {
+                            Text("Tool\u{2019}s default").tag(String?.none)
+                            ForEach(effortLevels, id: \.self) { Text($0).tag(Optional($0)) }
+                        }
+                        .labelsHidden()
+                        .accessibilityLabel("Effort")
+                        .controlSize(.small)
+                    }
                 }
             }
         }
@@ -297,14 +308,14 @@ public struct AgentComposer: View {
 
     private func label(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12))
+            .font(.system(size: AgentPanelMetrics.supportingSize))
             .foregroundStyle(.secondary)
             .gridColumnAlignment(.trailing)
     }
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .font(.system(size: AgentPanelMetrics.detailSize))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -342,6 +353,7 @@ public struct AgentComposer: View {
         return loadedEffort.levels
     }
 
+    /// Loads effort choices for the selected command-line model and clears a stale choice.
     private func loadEffortLevels() async {
         guard let source = effortSource else {
             loadedEffort = nil
@@ -369,6 +381,7 @@ public struct AgentComposer: View {
         return nil
     }
 
+    /// Starts a session with the selected task and attachments, leaving errors in the draft.
     private func start() {
         let task = context.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty, selectedModel != nil else { return }
@@ -402,6 +415,7 @@ extension AgentTabInfo {
         attachmentLabel(address: url.map { AgentAddress.reduced($0).absoluteString })
     }
 
+    /// Uses a reduced address when the title is empty or duplicates the address.
     private func attachmentLabel(address: String?) -> String {
         guard let address else { return title.isEmpty ? "Tab" : title }
         if title.isEmpty || title == url?.host || url.map({ AgentAddress.isOwnAddress(title, of: $0) }) == true { return address }
@@ -455,6 +469,7 @@ struct AgentTabChip: View {
         HStack(spacing: 4) {
             Image(systemName: "doc.text")
                 .font(.system(size: 10))
+                .accessibilityHidden(true)
             AgentAttachmentLabel(tab: tab)
                 .font(.system(size: 11))
             Button(action: remove) {

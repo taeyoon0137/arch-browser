@@ -1,9 +1,12 @@
-// The session's side of the tab calls of plugins and hook scripts (`docs/plugins.md`, Manager, runtimes, and the browser host): every Persona's open tabs as plugins see them, never agent tabs, suggested names under the AI hooks' rules (`docs/hooks.md`, hook decision 13), whose events carry the caller's cause, and the tabs' pages for plugins' page calls. One host serves every Persona's plugin manager and the JavaScript hook runner.
+// The session serves tab and page calls from plugins and hook scripts (`docs/plugins.md`, Manager, runtimes, and the browser host).
+// It lists each Persona's open tabs as plugins see them, omitting agent tabs. Suggested names follow AI hook rules (`docs/hooks.md`, hook decision 13), and their events name the caller's cause.
+// It also gives plugins access to tabs' pages. One host serves every Persona's plugin manager and the JavaScript hook runner.
 import ARCHEngine
 import Events
 import Foundation
 import Plugins
 
+/// Implements plugin tab, download, notification, and page access through a browser session.
 @MainActor
 public final class SessionPluginBrowserHost: PluginBrowserHost {
     private weak var session: BrowserSession?
@@ -11,13 +14,34 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
     /// Made with the session, which calls `attach(to:)` once it exists.
     nonisolated init() {}
 
+    /// Attaches the session after the host has been created.
     func attach(to session: BrowserSession) {
         self.session = session
     }
 
+    /// Lists one Persona's sidebar tabs for plugins, excluding agent tabs.
     public func tabs(in persona: PersonaID) -> [PluginTab] {
         guard let session else { return [] }
         return session.tabsInSidebarOrder.filter { $0.personaID == persona && BrowserEventSource.kind(of: $0) != .agent }.map(session.pluginTab)
+    }
+
+    /// Lists one Persona's downloads with the metadata available to plugins.
+    public func downloads(in persona: PersonaID) -> [PluginDownload] {
+        session?.downloads.filter { $0.personaID == persona }.map {
+            PluginDownload(id: $0.id, name: $0.filename, state: $0.state.rawValue,
+                           completedBytes: $0.completedBytes, totalBytes: $0.totalBytes)
+        } ?? []
+    }
+
+    /// Renames a download only when it belongs to the requested Persona.
+    public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool {
+        guard let entry = session?.downloads.first(where: { $0.id == id && $0.personaID == persona }) else { return false }
+        return entry.rename(to: name)
+    }
+
+    /// Asks the session to post a local notification under the plugin's name.
+    public func postNotification(pluginName: String, title: String, body: String) {
+        session?.postPluginNotification(pluginName: pluginName, title: title, body: body)
     }
 
     /// Only a space's tab takes a suggested name; a favorite's tab goes by its favorite's name. The rename's title change posts inside `withCause`, so it names its cause.

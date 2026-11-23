@@ -1,4 +1,5 @@
-// A plugin's AI (`docs/plugins.md`, AI hooks and plugins that AI writes): its own feature, `plugin.<id>`, which the manager registers while the plugin is enabled with `ai`; the client through which its requests go out under that feature; and its hooks, the bus event listeners of a plugin with `ai` and bus events, which run one at a time as steps of the shared hook scheduler under that feature (`docs/hooks.md`, Plugins).
+// A plugin with `ai` has its own feature, `plugin.<id>`, which the manager registers while the plugin is enabled.
+// This file holds the client that sends requests under that feature. With bus events, its listeners run one at a time as steps in the shared hook scheduler (`docs/plugins.md`, AI hooks; `docs/hooks.md`, Plugins).
 import AI
 import Foundation
 

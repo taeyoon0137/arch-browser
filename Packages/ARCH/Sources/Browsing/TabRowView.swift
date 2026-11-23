@@ -1,4 +1,5 @@
-// A tab's row in the sidebar and its parts: the icon, the name field that renames a tab or folder in place, the buttons under the pointer (close or, for a pinned tab, unload, for a live folder item's tab, dismiss, and back to a pinned tab's saved page) and the badges shown in their place, the Command key state that shows the shortcut numbers, and the new tab row.
+// A sidebar tab row holds its icon, inline name field, hover buttons, badges, shortcut numbers while Command is held, and the new-tab row.
+// Hover actions close, unload a pinned tab, dismiss a live-folder item, or return a pinned tab to its saved page. The inline field renames a tab or folder.
 import AI
 import AppKit
 import LiveFolders
@@ -39,6 +40,7 @@ struct TabRowView: View {
                 Text(tab.shownTitle)
                     .font(.system(size: 14))
                     .lineLimit(1)
+                    .truncationMode(.tail)
                     .opacity(isDimmed ? SidebarDimming.unopened : 1)
             }
             if tab.isAudible {
@@ -136,6 +138,8 @@ struct TabRowView: View {
         SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
         Button("Copy Address") { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
         Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
+        Button("Picture in Picture") { windowModel.togglePictureInPicture(tab) }
+            .disabled(!windowModel.canTogglePictureInPicture(tab))
         Divider()
         TabFolderItems(session: session, windowModel: windowModel, tab: tab)
         Divider()
@@ -377,6 +381,7 @@ struct TabRowButton: View {
     let label: String
     let help: String
     let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
 
     var body: some View {
@@ -384,7 +389,7 @@ struct TabRowButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 10, weight: .bold))
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(Color.primary.opacity(isHovering ? 0.1 : 0)))
+                .background(Circle().fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -417,14 +422,17 @@ struct TabIconView: View {
                 .resizable()
                 .interpolation(.high)
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                .accessibilityHidden(true)
         } else if !tab.isLoaded, tab.liveItem != nil {
             Image(systemName: "dot.radiowaves.up.forward")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         } else {
             Image(systemName: "globe")
                 .font(.system(size: symbolSize, weight: .medium))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         }
     }
 
@@ -452,6 +460,7 @@ struct NewTabButton: View {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
+                    .accessibilityHidden(true)
                 Text("New Tab")
                     .font(.system(size: 14))
                 Spacer(minLength: 0)

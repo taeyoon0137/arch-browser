@@ -32,6 +32,7 @@ public enum AgentMCPSetupClient: String, CaseIterable, Sendable {
     }
 }
 
+/// Formats setup commands and MCP configuration for supported clients.
 public enum AgentMCPConfiguration {
     /// Codex's tool timeout in the printed table. It covers a first call that waits on the grant sheet for up to the longest approval window, which Codex's own default (300 seconds in 0.164.0) covers only for the current 5-minute window; every other call answers within `callAnswerSeconds`.
     public static let codexToolTimeoutSeconds = (AgentLimits.outsideApprovalMinuteChoices.max() ?? AgentLimits.outsideApprovalDefaultMinutes) * 60 + AgentLimits.callAnswerSeconds
@@ -44,6 +45,7 @@ public enum AgentMCPConfiguration {
         }
     }
 
+    /// Renders the setup command or configuration text for one MCP client format.
     public static func text(_ format: AgentMCPConfigurationFormat, mcpPath: String) -> String {
         switch format {
         case .claude:

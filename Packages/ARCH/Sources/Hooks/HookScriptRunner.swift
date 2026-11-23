@@ -1,4 +1,7 @@
-// The JavaScript hook runner (`docs/hooks.md`, JavaScript scripts): runs a hook's `hook.js` in `Plugins`' script runtime, a `ScriptPlugin` in the plugin sandbox, from a package it makes in memory with the checked bytes, so the script that runs is the one whose digest the registry checked. The script sets its listener with `arch.events.on(kind, listener)` when it loads, and a run ends when the listener's promise settles. Each hook keeps at most two instances per Persona, each running one run at a time, which stop after 30 seconds without a run; the hook's timeout takes the place of the plugins' hang limit and ends the instance, as a cancel does.
+// A JavaScript hook runs `hook.js` in the `Plugins` sandbox as a `ScriptPlugin` (`docs/hooks.md`, JavaScript scripts).
+// Its in-memory package uses the bytes whose digest the registry checked. The script registers `arch.events.on(kind, listener)` when it loads; the run ends when the listener's promise settles.
+// Each hook keeps at most two instances per Persona, with one run in each. Idle instances stop after 30 seconds.
+// The hook timeout replaces the plugin hang limit and ends an instance, as cancellation does.
 import Agent
 import AI
 import Events
@@ -6,6 +9,7 @@ import Foundation
 import Plugins
 
 @MainActor
+/// Runs a JavaScript hook in a bounded plugin instance for its Persona.
 public final class HookScriptRunner: HookScriptRunning {
     /// The largest script the runner runs.
     public nonisolated static let maximumScriptSize = 256 * 1024
@@ -39,6 +43,7 @@ public final class HookScriptRunner: HookScriptRunning {
         return ScriptPlugin.syntaxError(in: source).map { "The script does not parse: \($0)." }
     }
 
+    /// Checks the script, starts or reuses an instance, and returns its listener's bounded outcome.
     public func run(_ invocation: HookInvocation) async -> HookRunOutcome {
         if !parsedDigests.contains(invocation.hook.script.digest) {
             if let problem = Self.problem(in: invocation.script) { return .failed(code: "invalidScript", message: problem) }
@@ -137,6 +142,7 @@ public final class HookScriptRunner: HookScriptRunning {
         return instance
     }
 
+    /// Builds an in-memory plugin instance and context from the checked script and hook grant.
     private func makeInstance(for invocation: HookInvocation, key: InstanceKey, configuration: Configuration) -> Instance {
         let hook = invocation.hook
         let id = HookScriptContext.pluginID(of: hook.id)
@@ -164,6 +170,7 @@ public final class HookScriptRunner: HookScriptRunning {
         if instance.isRetired { end(instance, as: nil) }
     }
 
+    /// Stops the instance assigned to this run with the given reason.
     private func end(run: UUID, as reason: Instance.EndReason) {
         guard let instance = running[run], instance.run == run else { return }
         end(instance, as: reason)
@@ -177,6 +184,7 @@ public final class HookScriptRunner: HookScriptRunning {
         Task { await instance.plugin.deactivate() }
     }
 
+    /// Removes an instance from its hook and Persona's kept pool.
     private func drop(_ instance: Instance) {
         instances[instance.key]?.removeAll { $0 === instance }
         if instances[instance.key]?.isEmpty == true { instances[instance.key] = nil }

@@ -1,11 +1,13 @@
 // Loop protection's rate (`docs/hooks.md`, Loop protection): what one owner runs for events within a minute, at most 10 for one subject and 60 in all. The hook registry applies it to each hook's runs and the plugin manager to each plugin's events, so code that reacts to its own or another's changes thins out instead of running without end.
 import Foundation
 
+/// Limits one owner's event runs within a rolling minute by subject and in total.
 public struct BrowserEventRateLimiter: Sendable {
     public static let window: TimeInterval = 60
     public static let runsPerSubject = 10
     public static let runsPerOwner = 60
 
+    /// Whether a run fits both limits or exceeds one of them.
     public enum Admission: Equatable, Sendable {
         case allowed, overSubject, overOwner
     }

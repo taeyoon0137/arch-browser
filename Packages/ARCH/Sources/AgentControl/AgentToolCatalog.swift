@@ -1,4 +1,6 @@
-// The one tool catalog that `tools/list`, `arch-mcp`, `arch-cli`, and the API-key loop share (docs/agents.md, Tools ▸ Catalog): each tool's name, description, access class, parameters with their limits, and MCP annotations. The catalog describes tools; the tool host decides every call, so nothing here grants anything.
+// One catalog serves `tools/list`, `arch-mcp`, `arch-cli`, and the API-key loop (docs/agents.md, Tools).
+// It names each tool, describes its access class and parameters with limits, and gives its MCP annotations.
+// The catalog describes tools; the tool host decides each call. Nothing here grants access.
 import Foundation
 
 /// A tool's access class, which the modes and rules gate (docs/agents.md, Permissions, approvals, and injection defenses ▸ Modes).
@@ -22,7 +24,9 @@ public enum AgentToolClass: String, Sendable, CaseIterable {
     }
 }
 
+/// One named tool parameter and the constraints exposed in its JSON Schema.
 public struct AgentToolParameter: Sendable {
+    /// The JSON value shape a tool parameter accepts.
     public enum Kind: Sendable, Equatable {
         case string
         case integer
@@ -86,6 +90,7 @@ public struct AgentToolParameter: Sendable {
     }
 }
 
+/// A tool's catalog description, access class, parameters, and MCP annotations.
 public struct AgentTool: Sendable {
     /// Notes the catalog's class column adds to a tool's class.
     public struct Traits: OptionSet, Sendable {
@@ -121,7 +126,11 @@ public struct AgentTool: Sendable {
     public var inputSchema: AgentJSON {
         var schema: [String: AgentJSON] = [
             "type": "object",
-            "properties": .object(Dictionary(uniqueKeysWithValues: parameters.map { ($0.name, $0.schema) })),
+            // A parameter listed twice is a mistake in the definition: debug builds stop on it, and a release build keeps the first.
+            "properties": .object(Dictionary(parameters.map { ($0.name, $0.schema) }, uniquingKeysWith: { first, _ in
+                assertionFailure("\(name) lists a parameter twice.")
+                return first
+            })),
             "additionalProperties": false,
         ]
         let required = parameters.filter(\.isRequired).map { AgentJSON.string($0.name) }
@@ -144,10 +153,12 @@ public struct AgentTool: Sendable {
     }
 }
 
+/// The shared tool definitions used by agent sessions and local control clients.
 public enum AgentToolCatalog {
     /// Tab handles: `t1`, `t2`, and so on, per session or per grant.
     static let tabPattern = "^t[1-9][0-9]*$"
 
+    /// Defines a tab handle parameter with the catalog's handle pattern.
     private static func tab(required: Bool = true, _ description: String = "The agent tab's handle, such as t1.") -> AgentToolParameter {
         AgentToolParameter("tab", .string, required: required, description, pattern: tabPattern)
     }
@@ -157,6 +168,7 @@ public enum AgentToolCatalog {
         value.formatted(.number.locale(Locale(identifier: "en_US")))
     }
 
+    /// Defines a snapshot element reference parameter.
     private static func ref(required: Bool = true, _ description: String = "An element's ref from the tab's latest snapshot, such as e5.") -> AgentToolParameter {
         AgentToolParameter("ref", .string, required: required, description)
     }
@@ -284,11 +296,13 @@ public enum AgentToolCatalog {
         AgentToolParameter("timeout_ms", .integer, "How long to wait for a first event, at most \(number(AgentLimits.toolWaitSeconds * 1000)) milliseconds, the default.", minimum: 0, maximum: AgentLimits.toolWaitSeconds * 1000),
     ])
 
+    /// The read-only tab request offered to an outside client's task session.
     public static let sessionTabRequest = AgentTool("request_tab", .reads, [.waitsForUser], "Asks the user to choose one tab to share for reading.", [
         AgentToolParameter("reason", .string, required: true, "Why this task needs another tab, shown to the user."),
         AgentToolParameter("access", .choice(["read"]), required: true, "Read-only access."),
     ])
 
+    /// Finds a session tool, substituting its read-only tab request definition.
     public static func sessionTool(named name: String) -> AgentTool? {
         switch name {
         case sessionTabRequest.name: return sessionTabRequest
@@ -296,6 +310,7 @@ public enum AgentToolCatalog {
         }
     }
 
+    /// Finds a shared tool or a tool offered only by a hook or outside client.
     public static func tool(named name: String) -> AgentTool? {
         if name == renameTab.name { return renameTab }
         if name == watchEvents.name { return watchEvents }

@@ -4,7 +4,9 @@ import Agent
 import Events
 import Foundation
 
+/// A content-free record of one hook event's run or skip.
 public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
+    /// Whether a run completed, failed, timed out, was cancelled, or was skipped.
     public enum Outcome: String, Codable, Sendable {
         case completed, failed, timedOut, cancelled, skipped
     }
@@ -85,6 +87,7 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+/// Keeps up to 30 days and 10,000 hook run entries in `hooks-activity.json`.
 @MainActor public final class HookRunLog: ObservableObject {
     public static let keptDays = 30
     public static let keptEntries = 10_000
@@ -129,6 +132,7 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// Adds an entry, prunes old or excess entries, and schedules a save.
     func record(_ entry: HookRunEntry) {
         entries.append(entry)
         dropOldEntries()
@@ -145,11 +149,13 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
         saveNow()
     }
 
+    /// Removes entries older than the log's retention period.
     private func dropOldEntries() {
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -Self.keptDays, to: now()), entries.contains(where: { $0.date < cutoff }) else { return }
         entries.removeAll { $0.date < cutoff }
     }
 
+    /// Removes the oldest entries above the configured limit.
     private func dropOverflowingEntries() {
         guard entries.count > entryLimit else { return }
         entries.removeFirst(entries.count - entryLimit)

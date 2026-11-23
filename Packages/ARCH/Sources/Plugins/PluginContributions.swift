@@ -2,6 +2,7 @@
 import ARCHEngine
 import Foundation
 
+/// The commands, interface items, settings, and page scripts declared by a plugin.
 public struct PluginContributions: Hashable, Sendable {
     public var commands: [PluginCommand]
     public var menuItems: [PluginMenuItem]
@@ -60,13 +61,15 @@ public struct PluginCommand: Identifiable, Hashable, Sendable {
     public var keywords: [String]
     /// The shortcut of the command's first item in the Plugins menu, which the index adds when the manifest lists none there. The user can change it in Settings ▸ Shortcuts.
     public var shortcut: PluginShortcut?
+    public var takesArgument: Bool
 
-    public init(id: String, title: String, symbol: String? = nil, keywords: [String] = [], shortcut: PluginShortcut? = nil) {
+    public init(id: String, title: String, symbol: String? = nil, keywords: [String] = [], shortcut: PluginShortcut? = nil, takesArgument: Bool = false) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.keywords = keywords
         self.shortcut = shortcut
+        self.takesArgument = takesArgument
     }
 }
 
@@ -89,6 +92,7 @@ extension Set where Element == PluginPageContext {
     }
 }
 
+/// Where a plugin menu item appears in the browser interface.
 public enum PluginMenuLocation: Hashable, Sendable {
     /// The Plugins menu in the menu bar. Its commands run on the active window's selected tab.
     case pluginsMenu
@@ -116,6 +120,11 @@ public struct PluginMenuItem: Hashable, Sendable {
 
 /// A row below the favorites with a symbol, a title, and the badge the plugin sets.
 public struct PluginSidebarItem: Identifiable, Hashable, Sendable {
+    /// How a plugin sidebar item opens its content.
+    public enum Presentation: String, Hashable, Sendable {
+        case popover, sidebar
+    }
+    /// The command or panel action of a plugin sidebar item.
     public enum Action: Hashable, Sendable {
         /// Runs one of the plugin's commands on the window's selected tab.
         case command(String)
@@ -129,17 +138,20 @@ public struct PluginSidebarItem: Identifiable, Hashable, Sendable {
     /// An SF Symbols name.
     public var symbol: String
     public var action: Action
+    public var presentation: Presentation
 
-    public init(id: String, title: String, symbol: String, action: Action) {
+    public init(id: String, title: String, symbol: String, action: Action, presentation: Presentation = .popover) {
         self.id = id
         self.title = title
         self.symbol = symbol
         self.action = action
+        self.presentation = presentation
     }
 }
 
 /// A field of the plugin's form in Settings ▸ Plugins. The plugin reads the value through `PluginContext.setting(_:)`, or a secret through `PluginContext.secrets`, under the field's key.
 public struct PluginSetting: Identifiable, Hashable, Sendable {
+    /// The supported value and control kinds for a plugin setting.
     public enum Kind: Hashable, Sendable {
         case toggle(default: Bool)
         case text(default: String)
@@ -247,15 +259,15 @@ public struct PluginContributionIndex: Sendable {
 
     /// The plugins that are enabled and that their runtimes can run contribute, a pair once: through its version installed first while that one contributes, otherwise through the other, whose runtime runs each command with the version for the invocation's tab. The contributing version also brings the commands of the other version that its own lacks while the other is enabled (`InstalledPlugin.commands(among:)`), as an action that only the other has. Menu items and sidebar items whose commands the plugin does not contribute are left out. A command with a shortcut and no item in the Plugins menu gets one there, after the plugin's own, so that the shortcut has an item to run and Settings ▸ Shortcuts lists it. Of a command's items in the Plugins menu, only the first has the shortcut, since Settings ▸ Shortcuts lists and changes only that one.
     @MainActor
-    init(_ plugins: [InstalledPlugin]) {
+    init(_ plugins: [InstalledPlugin], disabledCommands: [PluginID: Set<String>] = [:]) {
         var enabled: [InstalledPlugin] = []
         for plugin in plugins where plugin.isEnabled && plugin.unavailability == nil && !enabled.contains(where: { $0.id == plugin.counterpart }) {
             enabled.append(plugin)
         }
-        commands = enabled.flatMap { plugin in plugin.commands(among: plugins).map { plugin.attributed($0) } }
+        commands = enabled.flatMap { plugin in plugin.commands(among: plugins).filter { !disabledCommands[plugin.id, default: []].contains($0.id) }.map { plugin.attributed($0) } }
         menuItems = enabled.flatMap { plugin in
             let contributions = plugin.manifest.contributions
-            let commands = plugin.commands(among: plugins)
+            let commands = plugin.commands(among: plugins).filter { !disabledCommands[plugin.id, default: []].contains($0.id) }
             var inPluginsMenu: Set<String> = []
             let listed = contributions.menuItems.compactMap { item -> LocatedEntry? in
                 guard let command = commands.first(where: { $0.id == item.command }) else { return nil }
@@ -269,7 +281,7 @@ public struct PluginContributionIndex: Sendable {
             return (listed + forShortcuts).map { plugin.attributed($0) }
         }
         sidebarItems = enabled.flatMap { plugin in
-            let commands = plugin.commands(among: plugins)
+            let commands = plugin.commands(among: plugins).filter { !disabledCommands[plugin.id, default: []].contains($0.id) }
             return plugin.manifest.contributions.sidebarItems.filter { item in
                 guard case let .command(id) = item.action else { return true }
                 return commands.contains { $0.id == id }
@@ -310,6 +322,7 @@ public struct PluginContributionIndex: Sendable {
         return sections
     }
 
+    /// Splits search text into lowercase words for contribution matching.
     private static func words(in text: String) -> [Substring] {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
             .split { !$0.isLetter && !$0.isNumber }

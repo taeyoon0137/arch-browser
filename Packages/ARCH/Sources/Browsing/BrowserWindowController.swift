@@ -61,7 +61,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("BrowserWindowController is created with a window model")
+        return nil
     }
 
     /// The window's content: the main window's sidebar and page, or the small window's row and page.

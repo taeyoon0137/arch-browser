@@ -5,6 +5,7 @@ import UserNotifications
 
 /// The app's notification permission as macOS reports it, read at launch, whenever Arch becomes active, as after the user changed it in System Settings, and after each request. It is used on the main thread.
 public final class NotificationAuthorization: ObservableObject {
+    /// The app's notification permission as reported by macOS.
     public enum Status: Equatable {
         /// macOS has not asked the user yet.
         case notDetermined
@@ -37,6 +38,7 @@ public final class NotificationAuthorization: ObservableObject {
         self.init(system: Self.appSystem())
     }
 
+    /// Starts permission observation through the supplied system adapter, if available.
     init(system: System?) {
         self.system = system
         status = system == nil ? .unavailable : .notDetermined
@@ -75,6 +77,7 @@ public final class NotificationAuthorization: ObservableObject {
         }
     }
 
+    /// Publishes the permission and answers every completion waiting on the same request.
     private func finish(with status: Status) {
         self.status = status
         let answers = waiting ?? []

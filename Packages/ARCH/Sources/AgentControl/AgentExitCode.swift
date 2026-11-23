@@ -1,6 +1,7 @@
 // `arch-cli`'s exit codes and the result statuses they report (docs/agents.md, arch-cli; Tools ▸ Results). Codes 69, 70, 75, and 77 follow `sysexits.h`: unavailable, internal software error, temporary failure, and permission denied.
 import Foundation
 
+/// Exit codes for arch-cli commands and their result statuses.
 public enum AgentExitCode: Int32, CaseIterable, Sendable {
     case done = 0
     case toolError = 1

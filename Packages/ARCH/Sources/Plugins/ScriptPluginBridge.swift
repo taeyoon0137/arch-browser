@@ -1,4 +1,7 @@
-// The bridge between a script plugin's documents and its context: the `arch` object that a script defines at the start of each document, the message handler that performs its calls, and the function through which the app hands the background script commands, page script values, and events. A handler belongs to one web view, so a call always acts for the plugin instance whose web view sent it, whatever the message says. A panel's document gets the same `arch` without the listeners, since the app hands commands, page script values, and events to the background script only, and without page calls, which only the background script makes for now.
+// This bridge defines `arch` in each script plugin document and handles its calls.
+// It also delivers commands, page script values, and events to the background script.
+// A handler belongs to one web view. Its calls act for that view's plugin instance, regardless of the message contents.
+// A panel receives `arch` without listeners or page calls. Only the background script receives deliveries and makes page calls.
 import AI
 import ARCHEngine
 import WebKit
@@ -86,6 +89,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         value: Object.freeze({
           ...(\#(permitsAgent) ? { agent: Object.freeze({ run: (options) => call("agent.run", [options]) }) } : {}),
           ai: Object.freeze({ reply: (request) => call("ai.reply", [request]), stream }),
+          net: Object.freeze({ fetch: (url, options) => call("net.fetch", [url, ...given(options)]) }),
           ...(\#(listens) ? {
             commands: Object.freeze({ onRun: (id, listener) => { commandListeners.set(id, listener); } }),
             events: Object.freeze({
@@ -110,6 +114,10 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             move: (id, place) => call("tabs.move", [id, ...given(place)]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
+          downloads: Object.freeze({
+            list: () => call("downloads.list", []),
+            rename: (id, name) => call("downloads.rename", [id, name]),
+          }),
           storage: Object.freeze({
             get: (key) => call("storage.get", [key]),
             set: (key, value) => call("storage.set", [key, ...given(value)]),
@@ -122,6 +130,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           settings: Object.freeze({ get: (key) => call("settings.get", [key]) }),
           ui: Object.freeze({
             setBadge: (itemId, text) => call("ui.setBadge", [itemId, ...given(text)]),
+            setEnabled: (commandId, flag) => call("ui.setEnabled", [commandId, flag]),
+            showPanel: (itemId) => call("ui.showPanel", [itemId]),
+            notify: (title, body) => call("ui.notify", [title, body]),
             copy: (text) => call("ui.copy", [text]),
           }),
         }),
@@ -207,6 +218,29 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
                 do { Self.reply(.success(Self.value(of: try await client.reply(request))), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
+            }
+        case "net.fetch":
+            let request: URLRequest
+            do { request = try networkRequest(of: call) }
+            catch { return Self.reply(.failure(error), to: replyHandler) }
+            let number = nextRequestNumber
+            nextRequestNumber += 1
+            waitsForArch?(true)
+            replies[number] = Task {
+                defer {
+                    waitsForArch?(false)
+                    replies[number] = nil
+                }
+                do {
+                    let (data, response) = try await context.fetch(request)
+                    guard !hasEnded else { throw PluginError.stopped }
+                    guard let text = String(data: data, encoding: .utf8) else { throw PluginError.invalidResponse }
+                    var headers: [String: PluginValue] = [:]
+                    for (key, value) in response.allHeaderFields {
+                        if let key = key as? String, let value = value as? String { headers[key] = .string(value) }
+                    }
+                    Self.reply(.success(.object(["status": .number(Double(response.statusCode)), "headers": .object(headers), "text": .string(text)])), to: replyHandler)
+                } catch { Self.reply(.failure(error), to: replyHandler) }
             }
         case "pages.run":
             // A panel's `arch` has no `pages`, so a panel's document cannot make the call by posting to the handler itself either.
@@ -392,6 +426,31 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         return AIRequest(feature: .plugin(context.pluginID.rawValue), instructions: instructions, messages: messages, output: output, maxOutputTokens: maxOutputTokens)
     }
 
+    private func networkRequest(of call: Call) throws -> URLRequest {
+        guard (1...2).contains(call.args.count), let url = URL(string: try call.text(0)) else { throw BridgeFailure.invalidCall }
+        var request = URLRequest(url: url)
+        guard call.args.count == 2 else { return request }
+        guard case .object(var fields)? = call.value(1) else { throw BridgeFailure.invalidCall }
+        if let method = fields.removeValue(forKey: "method") {
+            guard case let .string(name) = method, ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(name) else { throw PluginError.invalidRequest }
+            request.httpMethod = name
+        }
+        if let headers = fields.removeValue(forKey: "headers") {
+            guard case let .object(values) = headers else { throw PluginError.invalidRequest }
+            for (name, value) in values {
+                guard case let .string(text) = value, PluginNetworkFetch.isAllowedHeader(name: name, value: text) else { throw PluginError.invalidRequest }
+                request.setValue(text, forHTTPHeaderField: name)
+            }
+        }
+        if let body = fields.removeValue(forKey: "body") {
+            guard case let .string(text) = body, text.utf8.count <= PluginNetworkFetch.requestLimit else { throw PluginError.invalidRequest }
+            request.httpBody = Data(text.utf8)
+        }
+        guard fields.isEmpty else { throw BridgeFailure.invalidCall }
+        try PluginNetworkFetch.validate(request)
+        return request
+    }
+
     /// A message's part: `{type: "text", text}`, or `{type: "page", url, title, text}` and `{type: "selection", url, title, text}` with the page's address and title, which the plugin's `ai` permission must list.
     private static func part(_ value: PluginValue) throws -> AIPart {
         guard case let .object(fields) = value, case let .string(type)? = fields["type"], case let .string(text)? = fields["text"] else { throw BridgeFailure.invalidCall }
@@ -424,10 +483,23 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return context.setting(try call.text(0))
         case "ui.setBadge":
             context.setBadge(try call.optionalText(1), onSidebarItem: try call.text(0))
+        case "ui.setEnabled":
+            context.setEnabled(try call.bool(1), command: try call.text(0))
+        case "ui.showPanel":
+            // A command reaches only the background script, so a panel's or settings page's call never comes from the user's command.
+            guard role == .background else { break }
+            context.showPanel(try call.text(0))
+        case "ui.notify":
+            try context.notify(title: try call.text(0), body: try call.text(1))
         case "ui.copy":
             try context.copyToClipboard(try call.text(0))
         case "tabs.list":
             return .array(try context.tabs().map(\.scriptValue))
+        case "downloads.list":
+            return .array(try context.downloads().map(\.scriptValue))
+        case "downloads.rename":
+            guard call.args.count == 2, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
+            return .bool(try context.renameDownload(id, to: try call.text(1)))
         case "tabs.get":
             // A tab the script does not reach is null, as is text that names no tab.
             return try UUID(uuidString: try call.text(0)).flatMap { try context.tab($0) }?.scriptValue ?? .null
@@ -520,6 +592,11 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             return text
         }
 
+        func bool(_ index: Int) throws -> Bool {
+            guard case let .bool(value)? = value(index) else { throw BridgeFailure.invalidCall }
+            return value
+        }
+
         /// Text, or nil where the script passed none or null.
         func optionalText(_ index: Int) throws -> String? {
             guard let value = value(index), value != .null else { return nil }
@@ -594,6 +671,13 @@ private extension PluginError {
         case .pageRunUnavailable: return "pageRunUnavailable"
         case .invalidAddress: return "invalidAddress"
         case .tooManyTabs: return "tooManyTabs"
+        case .hostRefused: return "hostRefused"
+        case .networkUnavailable: return "networkUnavailable"
+        case .redirectRefused: return "redirectRefused"
+        case .rateLimited: return "rateLimited"
+        case .responseTooLarge: return "responseTooLarge"
+        case .invalidResponse: return "invalidResponse"
+        case .invalidRequest: return "invalidRequest"
         }
     }
 }

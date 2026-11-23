@@ -1,11 +1,13 @@
 // The terminal's character grid: the visible lines, the scrollback above them, the cursor, and the modes programs set. It applies the parser's actions as VT-style terminals with xterm's common extensions do, which covers shells, installers that redraw progress lines, and full-screen programs such as command-line AI tools. It does not reflow lines when the size changes.
 import Foundation
 
+/// The grid's size in character columns and rows.
 struct TerminalSize: Equatable {
     var columns: Int
     var rows: Int
 }
 
+/// A cell's foreground or background color, as SGR sets it.
 enum TerminalColor: Equatable {
     /// The terminal's own foreground or background color.
     case `default`
@@ -14,6 +16,7 @@ enum TerminalColor: Equatable {
     case rgb(UInt8, UInt8, UInt8)
 }
 
+/// The SGR attributes a cell is drawn with.
 struct TerminalStyle: Equatable {
     var foreground = TerminalColor.default
     var background = TerminalColor.default
@@ -24,6 +27,7 @@ struct TerminalStyle: Equatable {
     var isInverse = false
 }
 
+/// One column of a line: its text, style, and width.
 struct TerminalCell: Equatable {
     /// A grapheme, or empty for the second column of a wide character.
     var text: String
@@ -37,6 +41,7 @@ struct TerminalCell: Equatable {
     }
 }
 
+/// One row of cells, visible or in the scrollback.
 struct TerminalLine: Equatable {
     var cells: [TerminalCell]
     /// The text continues on the next line because it reached the right margin.
@@ -69,6 +74,7 @@ struct TerminalPosition: Comparable {
     }
 }
 
+/// Applies the parser's actions to the grid, the scrollback, the cursor, and the modes.
 final class TerminalScreen {
     struct Cursor: Equatable {
         var row = 0

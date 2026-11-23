@@ -3,6 +3,7 @@ import AI
 import Foundation
 import Network
 
+/// Whether gh is installed and signed in to a GitHub host.
 public enum GitHubCLIStatus: Equatable, Sendable {
     case notInstalled
     case signedOut
@@ -21,6 +22,7 @@ public struct GitHubSearchResult: Equatable, Sendable {
     }
 }
 
+/// Runs the user's signed-in gh tool to search issues and pull requests.
 public actor GitHubCLI {
     public static let shared = GitHubCLI()
 
@@ -237,6 +239,7 @@ public actor GitHubCLI {
         var commits: Commits?
     }
 
+    /// Decodes a gh GraphQL response, preserving usable results when only individual nodes failed.
     private static func items(from run: Run, host: String) throws -> GitHubSearchResult {
         if run.termination == .exited(4) { throw LiveFolderError.gitHubSignedOut(host: host) }
         let response = try? JSONDecoder().decode(Response.self, from: run.output)

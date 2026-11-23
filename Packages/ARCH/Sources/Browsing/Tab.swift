@@ -7,6 +7,7 @@ import Events
 import Foundation
 import LiveFolders
 
+/// A tab's engine contents, sidebar state, page prompts, and navigation reports.
 @MainActor public final class Tab: ObservableObject, Identifiable {
     /// Kept across launches: `session.json` saves it with the tab, and the tab restores and reopens under it.
     public let id: UUID
@@ -134,6 +135,8 @@ import LiveFolders
     private(set) var isDownloadOnly = false
     /// Whether the page may start downloads without asking (`BrowserSession`'s download delegate).
     var pageDownloads = PageDownloadGate()
+    /// Downloads the user asked for in this tab, from the page's context menu or File ▸ Save Page As…, each until the engine asks for its file name or the tab commits another document. The session admits a matching download outside `pageDownloads`, so that a refusal of the page's own downloads does not stop the user's and the page cannot use the user's up first.
+    private var userDownloadRequests: [(url: URL, savesPage: Bool)] = []
     /// The address of the document the main frame last committed, as the engine reports the commit, or nil before the web contents commits one. A page's dialogs name it as their page: `url` can already be the address of a navigation the page started and has not committed, as WebKit gives it. The tab's events and a hook's name go by `committedURL` instead.
     private var engineCommittedURL: URL?
     /// The session sets this to name the agent whose agent folder has the given ID, or nil for a folder of the user's.
@@ -141,6 +144,7 @@ import LiveFolders
     /// Where an agent tab asks about its navigations and reports what its rules did. The session sets it.
     weak var agentMonitor: (any AgentTabMonitor)?
 
+    /// Wraps engine contents and observes its UI, navigation, and page script events.
     init(id: UUID, webContents: any EngineWebContents, spaceID: UUID?, isPinned: Bool, personaID: UUID) {
         self.id = id
         self.webContents = webContents
@@ -176,6 +180,7 @@ import LiveFolders
     @Published private var fallbackPreference: EngineKind?
     private var originalEngineState: (url: URL, data: Data)?
 
+    /// Keeps the preferred engine's page state only when it still belongs to this address.
     var restorableStateForPreferredEngine: Data? {
         guard preferredEngine != engineKind else { return webContents.restorableState }
         return originalEngineState?.url == url ? originalEngineState?.data : nil
@@ -350,6 +355,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
     public func webContentsDidRequestEnterFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(true) }
     public func webContentsDidRequestExitFullscreen(_ webContents: any EngineWebContents) { didChangeFullscreen?(false) }
+    /// Updates navigation state and records a finished page visit outside agent tabs.
     public func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) {
         let wasLoading = isLoading
         isLoading = webContents.isLoading
@@ -368,6 +374,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
             recordVisit?(url, webContents.title)
         }
     }
+    /// Starts a new document identity, clears typed-input state, and ends old requests.
     public func webContents(_ webContents: any EngineWebContents, didCommitDocumentAt url: URL?) {
         guard webContents === self.webContents else { return }
         documentID = UUID()
@@ -376,8 +383,10 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         // The commit can come long before the load ends, and before the engine reports the address as `url`.
         if let url = url?.withoutCredentials { commit(url) }
         pageDownloads.documentDidCommit(site: Self.site(of: url))
+        userDownloadRequests.removeAll()
         didCommitDocument?()
     }
+    /// Reports a finished main document to page listeners and an agent owner.
     public func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {
         commit(url)
         didLoadDocument.send()
@@ -480,6 +489,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         showPrompt(TabPromptContent.confirm(message: message, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) { completion(TabPromptContent.confirmResult($0)) }
     }
 
+    /// Shows a page's text prompt under its committed site's identity and reports an agent wait.
     public func webContents(_ webContents: any EngineWebContents, runJavaScriptPrompt message: String, defaultText: String?, frameOrigin: URL?, completion: @escaping (String?) -> Void) {
         reportToAgent(.dialogWaiting(.prompt, message: message, frame: frameOrigin))
         showPrompt(TabPromptContent.textInput(message: message, defaultText: defaultText, embeddedFrame: embeddedFrame(of: frameOrigin), identity: dialogIdentity(frameOrigin))) {
@@ -518,10 +528,10 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         var sections = [handed.suggestions, handed.spelling]
         // WebKit puts a link's items before the selection's in a field; outside one, a click on a link or image gets no selection items.
         if let link = element.linkURL {
-            sections.append([newTabItem("Open Link in New Tab", for: link), EngineActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
+            sections.append([newTabItem("Open Link in New Tab", for: link), downloadItem("Download Linked File", for: link), EngineActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
         }
         if let image = element.imageURL {
-            sections.append([newTabItem("Open Image in New Tab", for: image), EngineActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
+            sections.append([newTabItem("Open Image in New Tab", for: image), downloadItem("Download Image", for: image), EngineActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
         }
         sections.append(handed.lookUp)
         if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
@@ -562,6 +572,25 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url, false) }
+    }
+
+    /// Offers an explicit download for an HTTP link or image in the context menu.
+    private func downloadItem(_ title: String, for url: URL) -> NSMenuItem? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return EngineActionMenuItem(title) { [weak self] in self?.download(url, savingPage: false) }
+    }
+
+    /// Downloads the address for the user through the tab's engine. Saving the page always asks where to save it.
+    func download(_ url: URL, savingPage: Bool) {
+        userDownloadRequests.append((url, savingPage))
+        webContents.download(url)
+    }
+
+    /// Takes the user's request that the download answers, matched by the address the download was requested at, and returns whether it saves the page; nil when the user asked for no such download.
+    func takeUserDownloadRequest(for item: any EngineDownloadItem) -> Bool? {
+        guard item.webContents === webContents,
+              let index = userDownloadRequests.firstIndex(where: { $0.url == item.requestURL || $0.url == item.sourceURL }) else { return nil }
+        return userDownloadRequests.remove(at: index).savesPage
     }
 
     /// Puts the address on the pasteboard as a URL and as text, for Copy Link, Copy Image Address, and Copy Address.

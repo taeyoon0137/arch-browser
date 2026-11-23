@@ -1,4 +1,6 @@
-// Scrolls a list while a drag holds the pointer near its top or bottom edge: `DragAutoScroll` holds the bands, the speed, and the pixel steps, and `DragAutoScroller` scrolls the scroll view that encloses it once per display frame and reports each scroll under the drag. A space's list uses it for its lifted tab and folder rows (`SpaceTabsView.swift`).
+// A drag scrolls a list while the pointer stays near its top or bottom edge.
+// `DragAutoScroll` defines edge bands, speed, and pixel steps. `DragAutoScroller` moves the enclosing scroll view once per display frame and reports each move during the drag.
+// A space's list uses it for lifted tab and folder rows (`SpaceTabsView.swift`).
 import AppKit
 import SwiftUI
 

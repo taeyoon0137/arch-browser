@@ -1,4 +1,6 @@
-// Plugins that AI writes. The composer asks the AI interface for a script plugin that does what the user describes, checks the reply against the rules for plugins that AI writes, sends the problems it finds back to the model, and stages the plugin for the review sheet, as a package the user chose would be. Nothing of it runs until the user installs and enables it.
+// The composer asks Arch's AI interface to write a script plugin from the user's description.
+// It checks the reply against rules for AI-written plugins, sends problems back to the model, and stages a package for review.
+// Nothing in that package runs until the user installs and enables it.
 import AI
 import Foundation
 import JavaScriptCore
@@ -91,12 +93,15 @@ public final class PluginComposer {
         for (key, value) in [("sites", manifest["sites"]), ("contributes.pageScripts", contributions["pageScripts"])] where !absent.contains(value) {
             throw PluginError.invalidPackage("plugin.json: \(key) is not offered to plugins that AI writes.")
         }
-        // Nor do they reach models, with text only or with data kinds as `{"ai": [kinds]}`.
-        if case let .array(permissions)? = manifest["permissions"], permissions.contains(where: { permission in
-            if case let .object(fields) = permission { return fields[PluginPermission.ai.rawValue] != nil }
-            return permission == .string(PluginPermission.ai.rawValue)
-        }) {
-            throw PluginError.invalidPackage("plugin.json: permissions lists “ai”, which is not offered to plugins that AI writes.")
+        // Nor do they reach models or hosts, with permission names or permission objects.
+        if case let .array(permissions)? = manifest["permissions"] {
+            for permission in permissions {
+                for name in [PluginPermission.ai.rawValue, PluginPermission.network.rawValue] {
+                    var asks = permission == .string(name)
+                    if case let .object(fields) = permission { asks = fields[name] != nil }
+                    if asks { throw PluginError.invalidPackage("plugin.json: permissions lists “\(name)”, which is not offered to plugins that AI writes.") }
+                }
+            }
         }
         manifest["id"] = .string(pluginID.rawValue)
         manifest["apiVersion"] = .number(Double(PluginManifest.apiVersion))
@@ -128,12 +133,14 @@ public final class PluginComposer {
     }
 }
 
+/// Errors that prevent AI from producing a usable plugin package.
 public enum PluginComposerError: Error, Hashable, Sendable {
     /// Every reply to a request broke a rule for plugins that AI writes; the text states the last reply's problem as a sentence.
     case unusableReply(String)
 }
 
 extension PluginComposerError: LocalizedError {
+    /// The message shown for a composer failure.
     public var errorDescription: String? {
         switch self {
         case let .unusableReply(problem): return "AI wrote a plugin that Arch cannot use. \(problem)"

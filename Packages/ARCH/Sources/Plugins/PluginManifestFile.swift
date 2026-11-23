@@ -1,4 +1,5 @@
-// `plugin.json`, the manifest of a script plugin's package, read into a `PluginManifest`. Arch refuses the keys it does not read, so that a plugin never goes without a field it relies on, and reads each page script and style sheet from the package file the manifest names.
+// `plugin.json` is a script package's manifest and becomes a `PluginManifest`.
+// Arch refuses unknown keys so the plugin never relies on an ignored field. It reads each named page script and style sheet from the package.
 import AI
 import ARCHEngine
 import Events
@@ -32,7 +33,14 @@ struct ScriptManifest {
         let name = givenName.isEmpty ? id.rawValue : givenName
         let version = try object.string("version")
         let summary = try object.string("summary")
-        let (permissions, aiDataKinds) = try Self.permissions(object.value("permissions"))
+        let (permissions, aiDataKinds, network) = try Self.permissions(object.value("permissions"))
+        let settingsPage = try object.optionalString("settingsPage")
+        if let settingsPage {
+            _ = try packageFile(settingsPage, in: root, named: "settingsPage")
+            guard UTType(filenameExtension: (settingsPage as NSString).pathExtension)?.conforms(to: .html) == true else {
+                throw invalidManifest("settingsPage names “\(settingsPage)”, which is not an HTML file")
+            }
+        }
         let sites = try object.strings("sites").map(MatchPattern.init)
         let siteAccess = try Self.siteAccess(object.optionalString("siteAccess"))
         // `events` lists the bus's kinds and `settingChanged`, the plugin's own setting changes.
@@ -55,7 +63,7 @@ struct ScriptManifest {
         guard !receivesSettingChanges || !contributions.settings.isEmpty else { throw invalidManifest("events lists settingChanged, which needs contributes.settings") }
         // Without a command to run, a plugin that reaches its sites only where the user runs one would reach none.
         guard siteAccess == .listedSites || !contributions.commands.isEmpty else { throw invalidManifest("siteAccess whenInvoked needs contributes.commands") }
-        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, sites: sites,
+        manifest = PluginManifest(id: id, name: name, version: version, summary: summary, permissions: permissions, aiDataKinds: aiDataKinds, network: network, settingsPage: settingsPage, sites: sites,
                                   siteAccess: siteAccess, contributions: contributions, events: Set(events), receivesSettingChanges: receivesSettingChanges)
         self.background = background
     }
@@ -71,19 +79,32 @@ struct ScriptManifest {
     static let aiDataKinds: [AIDataKind] = [.page, .selection]
 
     /// `permissions` lists names of `PluginPermission`, and the `ai` permission either by its name, for requests with text only, or as `{"ai": [kinds]}` with the data kinds beyond text that its requests carry.
-    private static func permissions(_ value: PluginValue?) throws -> (Set<PluginPermission>, Set<AIDataKind>) {
-        guard let value else { return ([], []) }
+    private static func permissions(_ value: PluginValue?) throws -> (Set<PluginPermission>, Set<AIDataKind>, [PluginNetworkHost]) {
+        guard let value else { return ([], [], []) }
         let malformed = invalidManifest("permissions must be an array of permission names, with ai also as an object such as {\"ai\": [\"page\"]}")
         guard case let .array(items) = value else { throw malformed }
         var permissions: Set<PluginPermission> = []
         var aiDataKinds: Set<AIDataKind> = []
+        var network: [PluginNetworkHost] = []
         for item in items {
             switch item {
             case let .string(name):
                 guard let permission = PluginPermission(rawValue: name) else { throw invalidManifest("permissions lists “\(name)”, which Arch does not grant") }
                 guard permission != .nativeMessaging else { throw invalidManifest("permissions lists “\(name)”, which only web extensions may ask for") }
+                guard permission != .network else { throw invalidManifest("permissions lists “\(name)”, which needs its host list") }
                 permissions.insert(permission)
             case let .object(fields):
+                if fields.count == 1, case let .array(hosts)? = fields[PluginPermission.network.rawValue] {
+                    guard !hosts.isEmpty, network.isEmpty else { throw invalidManifest("permissions.network needs a nonempty host list once") }
+                    network = try hosts.map { host in
+                        guard case let .string(name) = host, let parsed = PluginNetworkHost(name) else {
+                            throw invalidManifest("permissions.network needs DNS host names or wildcard subdomains, without IP addresses, localhost, ports, or paths")
+                        }
+                        return parsed
+                    }
+                    permissions.insert(.network)
+                    continue
+                }
                 guard fields.count == 1, case let .array(kinds)? = fields[PluginPermission.ai.rawValue] else { throw malformed }
                 for kind in kinds {
                     guard case let .string(name) = kind else { throw malformed }
@@ -97,7 +118,7 @@ struct ScriptManifest {
                 throw malformed
             }
         }
-        return (permissions, aiDataKinds)
+        return (permissions, aiDataKinds, network)
     }
 
     private static func contributions(_ object: ManifestObject, packageAt root: URL) throws -> PluginContributions {
@@ -118,7 +139,8 @@ struct ScriptManifest {
     private static func command(_ object: ManifestObject) throws -> PluginCommand {
         var object = object
         let command = PluginCommand(id: try object.string("id"), title: try object.string("title"), symbol: try object.optionalString("symbol"),
-                                    keywords: try object.strings("keywords"), shortcut: try object.optionalString("shortcut").map(PluginShortcut.init))
+                                    keywords: try object.strings("keywords"), shortcut: try object.optionalString("shortcut").map(PluginShortcut.init),
+                                    takesArgument: try object.bool("takesArgument") ?? false)
         try object.finish()
         return command
     }
@@ -155,6 +177,10 @@ struct ScriptManifest {
         let id = try object.string("id")
         let title = try object.string("title")
         let symbol = try object.string("symbol")
+        let presentationName = try object.optionalString("presentation") ?? "popover"
+        guard let presentation = PluginSidebarItem.Presentation(rawValue: presentationName) else {
+            throw invalidManifest("\(object.path).presentation must be popover or sidebar")
+        }
         let action: PluginSidebarItem.Action
         if let page = try object.optionalString("panel") {
             guard object.value("command") == nil else { throw invalidManifest("\(object.path) takes a command or a panel, not both") }
@@ -164,10 +190,11 @@ struct ScriptManifest {
             }
             action = .panel(page: page)
         } else {
+            guard presentation == .popover else { throw invalidManifest("\(object.path).presentation sidebar needs a panel") }
             action = .command(try object.listedCommand(commands))
         }
         try object.finish()
-        return PluginSidebarItem(id: id, title: title, symbol: symbol, action: action)
+        return PluginSidebarItem(id: id, title: title, symbol: symbol, action: action, presentation: presentation)
     }
 
     /// `type` is `toggle`, `text`, `number` with an optional `min` and `max`, `choice` with its `options`, or `secret`. Each but a secret takes an optional `default`: false, empty text, the minimum or 0, and the first option without one.

@@ -2,7 +2,9 @@
 import ARCHEngine
 import Plugins
 
+/// A question Arch shows when a web extension needs access or a page reload.
 public struct WebExtensionQuestion: Equatable {
+    /// Whether the question asks for access, engine permissions, or a reload.
     public enum Kind: Equatable {
         /// More access that the extension requested, as with `permissions.request`.
         case access

@@ -1,4 +1,7 @@
-// The page area and split view. The page area of either kind of window shows the selected tab, or the split view it belongs to: two to four tabs side by side, each in its own pane. The selected tab is the focused pane, which the address pill, the find bar, and the menus act on, and a click in another pane selects that pane's tab. A pane whose tab another window shows holds a placeholder instead. Each pane of a split view has a control that takes its tab out, and a tab dragged from the sidebar onto a pane opens beside it. The session keeps each space's split view (`BrowserSession`, Split view).
+// Either window kind shows its selected tab or the split view containing it. A split view has two to four panes, each with one tab.
+// The selected tab is the focused pane for the address pill, find bar, and menus. Clicking another pane selects its tab.
+// A pane shown in another window becomes a placeholder. Each pane can remove its tab, and a sidebar drag onto a pane opens beside it.
+// `BrowserSession` keeps each space's split view.
 import Agent
 import SwiftUI
 
@@ -197,9 +200,11 @@ private struct ShownElsewherePaneView: View {
             Image(systemName: "macwindow.on.rectangle")
                 .font(.system(size: 30))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text(tab.shownTitle)
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
+                .truncationMode(.tail)
             Text("This tab is shown in another window.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)

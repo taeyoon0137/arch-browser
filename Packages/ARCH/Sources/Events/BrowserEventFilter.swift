@@ -3,6 +3,7 @@ import AI
 import ARCHEngine
 import Foundation
 
+/// Selects browser events by kind, place, site, engine, and tab kind.
 public struct BrowserEventFilter: Codable, Hashable, Sendable {
     /// Empty matches every kind.
     public var kinds: Set<BrowserEventKind>
@@ -29,6 +30,7 @@ public struct BrowserEventFilter: Codable, Hashable, Sendable {
     /// Every event but those of agent tabs.
     public static let everything = BrowserEventFilter()
 
+    /// Checks every filter field, excluding agent tabs unless they are requested explicitly.
     public func matches(_ event: BrowserEvent) -> Bool {
         guard kinds.isEmpty || kinds.contains(event.kind), scope.contains(event) else { return false }
         let urls = event.urls
@@ -48,6 +50,7 @@ public enum BrowserEventScope: Codable, Hashable, Sendable {
     /// Whole Personas and single spaces, which the interface shows as "Persona" and "Persona / Space".
     case places([BrowserPlace])
 
+    /// Decodes either the everywhere marker or a list of places.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let word = try? container.decode(String.self) {
@@ -58,6 +61,7 @@ public enum BrowserEventScope: Codable, Hashable, Sendable {
         }
     }
 
+    /// Encodes the everywhere marker or the selected places.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
@@ -87,6 +91,7 @@ public enum BrowserPlace: Codable, Hashable, Sendable {
         case persona, space
     }
 
+    /// Decodes a Persona or space identifier from its keyed object.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if let id = try container.decodeIfPresent(UUID.self, forKey: .persona) {
@@ -96,6 +101,7 @@ public enum BrowserPlace: Codable, Hashable, Sendable {
         }
     }
 
+    /// Encodes the place under its Persona or space key.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {

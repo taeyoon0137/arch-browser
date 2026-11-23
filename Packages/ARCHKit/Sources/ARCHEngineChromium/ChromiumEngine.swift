@@ -450,6 +450,13 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     public func exitFullscreen() {
         if isFullscreen { browser?.exitFullscreen(willResize: true) }
     }
+    public func download(_ url: URL) {
+        browser?.startDownload(withURL: url.absoluteString)
+    }
+    public func togglePictureInPicture(completion: @escaping (Bool) -> Void) {
+        guard let browser else { return completion(false) }
+        browser.evaluateInIsolatedWorld(withUserGesture: EnginePictureInPictureScript.toggle, completion: completion)
+    }
     /// The tools close with the page. CEF reports their close only once the browser has closed, when this object may be gone, so the app learns of it now. The engine ends the page's picture in picture as the browser closes, also unreported then, so the system's window closes now.
     func discard() {
         (devTools as? ChromiumDevTools)?.setView(nil)
@@ -639,7 +646,12 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         element.isEditable && pageView?.inputContext == nil
     }
 
-    /// The spelling and editing items CEF can run, as the WebKit adapter hands them to the tab: the misspelled word's suggestions, or No Guesses Found, Ignore Spelling, and Learn Spelling, then Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside one that is not on a link, image, or media, where WebKit's menu has no Copy. A right click on a text link selects the link's text on both engines. Select All is enabled in any field, as the WebKit adapter's is, also where Chromium would not run it, as in an empty field, where it selects nothing. Ignore Spelling sends AppKit's `ignoreSpelling:` to `pageView`, which runs Blink's IgnoreSpelling command on the selected misspelled word, and shows only when the view takes it. The other items have no target: a suggestion carries its word, Learn Spelling the misspelled word, and an editing item its command as its tag.
+    /// Builds the spelling and editing items CEF can run, as the WebKit adapter hands them to the tab.
+    /// For a misspelled word, it offers suggestions or No Guesses Found, Ignore Spelling, and Learn Spelling.
+    /// It adds Cut, Copy, Paste, and Select All in a field, or Copy for a selection outside a field that is not on a link, image, or media; WebKit has no Copy there.
+    /// A right click on a text link selects its text on both engines. Select All works in every field, even an empty one where it selects nothing.
+    /// Ignore Spelling sends AppKit's `ignoreSpelling:` to `pageView`, which runs Blink's IgnoreSpelling command on the selected word. It appears only when the view accepts it.
+    /// Other items have no target: a suggestion carries its word, Learn Spelling carries the misspelled word, and an editing item carries its command as a tag.
     static func engineMenuItems(misspelledWord: String, suggestions: [String], element: EngineContextMenuElement, editCommands: ARCHCEFEditCommand,
                                 pageView: NSView? = nil) -> [NSMenuItem] {
         var items: [NSMenuItem] = []

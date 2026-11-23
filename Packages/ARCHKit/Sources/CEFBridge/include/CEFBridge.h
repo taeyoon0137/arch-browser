@@ -218,7 +218,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFExtensionPromptKind) {
 /// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
 @interface ARCHCEFDownload : NSObject
 @property (nonatomic, readonly) uint32_t identifier;
+/// The address after redirects.
 @property (nonatomic, readonly, copy) NSString *url;
+/// The address the download was requested at, before redirects.
+@property (nonatomic, readonly, copy) NSString *originalURL;
 /// The destination after the engine chooses it.
 @property (nonatomic, readonly, copy, nullable) NSString *path;
 @property (nonatomic, readonly) int64_t receivedBytes;
@@ -375,7 +378,11 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserRunLeavePageDialogWithCompletion:(void (^)(BOOL leave))completion;
 /// The page's dialogs no longer apply, as after a navigation. Sheets still open for them should close.
 - (void)cefBrowserDidResetDialogs;
-/// Asks the app to show its own panel for a file chooser that CEF gives this browser: its page's file input, or another chooser, such as a download's Save As. CEF shows none of its own. CEF names no frame, and it also gives a browser the choosers of views without a browser of their own, such as an extension's popup or docked DevTools, from the same window or the focused browser. `acceptedTypes` are the lowercase MIME types and dotted extensions the page accepts, empty for any file; `defaultPath` is the suggested path, often only a file name, or empty; `pageURL` is the address the main frame committed, not one it is still loading. Call `completion` once with the chosen paths, or with nil or an empty array to cancel; CEF cancels the chooser if the block is released unanswered.
+/// Asks the app to show its panel for a file chooser CEF gives this browser, such as a page file input or a download's Save As. CEF shows no panel of its own.
+/// CEF names no frame. It may also give this browser a chooser from a view without its own browser, such as an extension popup or docked DevTools, in the same window or the focused browser.
+/// `acceptedTypes` holds lowercase MIME types and dotted extensions the page accepts, or is empty for any file.
+/// `defaultPath` is the suggested path, often only a file name, or empty. `pageURL` is the main frame's committed address, not a pending navigation address.
+/// Call `completion` once with chosen paths, or nil or an empty array to cancel. CEF cancels if the block is released unanswered.
 - (void)cefBrowserRunFileChooser:(ARCHCEFFileChooserMode)mode
                       defaultPath:(NSString *)defaultPath
                     acceptedTypes:(NSArray<NSString *> *)acceptedTypes
@@ -473,6 +480,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)reload;
 - (void)reloadIgnoringCache;
 - (void)stopLoading;
+/// Starts a download in this browser's request context.
+- (void)startDownloadWithURL:(NSString *)url;
 - (void)goBack;
 - (void)goForward;
 /// Evaluates `script` in the main frame's page world and passes the string it evaluates to. CEF's `ExecuteJavaScript` returns nothing, so the page's renderer process runs the script and replies with a process message. Passes nil when the frame has no script context, the script throws or returns another type, the page's process quits, the browser goes, or no reply comes within ten seconds. Calls `completion` once on the main thread.
@@ -491,6 +500,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)setPictureInPicturePlaying:(BOOL)playing;
 /// Ends picture in picture for the page's video. `pause` pauses the video, as closing the window does; pass NO when the user returns to the page. CEF reports the end through `cefBrowserDidStopPictureInPicture` before this returns. Does nothing while no video of the page is in picture in picture.
 - (void)closePictureInPicturePausingVideo:(BOOL)pause NS_SWIFT_NAME(closePictureInPicture(pausingVideo:));
+/// Evaluates an expression with user activation in an isolated world of the main frame, whose functions the page cannot replace, and waits for its boolean result.
+- (void)evaluateInIsolatedWorldWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion;
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
 /// Ends the search and leaves the active match selected.
 - (void)stopFinding;

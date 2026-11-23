@@ -17,6 +17,7 @@ public struct Feed: Equatable, Sendable {
     }
 }
 
+/// Parses RSS and Atom XML into feed items and refresh intervals.
 public enum FeedParser {
     private static let rdfNamespace = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
     private static let rss1Namespace = "http://purl.org/rss/1.0/"
@@ -47,6 +48,7 @@ public enum FeedParser {
         case rss2, rss1, atom
     }
 
+    /// Identifies the feed format from its root element and namespace.
     private static func format(of root: Node) -> Format? {
         switch (root.name, root.namespace) {
         case ("rss", ""): return .rss2
@@ -58,6 +60,7 @@ public enum FeedParser {
 
     // MARK: Formats
 
+    /// Reads an RSS 2.0 channel and its items into a feed.
     private static func rss2(_ root: Node, base: URL) -> Feed {
         guard let channel = root.child("channel", in: "") else { return Feed(title: nil, items: [], interval: nil) }
         let channelBase = self.base(of: channel, inheriting: base)
@@ -79,6 +82,7 @@ public enum FeedParser {
         return Feed(title: feedTitle, items: items, interval: [ttl, syndicationInterval(channel)].compactMap { $0 }.max())
     }
 
+    /// Reads RSS 1.0 items and their channel metadata into a feed.
     private static func rss1(_ root: Node, base: URL) -> Feed {
         let channel = root.child("channel", in: rss1Namespace)
         let items = root.children("item", in: rss1Namespace).compactMap { item -> LiveItem? in
@@ -93,6 +97,7 @@ public enum FeedParser {
         return Feed(title: feedTitle, items: items, interval: channel.flatMap(syndicationInterval))
     }
 
+    /// Reads Atom entries and feed metadata into a feed.
     private static func atom(_ root: Node, base: URL) -> Feed {
         let namespace = root.namespace
         let items = root.children("entry", in: namespace).compactMap { entry -> LiveItem? in
@@ -158,6 +163,7 @@ public enum FeedParser {
         }.map(\.element)
     }
 
+    /// Formats an XML parse error with its line number when available.
     private static func describe(_ error: (any Error)?) -> String {
         let info = (error as NSError?)?.userInfo ?? [:]
         let message = (info["NSXMLParserErrorMessage"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "it is not well-formed XML."
@@ -318,6 +324,7 @@ enum FeedText {
 
 // MARK: - Dates
 
+/// Parses the date formats used by feeds and HTTP responses.
 enum FeedDate {
     private static let months = ["jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12]
     private static let zones: [String: Int] = ["UT": 0, "UTC": 0, "GMT": 0, "Z": 0, "EST": -5, "EDT": -4, "CST": -6, "CDT": -5, "MST": -7, "MDT": -6, "PST": -8, "PDT": -7]

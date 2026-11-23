@@ -6,6 +6,7 @@ public enum AgentRPCID: Hashable, Sendable {
     case number(Int)
     case string(String)
 
+    /// Encodes the request ID as a JSON number or string.
     public var json: AgentJSON {
         switch self {
         case .number(let number): return .number(Double(number))
@@ -13,6 +14,7 @@ public enum AgentRPCID: Hashable, Sendable {
         }
     }
 
+    /// Accepts only string IDs or finite integer IDs smaller than 10^15 in magnitude.
     init?(_ json: AgentJSON) {
         switch json {
         case .number(let number) where number.rounded() == number && abs(number) < 1e15: self = .number(Int(number))
@@ -22,6 +24,7 @@ public enum AgentRPCID: Hashable, Sendable {
     }
 }
 
+/// A JSON-RPC error code, message, and optional data returned to a client.
 public struct AgentRPCError: Error, Equatable, Sendable {
     public var code: Int
     public var message: String
@@ -46,6 +49,7 @@ public struct AgentRPCError: Error, Equatable, Sendable {
     public static func internalError(_ message: String) -> AgentRPCError { AgentRPCError(code: internalErrorCode, message: message) }
 }
 
+/// A JSON-RPC request, notification, result, or error on the control channel.
 public enum AgentRPCMessage: Equatable, Sendable {
     case request(id: AgentRPCID, method: String, params: AgentJSON?)
     case notification(method: String, params: AgentJSON?)
@@ -53,6 +57,7 @@ public enum AgentRPCMessage: Equatable, Sendable {
     /// An error answer. The ID is nil when the request's ID could not be read, as for a parse error.
     case error(id: AgentRPCID?, error: AgentRPCError)
 
+    /// Encodes one message as a JSON-RPC 2.0 object.
     public func encoded() throws -> Data {
         var object: [String: AgentJSON] = ["jsonrpc": "2.0"]
         switch self {

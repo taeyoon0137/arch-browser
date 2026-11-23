@@ -60,6 +60,10 @@ public protocol PluginContext: AnyObject {
     func setting(_ key: String) -> PluginValue?
     /// Shows `text` as the badge of one of the plugin's sidebar items, or no badge for nil or empty text. The badge stays until the plugin changes it or the user switches the plugin off, updates it, or removes it, also after a script plugin's instance stops on its own.
     func setBadge(_ text: String?, onSidebarItem id: String)
+    /// Enables or disables one of this plugin's own contributed commands for the current run.
+    func setEnabled(_ isEnabled: Bool, command id: String)
+    /// Opens one of this plugin's own sidebar panels during a user-started command.
+    func showPanel(_ sidebarItemID: String)
     /// Needs `clipboard`.
     func copyToClipboard(_ text: String) throws
     /// The tabs the plugin reaches, in sidebar order, each without what the grant does not cover: its Persona's open tabs, never agent tabs. Without `tabs`, a tab shows its title and address only where the granted sites cover its page, and for `whenInvoked` only where the plugin has access in it. A plugin with `ai` gets no title or address of a tab on a site excluded from AI. Needs no permission.
@@ -68,6 +72,14 @@ public protocol PluginContext: AnyObject {
     func tab(_ id: PluginTab.ID) throws -> PluginTab?
     /// The tab the user has in front, as `tab(_:)` gives it: the selected tab of the browser window that last became main, when it is one of the tabs the plugin reaches and no internal page or the preview panel covers its page, as a command gets it. Nil otherwise. Needs no permission.
     func selectedTab() throws -> PluginTab?
+    /// Names, states, and byte counts of this Persona's downloads. Needs `downloads`.
+    func downloads() throws -> [PluginDownload]
+    /// Needs `downloads.rename`; returns false when the completed file cannot take the suggested name.
+    func renameDownload(_ id: UUID, to name: String) throws -> Bool
+    /// Posts a local notification under this plugin's name. Needs `notifications`.
+    func notify(title: String, body: String) throws
+    /// Sends one bounded HTTPS request to a host in the `network` grant, without browser cookies or credentials.
+    func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
     /// Needs `tabs.manage`. Opens a tab at the web address, `http` or `https`, in the space the options name, which must be one of the Persona's, or else in the last main window's space while it is the Persona's, or the Persona's first space, in the engine they name or the default engine, where a new tab that the user opens goes, and selects it unless they say not to, as `selectTab(_:)` does. Returns its identifier. The tab's opening, its selection with the space switch that the selection brings, and its first address and first load come with the plugin as their cause, so the plugin does not hear of them. Until the user acts in the tab's page, as with a click there, or loads an address in it, it downloads no file without asking, and at a file's address it closes without downloading. Throws `PluginError.invalidAddress` for any other address, `notGranted` for a space that is not the Persona's, `tooManyTabs` once the plugin has opened 10 tabs within the last minute, and `closed` once the Persona is gone.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
     /// Needs `tabs.manage`. Closes one of the tabs the plugin reaches without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads and keeps its place, a favorite's tab ends, a live folder item's tab is dismissed, and any other tab joins the closed list, from which Reopen Last Closed Tab and the Library reopen it; ⌘Z then reopens none of the tabs that the user closed before it, as after a page's own close. The close, and the selection of another tab in each window that had the tab selected, come with the plugin as their cause, so the plugin does not hear of them. Throws `PluginError.notGranted` for any other tab, and `stopped` for the event's tab of a hook step of the plugin once the scheduler has stopped the step, since the tab can show another document by then; a script plugin's panel closes outside any step.
@@ -87,8 +99,14 @@ public protocol PluginContext: AnyObject {
 }
 
 extension PluginContext {
+    public func setEnabled(_ isEnabled: Bool, command id: String) {}
+    public func showPanel(_ sidebarItemID: String) {}
     /// A context that offers no selected tab, such as a hook script's, which acts on its run's tabs, gives none.
     public func selectedTab() throws -> PluginTab? { nil }
+    public func downloads() throws -> [PluginDownload] { throw PluginError.permissionDenied(.downloads) }
+    public func renameDownload(_ id: UUID, to name: String) throws -> Bool { throw PluginError.permissionDenied(.renameDownloads) }
+    public func notify(title: String, body: String) throws { throw PluginError.permissionDenied(.notifications) }
+    public func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw PluginError.permissionDenied(.network) }
 
     /// A context that changes no tabs, such as a hook script's, refuses to open, close, select, and move them.
     public func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
@@ -142,6 +160,9 @@ public protocol PluginAgentContext: PluginContext {
 public protocol PluginBrowserHost: AnyObject {
     /// The Persona's open tabs in sidebar order, with titles and addresses before any grant applies; never agent tabs.
     func tabs(in persona: PersonaID) -> [PluginTab]
+    func downloads(in persona: PersonaID) -> [PluginDownload]
+    func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool
+    func postNotification(pluginName: String, title: String, body: String)
     /// Sets the tab's suggested name under the AI hooks' rules (`docs/hooks.md`, hook decision 13): the name's first line, trimmed and cut to `PluginTab.maximumNameLength` characters, while the tab still shows `document`, ignoring the fragment, the user has not named it, and the user has not turned down a suggested name for that document. Nil removes a suggested name for the document. A nil `document` stands for the tab's committed address now. The change's events carry `cause`. With `applying` false, nothing changes and the answer says whether the tab would take it. False for a favorite's tab, which goes by its favorite's name, for an agent tab, and for a tab that is gone.
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
     /// The page of a tab that `tabs(in:)` lists, through which plugins run scripts in it and post to its page scripts; nil for an agent tab and for a tab that is gone.
@@ -156,6 +177,35 @@ public protocol PluginBrowserHost: AnyObject {
     func selectTab(_ id: UUID, cause: BrowserEventCause)
     /// Moves a tab that `tabs(in:)` lists as `PluginContext.moveTab(_:to:)` describes, next to another such tab of its Persona or to a space, with the space switch it brings carrying `cause`, and returns whether the tab is at the place afterwards. Throws `PluginError.notGranted` for a space that is not the tab's Persona's; false for an agent tab and a tab that is gone, also as the one to go next to.
     func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool
+}
+
+extension PluginBrowserHost {
+    public func downloads(in persona: PersonaID) -> [PluginDownload] { [] }
+    public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool { false }
+    public func postNotification(pluginName: String, title: String, body: String) {}
+}
+
+/// A Persona's download metadata exposed to a plugin.
+public struct PluginDownload: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let name: String
+    public let state: String
+    public let completedBytes: Int64
+    public let totalBytes: Int64
+
+    public init(id: UUID, name: String, state: String, completedBytes: Int64, totalBytes: Int64) {
+        self.id = id
+        self.name = name
+        self.state = state
+        self.completedBytes = completedBytes
+        self.totalBytes = totalBytes
+    }
+
+    /// The JSON value exposed to script plugins for this download.
+    public var scriptValue: PluginValue {
+        .object(["id": .string(id.uuidString), "name": .string(name), "state": .string(state),
+                 "completedBytes": .number(Double(completedBytes)), "totalBytes": .number(Double(totalBytes))])
+    }
 }
 
 /// Where `PluginContext.moveTab(_:to:)` moves a tab, which stays pinned or open.
@@ -193,6 +243,10 @@ public struct PluginOpenTabOptions: Hashable, Sendable {
 
 /// What a command runs on.
 public struct PluginInvocation: Sendable {
+    /// Where the user invoked a plugin command.
+    public enum Source: String, Sendable { case palette, menu, contextMenu, shortcut, sidebar }
+    public var source: Source
+    public var argument: String?
     /// The tab the command acts on: the selected tab, or the tab of the page or tab row the user chose the item on. Nil when there is none, when the selected tab belongs to another Persona, as a favorite's tab can, and while an internal page or the preview panel covers its page.
     public var tab: PluginTab?
     /// The space whose menu holds the item, for a space menu item.
@@ -202,7 +256,9 @@ public struct PluginInvocation: Sendable {
     public var imageURL: URL?
     public var selection: String?
 
-    public init(tab: PluginTab?, spaceID: UUID? = nil, linkURL: URL? = nil, imageURL: URL? = nil, selection: String? = nil) {
+    public init(tab: PluginTab?, spaceID: UUID? = nil, linkURL: URL? = nil, imageURL: URL? = nil, selection: String? = nil, source: Source = .menu, argument: String? = nil) {
+        self.source = source
+        self.argument = argument
         self.tab = tab
         self.spaceID = spaceID
         self.linkURL = linkURL
@@ -305,6 +361,7 @@ public enum PluginValue: Hashable, Sendable {
 }
 
 extension PluginValue: Codable {
+    /// Decodes one JSON value into a plugin value.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
@@ -322,6 +379,7 @@ extension PluginValue: Codable {
         }
     }
 
+    /// Encodes this value as its corresponding JSON value.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
@@ -354,6 +412,7 @@ public protocol PluginSecrets: AnyObject {
     func setSecret(_ secret: String?, forKey key: String) async throws
 }
 
+/// Failures raised by plugin lifecycle, permissions, package handling, and browser calls.
 public enum PluginError: Error, Hashable, Sendable {
     /// The plugin's grant lacks the permission a call needs.
     case permissionDenied(PluginPermission)
@@ -397,9 +456,24 @@ public enum PluginError: Error, Hashable, Sendable {
     case invalidAddress(String)
     /// The plugin has opened as many tabs within the last minute as it may, 10 (`PluginManager.tabOpenLimit`).
     case tooManyTabs
+    /// The network request names an address that is not HTTPS on port 443 at a granted host, or a host that does not resolve or resolves to an address that is not public.
+    case hostRefused
+    /// The request reached no host or lost its connection: no network, a refused connection, a certificate that is not valid for the host, or a connection that broke before the response ended.
+    case networkUnavailable
+    /// A redirect leaves the grant, uses another scheme, or exceeds five hops.
+    case redirectRefused
+    /// A plugin started 60 network requests within a minute.
+    case rateLimited
+    /// The network response exceeds five megabytes.
+    case responseTooLarge
+    /// A network response has no HTTP status or is not UTF-8 text.
+    case invalidResponse
+    /// A network request has an unsupported method, refused header, or oversized body.
+    case invalidRequest
 }
 
 extension PluginError: LocalizedError {
+    /// A user-facing explanation of the plugin failure.
     public var errorDescription: String? {
         switch self {
         case let .permissionDenied(permission): return "The plugin may not \(permission.summary.prefix(1).lowercased() + permission.summary.dropFirst())."
@@ -423,6 +497,13 @@ extension PluginError: LocalizedError {
         case .pageRunUnavailable: return "Arch cannot reach this tab\u{2019}s page for the plugin without your gesture now."
         case let .invalidAddress(text): return "\u{201C}\(text)\u{201D} is not the address of a web page."
         case .tooManyTabs: return "The plugin opened as many tabs within a minute as it may."
+        case .hostRefused: return "The plugin may not reach this network host."
+        case .networkUnavailable: return "The plugin's network request could not reach its host."
+        case .redirectRefused: return "The network redirect is outside the plugin's grant."
+        case .rateLimited: return "The plugin has made as many requests within a minute as it may."
+        case .responseTooLarge: return "The network response is too large."
+        case .invalidResponse: return "The network response is not UTF-8 text."
+        case .invalidRequest: return "The network request has an unsupported method, header, or body."
         }
     }
 }

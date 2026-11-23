@@ -1,4 +1,6 @@
-// Settings window with a toolbar of sections in the system's settings layout: General, Sync, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI. Site Search saves its shortcuts in their own file, Websites in `permissions.json`, Plugins in each Persona's plugin files and the Keychain, and AI in its own files and the Keychain; the others save in `UserDefaults`.
+// The Settings window uses a system-style toolbar for General, Sync, Site Search, Sidebar, Appearance, Shortcuts, Websites, Plugins, and AI.
+// Site Search saves shortcuts in its own file. Websites saves to `permissions.json`.
+// Plugins saves to each Persona's plugin files and the Keychain. AI saves to its own files and the Keychain. Other sections use `UserDefaults`.
 import Agent
 import AI
 import AppKit
@@ -118,7 +120,7 @@ public final class PreferencesWindowController: NSWindowController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        fatalError("PreferencesWindowController is created through shared")
+        return nil
     }
 
     /// Brings the Settings window to the front, centering it if it was hidden.

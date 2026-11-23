@@ -27,26 +27,31 @@ public struct LiveItem: Codable, Hashable, Sendable, Identifiable {
 
 /// What a GitHub pull request or issue adds to its item, for the row's symbol and tooltip. Review decisions, mergeable states, and check states keep GitHub's values.
 public struct GitHubItem: Codable, Hashable, Sendable {
+    /// Whether the GitHub item is a pull request or issue.
     public enum Kind: String, Codable, Sendable {
         case pullRequest, issue
     }
 
+    /// The GitHub item's open, draft, merged, or closed state.
     public enum State: String, Codable, Sendable {
         case open, draft, merged, closed
     }
 
+    /// GitHub's review decision for a pull request.
     public enum ReviewDecision: String, Codable, Sendable {
         case approved = "APPROVED"
         case changesRequested = "CHANGES_REQUESTED"
         case reviewRequired = "REVIEW_REQUIRED"
     }
 
+    /// GitHub's mergeability result for a pull request.
     public enum Mergeable: String, Codable, Sendable {
         case mergeable = "MERGEABLE"
         case conflicting = "CONFLICTING"
         case unknown = "UNKNOWN"
     }
 
+    /// GitHub's check rollup state for the last commit.
     public enum CheckState: String, Codable, Sendable {
         case success = "SUCCESS"
         case failure = "FAILURE"
@@ -116,6 +121,7 @@ public enum LiveFolderError: Error, Equatable, Sendable, LocalizedError {
 
     public var errorDescription: String? { message }
 
+    /// A user-facing explanation of a live folder failure without a private feed address.
     public var message: String {
         switch self {
         case .invalidAddress(let reason): return reason

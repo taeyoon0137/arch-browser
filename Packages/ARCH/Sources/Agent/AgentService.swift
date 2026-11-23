@@ -1,4 +1,9 @@
-// The agents' service in the app (docs/agents.md, Local control channel; Outside clients: identity, grants, revocation; Sealed settings; In the browser; Approval interface): it owns `agent.json`, the activity log, the grants, the in-app sessions, the cards that wait for the user, the agent panel's model, and the control endpoint, which listens only while Allow Outside Clients is on or an in-app session needs it. It answers `hello`, binds a session's `arch-mcp` by its ticket, asks for a grant at an outside client's first tool call, runs calls through the tool host, starts sessions for the user and for clients with the Start Agent Tasks scope, and ends a grant's connections when the grant is revoked, released, or expires. A revocation, expiry, Stop All Agents, a client's Stop, the client leaving, and quit end the cards they concern as denied, and all but quit cancel the outside clients' calls they concern that still run. A call that answers `approvalPending` records its entry and step when it ends. Every decision about a call is made here and in the tool host, never in `arch-cli` or `arch-mcp`.
+// The app's agent service owns `agent.json`, activity, grants, in-app sessions, pending cards, the panel model, and the local control endpoint (docs/agents.md).
+// The endpoint listens only while outside clients are allowed or an in-app session needs it. The service answers `hello` and binds a session's `arch-mcp` by its ticket.
+// It asks for a grant on an outside client's first tool call, sends calls to the tool host, and starts user sessions or client sessions with Start Agent Tasks.
+// A revoked, released, or expired grant loses its connections. Those events, Stop All Agents, a client's Stop or exit, and quit deny the cards they concern.
+// All but quit also cancel the outside client's running calls they concern. A call that answers `approvalPending` records its entry and step when it ends.
+// The service and tool host decide every call. `arch-cli` and `arch-mcp` make no access decision.
 import AgentControl
 import AI
 import AppKit
@@ -6,6 +11,7 @@ import Combine
 import Events
 import Foundation
 
+/// Owns agent settings, grants, sessions, approvals, activity, and the local control endpoint.
 @MainActor public final class AgentService: ObservableObject {
     /// How `agent.json` read at launch.
     public enum SettingsState: Equatable, Sendable {
@@ -68,7 +74,7 @@ import Foundation
     /// Connected programs in the same order as their grants, shown in the sidebar and the agents menu.
     public var connectedGrants: [AgentGrant] { grants.filter { connectedGrantIDs.contains($0.id) } }
 
-    /// What the service reads and asks through, which tests replace.
+    /// The browser, identity, AI, and endpoint operations supplied to the service; tests replace them.
     struct Dependencies {
         var location: AgentSocketLocation?
         var keys: any AgentSealKeyStore
@@ -250,6 +256,7 @@ import Foundation
         settings.keepsCodexCopy || !canChangeSettings
     }
 
+    /// Reads sealed agent settings and keeps outside access off when the file or its key cannot be trusted.
     private func readSettings() async {
         switch await file.read() {
         case .none:
@@ -294,6 +301,7 @@ import Foundation
         updateListening()
     }
 
+    /// Writes changed settings after obtaining the seal key when needed.
     private func save() {
         guard canChangeSettings else { return }
         if file.hasKey { return write() }
@@ -307,6 +315,7 @@ import Foundation
         }
     }
 
+    /// Seals and writes agent settings, then updates the file watch or save error.
     private func write() {
         do {
             let record = try file.write(settings)
@@ -333,6 +342,7 @@ import Foundation
         settings.agentsPersonaID ?? unverifiedAgentsPersonaID
     }
 
+    /// Applies the saved Agents Persona restriction to the browser host.
     private func applyAgentOnlyPersona() {
         host.setAgentOnlyPersona(agentOnlyPersonaID)
     }
@@ -494,6 +504,7 @@ import Foundation
         }
     }
 
+    /// Checks whether a process-bound grant's original process has ended or changed.
     private func hasProcessEnded(_ grant: AgentGrant) -> Bool {
         guard case .process(_, _, let processID, let start) = grant.client.key else { return false }
         return dependencies.processStart(processID) != start
@@ -565,11 +576,12 @@ import Foundation
         return grant
     }
 
+    /// Shows one grant request with available Personas and spaces and returns the approved grant.
     private func askForGrant(_ identity: AgentClientIdentity) async -> AgentGrant? {
         let agentsID = settings.agentsPersonaID.flatMap { id in host.personas.contains { $0.id == id } ? id : nil }
         let personas = host.personas.filter { $0.id != agentsID }
         let request = AgentGrantRequest(client: identity, personas: personas, agentsSpaces: agentsID.map(host.spaces(in:)) ?? [],
-                                        spacesByPersona: Dictionary(uniqueKeysWithValues: personas.map { ($0.id, host.spaces(in: $0.id)) }))
+                                        spacesByPersona: Dictionary(personas.map { ($0.id, host.spaces(in: $0.id)) }, uniquingKeysWith: { first, _ in first }))
         let answer = await dependencies.prompt.ask(request)
         // A sheet that closed because outside access went off records no decline and asks for no Touch ID.
         guard acceptsOutsideClients else { return nil }
@@ -598,12 +610,14 @@ import Foundation
         }
     }
 
+    /// Records a declined grant and starts the request cooldown.
     private func decline(_ identity: AgentClientIdentity) {
         declinedAt[identity.key] = dependencies.now()
         lastDeclinedAt = dependencies.now()
         activity.record(AgentActivityEntry(date: dependencies.now(), event: .declined, clientName: identity.displayName))
     }
 
+    /// Creates a grant for the selected Persona, space, access, scopes, and expiry.
     private func makeGrant(_ choice: AgentGrantChoice, for identity: AgentClientIdentity) -> AgentGrant? {
         let personaID: UUID
         switch choice.persona {
@@ -744,6 +758,7 @@ import Foundation
         }
     }
 
+    /// A session-start refusal shown to the user as its message.
     public struct SessionError: LocalizedError, Equatable {
         public var message: String
         public var errorDescription: String? { message }
@@ -876,7 +891,7 @@ import Foundation
             session.ticket = nil
             return AgentAPISession(client: dependencies.apiClient, tools: SessionTools(service: self, session: session), model: model, id: session.id)
         }
-        let ticket = AgentSessionTicket.make()
+        guard let ticket = AgentSessionTicket.make() else { throw SessionError(message: "The session ticket could not be created.") }
         session.ticket = ticket
         let folder = dependencies.sessionFolder(session.id)
         let skills = AgentSessionSkills.skills(inSessionFolder: folder)
@@ -892,6 +907,7 @@ import Foundation
         return runner
     }
 
+    /// Connects a session's attachment, mode, and task events to the service and its approvals.
     private func configure(_ session: AgentSession) {
         session.attachmentDidChange = { [weak approvals, id = session.id] tabID in
             guard let approvals else { return }
@@ -1025,6 +1041,7 @@ import Foundation
         }
     }
 
+    /// Keeps the local endpoint available while a live CLI session needs it.
     private func updateSessionsChannel() {
         sessionsNeedChannel = sessions.contains { !$0.hasEnded && $0.commandLineRunner != nil }
     }
@@ -1180,6 +1197,7 @@ import Foundation
         }
     }
 
+    /// Dispatches a shell hook's call within its connection limit and run grant.
     private func callHook(_ hook: AgentHookCLIRun, params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard connection.runningCalls < AgentLimits.callsPerConnection else {
             return replyError(connection, requestID, AgentRPCError(code: AgentControlErrorCode.busy, message: "The connection has too many running calls."))
@@ -1282,7 +1300,7 @@ import Foundation
                 return AgentReadPage(tabID: tab.id, handle: session.handles.tabs.handle(for: tab.id), documentID: tab.documentID,
                                      url: url, ownerID: tab.agentOwnerID)
             }
-            let sources = Dictionary(uniqueKeysWithValues: pages.map { ($0.handle, $0) })
+            let sources = Dictionary(pages.map { ($0.handle, $0) }, uniquingKeysWith: { first, _ in first })
             return { [weak service, weak session] result in
                 @MainActor func permits(_ handle: String) -> Bool {
                     guard let service, let session, let source = sources[handle] else { return false }
@@ -1416,6 +1434,7 @@ import Foundation
         return AgentToolResult(status: .ok, text: "The user shared \(handle) for reading.", structured: ["tab": .string(handle), "access": "read"])
     }
 
+    /// Closes the local endpoint connection and its associated work.
     private func closeConnection(_ connection: ClientConnection) {
         endpoint?.close(connection.id)
     }
@@ -1433,6 +1452,7 @@ import Foundation
         }
     }
 
+    /// Starts an outside client's session only when its grant permits agent tasks.
     private func startTask(_ params: AgentJSON?, for grant: AgentGrant, identity: AgentClientIdentity, on connection: ClientConnection, requestID: AgentRPCID) {
         guard grant.scopes.startTasks else {
             return replyError(connection, requestID, Self.noGrantError("This client's grant does not include Start Agent Tasks. Revoke it in Settings \u{25B8} AI \u{25B8} Agents and allow it again with that scope."))
@@ -1467,6 +1487,7 @@ import Foundation
         return sessions.filter { $0.grantID == grant.id }
     }
 
+    /// Lists only the sessions started under this connection's current grant.
     private func listSessions(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard var mine = clientSessions(of: connection) else { return replyError(connection, requestID, Self.noGrantError("This client has no grant.")) }
         if let reference = try? params?.decode(as: AgentSessionReference.self) {
@@ -1476,6 +1497,7 @@ import Foundation
         reply(connection, requestID, Self.json(AgentSessionList(sessions: mine.map(summary(of:)))))
     }
 
+    /// Stops one session started under this connection's current grant.
     private func stopTask(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard let mine = clientSessions(of: connection) else { return replyError(connection, requestID, Self.noGrantError("This client has no grant.")) }
         guard let reference = try? params?.decode(as: AgentSessionReference.self), let session = mine.first(where: { $0.id == reference.session }) else {
@@ -1493,6 +1515,7 @@ import Foundation
 
     // MARK: Messages
 
+    /// Dispatches a client's control message after applying connection and ticket checks.
     private func handle(_ message: AgentRPCMessage, on connection: ClientConnection) {
         // Arch acts on a client's `tools/cancel` and asks clients nothing.
         if case .notification(let method, let params) = message, method == AgentControlMethod.toolsCancelNotification, connection.stage == .ready {
@@ -1596,6 +1619,7 @@ import Foundation
         reply(connection, requestID, Self.json(answer(for: identity)))
     }
 
+    /// Builds the hello response from the client's current grant and Persona.
     private func answer(for identity: AgentClientIdentity) -> AgentHelloAnswer {
         guard let grant = grant(for: identity) else { return AgentHelloAnswer(version: version, status: .noGrant) }
         let persona = host.personas.first { $0.id == grant.personaID }?.name ?? ""
@@ -1605,6 +1629,7 @@ import Foundation
         return AgentHelloAnswer(version: version, status: .granted(AgentGrantSummary(level: grant.level, persona: persona, space: space, expiry: grant.expiry)))
     }
 
+    /// Checks and dispatches one outside-client tool call within the connection's limits.
     private func call(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard let identity = connection.identity else { return }
         guard connection.runningCalls < AgentLimits.callsPerConnection else {
@@ -1711,6 +1736,7 @@ import Foundation
         tools.askAboutFileChooser(chooser, in: tabID, of: ownerID, state: toolState(of: ownerID), client: client)
     }
 
+    /// Lets the tool host decide whether an agent tab may load this address.
     private func agentTab(_ tabID: UUID, of ownerID: UUID, mayLoad url: URL, kind: AgentLoadKind) -> Bool {
         toolHost().tab(tabID, mayLoad: url, kind: kind, state: toolState(of: ownerID), scope: session(withID: ownerID)?.scope)
     }
@@ -1847,11 +1873,11 @@ extension AIFeature {
 /// A shell hook run's access to Arch through `arch-cli` (`docs/hooks.md`, Shell scripts ▸ Acting): the run's ticket, which the script's environment carries as `ARCH_HOOK_TICKET`, binds a connection only from the run's script process or its descendants, and only while the run lasts. The socket listens meanwhile, as for an in-app session on a CLI. `Hooks` runs the scripts and answers their calls; `AgentService` keeps the tickets and binds the connections.
 @MainActor
 public protocol AgentHookRunChannel: AnyObject {
-    /// Opens the run's access and returns its ticket: its connections list `tools`, and `call` answers each of their calls to one of them.
-    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String
+    /// Opens the run's access and returns its ticket: its connections list `tools`, and `call` answers each of their calls to one of them. Nil when Arch could not make a ticket; the run then does not start.
+    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String?
     /// The same, with `agentRun` answering the connections' `agent/run` under the hook's grant, feature, and run tabs (`docs/hooks.md`, arch-cli agent run and rename), whose answer names each renamed tab by its handle in `handles`, the run tabs' handles; without `agentRun`, `agent/run` is refused.
     func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String
+                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String?
     /// The run's script process started; connections bind only from it and its descendants.
     func hookRun(_ run: UUID, didStart processID: pid_t)
     /// The run ended: its ticket binds nothing more, and its connections close.
@@ -1861,7 +1887,7 @@ public protocol AgentHookRunChannel: AnyObject {
 extension AgentHookRunChannel {
     /// A channel that serves no `agent/run` opens the run's access without it.
     public func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
+                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String? {
         openHookRun(run, tools: tools, call: call)
     }
 }
@@ -1869,7 +1895,7 @@ extension AgentHookRunChannel {
 /// A shell hook run as the service keeps it.
 @MainActor
 private final class ShellHookRunAccess {
-    let ticket = AgentSessionTicket.make()
+    let ticket: AgentSessionTicket
     let tools: [String]
     let call: @MainActor (AgentToolCall) async -> AgentToolResult
     /// The run's `agent/run`, when its hook may start agent runs.
@@ -1879,8 +1905,10 @@ private final class ShellHookRunAccess {
     /// The script process, as it was right after it started.
     var process: AgentProcessRecord?
 
-    init(tools: [String], handles: [UUID: String] = [:], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
+    init?(tools: [String], handles: [UUID: String] = [:], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
          agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)? = nil) {
+        guard let ticket = AgentSessionTicket.make() else { return nil }
+        self.ticket = ticket
         self.tools = tools
         self.handles = handles
         self.call = call
@@ -1898,13 +1926,13 @@ extension AgentService {
 }
 
 extension AgentService: AgentHookRunChannel {
-    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
+    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String? {
         openHookRun(run, tools: tools, handles: [:], call: call, agentRun: nil)
     }
 
     public func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
-        let access = ShellHookRunAccess(tools: tools, handles: handles, call: call, agentRun: agentRun)
+                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String? {
+        guard let access = ShellHookRunAccess(tools: tools, handles: handles, call: call, agentRun: agentRun) else { return nil }
         shellHookRuns[run] = access
         if endpoint == nil { updateListening() }
         return access.ticket.text
@@ -2014,6 +2042,7 @@ extension AgentService {
         }
     }
 
+    /// Removes the numbered event subscription from this connection and replies with its result.
     private func unsubscribeEvents(_ params: AgentJSON?, on connection: ClientConnection, requestID: AgentRPCID) {
         guard case .number(let number)? = params?["subscription"], let id = Int(exactly: number) else {
             return replyError(connection, requestID, .invalidParams("events/unsubscribe takes the subscription's number."))

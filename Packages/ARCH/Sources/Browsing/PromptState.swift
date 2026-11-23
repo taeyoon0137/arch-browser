@@ -1,4 +1,5 @@
-// One waiting prompt, with the content a card last showed for a prompt that makes it again as it shows, and what the user has done with it so far: the text in its fields and when its buttons arm. It belongs to its tab, so the text stays while the user is on another tab.
+// A waiting prompt keeps what its card last showed and what the user has entered so far.
+// Field text and button arming stay with its tab while the user visits another tab.
 import AppKit
 import Combine
 
@@ -22,7 +23,7 @@ final class PromptState: ObservableObject, Identifiable {
         self.content = content
         self.makeContent = makeContent
         self.panel = panel
-        fieldValues = Dictionary(uniqueKeysWithValues: content.fields.map { ($0.id, $0.initialValue) })
+        fieldValues = Dictionary(content.fields.map { ($0.id, $0.initialValue) }, uniquingKeysWith: { first, _ in first })
         arming = PromptArming(shownAt: now)
     }
 

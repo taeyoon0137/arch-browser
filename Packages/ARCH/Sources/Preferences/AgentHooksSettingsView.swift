@@ -1,4 +1,9 @@
-// Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks): Run Hooks, Allow Shell Scripts, the notices about `hooks.json`, New Script Hook…, every hook in run order, and Clear Activity. Each row has its switch, name, situation, model and record for an agent hook, last run, and the program that added it, a paused hook's reason with Resume or Review, and a menu with Edit…, Run on Current Tab, Duplicate, and Delete; dragging reorders the rows, and a row opens to its last runs, with a shell script's standard error and, for a run whose agent runs were kept with Keep the Session, Show Session and Delete Session…. A connected agent-capable model makes New Agent Hook… available.
+// Settings ▸ AI ▸ Hooks controls Run Hooks and Allow Shell Scripts (`docs/hooks.md`).
+// It shows notices about `hooks.json`, New Script Hook…, hooks in run order, and Clear Activity.
+// Each row shows its switch, name, situation, last run, and the program that added it. Agent hooks also show their model and record.
+// A paused row shows its reason with Resume or Review. Its menu offers Edit…, Run on Current Tab, Duplicate, and Delete.
+// Dragging reorders rows. Opening a row shows its last runs, including a shell script's standard error.
+// A run kept with Keep the Session offers Show Session and Delete Session…. An agent-capable model enables New Agent Hook….
 import Agent
 import AI
 import Browsing
@@ -130,10 +135,11 @@ struct AgentHooksPage: View {
                     if isOn { registry.resume(hook.id) } else { registry.pause(hook.id) }
                 }))
                 .labelsHidden()
+                .accessibilityLabel(hook.name)
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(hook.name).fontWeight(.medium)
+                    Text(hook.name).fontWeight(.medium).lineLimit(1).truncationMode(.tail)
                     ForEach(HookSummary.lines(for: hook, places: registry.places, lastRun: registry.lastRuns[hook.id]?.last), id: \.self) { line in
                         Text(line).font(.caption).foregroundStyle(.secondary)
                     }
@@ -192,6 +198,8 @@ struct AgentHooksPage: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .accessibilityLabel("Hook Actions")
+        .help("Hook Actions")
     }
 
     @ViewBuilder

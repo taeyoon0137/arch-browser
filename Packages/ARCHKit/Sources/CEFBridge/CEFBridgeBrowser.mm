@@ -43,7 +43,7 @@ const int64_t kScriptReplyTimeout = 10 * NSEC_PER_SEC;
 @property (nonatomic, readwrite) ARCHCEFDownloadState state;
 /// Set once the app cancels the download. CEF applies a cancel later, and never to an interrupted download, so the browser stops counting it at once.
 @property (nonatomic, readonly) BOOL isCancelledByApp;
-- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url;
+- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url originalURL:(NSString *)originalURL;
 - (void)applyItem:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback;
 @end
 
@@ -53,13 +53,14 @@ const int64_t kScriptReplyTimeout = 10 * NSEC_PER_SEC;
     BOOL _cancelRequested;
 }
 
-- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url {
+- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url originalURL:(NSString *)originalURL {
     self = [super init];
     if (!self) {
         return nil;
     }
     _identifier = identifier;
     _url = [url copy];
+    _originalURL = [originalURL copy];
     _state = ARCHCEFDownloadStateInProgress;
     return self;
 }
@@ -514,7 +515,12 @@ public:
         return true;
     }
 
-    // CEF's file dialog factory takes every chooser and asks the dialog handler of the browser it finds for the chooser's web contents, then for its window, then the focused one, and cancels when it finds none (`file_dialog_runner.cc`). So this browser's file inputs and other choosers, such as a download's Save As, come here, and so can those of views without a browser of their own, such as an extension's popup or docked DevTools. The app shows its own panel and answers through the callback, which stays alive in the block until then; CEF cancels the chooser when the callback goes unanswered. Returning true keeps Chromium's own panel closed and CEF from asking again for the same chooser, also for a browser without an owner. The app gets the accepted types as the page names them and maps MIME types to file types itself, so CEF's expansion into extensions goes unused. CEF names no frame, so the app gets the main frame's committed address (`GetURL()` reads `GetLastCommittedURL()`), not the address a navigation the page started is loading.
+    // CEF asks the dialog handler of the chooser's web contents browser, then its window, then the focused browser (`file_dialog_runner.cc`). A missing handler cancels.
+    // This browser's file inputs, a download's Save As, and choosers in browserless views such as an extension popup or docked DevTools can arrive here.
+    // The app shows its own panel. Its callback stays alive in the block until the app answers; CEF cancels an unanswered callback when it is dropped.
+    // Returning true suppresses Chromium's panel and repeat handling, even for a browser without an owner.
+    // The app receives accepted types as the page names them and maps MIME types to file types itself. It does not use CEF's expansion into extensions.
+    // CEF names no frame. The app uses the main frame's committed address (`GetURL()` reads `GetLastCommittedURL()`), not a pending navigation address.
     bool OnFileDialog(CefRefPtr<CefBrowser> browser, FileDialogMode mode, const CefString &title, const CefString &default_file_path,
                       const std::vector<CefString> &accept_filters, const std::vector<CefString> &accept_extensions,
                       const std::vector<CefString> &accept_descriptions, CefRefPtr<CefFileDialogCallback> callback) override {
@@ -841,9 +847,42 @@ private:
     IMPLEMENT_REFCOUNTING(BridgePdfCallback);
 };
 
-// Runs the browser's screenshot requests through the DevTools protocol and passes each one's PNG, or nil, to its completion exactly once.
+// Runs the browser's screenshot requests, evaluations, and other DevTools methods through the DevTools protocol and passes each one's PNG, boolean, or result object, or nil or NO, to its completion exactly once.
 class BridgeDevToolsObserver : public CefDevToolsMessageObserver {
 public:
+    // Sends `method` and passes its result object, or nil when it fails.
+    void Call(CefRefPtr<CefBrowserHost> host, const std::string &method, CefRefPtr<CefDictionaryValue> params, void (^completion)(NSDictionary *_Nullable)) {
+        isSending_ = true;
+        isSendingObject_ = true;
+        int messageID = host->ExecuteDevToolsMethod(0, method, params);
+        isSending_ = false;
+        isSendingObject_ = false;
+        std::map<int, NSDictionary *> early;
+        early.swap(earlyObject_);
+        if (messageID == 0) {
+            completion(nil);
+        } else if (auto result = early.find(messageID); result != early.end()) {
+            completion(result->second);
+        } else {
+            pendingObject_[messageID] = completion;
+        }
+    }
+    void Evaluate(CefRefPtr<CefBrowserHost> host, CefRefPtr<CefDictionaryValue> params, void (^completion)(BOOL)) {
+        isSending_ = true;
+        isSendingBoolean_ = true;
+        int messageID = host->ExecuteDevToolsMethod(0, "Runtime.evaluate", params);
+        isSending_ = false;
+        isSendingBoolean_ = false;
+        std::map<int, bool> early;
+        early.swap(earlyBoolean_);
+        if (messageID == 0) {
+            completion(NO);
+        } else if (auto result = early.find(messageID); result != early.end()) {
+            completion(result->second);
+        } else {
+            pendingBoolean_[messageID] = completion;
+        }
+    }
     // Sends `Page.captureScreenshot` with `params`. A call that fails can answer before `ExecuteDevToolsMethod` returns, so results that come while the call is sent wait in `early_` for its message ID.
     void Capture(CefRefPtr<CefBrowserHost> host, CefRefPtr<CefDictionaryValue> params, void (^completion)(NSData *_Nullable)) {
         isSending_ = true;
@@ -867,22 +906,50 @@ public:
         for (auto &entry : pending) {
             entry.second(nil);
         }
+        std::map<int, void (^)(BOOL)> booleans;
+        booleans.swap(pendingBoolean_);
+        for (auto &entry : booleans) { entry.second(NO); }
+        std::map<int, void (^)(NSDictionary *_Nullable)> objects;
+        objects.swap(pendingObject_);
+        for (auto &entry : objects) { entry.second(nil); }
     }
 
     void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void *result,
                                 size_t result_size) override {
         NSData *png = nil;
+        bool boolean = false;
+        NSDictionary *object = nil;
         if (success && result_size > 0) {
             NSData *json = [NSData dataWithBytesNoCopy:const_cast<void *>(result) length:result_size freeWhenDone:NO];
-            id base64 = [[NSJSONSerialization JSONObjectWithData:json options:0 error:nil] objectForKey:@"data"];
+            id parsed = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
+            object = [parsed isKindOfClass:NSDictionary.class] ? parsed : nil;
+            id base64 = [object objectForKey:@"data"];
             if ([base64 isKindOfClass:NSString.class]) {
                 png = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
             }
+            id value = [[object objectForKey:@"result"] objectForKey:@"value"];
+            boolean = [value isKindOfClass:NSNumber.class] && [value boolValue];
+        }
+        auto pendingObject = pendingObject_.find(message_id);
+        if (pendingObject != pendingObject_.end()) {
+            void (^completion)(NSDictionary *_Nullable) = pendingObject->second;
+            pendingObject_.erase(pendingObject);
+            completion(object);
+            return;
+        }
+        auto pendingBoolean = pendingBoolean_.find(message_id);
+        if (pendingBoolean != pendingBoolean_.end()) {
+            void (^completion)(BOOL) = pendingBoolean->second;
+            pendingBoolean_.erase(pendingBoolean);
+            completion(boolean);
+            return;
         }
         auto pending = pending_.find(message_id);
         if (pending == pending_.end()) {
             if (isSending_) {
-                early_[message_id] = png;
+                if (isSendingObject_) { earlyObject_[message_id] = object; }
+                else if (isSendingBoolean_) { earlyBoolean_[message_id] = boolean; }
+                else { early_[message_id] = png; }
             }
             return;
         }
@@ -897,7 +964,13 @@ public:
 private:
     std::map<int, void (^)(NSData *_Nullable)> pending_;
     std::map<int, NSData *> early_;
+    std::map<int, void (^)(BOOL)> pendingBoolean_;
+    std::map<int, bool> earlyBoolean_;
+    std::map<int, void (^)(NSDictionary *_Nullable)> pendingObject_;
+    std::map<int, NSDictionary *> earlyObject_;
     bool isSending_ = false;
+    bool isSendingBoolean_ = false;
+    bool isSendingObject_ = false;
     IMPLEMENT_REFCOUNTING(BridgeDevToolsObserver);
 };
 
@@ -1347,7 +1420,7 @@ private:
     NSNumber *key = @(item->GetId());
     ARCHCEFDownload *download = _downloads[key];
     if (!download) {
-        download = [[ARCHCEFDownload alloc] initWithIdentifier:item->GetId() url:ToNSString(item->GetURL())];
+        download = [[ARCHCEFDownload alloc] initWithIdentifier:item->GetId() url:ToNSString(item->GetURL()) originalURL:ToNSString(item->GetOriginalUrl())];
         _downloads[key] = download;
     }
     return download;
@@ -1629,6 +1702,12 @@ static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
     }
 }
 
+- (void)startDownloadWithURL:(NSString *)url {
+    if (_browser) {
+        _browser->GetHost()->StartDownload(CefString(url.UTF8String));
+    }
+}
+
 - (void)goBack {
     // Without an entry nothing loads, and the dialog would stay suppressed until another load ends.
     if (!_browser || !_browser->CanGoBack()) {
@@ -1863,6 +1942,36 @@ static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
     params->SetString("format", "png");
     params->SetBool("captureBeyondViewport", beyondViewport);
     _devToolsObserver->Capture(host, params, completion);
+}
+
+// The main frame's ID comes from the frame tree, then `Page.createIsolatedWorld` gives the world's context, which DevTools reuses for the same name, and `Runtime.evaluate` runs there.
+- (void)evaluateInIsolatedWorldWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion {
+    if (!_browser) { completion(NO); return; }
+    CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+    if (!_devToolsObserver) {
+        _devToolsObserver = new BridgeDevToolsObserver;
+        _devToolsRegistration = host->AddDevToolsMessageObserver(_devToolsObserver);
+    }
+    CefRefPtr<BridgeDevToolsObserver> observer = _devToolsObserver;
+    std::string expression = script.UTF8String;
+    observer->Call(host, "Page.getFrameTree", CefDictionaryValue::Create(), ^(NSDictionary *tree) {
+        id frameID = [[[tree objectForKey:@"frameTree"] objectForKey:@"frame"] objectForKey:@"id"];
+        if (![frameID isKindOfClass:NSString.class]) { completion(NO); return; }
+        CefRefPtr<CefDictionaryValue> world = CefDictionaryValue::Create();
+        world->SetString("frameId", CefString([frameID UTF8String]));
+        world->SetString("worldName", "Arch");
+        observer->Call(host, "Page.createIsolatedWorld", world, ^(NSDictionary *created) {
+            id context = [created objectForKey:@"executionContextId"];
+            if (![context isKindOfClass:NSNumber.class]) { completion(NO); return; }
+            CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+            params->SetString("expression", CefString(expression));
+            params->SetInt("contextId", [context intValue]);
+            params->SetBool("userGesture", true);
+            params->SetBool("awaitPromise", true);
+            params->SetBool("returnByValue", true);
+            observer->Evaluate(host, params, completion);
+        });
+    });
 }
 
 /// Ends every capture still waiting for its result, as when the page's process quits or the browser goes.

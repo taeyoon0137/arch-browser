@@ -63,13 +63,15 @@ import Testing
              "plugin.json: contributes.pageScripts is not offered to plugins that AI writes."),
             (reply(["permissions": ["tabs", "ai"]]), "plugin.json: permissions lists “ai”, which is not offered to plugins that AI writes."),
             (reply(["permissions": [["ai": ["page"]]]]), "plugin.json: permissions lists “ai”, which is not offered to plugins that AI writes."),
+            (reply(["permissions": ["network"]]), "plugin.json: permissions lists “network”, which is not offered to plugins that AI writes."),
+            (reply(["permissions": [["network": ["api.example.com"]]]]), "plugin.json: permissions lists “network”, which is not offered to plugins that AI writes."),
             (reply(files: ["lib/background.js": ""]), "files names “lib/background.js”, which is not a plain file name that ends in .js."),
             (reply(files: ["notes.txt": ""]), "files names “notes.txt”, which is not a plain file name that ends in .js."),
             (reply(files: ["background.js": "", "format.js": ""]),
              "files names “format.js”, which is not the manifest\u{2019}s background script. Only the background script runs, so put all the code in it."),
             (reply(files: ["background.js": 1]), "files.background.js must be text."),
             // Staging checks what it checks for every package.
-            (reply(["permissions": ["notifications"]]), "plugin.json: permissions lists “notifications”, which Arch does not grant."),
+            (reply(["permissions": ["camera"]]), "plugin.json: permissions lists “camera”, which Arch does not grant."),
             (reply(["background": NSNull()], files: [:]), "plugin.json: commands need a background script."),
         ]
         for (unusable, problem) in cases {

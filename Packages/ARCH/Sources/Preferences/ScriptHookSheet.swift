@@ -1,4 +1,8 @@
-// New Script Hook… and Edit… in Settings ▸ AI ▸ Hooks (`docs/hooks.md`, Settings ▸ AI ▸ Hooks; Shell scripts): a hook's name, situation, places, sites, engines, and tabs, what its script may do with tabs, and the script, which Save checks before the registry records it with its digest. Review opens the sheet on a script that changed outside Arch; saving it lets the hook run again. The user's edits in Arch need no Touch ID, except a shell script's: while Allow Shell Scripts is on, Shell Script shows a file's full text, its interpreter's resolved path, what it receives, and that the commands it runs get the hook's access, and Arch copies the file only after Touch ID or the login password, as again for Update from File…, a changed interpreter, or Let Agent Runs Read Pages.
+// New Script Hook… and Edit… in Settings ▸ AI ▸ Hooks edit a hook's name, situation, places, sites, engines, tabs, access, and script (`docs/hooks.md`).
+// Save checks the script before the registry stores it with its digest. Review opens a script changed outside Arch; saving allows it to run again.
+// Edits made in Arch need no Touch ID except for shell scripts. When Allow Shell Scripts is on, Shell Script shows the file's text and resolved interpreter path.
+// It also shows what the script receives and what its commands may access. Arch copies it after Touch ID or the login password.
+// Update from File, a changed interpreter, and Let Agent Runs Read Pages require that approval again.
 import AppKit
 import Agent
 import AI
@@ -9,14 +13,14 @@ import SwiftUI
 
 /// A shell hook's file as the trust sheet shows it.
 struct ShellScriptChoice: Equatable {
-    /// Where the user keeps the file, which Update from File… reads again.
+    /// Where the user keeps the file, which Update from File reads again.
     var source: String
     /// The bytes the user reads and trusts, which Arch copies.
     var contents: Data
     /// The interpreter as the first line resolves now; nil while the sheet resolves it or when it does not resolve.
     var resolution: HookInterpreterResolution?
     var problem: String?
-    /// The lines that differ from the copy the user trusted last, by index, and how many of its lines are gone, after Update from File….
+    /// The lines that differ from the copy the user trusted last, by index, and how many of its lines are gone, after Update from File.
     var changedLines: Set<Int> = []
     var removedLines = 0
 
@@ -25,7 +29,7 @@ struct ShellScriptChoice: Equatable {
 
 /// What the user last trusted of a shell hook, so that a save that changes none of it asks for no Touch ID.
 struct ShellTrust: Equatable {
-    /// The file's path, so that another file with the same bytes is trusted as a new file, which Update from File… then reads.
+    /// The file's path, so that another file with the same bytes is trusted as a new file, which Update from File then reads.
     var source: String
     var contents: Data
     var interpreter: HookInterpreter
@@ -89,7 +93,7 @@ struct ScriptHookDraft: Identifiable {
     /// Let Agent Runs Read Pages on the trust sheet, off by default.
     var letsAgentReadPages = false
     var trusted: ShellTrust?
-    /// Arch's copy as the user trusted it last, which Update from File… and Choose Another File… mark changed lines against; nil for a new hook, and for a copy that changed outside Arch, which is no longer the trusted one.
+    /// Arch's copy as the user trusted it last, which Update from File and Choose Another File… mark changed lines against; nil for a new hook, and for a copy that changed outside Arch, which is no longer the trusted one.
     var trustedCopy: Data?
 
     init(new places: [HookPersonaPlaces], guided: Bool = false) {
@@ -504,7 +508,7 @@ struct ScriptHookSheet: View {
                 if let route = draft.agentModel {
                     let refs = models(on: route)
                     if case .tier(let tier) = route, refs.isEmpty {
-                        Menu("Choose a model for the \(tier.title) tier") {
+                        Menu("Choose a Model for the \(tier.title) Tier") {
                             ForEach(connectedModels, id: \.self) { ref in Button(aiSettings.title(of: ref)) { aiSettings.setRoute(AIRoute(isEnabled: true, models: [ref]), for: .tier(tier)) } }
                         }
                     }
@@ -546,10 +550,13 @@ struct ScriptHookSheet: View {
             HStack(spacing: 6) {
                 TextField(title, value: value, format: .number)
                     .labelsHidden()
+                    .accessibilityLabel(title)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 64)
                 if let unit { Text(unit).foregroundStyle(.secondary) }
-                Stepper(title, value: value, in: range).labelsHidden()
+                Stepper(title, value: value, in: range)
+                    .labelsHidden()
+                    .accessibilityLabel(title)
             }
         }
     }
@@ -597,7 +604,7 @@ struct ScriptHookSheet: View {
         }
     }
 
-    /// The trust sheet's part: the file, its interpreter, what the script receives and what its commands get, Let Agent Runs Read Pages, and the file's full text with the lines Update from File… changed marked.
+    /// The trust sheet's part: the file, its interpreter, what the script receives and what its commands get, Let Agent Runs Read Pages, and the file's full text with the lines Update from File changed marked.
     @ViewBuilder private var shellScript: some View {
         if let shell = draft.shell {
             LabeledContent("File") {
@@ -607,7 +614,7 @@ struct ScriptHookSheet: View {
         HStack {
             Button(draft.shell == nil ? "Choose File\u{2026}" : "Choose Another File\u{2026}") { chooseShellFile() }
             if draft.stored != nil, let source = draft.shell?.source {
-                Button("Update from File\u{2026}") { loadShellFile(at: URL(fileURLWithPath: source)) }
+                Button("Update from File") { loadShellFile(at: URL(fileURLWithPath: source)) }
             }
         }
         if let shell = draft.shell {
@@ -694,7 +701,7 @@ struct ScriptHookSheet: View {
         }
     }
 
-    /// Resolves the first line in the PATH the script will get, off the main thread, since the interpreter's digest reads the whole program. Without the login shell's PATH nothing resolves, so the sheet records no interpreter that the runs would not find, and Choose Another File… or Update from File… tries again.
+    /// Resolves the first line in the PATH the script will get, off the main thread, since the interpreter's digest reads the whole program. Without the login shell's PATH nothing resolves, so the sheet records no interpreter that the runs would not find, and Choose Another File… or Update from File tries again.
     private func resolveInterpreter() {
         guard let contents = draft.shell?.contents else { return }
         draft.shell?.resolution = nil

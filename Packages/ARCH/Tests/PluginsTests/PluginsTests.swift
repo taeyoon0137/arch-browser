@@ -106,6 +106,31 @@ import WebKit
         #expect(PluginGrant(updating: installed, to: update) == PluginGrant(permissions: [.tabs, .clipboard], sites: [sites[0], sites[2]]))
     }
 
+    /// A permission or host that the user revoked stays revoked in the update's review, while one the installed version did not ask for starts on.
+    @Test func offersAnUpdateWithoutWhatTheUserRevoked() throws {
+        let id = PluginID(rawValue: "org.example.update")!
+        let hosts = ["api.example.com", "cdn.example.com", "new.example.com"].compactMap(PluginNetworkHost.init)
+        let manifest = PluginManifest(id: id, name: "Update", version: "1", summary: "", permissions: [.tabs, .manageTabs, .network], network: Array(hosts[0...1]),
+                                      sites: [], contributions: PluginContributions())
+        let installed = InstalledPlugin(manifest: manifest, grant: PluginGrant(permissions: [.tabs, .network], sites: [], network: [hosts[0]]), isEnabled: true)
+        let update = PluginManifest(id: id, name: "Update", version: "2", summary: "", permissions: [.tabs, .manageTabs, .network, .clipboard], network: hosts,
+                                    sites: [], contributions: PluginContributions())
+        #expect(PluginGrant(updating: installed, to: update) == PluginGrant(permissions: [.tabs, .network, .clipboard], sites: [], network: [hosts[0], hosts[2]]))
+        // With network revoked, no host comes back.
+        let revoked = InstalledPlugin(manifest: manifest, grant: PluginGrant(permissions: [.tabs, .manageTabs], sites: []), isEnabled: true)
+        #expect(PluginGrant(updating: revoked, to: update) == PluginGrant(permissions: [.tabs, .manageTabs, .clipboard], sites: []))
+    }
+
+    /// Revoking renaming alone would change nothing while managing tabs covers it, so Settings offers no Revoke for it then.
+    @Test func offersToRevokeRenamingOnlyWithoutTabManagement() {
+        let manifest = PluginManifest(id: PluginID(rawValue: "org.example.tabs")!, name: "Tabs", version: "1", summary: "", permissions: [.manageTabs, .renameTabs, .tabs],
+                                      sites: [], contributions: PluginContributions())
+        let both = InstalledPlugin(manifest: manifest, grant: PluginGrant(permissions: [.manageTabs, .renameTabs, .tabs], sites: []), isEnabled: true)
+        #expect(!both.revocablePermissions.contains(.renameTabs) && both.revocablePermissions.contains(.manageTabs) && both.revocablePermissions.contains(.tabs))
+        let renameOnly = InstalledPlugin(manifest: manifest, grant: PluginGrant(permissions: [.renameTabs], sites: []), isEnabled: true)
+        #expect(renameOnly.revocablePermissions == [.renameTabs])
+    }
+
     @Test func asksToConfirmEveryWebsiteAndNativeApps() throws {
         let everySite = try MatchPattern("<all_urls>")
         #expect(PluginGrant(permissions: [.nativeMessaging], sites: [everySite]).confirmationReason(for: "A")

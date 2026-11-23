@@ -1,4 +1,4 @@
-// One run of a command-line tool, started with `posix_spawn`: its own process group, pipes for standard input, output, and error instead of a terminal, only the given environment, and its own working directory. Standard input closes after the first input, or stays open for more in order, as a Claude Code session's messages need. A shell hook's interpreter also reads its script from a pipe at descriptor 3. Ending it sends SIGTERM to the group and SIGKILL two seconds later.
+// Runs one command-line tool with `posix_spawn` in its own process group and working directory. The process receives only the given environment. Pipes replace a terminal for standard input, output, and error. Standard input closes after the first message unless the caller keeps it open for later messages, as a Claude Code session does. A shell hook's interpreter reads its script from descriptor 3. Ending the run sends SIGTERM to the group, then SIGKILL two seconds later.
 import Darwin
 import Foundation
 
@@ -14,6 +14,7 @@ public enum CommandLineTermination: Equatable, Sendable {
     }
 }
 
+/// Runs one process in its own group and streams its standard output.
 public final class CommandLineProcess: @unchecked Sendable {
     /// Seconds between SIGTERM and SIGKILL.
     private static let terminationGrace: TimeInterval = 2
@@ -251,10 +252,12 @@ private final class InputPipe: @unchecked Sendable {
     /// Read and written only on `queue`.
     private var isOpen = true
 
+    /// Keeps the descriptor open for ordered writes and a later close.
     init(descriptor: Int32) {
         self.descriptor = descriptor
     }
 
+    /// Queues nonempty input behind earlier writes unless the pipe has closed.
     func write(_ data: Data) {
         guard !data.isEmpty else { return }
         queue.async { [self] in
@@ -263,6 +266,7 @@ private final class InputPipe: @unchecked Sendable {
         }
     }
 
+    /// Queues a close after all writes already submitted.
     func close() {
         queue.async { [self] in
             guard isOpen else { return }
@@ -279,6 +283,7 @@ private final class ScriptPipe: @unchecked Sendable {
     /// Set by the source's cancel handler; read under `lock`.
     private var hasClosed = false
 
+    /// Streams script bytes through descriptor 3 without blocking a thread.
     init(descriptor: Int32, script: Data) {
         // An interpreter that exits before it reads its whole script ends the write with EPIPE instead of a signal.
         _ = fcntl(descriptor, F_SETNOSIGPIPE, 1)
@@ -318,6 +323,7 @@ private final class ExitRecord: @unchecked Sendable {
     private var termination: CommandLineTermination?
     private var waiters: [CheckedContinuation<CommandLineTermination, Never>] = []
 
+    /// Saves the process result and resumes callers already waiting for it.
     func record(_ termination: CommandLineTermination) {
         lock.lock()
         self.termination = termination
@@ -327,6 +333,7 @@ private final class ExitRecord: @unchecked Sendable {
         waiting.forEach { $0.resume(returning: termination) }
     }
 
+    /// Returns the recorded result or waits until the process ends.
     func wait() async -> CommandLineTermination {
         await withCheckedContinuation { continuation in
             lock.lock()

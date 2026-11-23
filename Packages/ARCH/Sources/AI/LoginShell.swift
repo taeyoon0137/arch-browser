@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// Reads the user's exported login-shell environment for tool discovery.
 public actor LoginShell {
     /// What the login shell sets. Only `PATH` reaches every command-line tool; the GitHub CLI also gets the two configuration folders (`docs/bookmarks.md`, GitHub).
     public struct Variables: Equatable, Sendable {

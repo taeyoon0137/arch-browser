@@ -1,6 +1,7 @@
 // `WKWebView` adapter for the `ARCHEngine` protocols. This secondary engine prefers Apple APIs.
 import AppKit
 import ARCHEngine
+import ARCHPrivateAPI
 import Foundation
 import WebKit
 
@@ -23,10 +24,12 @@ public final class WebKitEngine: Engine {
         MainActor.assumeIsolated {
             WebKitInspectorAPI.register()
             WebKitFileChooserAPI.register()
+            WebKitPictureInPictureAPI.register()
         }
     }
 
-    /// Whether an event is a key down that a web contents' trusted input sent (`EngineWebContents.input`). WebKit hands such a key that the page leaves unhandled back to the application with `NSApplication.sendEvent(_:)` once the page has answered, which the page can put off for seconds. The application would offer it to its local event monitors, in no fixed order, and to the menus, and then send it to whatever window and view are key by then, such as the address field, so the application's `sendEvent(_:)` drops it before all of them.
+    /// Marks a key down sent by trusted input (`EngineWebContents.input`). WebKit can return an unhandled key to `NSApplication.sendEvent(_:)` after the page answers, even seconds later.
+    /// The application would pass it to local monitors in unspecified order, menus, and the window and view then in focus, perhaps the address field. Its `sendEvent(_:)` drops this key first.
     @MainActor public static func isTrustedInputKey(_ event: NSEvent) -> Bool {
         event.type == .keyDown && WebKitSentKeys.contains(event)
     }
@@ -289,6 +292,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         webConfiguration.applicationNameForUserAgent = Self.applicationNameForUserAgent
         // The Fullscreen API then works as in the system's browser: WebKit moves the element into its own full-screen window.
         webConfiguration.preferences.isElementFullscreenEnabled = true
+        WebKitPictureInPictureAPI.enable(in: webConfiguration.preferences)
         // A page opens a window only from the user's click or key, as Blink holds Chromium's pages to. WebKit on macOS lets a script open windows without one by default, so a page, or an extension's script in it, could open tab after tab, each with a first download of its own. Popups take this configuration, so the rule holds for them too.
         webConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false
         if WebKitInspectorAPI.isAllowed { WebKitInspectorAPI.enableDeveloperExtras(in: webConfiguration.preferences) }
@@ -327,10 +331,20 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         return (WKWebViewConfiguration(), nil)
     }
 
-    /// For popups (window.open). The configuration WebKit hands over must be used as-is, so the popup shares its opener's content controller, page scripts, and web extensions, and loads the pages its opener loads: `extensionBaseURL` is the opener's.
+    /// For popups (window.open), a valid configuration keeps the opener's content controller, page scripts, and web extensions. `extensionBaseURL` is the opener's.
+    /// `makePopup` rejects an unexpected controller. Direct callers receive a fresh controller instead of trapping.
+    static func makePopup(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) -> WebKitWebContents? {
+        guard parentConfiguration.userContentController is WebKitUserContentController else { return nil }
+        return WebKitWebContents(parentConfiguration: parentConfiguration, extensionBaseURL: extensionBaseURL, context: context)
+    }
+
     init(parentConfiguration: WKWebViewConfiguration, extensionBaseURL: URL?, context: WebKitBrowserContext) {
-        guard let userContent = parentConfiguration.userContentController as? WebKitUserContentController else {
-            preconditionFailure("WebKit popups come from web views of WebKit web contents")
+        let userContent: WebKitUserContentController
+        if let existing = parentConfiguration.userContentController as? WebKitUserContentController {
+            userContent = existing
+        } else {
+            userContent = WebKitUserContentController()
+            parentConfiguration.userContentController = userContent
         }
         self.context = context
         self.userContent = userContent
@@ -370,6 +384,23 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public var isCapturingMedia: Bool { webView.cameraCaptureState != .none || webView.microphoneCaptureState != .none }
     /// WebKit has no public state for picture in picture, so the media script reports each document's (`WebKitAudibleScript`).
     public var isInPictureInPicture: Bool { !pictureInPictureDocuments.isEmpty }
+
+    public func download(_ url: URL) {
+        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in
+            guard let self else { download.cancel(); return }
+            self.context.webKitDownloads.add(download, from: self)
+        }
+    }
+
+    /// `callAsyncJavaScript` runs with the user's gesture, which the request needs, in the client's world, whose functions the page cannot replace. The script settles within five seconds, so the call keeps the web view no longer.
+    public func togglePictureInPicture(completion: @escaping (Bool) -> Void) {
+        Task { @MainActor [weak self] in
+            guard let webView = self?.webView else { return completion(false) }
+            let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.toggle,
+                                                                arguments: [:], in: nil, contentWorld: .defaultClient)
+            completion(result as? Bool == true)
+        }
+    }
     public var zoomFactor: Double {
         get { webView.pageZoom }
         set { webView.pageZoom = newValue }
@@ -503,7 +534,10 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
             return
         }
         let job = PDFPrintJob(completion: completion)
-        let printInfo = NSPrintInfo.shared.copy() as! NSPrintInfo
+        guard let printInfo = NSPrintInfo.shared.copy() as? NSPrintInfo else {
+            completion(.failure(CocoaError(.fileWriteUnknown)))
+            return
+        }
         printInfo.jobDisposition = .save
         printInfo.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = job.file
         let operation = webView.printOperation(with: printInfo)
@@ -663,4 +697,26 @@ final class WebKitBackForwardListItem: EngineBackForwardListItem {
 
     var url: URL { item.url }
     var title: String { item.title ?? "" }
+}
+
+enum WebKitPictureInPictureAPI {
+    static let apiID = "webkit.pictureInPicturePlayback"
+    static let featureID = "webkit.pictureInPicture"
+    // WebKit names the preference with a leading underscore; `setAllowsPictureInPictureMediaPlayback:` does not exist.
+    static let setter = NSSelectorFromString("_setAllowsPictureInPictureMediaPlayback:")
+
+    @MainActor static func register() {
+        let flags = PrivateAPIFlags.shared
+        flags.register(PrivateAPI(id: apiID, name: "WKPreferences._allowsPictureInPictureMediaPlayback", framework: "WebKit") {
+            WKPreferences.instancesRespond(to: setter)
+        })
+        flags.register(PrivateAPIFeature(id: featureID, name: "Picture in picture on WebKit", apiIDs: [apiID]))
+    }
+
+    static func enable(in preferences: WKPreferences) {
+        guard MainActor.assumeIsolated({ PrivateAPIFlags.shared.allows(featureID) }),
+              preferences.responds(to: setter) else { return }
+        // Key-value coding finds the underscored setter for the key without its underscore.
+        preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
+    }
 }

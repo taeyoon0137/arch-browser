@@ -1,6 +1,8 @@
-// The control protocol's version, Arch's first message, `ready`, and the client's, `hello` (docs/agents.md, Local control channel ▸ Framing and methods). `ready`, `hello`, and its answer keep this shape in every protocol version, so that a client and an Arch of different versions can still name both versions.
+// The local control protocol starts with Arch's `ready` and the client's `hello` (docs/agents.md, Framing and methods).
+// These messages and the answer keep the same shape across protocol versions, so each side can name both versions even when they differ.
 import Foundation
 
+/// The version and handshake names shared by Arch and its local control clients.
 public enum AgentControlProtocol {
     /// The version this build speaks. A `hello` with another version is refused, and the client exits with code 75.
     public static let version = 1
@@ -77,6 +79,7 @@ public struct AgentHelloAnswer: Equatable, Sendable {
     }
 }
 
+/// Whether a local control connection is bound, granted, awaiting a grant, or refused.
 public enum AgentConnectionStatus: Equatable, Sendable {
     /// The connection belongs to an in-app session or a shell hook's run, through its ticket.
     case bound
@@ -88,6 +91,7 @@ public enum AgentConnectionStatus: Equatable, Sendable {
     case refused(AgentRefusal)
 }
 
+/// The access level, place, and expiry returned for an outside client's grant.
 public struct AgentGrantSummary: Codable, Equatable, Sendable {
     public var level: AgentAccessLevel
     /// The name of the grant's Persona.
@@ -127,6 +131,7 @@ public enum AgentGrantExpiry: Equatable, Sendable {
 }
 
 extension AgentGrantExpiry: Codable {
+    /// Decodes a quit, revoke, or ISO 8601 expiry value.
     public init(from decoder: Decoder) throws {
         let text = try decoder.singleValueContainer().decode(String.self)
         switch text {
@@ -140,6 +145,7 @@ extension AgentGrantExpiry: Codable {
         }
     }
 
+    /// Encodes the expiry as its wire-format string.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
@@ -150,6 +156,7 @@ extension AgentGrantExpiry: Codable {
     }
 }
 
+/// The reason and user-facing message for a refused control connection.
 public struct AgentRefusal: Codable, Equatable, Sendable {
     public var reason: Reason
     /// One sentence for the user.
@@ -187,6 +194,7 @@ extension AgentHelloAnswer: Codable {
         case `protocol`, version, status, grant, refusal
     }
 
+    /// Decodes the flat hello answer and its status-specific grant or refusal.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         `protocol` = try container.decode(Int.self, forKey: .protocol)
@@ -201,6 +209,7 @@ extension AgentHelloAnswer: Codable {
         }
     }
 
+    /// Encodes the flat hello answer with its grant or refusal when present.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(`protocol`, forKey: .protocol)
@@ -255,6 +264,7 @@ public struct AgentEventFilter: Codable, Equatable, Sendable {
         self.tabKinds = tabKinds
     }
 
+    /// Reads a partial filter with empty lists for omitted fields.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         kinds = try container.decodeIfPresent([String].self, forKey: .kinds) ?? []
@@ -282,6 +292,7 @@ public struct AgentEventSubscribe: Codable, Equatable, Sendable {
         self.after = after
     }
 
+    /// Reads an omitted filter as a match-all filter.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         filter = try container.decodeIfPresent(AgentEventFilter.self, forKey: .filter) ?? AgentEventFilter()
@@ -302,6 +313,7 @@ public struct AgentEventSubscription: Codable, Equatable, Sendable {
 
 /// One event as `arch-cli events` prints it without `--json`, from its outside view: `09:30:12 pageLoaded w4 example.org (chromium, open)`. A download's name is an untrusted block, since a page or a server chose it.
 public enum AgentEventLine {
+    /// Formats an outside event's time, tab or download, and place for terminal output.
     public static func text(for event: AgentJSON, timeZone: TimeZone = .current) -> String {
         var words: [String] = []
         if let date = event["date"]?.stringValue.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
@@ -401,6 +413,7 @@ public struct AgentHookAdd: Codable, Equatable, Sendable {
 
 /// `hooks/add`'s answer.
 public struct AgentHookAddResult: Codable, Equatable, Sendable {
+    /// Whether a proposed outside hook was added, declined, or refused.
     public enum Status: String, Codable, Sendable {
         /// The user allowed the hook, which runs from now on.
         case added

@@ -74,6 +74,7 @@ public struct AgentSessionReference: Codable, Equatable, Sendable {
 
 /// A `task/event` notification's params: what the session did, for `arch-cli task` to print.
 public struct AgentTaskEvent: Codable, Equatable, Sendable {
+    /// The kind of progress a task reports to its client.
     public enum Kind: String, Codable, Sendable {
         /// Part of the agent's reply.
         case text

@@ -1,4 +1,8 @@
-// The shell hook runner (`docs/hooks.md`, Shell scripts): runs Arch's copy of a script the user trusted, which the registry checked against its digest, only while its interpreter is still the one recorded at trust time, by path and SHA-256. It starts that interpreter directly with `posix_spawn` in a process group of its own, never through `env`, with the checked bytes on descriptor 3 and `/dev/fd/3` as the script's path, the event as JSON on standard input, only the listed environment, and a working folder of its own. Standard output is read and dropped, and the end of standard error stays in memory. At the hook's timeout the process group gets SIGTERM, then SIGKILL. While the script runs, `arch-cli` binds to the run with `ARCH_HOOK_TICKET` from the script's process tree and reaches the run's tabs under the hook's grant.
+// A shell hook runs Arch's checked copy of a trusted script (`docs/hooks.md`, Shell scripts).
+// The registry checks its digest, and the runner checks the interpreter's path and SHA-256 against the trusted version.
+// `posix_spawn` starts that interpreter directly in its own process group, never through `env`. The script's bytes arrive on descriptor 3 at `/dev/fd/3`; the event arrives as JSON on standard input.
+// The process gets only the listed environment and its own working folder. Standard output is dropped; the end of standard error stays in memory.
+// At timeout the group receives SIGTERM, then SIGKILL. While it runs, `arch-cli` uses `ARCH_HOOK_TICKET` within the script's process tree to reach the run tabs under the hook grant.
 import Agent
 import AgentControl
 import AI
@@ -38,7 +42,9 @@ public enum HookShellScript {
     /// What the trust sheet says about the commands the script runs.
     public static let pathSentence = "Commands this script runs by name come from your PATH, and each of them gets this hook's access to Arch."
     /// What the trust sheet says the script receives.
-    public static let inputSentence = "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File\u{2026}."
+    public static let inputSentence = "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File."
+    /// The failure of a run whose ticket the channel could not make.
+    static let noTicketSentence = "Arch could not make the run's ticket, so the script did not start."
     /// What Let Agent Runs Read Pages says on the trust sheet.
     public static let readsPagesSentence = "The script and every command it runs can then read the event's page through agent runs."
     static let firstLineSentence = "Its first line must be #! and the absolute path of a program, with at most one option made of the letters e, f, u, v, w, and x, as in -eu, or /usr/bin/env and one program's name."
@@ -160,7 +166,7 @@ public enum HookShellScript {
         return nil
     }
 
-    /// The lines of `new` that `old` does not hold in the same order, by index, and how many lines of `old` are gone, for Update from File….
+    /// The lines of `new` that `old` does not hold in the same order, by index, and how many lines of `old` are gone, for Update from File.
     public static func changes(from old: String, to new: String) -> (changed: Set<Int>, removed: Int) {
         let before = lines(of: old), after = lines(of: new)
         var changed = Set<Int>()
@@ -190,11 +196,13 @@ public enum HookShellScript {
 
     // MARK: Files
 
+    /// Whether the path names a regular executable file.
     private static func isProgram(_ path: String) -> Bool {
         var status = stat()
         return stat(path, &status) == 0 && status.st_mode & S_IFMT == S_IFREG && access(path, X_OK) == 0
     }
 
+    /// Resolves symbolic links in an interpreter path.
     private static func realPath(of path: String) -> String? {
         guard let resolved = Darwin.realpath(path, nil) else { return nil }
         defer { free(resolved) }
@@ -261,6 +269,7 @@ private final class Locked<Value>: @unchecked Sendable {
 // MARK: - The runner
 
 @MainActor
+/// Runs a trusted shell hook with its checked interpreter, bounded process, and grant channel.
 public final class ShellHookRunner: HookScriptRunning {
     /// The end of standard error that a run's last runs keep in memory.
     public static let errorOutputLimit = 4 * 1024
@@ -289,6 +298,7 @@ public final class ShellHookRunner: HookScriptRunning {
         self.loginPath = loginPath
     }
 
+    /// Checks the interpreter, starts the script with a bounded environment and ticket, and returns its outcome.
     public func run(_ invocation: HookInvocation) async -> HookRunOutcome {
         guard case .shell(_, _, let recorded) = invocation.hook.script else { return .failed(code: "invalidScript", message: "This hook's script is not a shell script.") }
         if let problem = HookShellScript.problem(in: invocation.script) { return .failed(code: "invalidScript", message: problem) }
@@ -321,7 +331,15 @@ public final class ShellHookRunner: HookScriptRunning {
         if tools.permitsAgentRuns {
             agentRun = { @MainActor fields in await tools.runAgent(fields) }
         }
-        let ticket = channel?.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun) ?? ""
+        var ticket = ""
+        if let channel {
+            // Without a ticket, every arch-cli call of the script would fail as not granted, so the run does not start.
+            guard let opened = channel.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun) else {
+                tools.end()
+                return .failed(code: "notStarted", message: HookShellScript.noTicketSentence)
+            }
+            ticket = opened
+        }
         state.accessEnd = { [channel] in
             tools.end()
             channel?.closeHookRun(invocation.run)
@@ -369,6 +387,7 @@ public final class ShellHookRunner: HookScriptRunning {
         running[run]?.cancel()
     }
 
+    /// Returns and removes the captured standard error for a run.
     public func takeErrorOutput(of run: UUID) -> String? {
         errorOutputs.removeValue(forKey: run)
     }
@@ -578,6 +597,7 @@ final class ShellHookRunTools {
         return (tab.title ?? "", document)
     }
 
+    /// Checks a run tab's document before applying or proposing its suggested name.
     private func rename(_ arguments: [String: AgentJSON]) -> AgentToolResult {
         guard let handle = arguments["tab"]?.stringValue, let name = arguments["name"]?.stringValue else {
             return AgentToolResult(status: .refused, code: "invalidArguments", text: "rename_tab needs a tab's handle and a name.")

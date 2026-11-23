@@ -23,6 +23,7 @@ public struct LiveItemTab: Hashable, Sendable {
 
 /// The changes that bring a folder's tabs in line with its items.
 public struct LiveFolderPlan: Equatable, Sendable {
+    /// A retained tab or the item that needs a new tab in the planned order.
     public enum Entry: Hashable, Sendable {
         case tab(UUID)
         /// The new tab for the item with this ID.
@@ -39,6 +40,7 @@ public struct LiveFolderPlan: Equatable, Sendable {
     public var order: [Entry] = []
 }
 
+/// Plans tab additions, title changes, removals, and ordering for a live folder.
 public enum LiveFolderReconciler {
     /// Adds a tab for each listed item that has none and is not dismissed, retitles tabs whose items changed title, and removes tabs for items the source no longer lists, or that are dismissed, unless the tab has its page or a window shows it. A kept tab that later loses its page goes at the next plan. A second tab for one item counts as one for an item no longer listed.
     public static func plan(items: [LiveItem], tabs: [LiveItemTab], dismissed: Set<String>) -> LiveFolderPlan {

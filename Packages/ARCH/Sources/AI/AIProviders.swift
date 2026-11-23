@@ -2,6 +2,7 @@
 import CryptoKit
 import Foundation
 
+/// A stable identifier for one provider connected by the user.
 public struct AIProviderID: RawRepresentable, Hashable, Codable, Sendable {
     /// A UUID string made when the user adds the provider.
     public let rawValue: String
@@ -16,6 +17,7 @@ public struct AIProviderID: RawRepresentable, Hashable, Codable, Sendable {
     }
 }
 
+/// The saved provider kind, models, request limits, and display name.
 public struct AIProviderConfiguration: Identifiable, Codable, Sendable, Equatable {
     public var id: AIProviderID
     public var name: String
@@ -145,6 +147,7 @@ public enum AIProviderKind: Codable, Sendable, Equatable {
     }
 }
 
+/// A model's name, input limit, optional price, and capability override.
 public struct AIModelConfiguration: Codable, Sendable, Equatable {
     public static let defaultInputCharacterLimit = 100_000
 
@@ -177,6 +180,7 @@ public struct AIModelConfiguration: Codable, Sendable, Equatable {
     }
 }
 
+/// Concurrent and per-minute request limits for a provider.
 public struct AIProviderLimits: Codable, Sendable, Equatable {
     /// Default 4 for HTTP providers and 1 for command-line tools.
     public var concurrentRequests: Int
@@ -196,6 +200,7 @@ public struct AIProviderLimits: Codable, Sendable, Equatable {
 
 // MARK: - HTTP APIs
 
+/// The wire format, destination, nonsecret headers, and saved-key state for an HTTP provider.
 public struct AIHTTPConfiguration: Codable, Sendable, Equatable {
     public var format: AIWireFormat
     /// https, or http only for a loopback host such as a model server on this Mac.
@@ -236,10 +241,12 @@ public struct AIHTTPConfiguration: Codable, Sendable, Equatable {
     }
 }
 
+/// The supported HTTP request and response formats.
 public enum AIWireFormat: String, Codable, Sendable, CaseIterable {
     case chatCompletions
     case messages
 
+    /// The model capabilities supported by this wire format before model overrides.
     public var capabilities: Set<AIModelCapability> {
         switch self {
         case .chatCompletions: return [.tools, .jsonOutput, .images]
@@ -384,6 +391,7 @@ protocol AIProvider: Sendable {
     func stream(_ request: AIProviderRequest) -> AsyncThrowingStream<AIEvent, any Error>
 }
 
+/// A request after route and data-policy checks, ready for one provider.
 struct AIProviderRequest: Sendable {
     var model: String
     var instructions: String?

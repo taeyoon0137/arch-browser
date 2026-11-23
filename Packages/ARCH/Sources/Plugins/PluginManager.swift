@@ -1,4 +1,9 @@
-// The plugins of one Persona. The manager registers the built-in plugins and the plugins the user installed, script plugins and those of the kinds whose runtimes the app supplies, keeps which of them the user switched on or off and what it installed in `plugins.json`, exposes the contributions of the enabled ones, starts a plugin's code only when one of its commands runs, one of its panels opens, one of its page scripts sends it a value, an event its manifest lists arrives from the Persona's browser events, or the user changes one of its settings while its manifest asks for that, and keeps each plugin's data in the Persona's folder and its secrets in the Keychain. It stages plugins from the files the user chooses and script plugins from the files AI writes, installs, updates, and removes installed plugins, records which engines run the packages of kinds that engines check, keeps two web extension plugins that are versions of one extension as a pair with one engine each, tells each runtime which of its plugins are enabled, and switches off a script plugin whose background script fails three times within five minutes. It registers the AI feature of each enabled plugin with `ai` and runs the bus event listeners of those with bus events as steps of the shared hook scheduler.
+// One Persona's plugin manager registers built-in and installed plugins, including scripts and kinds supplied by app runtimes.
+// It keeps enabled state and installs in `plugins.json`, publishes enabled contributions, stores plugin data in the Persona's folder, and keeps secrets in the Keychain.
+// A plugin's code starts only when a command runs, a panel opens, a page script sends a value, a listed browser event arrives, or a listed setting changes.
+// The manager stages user files and AI-written scripts, then installs, updates, or removes them. It tracks engine coverage and pairs two versions of one web extension, one per engine.
+// It tells runtimes what is enabled and switches off a script plugin after three background failures in five minutes.
+// It registers an AI feature for each enabled plugin with `ai`. Bus event listeners run as steps in the shared hook scheduler.
 import AI
 import AppKit
 import ARCHEngine
@@ -78,11 +83,26 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
 
     /// The sentence of each permission of the grant, in a fixed order.
     private var permissionSummaries: [String] {
-        PluginPermission.allCases.filter(grant.permissions.contains).map(\.summary)
+        PluginPermission.allCases.filter(grant.permissions.contains).map { $0 == .network ? grant.networkSummary : $0.summary }
+    }
+
+    /// The permissions of the grant that Settings offers to revoke, in the order of their sentences: each one except `tabs.rename` while `tabs.manage`, which covers renaming, is granted, since revoking it alone would change nothing.
+    public var revocablePermissions: [PluginPermission] {
+        PluginPermission.allCases.filter { grant.permissions.contains($0) && !($0 == .renameTabs && grant.permissions.contains(.manageTabs)) }
+    }
+
+    /// The sentence of the grant's permission, as `accessSummaries` states it.
+    public func summary(of permission: PluginPermission) -> String {
+        permission == .network ? grant.networkSummary : permission.summary
+    }
+
+    /// The sentence for the grant's sites that `accessBrief` gives in place of theirs, or nil with no more than `listedSiteLimit` sites.
+    public var sitesBrief: String? {
+        grant.sites.count > Self.listedSiteLimit ? MatchPattern.briefAccessSummary(of: grant.sites) : nil
     }
 
     /// The sentences of what comes with the grant: the data kinds that its AI requests carry and a web extension's other API permissions.
-    private var includedSummaries: [String] {
+    public var includedSummaries: [String] {
         [grant.permissions.contains(.ai) ? manifest.aiDataSummary : nil, manifest.extensionPermissionsSummary].compactMap { $0 }
     }
 
@@ -105,6 +125,7 @@ public protocol PluginNativeAppGate: AnyObject {
     func refusal(of manifest: PluginManifest, proof: PluginProof?, predatesProof: Bool) -> String?
 }
 
+/// Manages one Persona's plugin installs, grants, contributions, runtimes, and event delivery.
 @MainActor
 public final class PluginManager: ObservableObject {
     /// The start of the identifiers of Arch's own plugins: those built into it and, under `PluginComposer.identifierPrefix`, those that AI writes.
@@ -120,7 +141,7 @@ public final class PluginManager: ObservableObject {
     /// The built-in plugins in the order the app listed them, then the installed plugins in the order the user installed them, where the remaining version of a pair takes the place of the pair. Each version of a pair has its counterpart and its engine.
     @Published public private(set) var plugins: [InstalledPlugin] {
         didSet {
-            contributions = PluginContributionIndex(plugins)
+            contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
             pruneSiteAccess()
             runEnabledPlugins()
             registerAIFeatures()
@@ -137,6 +158,9 @@ public final class PluginManager: ObservableObject {
     @Published public private(set) var listWriteFailure: String?
     /// The badges the plugins set, by plugin and sidebar item.
     @Published private var badges: [PluginID: [String: String]] = [:]
+    @Published public private(set) var panelRequest: (plugin: PluginID, item: String, nonce: UUID)?
+    private var disabledCommands: [PluginID: Set<String>] = [:]
+    private var lastNotification: [PluginID: Date] = [:]
     private let builtIns: [PluginID: any BuiltInPlugin.Type]
     /// The runtimes of the installed kinds that the manager does not run itself, which read their packages and run their plugins, by kind.
     private let runtimes: [PluginKind: any PluginRuntime]
@@ -170,6 +194,14 @@ public final class PluginManager: ObservableObject {
     private var eventLimiter = BrowserEventRateLimiter()
     /// When each plugin opened the tabs it opened in the last minute, which `tabOpenLimit` caps.
     private var tabOpenings: [PluginID: [Date]] = [:]
+    /// When each plugin started the network requests it started in the last minute, which `networkRequestLimit` caps.
+    private var networkOpenings: [PluginID: [Date]] = [:]
+    /// The most network requests a plugin starts within a minute.
+    static let networkRequestLimit = 60
+    /// Sends a plugin's checked request to the granted hosts: `PluginNetworkFetch`, or a test's own transport.
+    var networkTransport: (URLRequest, [PluginNetworkHost]) async throws -> (Data, HTTPURLResponse) = { request, hosts in
+        try await PluginNetworkFetch(hosts: hosts).run(request)
+    }
     /// The AI interface that the plugins with `ai` send their requests through, whose hook scheduler runs their hooks; without one, they get no AI and their events arrive as for other plugins.
     private let ai: AIService?
     /// The features this manager registered in `ai`, those of its enabled plugins with `ai`, by identifier.
@@ -227,6 +259,7 @@ public final class PluginManager: ObservableObject {
         self.init(persona: persona, directory: directory, builtIns: builtIns, runtimes: runtimes, secretStore: PluginKeychain(), events: events, browserHost: browserHost, ai: ai)
     }
 
+    /// Restores plugin state with the supplied secret store and script limits.
     init(persona: PersonaID, directory: URL, builtIns: [any BuiltInPlugin.Type], runtimes: [any PluginRuntime] = [], secretStore: any PluginSecretStore,
          scriptLimits: ScriptPluginLimits = .standard, publisherKeyDigest: Data = CRXArchive.webStorePublisherKeyDigest,
          events: BrowserEventBus? = nil, browserHost: (any PluginBrowserHost)? = nil, ai: AIService? = nil) {
@@ -268,7 +301,7 @@ public final class PluginManager: ObservableObject {
         self.choices = choices
         self.installs = installs
         self.pairRecords = pairRecords
-        contributions = PluginContributionIndex(paired)
+        contributions = PluginContributionIndex(paired, disabledCommands: disabledCommands)
         // Packages that were under review when the app last quit cannot be installed any more.
         try? FileManager.default.removeItem(at: stagingDirectory)
         if !restored.isEmpty { saveList() }
@@ -387,6 +420,30 @@ public final class PluginManager: ObservableObject {
         setEnabled(isEnabled, for: [id] + [plugins.first { $0.id == id }?.counterpart].compactMap { $0 }, failure: nil)
     }
 
+    /// Removes one part of an installed plugin's grant and stops its old context immediately.
+    public func revoke(_ permission: PluginPermission, from id: PluginID) {
+        updateGrant(of: id) { $0.permissions.remove(permission) }
+    }
+
+    /// Removes a site from an installed plugin's grant and stops its current context.
+    public func revoke(_ site: MatchPattern, from id: PluginID) {
+        updateGrant(of: id) { $0.sites.removeAll { $0 == site } }
+    }
+
+    /// Persists an installed plugin's reduced grant and stops its running instance.
+    private func updateGrant(of id: PluginID, _ change: (inout PluginGrant) -> Void) {
+        guard !isClosed, let index = plugins.firstIndex(where: { $0.id == id && $0.origin != .bundled }),
+              let entryIndex = installs.firstIndex(where: { $0.id == id.rawValue }),
+              case var .readable(entry) = installs[entryIndex] else { return }
+        var next = plugins
+        change(&entry.grant)
+        next[index].grant = entry.grant
+        installs[entryIndex] = .readable(entry)
+        stop(id)
+        saveList()
+        setPlugins(next)
+    }
+
     /// `failure` says why the manager switches the plugins off, for Settings. The manager switches off one version of a pair alone, so that its counterpart keeps running.
     private func setEnabled(_ isEnabled: Bool, for ids: [PluginID], failure: String?) {
         var next = plugins
@@ -440,9 +497,10 @@ public final class PluginManager: ObservableObject {
         saveList()
     }
 
-    /// Drops the plugin's running instance, whose context stops acting at once and which deactivates once its activation ends.
+    /// Drops the plugin's running instance, whose context stops acting at once and which deactivates once its activation ends. The commands that the run disabled come back, since `setEnabled(_:command:)` lasts only for the run and a plugin without events may have no other way to start again.
     private func stop(_ id: PluginID) {
         guard let stopped = running.removeValue(forKey: id) else { return }
+        restoreCommands(of: id)
         stopped.context.end()
         Task {
             guard (try? await stopped.activation.value) != nil else { return }
@@ -578,6 +636,16 @@ public final class PluginManager: ObservableObject {
     public func discard(_ package: PluginPackage) {
         guard package.rootURL.deletingLastPathComponent().standardizedFileURL == stagingDirectory.standardizedFileURL else { return }
         try? FileManager.default.removeItem(at: package.rootURL)
+    }
+
+    /// The installed package folder that another Persona can stage for its own grant review, as from a folder. None for a plugin that AI wrote, whose review there would show a file install without its requests and sources.
+    public func packageFolderForCopy(of id: PluginID) -> URL? {
+        guard !isClosed, let installed = plugins.first(where: { $0.id == id }),
+              installed.counterpart == nil, installed.kind == .script || installed.kind == .webExtension else { return nil }
+        switch installed.origin {
+        case .bundled, .generated: return nil
+        case .file, .webStore: return packages[id]?.rootURL
+        }
     }
 
     /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. A new plugin takes nothing from an install entry or a pair record with its identifier that the list leaves out, as a removal whose write failed leaves them: its entry goes after the others without the old dismissed notes, and the records go, so that it joins a pair only as the user chooses. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID, and the file system's error when the package cannot move or `plugins.json` cannot record the install, as on a full disk. In the last case the staged package goes back to staging, the package it replaced back to its place, and the lists back to how they were, so that the review can install it again or discard it.
@@ -1003,10 +1071,13 @@ public final class PluginManager: ObservableObject {
 
     /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
-        guard let installed = enabledPlugin(command.plugin), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
+        guard let installed = enabledPlugin(command.plugin), !disabledCommands[command.plugin, default: []].contains(command.command), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
         guard grantSiteAccess(to: installed, for: invocation) else { return NSSound.beep() }
         do {
-            try await start(installed)?.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
+            guard let plugin = try await start(installed), let context = running[installed.id]?.context else { return }
+            context.userCommandCount += 1
+            defer { context.userCommandCount -= 1 }
+            try await plugin.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
         } catch {
             NSSound.beep()
         }
@@ -1056,6 +1127,12 @@ public final class PluginManager: ObservableObject {
         return nil
     }
 
+    /// Starts an enabled script plugin and opens its package's settings page in a panel controller for Settings.
+    public func settingsPage(for id: PluginID) async -> NSViewController? {
+        guard let installed = enabledPlugin(id), installed.kind == .script, installed.manifest.settingsPage != nil else { return nil }
+        return (try? await start(installed) as? ScriptPlugin)?.settingsPage()
+    }
+
     /// The badge the item's plugin set on it, if any.
     public func badge(on item: Attributed<PluginSidebarItem>) -> String? {
         badges[item.plugin]?[item.item.id]
@@ -1065,6 +1142,29 @@ public final class PluginManager: ObservableObject {
     fileprivate func setBadge(_ text: String?, onSidebarItem id: String, of plugin: PluginID) {
         guard let installed = enabledPlugin(plugin), installed.manifest.contributions.sidebarItems.contains(where: { $0.id == id }) else { return }
         badges[plugin, default: [:]][id] = text?.isEmpty == false ? text : nil
+    }
+
+    /// Enables or disables one contributed command for the current plugin run.
+    fileprivate func setEnabled(_ isEnabled: Bool, command id: String, of plugin: PluginID) {
+        guard let installed = enabledPlugin(plugin), installed.commands(among: plugins).contains(where: { $0.id == id }) else { return }
+        if isEnabled { disabledCommands[plugin, default: []].remove(id) }
+        else { disabledCommands[plugin, default: []].insert(id) }
+        contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
+    }
+
+    /// Shows again the commands that the plugin's run disabled.
+    private func restoreCommands(of plugin: PluginID) {
+        guard disabledCommands.removeValue(forKey: plugin) != nil else { return }
+        contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
+    }
+
+    /// Requests a panel for a contributed sidebar item with a panel action.
+    fileprivate func showPanel(_ item: String, of plugin: PluginID) {
+        guard let installed = enabledPlugin(plugin), installed.manifest.contributions.sidebarItems.contains(where: {
+            guard $0.id == item, case .panel = $0.action else { return false }
+            return true
+        }) else { return }
+        panelRequest = (plugin, item, UUID())
     }
 
     // MARK: Page scripts
@@ -1181,6 +1281,7 @@ public final class PluginManager: ObservableObject {
         return tab
     }
 
+    /// Clears the named plugins' access in a tab and republishes its page scripts.
     private func endSiteAccess(of plugins: [PluginID], inTab id: UUID) {
         for plugin in plugins { siteAccess[plugin]?[id] = nil }
         siteAccess = siteAccess.filter { !$0.value.isEmpty }
@@ -1389,7 +1490,10 @@ public final class PluginManager: ObservableObject {
         } catch {
             // The failed instance is dropped, so whatever it left running cannot act for the plugin.
             started.context.end()
-            if running[installed.id]?.plugin === started.plugin { running[installed.id] = nil }
+            if running[installed.id]?.plugin === started.plugin {
+                running[installed.id] = nil
+                restoreCommands(of: installed.id)
+            }
             throw error
         }
         guard running[installed.id]?.plugin === started.plugin else { return nil }
@@ -1421,6 +1525,7 @@ public final class PluginManager: ObservableObject {
         setEnabled(false, for: [id], failure: "Arch switched the plugin off after it failed three times within five minutes. \(reason)")
     }
 
+    /// Creates a context scoped to the installed plugin and its Persona.
     func makeContext(for installed: InstalledPlugin) -> ScopedPluginContext {
         ScopedPluginContext(manager: self, pluginID: installed.id, personaID: persona, grant: installed.grant,
                             storage: ScopedPluginStorage(file: storage(for: installed.id)), secrets: secrets(for: installed.id),
@@ -1430,6 +1535,34 @@ public final class PluginManager: ObservableObject {
     /// The Persona's tabs before the grant applies.
     fileprivate func personaTabs() -> [PluginTab] {
         browserHost?.tabs(in: persona) ?? []
+    }
+
+    fileprivate func personaDownloads() -> [PluginDownload] {
+        browserHost?.downloads(in: persona) ?? []
+    }
+
+    fileprivate func renameDownload(_ id: UUID, to name: String) -> Bool {
+        browserHost?.renameDownload(id, to: name, in: persona) ?? false
+    }
+
+    /// Posts a notification for an enabled plugin, at most once every ten seconds, with at most 100 characters of title and 500 of body.
+    fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
+        let now = Date()
+        guard lastNotification[plugin].map({ now.timeIntervalSince($0) >= 10 }) ?? true,
+              let name = plugins.first(where: { $0.id == plugin && $0.isEnabled })?.manifest.name else { return }
+        lastNotification[plugin] = now
+        browserHost?.postNotification(pluginName: name, title: String(title.prefix(100)), body: String(body.prefix(500)))
+    }
+
+    /// Checks a network request at the moment it starts: the plugin is still installed and enabled with the very grant its context holds, so a revoke or an update stops it at once, the grant has `network`, the address is HTTPS on port 443 at a granted host, and the plugin has started fewer than `networkRequestLimit` requests within the last minute. Throws `PluginError.permissionDenied(.network)`, `hostRefused`, or `rateLimited`.
+    fileprivate func allowNetwork(_ plugin: PluginID, request: URLRequest, grant: PluginGrant) throws {
+        guard !isClosed, let installed = plugins.first(where: { $0.id == plugin && $0.isEnabled }),
+              installed.grant == grant, grant.permissions.contains(.network) else { throw PluginError.permissionDenied(.network) }
+        guard let url = request.url, PluginNetworkFetch.checkedHost(of: url, hosts: grant.network) != nil else { throw PluginError.hostRefused }
+        let now = Date()
+        let recent = (networkOpenings[plugin] ?? []).filter { now.timeIntervalSince($0) < 60 }
+        guard recent.count < Self.networkRequestLimit else { throw PluginError.rateLimited }
+        networkOpenings[plugin] = recent + [now]
     }
 
     /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
@@ -1536,6 +1669,7 @@ private struct PackageMove {
     /// The plugin's folder, if the move created it.
     private let createdFolder: URL?
 
+    /// Moves a staged package into place while retaining the prior package for rollback.
     init(from stagedURL: URL, to destination: URL) throws {
         let fileManager = FileManager.default
         let folder = destination.deletingLastPathComponent()
@@ -1578,6 +1712,7 @@ private struct PackageMove {
 struct PluginListFile: Codable {
     static let name = "plugins.json"
 
+    /// An on/off choice for one plugin.
     struct Choice: Codable {
         /// The plugin's identifier as `PluginID` writes it.
         var id: String
@@ -1719,6 +1854,7 @@ struct PluginListFile: Codable {
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.
 @MainActor
 final class ScopedPluginContext: PluginPanelContext {
+    var userCommandCount = 0
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
@@ -1730,6 +1866,7 @@ final class ScopedPluginContext: PluginPanelContext {
     /// The page calls' runs that wait for the page's reply, by number, which `end()` ends.
     private var pageRuns: [Int: CheckedContinuation<String?, any Error>] = [:]
     private var nextPageRun = 0
+    private var networkRuns: [UUID: Task<(Data, HTTPURLResponse), any Error>] = [:]
 
     init(manager: PluginManager, pluginID: PluginID, personaID: PersonaID, grant: PluginGrant, storage: ScopedPluginStorage, secrets: ScopedPluginSecrets, ai: PluginAIRequests? = nil) {
         self.manager = manager
@@ -1756,6 +1893,8 @@ final class ScopedPluginContext: PluginPanelContext {
         scopedStorage.end()
         scopedSecrets.end()
         aiRequests?.end()
+        for task in networkRuns.values { task.cancel() }
+        networkRuns = [:]
         let runs = pageRuns.values
         pageRuns = [:]
         for run in runs {
@@ -1777,6 +1916,16 @@ final class ScopedPluginContext: PluginPanelContext {
         manager?.setBadge(text, onSidebarItem: id, of: pluginID)
     }
 
+    func setEnabled(_ isEnabled: Bool, command id: String) {
+        guard !hasEnded else { return }
+        manager?.setEnabled(isEnabled, command: id, of: pluginID)
+    }
+
+    func showPanel(_ sidebarItemID: String) {
+        guard !hasEnded, userCommandCount > 0 else { return }
+        manager?.showPanel(sidebarItemID, of: pluginID)
+    }
+
     func copyToClipboard(_ text: String) throws {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.clipboard)
@@ -1788,6 +1937,45 @@ final class ScopedPluginContext: PluginPanelContext {
         guard !hasEnded else { throw PluginError.stopped }
         guard let manager else { return [] }
         return manager.personaTabs().map { manager.shown($0, to: grant, of: pluginID) }
+    }
+
+    func downloads() throws -> [PluginDownload] {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.downloads)
+        return manager?.personaDownloads() ?? []
+    }
+
+    func renameDownload(_ id: UUID, to name: String) throws -> Bool {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.renameDownloads)
+        guard let manager, manager.personaDownloads().contains(where: { $0.id == id }) else { return false }
+        return manager.renameDownload(id, to: name)
+    }
+
+    func notify(title: String, body: String) throws {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.notifications)
+        manager?.notify(pluginID, title: title, body: body)
+    }
+
+    func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.network)
+        guard let manager else { throw PluginError.stopped }
+        try manager.allowNetwork(pluginID, request: request, grant: grant)
+        let id = UUID()
+        let (transport, hosts) = (manager.networkTransport, grant.network)
+        let task = Task { try await transport(request, hosts) }
+        networkRuns[id] = task
+        defer { networkRuns[id] = nil }
+        let response: (Data, HTTPURLResponse)
+        do {
+            response = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        } catch is CancellationError {
+            throw PluginError.stopped
+        }
+        guard !hasEnded else { throw PluginError.stopped }
+        return response
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {

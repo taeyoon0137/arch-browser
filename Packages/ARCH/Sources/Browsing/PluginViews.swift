@@ -1,4 +1,5 @@
-// What the plugins of a window's Persona add to the sidebar: rows below the favorites that run a command or open the plugin's panel in a popover, and their items in the menus that SwiftUI builds, the tab rows' context menus and the space menu.
+// Shows plugin items below the favorites. An item runs a command or opens a panel in a popover or the sidebar.
+// Plugin items also appear in tab and space menus.
 import AppKit
 import Plugins
 import SwiftUI
@@ -6,12 +7,13 @@ import SwiftUI
 /// The sidebar items of the manager's enabled plugins, in the order the plugins registered. Without items it shows nothing and takes no space.
 struct PluginSidebarItemsView: View {
     @ObservedObject var plugins: PluginManager
+    let spaceID: UUID
 
     var body: some View {
         let items = plugins.contributions.sidebarItems
         if !items.isEmpty {
             VStack(spacing: 2) {
-                ForEach(items, id: \.id) { PluginSidebarItemRow(plugins: plugins, item: $0) }
+                ForEach(items, id: \.id) { PluginSidebarItemRow(plugins: plugins, item: $0, spaceID: spaceID) }
             }
         }
     }
@@ -22,6 +24,7 @@ private struct PluginSidebarItemRow: View {
     @ObservedObject var plugins: PluginManager
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let item: Attributed<PluginSidebarItem>
+    let spaceID: UUID
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
     @State private var anchor = PluginPanelAnchor()
@@ -34,9 +37,11 @@ private struct PluginSidebarItemRow: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 18)
+                    .accessibilityHidden(true)
                 Text(item.item.title)
                     .font(.system(size: 14))
                     .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
                 if let badge {
                     Text(badge)
@@ -44,7 +49,7 @@ private struct PluginSidebarItemRow: View {
                         .lineLimit(1)
                         .padding(.horizontal, 6)
                         .frame(minWidth: 18, minHeight: 18)
-                        .background(Capsule().fill(Color.primary.opacity(0.1)))
+                        .background(Capsule().fill(SidebarFill.field.color(in: colorScheme)))
                 }
             }
             .padding(.leading, 10)
@@ -55,6 +60,11 @@ private struct PluginSidebarItemRow: View {
         }
         .buttonStyle(.plain)
         .background(PluginPanelAnchorView(anchor: anchor))
+        .onChange(of: plugins.panelRequest?.nonce) {
+            guard let request = plugins.panelRequest, request.plugin == item.plugin, request.item == item.item.id,
+                  windowModel.session.activeWindow === windowModel else { return }
+            openPanel()
+        }
         .onHover { isHovering = $0 }
         // On a second line, as a tab row's address: parentheses in the sidebar's tooltips hold a shortcut.
         .help("\(item.item.title)\n\(item.pluginName)")
@@ -62,12 +72,24 @@ private struct PluginSidebarItemRow: View {
         .accessibilityValue(badge ?? "")
     }
 
-    /// A command runs on the window's selected tab. A panel opens beside the row once the plugin hands it over and closes with a click outside it, Escape, a click on the row, or its own end.
+    /// Runs a command on the selected tab or opens the panel in its requested presentation. A popover closes on a click outside, Escape, a second click on the row, or its own end.
     private func open() {
         switch item.item.action {
         case let .command(id):
-            windowModel.runPluginCommand(PluginCommandRef(plugin: item.plugin, command: id))
+            windowModel.runPluginCommand(PluginCommandRef(plugin: item.plugin, command: id), source: .sidebar)
         case .panel:
+            openPanel()
+        }
+    }
+
+    private func openPanel() {
+        guard windowModel.currentSpaceID == spaceID else { return }
+        if item.item.presentation == .sidebar {
+            Task {
+                guard let panel = await plugins.panel(for: item) else { return }
+                windowModel.showSidebarPanel(panel, for: item, in: spaceID, plugins: plugins)
+            }
+        } else {
             anchor.showPanel { await plugins.panel(for: item) }
         }
     }

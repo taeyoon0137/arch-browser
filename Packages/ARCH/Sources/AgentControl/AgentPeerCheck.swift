@@ -30,6 +30,7 @@ public struct AgentPeer: Sendable {
     }
 }
 
+/// Reasons a control-socket peer identity check can fail.
 public enum AgentPeerCheckFailure: Error, Equatable {
     case unreadablePeer(Int32)
     /// The peer runs as another user.
@@ -55,6 +56,7 @@ public enum AgentPeerCheckFailure: Error, Equatable {
     }
 }
 
+/// Reads the code directory hash of a signed file or running peer.
 public enum AgentCodeIdentity {
     /// The code directory hash (`kSecCodeInfoUnique`) of the signed file at a path.
     public static func uniqueHash(ofFileAt url: URL) throws -> Data {
@@ -77,6 +79,7 @@ public enum AgentCodeIdentity {
         return try uniqueHash(of: unsafeBitCast(code, to: SecStaticCode.self))
     }
 
+    /// Reads the unique code directory hash from a validated code object.
     private static func uniqueHash(of code: SecStaticCode) throws -> Data {
         var information: CFDictionary?
         let status = SecCodeCopySigningInformation(code, [], &information)

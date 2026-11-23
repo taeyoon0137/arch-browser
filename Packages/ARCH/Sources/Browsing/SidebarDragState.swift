@@ -1,4 +1,6 @@
-// What a drag in a window's sidebar lifts, where it is, and the drop target under it, with the layer that draws a lifted tab or folder row above the sidebar and the page. Tab and folder rows start their drags in `SpaceTabsView.swift`, where a row held near the list's top or bottom scrolls it (`DragAutoScroll.swift`), favorites and space symbols in `SidebarDragAndDrop.swift`, and the page area finds a dragged tab's place in split view (`SplitView.swift`).
+// A sidebar drag tracks the lifted item, its position, and the drop target. A layer draws a lifted tab or folder row over the sidebar and page.
+// `SpaceTabsView.swift` starts tab and folder drags and scrolls a row held near an edge through `DragAutoScroll.swift`.
+// `SidebarDragAndDrop.swift` starts favorite and space-symbol drags. `SplitView.swift` finds a dragged tab's place in the page area.
 import SwiftUI
 
 /// What a drag in the sidebar lifts.
@@ -120,6 +122,13 @@ struct SidebarReorderHover {
         }
         return unpinning(tab, current: current, at: point, divider: divider, newTabRow: newTabRow,
                          openTabs: tree.tabsOutsideFolders(in: spaceID, pinned: false), rowFrames: rowFrames).map { ($0, nil) }
+    }
+
+    /// The frames of the rows that the pointer can reach at `point`: those of the area under it, the pinned area's or the open area's with its New Tab row, since rows scrolled out of an area's sight lie under the divider or the other area; none over the divider, which ends the pinned list itself; and the frame of `slotOf`, the dragged row's slot, wherever it is, which `placement` measures the pointer from.
+    static func reachableFrames(at point: CGPoint, pinnedArea: CGRect, pinnedFrames: [UUID: CGRect], openArea: CGRect, openFrames: [UUID: CGRect], slotOf draggedID: UUID?) -> [UUID: CGRect] {
+        var frames = pinnedArea.contains(point) ? pinnedFrames : openArea.contains(point) ? openFrames : [:]
+        if let draggedID, let slot = pinnedFrames[draggedID] ?? openFrames[draggedID] { frames[draggedID] = slot }
+        return frames
     }
 
     /// Move only the dragged row in this render's lists. Its identity stays with the gesture.

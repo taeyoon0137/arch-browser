@@ -1,6 +1,7 @@
 // Routes: which models serve each feature, with up to two fallbacks, and the routes a request names for itself, a model tier or models of its own (`docs/hooks.md`, Model choice and tiers). The service resolves a request's route once, at its start, and keeps it for the whole request. The interface names a route's models and estimates their costs here.
 import Foundation
 
+/// A provider and its model name as stored in a feature route.
 public struct AIModelRef: Hashable, Codable, Sendable {
     public var provider: AIProviderID
     /// The provider's model name. Empty for a command-line tool's own default model.
@@ -12,6 +13,7 @@ public struct AIModelRef: Hashable, Codable, Sendable {
     }
 }
 
+/// Whether a feature is enabled and which models it tries in order.
 public struct AIRoute: Codable, Sendable, Equatable {
     /// The primary model and up to two fallbacks.
     public static let maximumModels = 3

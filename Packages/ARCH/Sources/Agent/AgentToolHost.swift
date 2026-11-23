@@ -1,4 +1,8 @@
-// The tool host: where every tool call runs and is checked, the same code for every client (agent decision 5). It runs, for an outside client's grant, every tool of the catalog: the session and list tools and `guide`, the agent tab and reading tools here, snapshots, screenshots, and actions in `AgentPageTools.swift`, with the actions' trusted input in `AgentTrustedInput.swift`, and the tools that wait for the user in `AgentUserTools.swift`, with an outside client's `rename_tab` (P19), with the events since the client's previous call, the limits, and the rules and modes in `AgentPolicy`; an in-app session's calls run on the same path with its site scope (P13), its own agent folder, and its cards in its panel. An outside client's call that waits for the user answers `approvalPending` after 45 seconds and goes on; `approval_wait` takes its result. A session's call waits on its card instead.
+// The tool host checks and runs every tool call for every client (agent decision 5).
+// An outside grant can use catalog, session, list, `guide`, tab, reading, snapshot, screenshot, action, and user-request tools.
+// `AgentPageTools.swift` holds snapshots, screenshots, and actions; `AgentTrustedInput.swift` sends their trusted input; `AgentUserTools.swift` handles cards and `rename_tab` (P19).
+// The host passes the events since the client's previous call, and applies limits and `AgentPolicy` rules. In-app calls use the same path with a site scope (P13), agent folder, and panel cards.
+// An outside call waiting for the user returns `approvalPending` after 45 seconds; `approval_wait` takes its result. An in-app call waits on its card.
 import AgentControl
 import ARCHEngine
 import Foundation

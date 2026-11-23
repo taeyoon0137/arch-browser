@@ -1,4 +1,9 @@
-// The web extensions of one Persona as a kind of plugin. The runtime reads their packages, has the engines that run extensions check them, loads each enabled extension with what the user granted it into the Persona's profiles in the engines that run its package, a version of a pair only in the engine its record gives it, deletes a removed extension's storage in each engine, in a later launch for an engine that did not run at the removal, and does for those engines what the app does for extensions: it shows their popups, opens the tabs and windows they ask for, asks the user about access they request while they run and the engines' other questions, and relays their native messages. It has Arch look for native apps before it loads an extension that may reach one, and keeps out of Chromium, which reads Arch's links to other browsers' host manifests itself, each version whose identifier Arch cannot prove while a linked native app accepts it (`NativeMessagingHostLinks`). The plugin list stays engine-independent, so that every engine that runs extensions runs the same installs where their packages run.
+// Manages web extensions as plugins for one Persona. It reads packages and asks each capable engine to check them.
+// It loads enabled extensions with the user's grants into that Persona's profiles. A paired version runs only in its assigned engine.
+// It removes extension storage from each engine, or on the next launch if an engine did not run during removal.
+// It shows popups, handles extension tab and window requests, asks about access and engine prompts, and relays native messages.
+// Before an extension that may use native messaging loads, Arch looks for native apps. The runtime stops in Chromium, which reads Arch's host-manifest links itself, each version whose identifier Arch cannot prove while a linked native app accepts it (`NativeMessagingHostLinks`).
+// The plugin list stays shared across engines; each engine runs the packages it supports.
 import AppKit
 import ARCHEngine
 import Plugins
@@ -43,6 +48,7 @@ public struct WebExtensionActionItem: Identifiable {
 }
 
 @MainActor
+/// Runs one Persona's web extensions across the engines that support them.
 public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     public nonisolated let kind = PluginKind.webExtension
     public nonisolated let manifestFileName = WebExtensionManifest.fileName
@@ -104,6 +110,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         self.init(persona: persona, host: host, hostLinks: NativeMessagingHostLinks(directory: nativeMessagingHosts, folders: []))
     }
 
+    /// Reads a package's web extension manifest for the plugin system.
     public nonisolated func manifest(forPackageAt root: URL, source: URL) throws -> PluginManifest {
         try WebExtensionManifest(packageAt: root, source: source).manifest
     }
@@ -132,6 +139,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         return checks
     }
 
+    /// Turns one engine's package check into a result the install review can show.
     private static func check(_ packageURL: URL, in engine: any EngineExtensions, of kind: EngineKind) async -> PluginEngineCheck {
         do {
             try await engine.check(packageURL)
@@ -141,6 +149,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         }
     }
 
+    /// Updates installed extensions and queues their loads in the Persona's engines.
     public func run(_ installed: [InstalledPlugin]) {
         if let installDates, installed.contains(where: { $0.grant.permissions.contains(.nativeMessaging) && installDates[$0.id] != $0.installedAt }) {
             looksForNativeAppsAgain = true
@@ -164,6 +173,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
         plugins.filter(\.isEnabled)
     }
 
+    /// Makes the plugin instance that runs this extension's palette action.
     public func makePlugin(_ installed: InstalledPlugin) -> any Plugin {
         WebExtensionPlugin(runtime: self, id: installed.id)
     }
@@ -542,6 +552,7 @@ extension WebExtensionRuntime: @preconcurrency EngineExtensionsDelegate {
         host.openTab(url, in: kind, persona: persona, window: windowID, active: active, index: index, completion: completion)
     }
 
+    /// Opens an extension-requested window in the calling engine and Persona.
     public func extensions(_ extensions: any EngineExtensions, openWindowWith urls: [URL], focused: Bool, completion: @escaping (UUID?) -> Void) {
         guard let host, let kind = engineKind(of: extensions) else { return completion(nil) }
         host.openWindow(with: urls, in: kind, persona: persona, focused: focused, completion: completion)

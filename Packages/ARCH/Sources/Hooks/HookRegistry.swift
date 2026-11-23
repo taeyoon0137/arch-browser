@@ -1,4 +1,7 @@
-// The hook registry (`docs/hooks.md`, Hook registry): keeps the hooks of `hooks.json`, matches each browser event to them, and runs each match as a step of the shared hook scheduler, after the AI hook center's hooks for the same event, with the registry's own rules: concurrency caps, loop protection, rate and daily limits, pausing, and the run log. A step runs the hook's script through a `HookScriptRunning`; the registry never runs an agent itself.
+// The hook registry (`docs/hooks.md`, Hook registry) stores hooks from `hooks.json` and matches browser events to them.
+// It runs each match after the AI hook center's hooks for the same event, as a step in the shared scheduler.
+// It enforces concurrency, loop, rate, and daily limits, and keeps pauses and the run log.
+// A `HookScriptRunning` runs the script; the registry does not run an agent itself.
 import Agent
 import AgentControl
 import AI
@@ -36,6 +39,7 @@ public struct HookPersonaPlaces: Hashable, Sendable {
     }
 }
 
+/// A space in a Persona, named by hook place filters.
 public struct HookSpace: Hashable, Sendable {
     public var id: UUID
     public var name: String
@@ -186,6 +190,7 @@ public struct HookDayCount: Hashable, Sendable {
     public var failures: Int
 }
 
+/// A validation error returned while adding or editing a hook.
 public enum HookRegistryError: LocalizedError, Equatable {
     case duplicate
     case unknownHook
@@ -212,6 +217,7 @@ public enum HookRegistryError: LocalizedError, Equatable {
 // MARK: - Registry
 
 @MainActor
+/// Stores, schedules, limits, and records hooks matched to browser events.
 public final class HookRegistry: ObservableObject {
     /// Registry runs at once, in all and for one hook; steps beyond them wait in arrival order, at most `maximumWaiting`.
     public static let maximumRunning = 4
@@ -333,6 +339,7 @@ public final class HookRegistry: ObservableObject {
         Task { await load() }
     }
 
+    /// Loads saved hooks and run summaries, registers AI features, and reconciles current settings.
     private func load() async {
         guard !isLoading else { return }
         isLoading = true
@@ -501,6 +508,7 @@ public final class HookRegistry: ObservableObject {
         activityDidClear?()
     }
 
+    /// Moves a hook within the run order and saves the new order.
     public func move(_ id: UUID, to index: Int) {
         guard let from = self.index(of: id) else { return }
         let hook = hooks.remove(at: from)
@@ -578,6 +586,7 @@ public final class HookRegistry: ObservableObject {
         if changed { persist() }
     }
 
+    /// Checks whether the condition that paused a hook has cleared.
     private func mayResume(_ hook: Hook, from reason: HookPauseReason) -> Bool {
         if case .places(let places) = hook.filter.scope, places.isEmpty { return false }
         switch reason {
@@ -598,6 +607,7 @@ public final class HookRegistry: ObservableObject {
         persist()
     }
 
+    /// Cancels active runs when Run Hooks turns off, then saves the setting.
     private func runsHooksDidChange(from wasOn: Bool) {
         guard !isApplyingSettings, runsHooks != wasOn else { return }
         if !runsHooks {
@@ -639,6 +649,7 @@ public final class HookRegistry: ObservableObject {
 
     // MARK: Places, scripts, providers, and the scheduler's pauses
 
+    /// Updates filters after Personas or spaces change and saves any repairs.
     private func placesDidChange() {
         guard isReady, applyPlaces() else { return }
         persist()
@@ -681,6 +692,7 @@ public final class HookRegistry: ObservableObject {
         return changed
     }
 
+    /// Records provider destinations after the registry has loaded.
     private func providersDidChange(_ providers: [AIProviderConfiguration]) {
         // The launch's load records the changes made before it.
         guard isReady else { return }
@@ -703,6 +715,7 @@ public final class HookRegistry: ObservableObject {
         return changed
     }
 
+    /// Maps each provider to the destination that hooks recognize for review.
     private static func destinations(of providers: [AIProviderConfiguration]) -> [AIProviderID: String] {
         Dictionary(providers.map { ($0.id, HookKnownProvider($0).destination) }, uniquingKeysWith: { first, _ in first })
     }
@@ -976,6 +989,7 @@ public final class HookRegistry: ObservableObject {
         if !keepsCarryOver, let tab = run.event.tab { firstLoadCarryOvers[tab.id]?.remove(run.hookID) }
     }
 
+    /// Explains why the hook's chosen agent model cannot run.
     private func unavailableMessage(for run: HookRun) -> String {
         guard let hook = hook(withID: run.hookID) else { return "" }
         do {
@@ -1024,6 +1038,7 @@ public final class HookRegistry: ObservableObject {
         return await test(preview, script: script, onTab: tabID, applying: applying)
     }
 
+    /// Tests checked script bytes on a covered tab without charging the hook's daily run count.
     private func test(_ hook: Hook, script: Data, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
         let id = hook.id
         guard let tab = host.tab(tabID) else { return .notRun("The tab is no longer open.") }
@@ -1074,6 +1089,7 @@ public final class HookRegistry: ObservableObject {
 
     // MARK: Records
 
+    /// Logs a run's outcome and pauses the hook after failures that count toward its limit.
     private func record(_ outcome: HookRunOutcome, of run: HookRun, countsAsFailure: Bool = true) {
         guard let hook = hook(withID: run.hookID) else { return }
         var entry = Self.entry(for: hook, event: run.event, outcome: .completed, date: now(), isTest: run.isTest)
@@ -1171,12 +1187,14 @@ public final class HookRegistry: ObservableObject {
         return summaries.mapValues { Array($0.suffix(keptRunSummaries)) }
     }
 
+    /// Returns only today's run and failure counts for a hook.
     private func dayCount(of id: UUID) -> HookDayCount {
         let today = Calendar.current.startOfDay(for: now())
         guard let count = dayCounts[id], count.day == today else { return HookDayCount(day: today, runs: 0, failures: 0) }
         return count
     }
 
+    /// Increments a hook's run count for today.
     private func countRun(of id: UUID) {
         dayCounts[id] = dayCount(of: id).adding(runs: 1)
     }
@@ -1276,6 +1294,7 @@ final class HookRunSlots {
         }
     }
 
+    /// Frees a run's slot and grants available slots to waiting runs in order.
     func release(run: UUID) {
         guard running.removeValue(forKey: run) != nil else { return }
         var index = 0
@@ -1321,6 +1340,7 @@ extension HookRegistry: AgentHookRegistrar {
     /// How long a declined program waits before its next proposal shows.
     static let proposalInterval: TimeInterval = 60
 
+    /// Lists only the hooks added by this outside program.
     public func hooks(addedBy client: AgentClientIdentity.Key) -> [AgentHookSummary] {
         hooks.filter { $0.origin.programKey == client }.map { hook in
             let state: String
@@ -1333,12 +1353,14 @@ extension HookRegistry: AgentHookRegistrar {
         }
     }
 
+    /// Removes a hook only when this outside program added it.
     public func remove(_ id: UUID, addedBy client: AgentClientIdentity.Key) -> Bool {
         guard isReady, hooks.contains(where: { $0.id == id && $0.origin.programKey == client }) else { return false }
         remove(id)
         return true
     }
 
+    /// Rechecks outside programs' hooks against the grants now in force.
     public func grantsDidChange(inForce clients: Set<AgentClientIdentity.Key>) {
         reportedPrograms = clients
         applyProgramGrants()

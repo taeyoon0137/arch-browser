@@ -14,9 +14,11 @@ import Foundation
 }
 
 extension AgentSessionTools {
+    /// Leaves retained results without a history check when the host provides none.
     public func historyCheck(for call: AgentToolCall) -> (@MainActor @Sendable (AIToolResult) -> AIToolResult)? { nil }
 }
 
+/// Runs an HTTP agent conversation through the AI interface and the session tool host.
 @MainActor public final class AgentAPISession {
     /// Rounds of model requests per user message.
     public nonisolated static let roundsPerMessage = 50
@@ -93,12 +95,14 @@ extension AgentSessionTools {
         continuation.finish()
     }
 
+    /// Starts the oldest queued message when no turn is running.
     private func startNextTurn() {
         guard !isTurnRunning, !hasEnded, !queuedMessages.isEmpty else { return }
         conversation.append(AIMessage(role: .user, parts: [.text(queuedMessages.removeFirst())]))
         startTurn()
     }
 
+    /// Prepares one model request and the tools currently available to the session.
     private func startTurn() {
         isTurnRunning = true
         turn += 1
@@ -109,6 +113,7 @@ extension AgentSessionTools {
         turnTask = Task { await runTurn(number, request, handlers) }
     }
 
+    /// Streams one message's model rounds and reports its completion or failure.
     private func runTurn(_ number: Int, _ request: AIRequest, _ handlers: [AIToolHandler]) async {
         let stream = client.run(request, tools: handlers, maxRounds: Self.roundsPerMessage) { [weak self] messages in
             await self?.keep(messages, turn: number)
@@ -150,10 +155,12 @@ extension AgentSessionTools {
         finishTurn(end)
     }
 
+    /// Accepts events only from the latest active turn.
     private func isCurrent(_ number: Int) -> Bool {
         turn == number && isTurnRunning
     }
 
+    /// Pins the first serving model and announces that the session is ready.
     private func becomeReady(_ servingModel: AIModelRef?) {
         guard !isReady, let ready = model ?? servingModel else { return }
         isReady = true
@@ -167,6 +174,7 @@ extension AgentSessionTools {
         conversation = messages
     }
 
+    /// Publishes usage and the turn's end before starting another queued message.
     private func finishTurn(_ end: AIAgentEvent) {
         isTurnRunning = false
         turnTask = nil
@@ -178,6 +186,7 @@ extension AgentSessionTools {
 
     // MARK: Tool calls
 
+    /// Wraps a catalog tool in the provider-neutral handler for this turn.
     private func handler(for tool: AgentTool, turn number: Int) -> AIToolHandler {
         let schema = (try? tool.inputSchema.encoded()) ?? Data(#"{"type":"object"}"#.utf8)
         return AIToolHandler(tool: AITool(name: tool.name, description: tool.description, inputSchema: schema)) { [weak self] call in
@@ -186,6 +195,7 @@ extension AgentSessionTools {
         }
     }
 
+    /// Checks and runs a model's tool call, retaining access checks for page results.
     private func perform(_ call: AIToolCall, turn number: Int) async -> AIToolResult {
         guard isCurrent(number) else { return AIToolResult(callID: call.id, parts: [.text("The user stopped this message.")], isError: true) }
         guard let arguments = Self.arguments(call.arguments) else {
@@ -270,6 +280,7 @@ extension AgentSessionTools {
         return pageURLs.count == 1 ? pageURLs.first : nil
     }
 
+    /// Formats a count for the short note kept in place of an older result.
     private nonisolated static func number(_ value: Int) -> String {
         value.formatted(.number.locale(Locale(identifier: "en_US")))
     }

@@ -1,6 +1,7 @@
 // The Web Store's addresses, which no other file names (`docs/web-store.md`): Google's public update endpoint, which Arch asks for an extension's current package, and the hosts of the store's extension pages, whose addresses name the extension to install, as does a pasted identifier.
 import Foundation
 
+/// Recognizes extension identifiers in supported Web Store pages.
 public enum WebStore {
     /// The update endpoint, which Chromium's extension updater asks about extensions by identifier (`docs/web-store.md`, Facts).
     static let updateEndpoint = URL(string: "https://clients2.google.com/service/update2/crx")!

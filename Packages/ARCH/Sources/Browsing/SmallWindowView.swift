@@ -1,4 +1,6 @@
-// The content of a small window, which opens for a link from another app while Arch is in the background, for a page that a small window's page or preview opens, and for an extension's `windows.create`: one row on the line of the traffic light buttons with the page's site and controls, and below it the page area over the window material with the tint of the tab's space. The window shows only its own tab; find, prompt cards, page fullscreen, the docked developer tools, the page reader, the agent panel, and the palette that edits the address work here, and sidebar commands go to the main window.
+// A small window opens for a link from another app while Arch is in the background, a page opened by its page or preview, or an extension's `windows.create`.
+// Its top row aligns with the traffic light buttons and holds the page site and controls. Below, the page sits over material tinted by the tab's space.
+// The window shows one tab. Find, prompt cards, page fullscreen, docked developer tools, reader, agent panel, and address palette work there. Sidebar commands go to the main window.
 import SwiftUI
 
 struct SmallWindowView: View {
@@ -52,6 +54,7 @@ private struct SmallWindowTopRow: View {
     /// Observed so that the controls follow navigation within the page.
     @ObservedObject var tab: Tab
     let windowButtons: WindowButtonMetrics
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isHoveringSite = false
 
     /// The name of the web extension whose page the tab shows (`AddressPillView.extensionName(ofPageAt:in:session:)`), unless an internal page covers it.
@@ -81,6 +84,7 @@ private struct SmallWindowTopRow: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 14)
+                        .accessibilityHidden(true)
                     Text(siteName)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
@@ -89,7 +93,7 @@ private struct SmallWindowTopRow: View {
                 .padding(.horizontal, 6)
                 .frame(height: 28)
                 // The row's buttons show the same fill under the pointer.
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(isHoveringSite ? 0.08 : 0)))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHoveringSite ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

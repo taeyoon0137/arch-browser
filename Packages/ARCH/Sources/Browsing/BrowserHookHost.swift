@@ -5,11 +5,13 @@ import Events
 import Foundation
 import Hooks
 
+/// Adapts the session's user tabs and places to the hook registry.
 @MainActor public final class BrowserHookHost: HookBrowserHost {
     private unowned let session: BrowserSession
     public var placesDidChange: (() -> Void)?
     private var cancellables: Set<AnyCancellable> = []
 
+    /// Watches Persona and space changes and notifies the hook registry after they settle.
     public init(session: BrowserSession) {
         self.session = session
         // On the next turn, once the session has finished a change that touches both lists, as deleting a Persona does.
@@ -26,10 +28,12 @@ import Hooks
         }
     }
 
+    /// Returns the event-facing facts for an open tab.
     public func tab(_ id: UUID) -> BrowserTabRef? {
         session.allTabs.first { $0.id == id }.map(Self.ref)
     }
 
+    /// Returns the Persona's sidebar tabs in order, excluding agent tabs.
     public func tabs(inPersona id: UUID) -> [BrowserTabRef] {
         session.tabsInSidebarOrder.filter { $0.personaID == id }.map(Self.ref).filter { $0.kind != .agent }
     }

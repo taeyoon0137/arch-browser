@@ -1,6 +1,7 @@
 // Features register with the service before they make requests. A feature names what starts its requests, the page data they may carry, the capabilities its models need, and where its requests' routes come from.
 import Foundation
 
+/// A registered AI feature's trigger, allowed data, model needs, and route source.
 public struct AIFeature: Identifiable, Sendable {
     public var id: AIFeatureID
     public var name: String
@@ -23,6 +24,7 @@ public struct AIFeature: Identifiable, Sendable {
     }
 }
 
+/// Whether the user or the app starts each request from a feature.
 public enum AITrigger: String, Codable, Sendable {
     /// The user starts each request, for example by asking a question.
     case user
@@ -30,13 +32,15 @@ public enum AITrigger: String, Codable, Sendable {
     case automatic
 }
 
+/// Where a feature obtains the models for its requests.
 public enum AIFeatureRouting: String, Codable, Sendable {
     /// The feature's route in `ai.json`, which Settings ▸ AI ▸ Features edits. The default.
     case stored
-    /// Each request names its route, as an agent hook's runs do. Features does not list the feature; Usage lists it by name.
+    /// Each request names its route, as an agent hook run does. The Features page does not list this feature; Usage lists it by name.
     case perRequest
 }
 
+/// A capability a model may offer to an AI feature.
 public enum AIModelCapability: String, Codable, Sendable, CaseIterable {
     case tools
     case jsonOutput
@@ -49,6 +53,7 @@ public enum AIModelCapability: String, Codable, Sendable, CaseIterable {
     public static let overridable = allCases.filter { $0 != .agent }
 }
 
+/// A nontext data kind that a feature may declare it sends.
 public enum AIDataKind: String, Codable, Sendable, CaseIterable {
     case page
     case selection

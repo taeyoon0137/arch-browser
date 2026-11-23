@@ -1,7 +1,9 @@
-// What `agent.json` keeps (docs/agents.md, Storage; Outside clients: identity, grants, revocation): Settings ▸ AI ▸ Agents, the grants that outlive a launch, and the Agents Persona's ID. Grants until Arch quits stay in memory. The file holds no secrets and is sealed (`AgentSettingsFile`).
+// `agent.json` holds Settings ▸ AI ▸ Agents, grants that outlive a launch, and the Agents Persona's ID (docs/agents.md, Storage).
+// Grants that last only until Arch quits remain in memory. The file holds no secrets and is sealed by `AgentSettingsFile`.
 import AgentControl
 import Foundation
 
+/// The agent settings and persistent grants stored in `agent.json`.
 public struct AgentSettings: Codable, Equatable, Sendable {
     /// Allow Outside Clients: whether `arch-cli` and `arch-mcp` may ask for grants. Off until the user turns it on.
     public var allowsOutsideClients = false
@@ -86,6 +88,7 @@ public struct AgentGrant: Codable, Identifiable, Equatable, Sendable {
         runsPerDay = try container.decodeIfPresent(Int.self, forKey: .runsPerDay) ?? Self.defaultRunsPerDay
     }
 
+    /// Reports whether a time-limited grant has expired at the given date.
     public func hasExpired(at date: Date) -> Bool {
         if case .at(let end) = expiry { return end <= date }
         return false
@@ -124,6 +127,7 @@ public struct AgentGrantScopes: Codable, Equatable, Sendable {
 
 /// Who an outside client is, from its process ancestry and signature (`AgentClientIdentifier`). Two connections share a grant when their keys are equal; the other fields describe the client.
 public struct AgentClientIdentity: Codable, Equatable, Sendable {
+    /// The verified identity used to share a grant across an outside client's connections.
     public enum Key: Codable, Hashable, Sendable {
         /// Code signed with a team: its signing identifier and team, which stay across updates.
         case signed(identifier: String, team: String)
