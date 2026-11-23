@@ -126,7 +126,7 @@ import Testing
         for malformed in ["HTTP/2 200\r\n\r\n", "HTTP/1.1 2000 OK\r\n\r\n", "HTTP/1.1 200 OK\r\n folded\r\n\r\n", "HTTP/1.1 200 OK\r\nNo-Colon\r\n\r\n",
                           "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 0\r\n\r\n", "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n",
                           "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\n", "HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nab",
-                          "HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", "HTTP/1.1 101 Switching\r\n\r\n"] {
+                          "HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n-1\r\nab\r\n", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n+4\r\nWiki\r\n0\r\n\r\n", "HTTP/1.1 101 Switching\r\n\r\n"] {
             #expect(throws: PluginError.invalidResponse, "\(malformed)") { try parse(malformed) }
         }
         #expect(throws: PluginError.responseTooLarge) { try parse("HTTP/1.1 200 OK\r\nContent-Length: \(PluginNetworkFetch.bodyLimit + 1)\r\n\r\n") }

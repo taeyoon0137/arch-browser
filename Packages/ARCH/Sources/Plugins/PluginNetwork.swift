@@ -443,7 +443,9 @@ struct PluginHTTPResponse: Equatable {
             }
             guard let line = String(data: data[index..<sizeEnd.lowerBound], encoding: .ascii),
                   let sizeText = line.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false).first?.trimmingCharacters(in: .whitespaces),
-                  !sizeText.isEmpty, sizeText.count <= 8, let size = Int(sizeText, radix: 16) else { throw PluginError.invalidResponse }
+                  // Hex digits only: `Int(_:radix:)` also reads a sign, and a negative size would make an invalid range.
+                  !sizeText.isEmpty, sizeText.count <= 8, sizeText.allSatisfy(\.isHexDigit), sizeText.allSatisfy(\.isASCII),
+                  let size = Int(sizeText, radix: 16) else { throw PluginError.invalidResponse }
             index = sizeEnd.upperBound
             if size == 0 {
                 // Trailers follow until an empty line.
