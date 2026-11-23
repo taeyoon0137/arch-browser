@@ -179,6 +179,14 @@ public final class PluginManager: ObservableObject {
     private var eventLimiter = BrowserEventRateLimiter()
     /// When each plugin opened the tabs it opened in the last minute, which `tabOpenLimit` caps.
     private var tabOpenings: [PluginID: [Date]] = [:]
+    /// When each plugin started the network requests it started in the last minute, which `networkRequestLimit` caps.
+    private var networkOpenings: [PluginID: [Date]] = [:]
+    /// The most network requests a plugin starts within a minute.
+    static let networkRequestLimit = 60
+    /// Sends a plugin's checked request to the granted hosts: `PluginNetworkFetch`, or a test's own transport.
+    var networkTransport: (URLRequest, [PluginNetworkHost]) async throws -> (Data, HTTPURLResponse) = { request, hosts in
+        try await PluginNetworkFetch(hosts: hosts).run(request)
+    }
     /// The AI interface that the plugins with `ai` send their requests through, whose hook scheduler runs their hooks; without one, they get no AI and their events arrive as for other plugins.
     private let ai: AIService?
     /// The features this manager registered in `ai`, those of its enabled plugins with `ai`, by identifier.
@@ -1518,6 +1526,17 @@ public final class PluginManager: ObservableObject {
         browserHost?.postNotification(pluginName: name, title: title, body: body)
     }
 
+    /// Checks a network request at the moment it starts: the plugin is still installed and enabled with the very grant its context holds, so a revoke or an update stops it at once, the grant has `network`, the address is HTTPS on port 443 at a granted host, and the plugin has started fewer than `networkRequestLimit` requests within the last minute. Throws `PluginError.permissionDenied(.network)`, `hostRefused`, or `rateLimited`.
+    fileprivate func allowNetwork(_ plugin: PluginID, request: URLRequest, grant: PluginGrant) throws {
+        guard !isClosed, let installed = plugins.first(where: { $0.id == plugin && $0.isEnabled }),
+              installed.grant == grant, grant.permissions.contains(.network) else { throw PluginError.permissionDenied(.network) }
+        guard let url = request.url, PluginNetworkFetch.checkedHost(of: url, hosts: grant.network) != nil else { throw PluginError.hostRefused }
+        let now = Date()
+        let recent = (networkOpenings[plugin] ?? []).filter { now.timeIntervalSince($0) < 60 }
+        guard recent.count < Self.networkRequestLimit else { throw PluginError.rateLimited }
+        networkOpenings[plugin] = recent + [now]
+    }
+
     /// The tab of the Persona that a page call of the plugin with the grant names, before the grant applies, with its page. Throws `PluginError.notGranted` for a tab outside the Persona or an agent tab, `noPage` for a tab whose engine committed no document or that has no page, and `siteNotGranted`, which names no address, for a document the plugin does not reach (`reaches(_:in:of:grant:)`), as one outside the granted sites or, for `whenInvoked`, in a tab without the plugin's access, or for a plugin with `ai` a document or shown address on a site excluded from AI, which its code could send to a model as text.
     fileprivate func page(of id: UUID, for grant: PluginGrant, of plugin: PluginID) throws -> (tab: PluginTab, contents: any EngineWebContents) {
         guard let tab = personaTabs().first(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
@@ -1914,8 +1933,21 @@ final class ScopedPluginContext: PluginPanelContext {
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.network)
-        // URLSession may resolve the host again after the checked DNS result. Refuse until the connection uses a checked address.
-        throw PluginError.networkUnavailable
+        guard let manager else { throw PluginError.stopped }
+        try manager.allowNetwork(pluginID, request: request, grant: grant)
+        let id = UUID()
+        let (transport, hosts) = (manager.networkTransport, grant.network)
+        let task = Task { try await transport(request, hosts) }
+        networkRuns[id] = task
+        defer { networkRuns[id] = nil }
+        let response: (Data, HTTPURLResponse)
+        do {
+            response = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        } catch is CancellationError {
+            throw PluginError.stopped
+        }
+        guard !hasEnded else { throw PluginError.stopped }
+        return response
     }
 
     func tab(_ id: PluginTab.ID) throws -> PluginTab? {
