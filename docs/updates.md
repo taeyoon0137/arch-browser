@@ -33,7 +33,8 @@ Sparkle's EdDSA (ed25519) key pair signs and checks the update archives.
 
 - The key pair was made on November 23 with CryptoKit, without the Keychain, so no dialog appeared. The private key is the Base64 of its 32-byte seed in `the key file` on the release Mac, readable only by the user. `release_app.sh` passes it to `sign_update --ed-key-file`. It never goes into the repository, a build, or a release.
 - The public key is the default of `SPARKLE_PUBLIC_KEY` in `scripts/bundle_app.sh`. `ARCH_SPARKLE_PUBLIC_KEY` overrides it for one run.
-- Losing the private key means installed copies can never update again. A copy belongs in a safe place outside the repository, such as an encrypted backup.
+- The same private key is also in the login Keychain under its account, imported with `generate_keys --account <account> -f <file>` on November 23, so `sign_update --account` can use it and the Keychain holds a second copy.
+- Losing the private key means installed copies can never update again. A further copy belongs in a safe place outside the repository, such as an encrypted backup.
 
 ## Release steps
 
@@ -54,7 +55,7 @@ Notarization requires the hardened runtime on every executable. Sparkle's parts 
 
 These steps need the user's own hands, credentials, or approval:
 
-1. Back up the private key file named under Keys to a safe place outside the repository.
+1. Keep a copy of the private key outside this Mac, such as an encrypted backup; the file and the Keychain item named under Keys are both on this Mac.
 2. For notarization, store a profile once with `xcrun notarytool store-credentials <profile name>`, using an app-specific password or an App Store Connect API key, and set `ARCH_NOTARY_PROFILE=<profile name>` when releasing.
 3. Approve and run the first `./scripts/release_app.sh --publish`.
 4. In an installed copy, check Check for Updates… and Settings ▸ General ▸ Updates once a newer release exists (V.12 in `docs/plan.md`).
