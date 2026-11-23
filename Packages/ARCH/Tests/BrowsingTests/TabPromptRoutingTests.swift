@@ -74,14 +74,14 @@ import Testing
         #expect(kept.content.kind == .notice)
         session.prompts.answer(kept.id, with: PromptAnswer(buttonID: "ok"))
         session.prompts.answer(old.id, with: PromptAnswer(buttonID: "allow"))
-        #expect(session.sitePermissions.decision(for: .clipboard, origin: origin) == nil)
+        #expect(session.sitePermissions.decision(for: .clipboard, origin: origin, in: Persona.defaultID) == nil)
 
         requestClipboard()
         let fresh = try #require(session.prompts.current(for: tab.id))
         #expect(fresh.id != old.id)
         session.prompts.answer(fresh.id, with: PromptAnswer(buttonID: "deny"))
         #expect(answers == [false, false, false])
-        #expect(session.sitePermissions.decision(for: .clipboard, origin: origin) == .deny)
+        #expect(session.sitePermissions.decision(for: .clipboard, origin: origin, in: Persona.defaultID) == .deny)
     }
 
     @Test func modifiedLinksOpenOneTabInTheRequestedDisposition() async throws {

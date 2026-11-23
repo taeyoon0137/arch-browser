@@ -1,4 +1,4 @@
-// The answers to websites' permission requests: remembered answers decide without a card, requests that wait for one card share its answer, Allow and Don't Allow are remembered and a card that ended without the user is not, engine profiles take the remembered answers and, when they start, the removals of answers, and a website's notifications ask macOS only after the card's Allow and offer System Settings while Arch's notifications are off, as the permission is when the card shows. Each test keeps its store in a temporary folder of its own.
+// The answers to websites' permission requests: remembered answers decide without a card, each Persona's only in its own tabs and profiles, a file from before Personas kept their own answers gives its answers to every Persona once, a deleted Persona's answers go, requests that wait for one card share its answer, Allow and Don't Allow are remembered and a card that ended without the user is not, engine profiles take the remembered answers and, when they start, the removals of answers, and a website's notifications ask macOS only after the card's Allow and offer System Settings while Arch's notifications are off, as the permission is when the card shows. Each test keeps its store in a temporary folder of its own.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -15,8 +15,8 @@ import Testing
     @Test func rememberedAnswersDecideWithoutACard() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        store.set(.allow, for: [.camera, .microphone], origin: Self.origin)
-        store.set(.deny, for: [.geolocation], origin: Self.origin)
+        store.set(.allow, for: [.camera, .microphone], origin: Self.origin, in: Persona.defaultID)
+        store.set(.deny, for: [.geolocation], origin: Self.origin, in: Persona.defaultID)
         let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let prompts = PromptRecorder()
 
@@ -43,8 +43,8 @@ import Testing
 
         prompts.respond(Self.allow)
         #expect(granted == [true, true])
-        #expect(store.decision(for: .camera, origin: Self.origin) == .allow)
-        #expect(SitePermissionStore(directory: folder.url).decision(for: .camera, origin: Self.origin) == .allow)
+        #expect(store.decision(for: .camera, origin: Self.origin, in: Persona.defaultID) == .allow)
+        #expect(SitePermissionStore(directory: folder.url).decision(for: .camera, origin: Self.origin, in: Persona.defaultID) == .allow)
     }
 
     @Test func aCardThatEndedWithoutTheUserAndScreenRecordingLeaveNothingRemembered() throws {
@@ -62,40 +62,126 @@ import Testing
         prompts.respond(Self.allow)
 
         #expect(granted == [false, true])
-        #expect(store.decisions.isEmpty)
+        #expect(store.answers.isEmpty)
     }
 
     @Test func profilesTakeTheRememberedAnswersNowAndAfterEachChange() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        store.set(.allow, for: [.camera], origin: Self.origin)
+        store.set(.allow, for: [.camera], origin: Self.origin, in: Persona.defaultID)
         let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
 
         answers.follow(context, of: Persona.defaultID)
         #expect(context.kept["camera \(Self.origin)"] == .some(true))
-        store.set(.deny, for: [.microphone], origin: Self.origin)
+        store.set(.deny, for: [.microphone], origin: Self.origin, in: Persona.defaultID)
         #expect(context.kept["microphone \(Self.origin)"] == .some(false))
-        store.set(nil, for: [.camera], origin: Self.origin)
+        store.set(nil, for: [.camera], origin: Self.origin, in: Persona.defaultID)
         #expect(context.kept["camera \(Self.origin)"] == .some(nil))
 
         let other = RecordingContext()
-        answers.restoreRememberedAnswers(for: EnginePermissionRequest(origin: Self.site, types: [.camera, .microphone]), in: other)
+        answers.restoreRememberedAnswers(for: EnginePermissionRequest(origin: Self.site, types: [.camera, .microphone]), personaID: Persona.defaultID, in: other)
         #expect(other.kept["camera \(Self.site.absoluteString)"] == .some(nil))
         #expect(other.kept["microphone \(Self.site.absoluteString)"] == .some(false))
+    }
+
+    @Test func eachPersonaKeepsItsOwnAnswersInItsTabsAndProfiles() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let work = UUID()
+        store.set(.allow, for: [.camera], origin: Self.origin, in: Persona.defaultID)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
+        let prompts = PromptRecorder()
+
+        // The default Persona's Allow answers its tab without a card; the same site asks in Work, which remembers its own answer.
+        var granted: [Bool] = []
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
+        answers.answer(EnginePermissionRequest(origin: Self.site, types: [.camera]), forTab: UUID(), personaID: work, in: nil, identity: Self.identity,
+                       persona: "the Persona of \u{201C}Work / Research\u{201D}", ask: prompts.ask) { granted.append($0) }
+        #expect(prompts.contents.count == 1)
+        #expect(prompts.contents.first?.notes.first?.text == "Arch remembers your answer for this website in the Persona of \u{201C}Work / Research\u{201D}. You can change it in Settings \u{25B8} Websites.")
+        prompts.respond(Self.deny)
+        #expect(granted == [true, false])
+        #expect(store.decision(for: .camera, origin: Self.origin, in: work) == .deny)
+        #expect(store.decision(for: .camera, origin: Self.origin, in: Persona.defaultID) == .allow)
+
+        // Each profile takes only its Persona's answers, now and after a change.
+        let defaultProfile = RecordingContext(), workProfile = RecordingContext()
+        answers.follow(defaultProfile, of: Persona.defaultID)
+        answers.follow(workProfile, of: work)
+        #expect(defaultProfile.kept == ["camera \(Self.origin)": .some(true)])
+        #expect(workProfile.kept == ["camera \(Self.origin)": .some(false)])
+        store.set(.allow, for: [.geolocation], origin: Self.origin, in: work)
+        #expect(workProfile.kept["geolocation \(Self.origin)"] == .some(true))
+        #expect(defaultProfile.kept["geolocation \(Self.origin)"] == nil)
+        store.set(nil, for: [.camera], origin: Self.origin, in: Persona.defaultID)
+        #expect(defaultProfile.kept["camera \(Self.origin)"] == .some(nil))
+        #expect(workProfile.kept["camera \(Self.origin)"] == .some(false))
+        #expect(SitePermissionStore(directory: folder.url).answers == store.answers)
+    }
+
+    /// A `permissions.json` of version 1 held one app-wide set of answers, which every Persona but the Agents Persona takes once; a Persona made later starts empty.
+    @Test func appWideAnswersFromAnOlderFileGoToEveryPersonaOnce() throws {
+        let folder = try TemporaryFolder()
+        let old = #"{"version":1,"sites":{"https://example.com":{"camera":"allow","midi":"deny","future":"allow"}},"removed":{"https://example.com":["geolocation"]}}"#
+        try Data(old.utf8).write(to: folder.url.appendingPathComponent("permissions.json"))
+        let work = UUID(), agents = UUID()
+        let store = SitePermissionStore(directory: folder.url)
+        #expect(store.answers.isEmpty)
+        store.adoptAppWideAnswers(into: [Persona.defaultID, work])
+        for persona in [Persona.defaultID, work] {
+            #expect(store.decisions(in: persona) == [Self.origin: [.camera: .allow, .midi: .deny]])
+            #expect(store.removed(in: persona) == [Self.origin: [.geolocation]])
+        }
+        #expect(store.decisions(in: agents).isEmpty)
+
+        // The file now keeps them per Persona, so the next launch copies nothing again, and a later change stays in its Persona.
+        store.set(.deny, for: [.camera], origin: Self.origin, in: work)
+        let relaunched = SitePermissionStore(directory: folder.url)
+        relaunched.adoptAppWideAnswers(into: [Persona.defaultID, work, agents])
+        #expect(relaunched.answers == store.answers)
+        #expect(relaunched.decision(for: .camera, origin: Self.origin, in: Persona.defaultID) == .allow)
+        #expect(relaunched.decisions(in: agents).isEmpty)
+    }
+
+    @Test func aDeletedPersonasAnswersGoAtTheLaunchThatRemovesItsData() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let work = UUID()
+        store.set(.allow, for: [.camera], origin: Self.origin, in: work)
+        store.set(.allow, for: [.camera], origin: Self.origin, in: Persona.defaultID)
+        #expect(store.removeAnswers(ofPersona: work))
+        #expect(store.removeAnswers(ofPersona: UUID()))
+        let relaunched = SitePermissionStore(directory: folder.url)
+        #expect(relaunched.decisions(in: work).isEmpty)
+        #expect(relaunched.decision(for: .camera, origin: Self.origin, in: Persona.defaultID) == .allow)
+    }
+
+    /// The session copies an older file's answers before any profile starts, so the default Persona's profile takes them from launch.
+    @Test func theSessionGivesAnOlderFilesAnswersToItsPersonas() throws {
+        let folder = try TemporaryFolder()
+        try Data(#"{"version":1,"sites":{"https://example.com":{"camera":"allow"}}}"#.utf8).write(to: folder.url.appendingPathComponent("permissions.json"))
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: folder.url)
+        #expect(session.sitePermissions.decision(for: .camera, origin: Self.origin, in: Persona.defaultID) == .allow)
+        // A new Persona starts without answers.
+        let work = session.addPersona(named: "Work")
+        #expect(session.sitePermissions.decisions(in: work.id).isEmpty)
+        #expect(session.personasWithRememberedAnswers.map(\.id) == [Persona.defaultID, work.id])
     }
 
     @Test func aProfileThatStartsAfterAnAnswerWasRemovedForgetsItToo() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)
-        store.set(.allow, for: [.geolocation, .camera], origin: Self.origin)
-        store.set(nil, for: [.geolocation, .camera], origin: Self.origin)
-        store.set(.deny, for: [.camera], origin: Self.origin)
-        #expect(store.removed == [Self.origin: [.geolocation]])
+        store.set(.allow, for: [.geolocation, .camera], origin: Self.origin, in: Persona.defaultID)
+        store.set(nil, for: [.geolocation, .camera], origin: Self.origin, in: Persona.defaultID)
+        store.set(.deny, for: [.camera], origin: Self.origin, in: Persona.defaultID)
+        #expect(store.removed(in: Persona.defaultID) == [Self.origin: [.geolocation]])
 
         // The next launch reads the removal from the file, and a profile that starts then takes the answer away.
         let relaunched = SitePermissionStore(directory: folder.url)
-        #expect(relaunched.removed == [Self.origin: [.geolocation]])
+        #expect(relaunched.removed(in: Persona.defaultID) == [Self.origin: [.geolocation]])
         let answers = SitePermissionAnswers(store: relaunched, notifications: NotificationAuthorization(system: nil))
         let context = RecordingContext()
         answers.follow(context, of: Persona.defaultID)
@@ -103,8 +189,8 @@ import Testing
         #expect(context.kept["camera \(Self.origin)"] == .some(false))
 
         // A new answer takes the type off the list.
-        relaunched.set(.allow, for: [.geolocation], origin: Self.origin)
-        #expect(relaunched.removed.isEmpty)
+        relaunched.set(.allow, for: [.geolocation], origin: Self.origin, in: Persona.defaultID)
+        #expect(relaunched.removed(in: Persona.defaultID).isEmpty)
         #expect(context.kept["geolocation \(Self.origin)"] == .some(true))
     }
 
@@ -125,7 +211,7 @@ import Testing
         prompts.respond(Self.allow)
         #expect(granted == [true])
         #expect(system.requests == 1)
-        #expect(store.decision(for: .notifications, origin: Self.origin) == .allow)
+        #expect(store.decision(for: .notifications, origin: Self.origin, in: Persona.defaultID) == .allow)
 
         // The remembered Allow answers without a card and without asking macOS again.
         answers.answer(EnginePermissionRequest(origin: Self.site, types: [.notifications]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }
@@ -152,7 +238,7 @@ import Testing
 
         #expect(granted == [false, true])
         #expect(system.requests == 0)
-        #expect(store.decision(for: .notifications, origin: Self.origin) == .deny)
+        #expect(store.decision(for: .notifications, origin: Self.origin, in: Persona.defaultID) == .deny)
     }
 
     @Test func whileArchsNotificationsAreOffTheCardOpensSystemSettingsAndRemembersNothing() throws {
@@ -175,7 +261,7 @@ import Testing
         #expect(granted == [false])
         #expect(system.opened.count == 1)
         #expect(system.requests == 0)
-        #expect(store.decisions.isEmpty)
+        #expect(store.answers.isEmpty)
 
         // A bare build says that it cannot show notifications and offers no setting.
         let bare = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
@@ -235,8 +321,8 @@ import Testing
         // Don't Allow, whether clicked or through Escape, is remembered.
         prompts.respond(Self.deny)
         #expect(granted == [false])
-        #expect(store.decision(for: .camera, origin: Self.origin) == .deny)
-        #expect(store.decision(for: .microphone, origin: Self.origin) == .deny)
+        #expect(store.decision(for: .camera, origin: Self.origin, in: Persona.defaultID) == .deny)
+        #expect(store.decision(for: .microphone, origin: Self.origin, in: Persona.defaultID) == .deny)
 
         // A page without a host is "this page", and nothing about it is remembered.
         answers.answer(EnginePermissionRequest(origin: URL(string: "data:text/html,hi")!, types: [.geolocation]), forTab: UUID(), personaID: Persona.defaultID, in: nil, identity: Self.identity, ask: prompts.ask) { granted.append($0) }

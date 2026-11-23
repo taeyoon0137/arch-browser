@@ -88,6 +88,7 @@ Code comments and documents cite these as "sync decision 4".
 - Open tabs and open folders, the closed-tab list, the selected tab, the current space, folders' collapsed state, window frames, small windows, and the sidebar width.
 - A live folder's items, read state, and fetch state (`live-folders.json`). Each Mac fetches its own items.
 - Browsing history (`history.sqlite`), downloads, captures, and favicons.
+- Remembered site permission answers (`permissions.json`), which each Persona keeps on each Mac (Persona rule 6 of `docs/windows-personas.md`). A Persona that arrives from another Mac starts with none, as a new Persona does.
 - Private API flags (`ARCHPrivateAPIs`, `ARCHPrivateAPI.*`, `ARCHPrivateAPIFeature.*`), whose availability depends on each Mac's macOS version, per-Mac prompts such as `ARCHAskedDefaultBrowser`, and sync's own keys, such as the toggle (`ARCHSyncEnabled`) and the key of the crash-loop guard (`ARCHSyncApplyingChanges`).
 - Installed plugins and extensions and their storage (rows 44 and 50).
 
