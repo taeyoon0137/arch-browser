@@ -697,21 +697,24 @@ final class WebKitBackForwardListItem: EngineBackForwardListItem {
     var title: String { item.title ?? "" }
 }
 
-private enum WebKitPictureInPictureAPI {
+enum WebKitPictureInPictureAPI {
     static let apiID = "webkit.pictureInPicturePlayback"
     static let featureID = "webkit.pictureInPicture"
+    // WebKit names the preference with a leading underscore; `setAllowsPictureInPictureMediaPlayback:` does not exist.
+    static let setter = NSSelectorFromString("_setAllowsPictureInPictureMediaPlayback:")
 
     @MainActor static func register() {
         let flags = PrivateAPIFlags.shared
-        flags.register(PrivateAPI(id: apiID, name: "WKPreferences.allowsPictureInPictureMediaPlayback", framework: "WebKit") {
-            WKPreferences.instancesRespond(to: NSSelectorFromString("setAllowsPictureInPictureMediaPlayback:"))
+        flags.register(PrivateAPI(id: apiID, name: "WKPreferences._allowsPictureInPictureMediaPlayback", framework: "WebKit") {
+            WKPreferences.instancesRespond(to: setter)
         })
         flags.register(PrivateAPIFeature(id: featureID, name: "Picture in picture on WebKit", apiIDs: [apiID]))
     }
 
     static func enable(in preferences: WKPreferences) {
         guard MainActor.assumeIsolated({ PrivateAPIFlags.shared.allows(featureID) }),
-              preferences.responds(to: NSSelectorFromString("setAllowsPictureInPictureMediaPlayback:")) else { return }
+              preferences.responds(to: setter) else { return }
+        // Key-value coding finds the underscored setter for the key without its underscore.
         preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
     }
 }
