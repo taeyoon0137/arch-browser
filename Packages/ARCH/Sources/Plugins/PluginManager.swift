@@ -86,8 +86,23 @@ public struct InstalledPlugin: Identifiable, Hashable, Sendable {
         PluginPermission.allCases.filter(grant.permissions.contains).map { $0 == .network ? grant.networkSummary : $0.summary }
     }
 
+    /// The permissions of the grant that Settings offers to revoke, in the order of their sentences: each one except `tabs.rename` while `tabs.manage`, which covers renaming, is granted, since revoking it alone would change nothing.
+    public var revocablePermissions: [PluginPermission] {
+        PluginPermission.allCases.filter { grant.permissions.contains($0) && !($0 == .renameTabs && grant.permissions.contains(.manageTabs)) }
+    }
+
+    /// The sentence of the grant's permission, as `accessSummaries` states it.
+    public func summary(of permission: PluginPermission) -> String {
+        permission == .network ? grant.networkSummary : permission.summary
+    }
+
+    /// The sentence for the grant's sites that `accessBrief` gives in place of theirs, or nil with no more than `listedSiteLimit` sites.
+    public var sitesBrief: String? {
+        grant.sites.count > Self.listedSiteLimit ? MatchPattern.briefAccessSummary(of: grant.sites) : nil
+    }
+
     /// The sentences of what comes with the grant: the data kinds that its AI requests carry and a web extension's other API permissions.
-    private var includedSummaries: [String] {
+    public var includedSummaries: [String] {
         [grant.permissions.contains(.ai) ? manifest.aiDataSummary : nil, manifest.extensionPermissionsSummary].compactMap { $0 }
     }
 

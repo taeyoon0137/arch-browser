@@ -252,7 +252,7 @@ public struct PluginGrant: Hashable, Sendable {
     public var networkSummary: String { "Send requests to \(network.map(\.description).joined(separator: ", "))" }
 
     /// The sentence of the site access after the sites' sentences, for `whenInvoked` with sites.
-    var siteAccessSummaries: [String] {
+    public var siteAccessSummaries: [String] {
         sites.isEmpty ? [] : [siteAccess.summary].compactMap { $0 }
     }
 
