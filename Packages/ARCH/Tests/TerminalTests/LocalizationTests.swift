@@ -16,5 +16,6 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Terminal"], "터미널")
         XCTAssertEqual(strings["Close the terminal?"], "터미널을 닫겠습니까?")
         XCTAssertEqual(strings["Select All"], "모두 선택")
+        XCTAssertEqual(strings["The shell could not start: %@"], "셸을 시작할 수 없습니다: %@")
     }
 }

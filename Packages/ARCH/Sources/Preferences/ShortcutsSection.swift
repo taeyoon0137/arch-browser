@@ -22,7 +22,7 @@ struct ShortcutsSection: View {
                         .foregroundStyle(.red)
                 }
             } footer: {
-                formFootnote("Brings Arch forward and opens the new tab palette while another app is in front. To change a shortcut, click it and press the new keys; Escape cancels and Delete removes the shortcut.")
+                formFootnote(localized("Brings Arch forward and opens the new tab palette while another app is in front. To change a shortcut, click it and press the new keys; Escape cancels and Delete removes the shortcut."))
             }
             ForEach(menuGroups) { group in
                 Section(group.title) {

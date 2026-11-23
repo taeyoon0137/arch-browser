@@ -161,7 +161,7 @@ public enum IncomingSidebarRecords {
             // Recreate it only if the Persona still has no other space.
             removed.removeValue(forKey: name)
             let item = SyncRecord(recordType: .space, recordName: name, fields: [
-                "persona": .reference(persona.recordName), "name": .text("Personal"), "order": .number(1),
+                "persona": .reference(persona.recordName), "name": .text(localized("Personal")), "order": .number(1),
                 "symbol": .text("circle.fill"), "tint": .text("blue")], modifiedAt: foundAt)
             all[name] = item
             spaces[.reference(persona.recordName)] = [item]

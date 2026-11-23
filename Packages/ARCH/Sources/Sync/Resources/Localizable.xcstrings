@@ -61,6 +61,16 @@
         }
       }
     },
+    "Personal" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인"
+          }
+        }
+      }
+    },
     "Sign in to iCloud in System Settings to sync." : {
       "localizations" : {
         "ko" : {

@@ -73,7 +73,7 @@ struct AgentGrantSheetView: View {
 
     private var personaName: String {
         switch choice.persona {
-        case .agents: return "Agents"
+        case .agents: return localized("Agents")
         case .existing(let id): return request.personas.first { $0.id == id }?.name ?? ""
         }
     }

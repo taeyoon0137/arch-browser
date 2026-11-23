@@ -571,6 +571,16 @@
         }
       }
     },
+    "The script does not parse: %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트 구문을 해석할 수 없습니다: %@."
+          }
+        }
+      }
+    },
     "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File." : {
       "localizations" : {
         "ko" : {
@@ -587,6 +597,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "스크립트에 탭과 줄 바꿈 외의 제어 문자나 서식 문자(예: 캐리지 리턴, 텍스트 방향 표시)가 있어 Arch가 인터프리터가 읽는 그대로 표시할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The script is larger than %lld KB." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트가 %lldKB보다 큽니다."
           }
         }
       }

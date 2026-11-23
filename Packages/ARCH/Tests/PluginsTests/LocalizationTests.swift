@@ -15,6 +15,7 @@ final class PluginsLocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Copy Page Address"], "페이지 주소 복사")
         XCTAssertEqual(strings["The plugin has stopped."], "플러그인이 중단되었습니다.")
         XCTAssertEqual(strings["%@ and %lld more"], "%1$@ 외 %2$lld개")
+        XCTAssertEqual(strings["“%@” is not a site pattern."], "“%@” 항목은 사이트 패턴이 아닙니다.")
     }
 }
 

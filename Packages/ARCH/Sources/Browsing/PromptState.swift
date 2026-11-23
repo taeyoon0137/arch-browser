@@ -20,16 +20,17 @@ final class PromptState: ObservableObject, Identifiable {
 
     init(tabID: UUID, content: PromptContent, panel: NSSavePanel? = nil, makeContent: (() -> PromptContent)? = nil, now: Date = Date()) {
         self.tabID = tabID
+        let content = content.keepingFirstOfEachID()
         self.content = content
         self.makeContent = makeContent
         self.panel = panel
-        fieldValues = Dictionary(content.fields.map { ($0.id, $0.initialValue) }, uniquingKeysWith: { first, _ in first })
+        fieldValues = Dictionary(uniqueKeysWithValues: content.fields.map { ($0.id, $0.initialValue) })
         arming = PromptArming(shownAt: now)
     }
 
     /// Takes the content as `makeContent` makes it now, as a card shows the prompt or as what it follows changes while the card shows. The fields keep what the user typed.
     func remake() {
         guard let makeContent else { return }
-        content = makeContent()
+        content = makeContent().keepingFirstOfEachID()
     }
 }

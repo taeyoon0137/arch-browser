@@ -325,8 +325,8 @@ extension AIFeatureID {
 
 extension AIFeature {
     /// Agent Runs from Programs: automatic and `perRequest`, since each run names its tier or models, and requiring `agent`.
-    public static let agentRun = AIFeature(id: .agentRun, name: "Agent Runs from Programs",
-                                           summary: "Runs one agent for a program you allowed, on the tabs it opened or you shared with it, within its grant.",
+    public static let agentRun = AIFeature(id: .agentRun, name: localized("Agent Runs from Programs"),
+                                           summary: localized("Runs one agent for a program you allowed, on the tabs it opened or you shared with it, within its grant."),
                                            trigger: .automatic, data: AIDataScope(kinds: [.page]), requirements: [.agent], routing: .perRequest)
 }
 

@@ -1049,8 +1049,8 @@ import Foundation
     /// Where Use the Agents Persona starts a session, as "Persona / Space": the Agents Persona's first space, or the one Arch makes with it.
     public var agentsPersonaPlace: String {
         let id = settings.agentsPersonaID
-        let persona = id.flatMap { id in host.personas.first { $0.id == id }?.name } ?? "Agents"
-        let space = id.flatMap { host.spaces(in: $0).first?.name } ?? "Personal"
+        let persona = id.flatMap { id in host.personas.first { $0.id == id }?.name } ?? localized("Agents")
+        let space = id.flatMap { host.spaces(in: $0).first?.name } ?? localized("Personal")
         return "\(persona) / \(space)"
     }
 

@@ -212,7 +212,7 @@ struct ScriptHookDraft: Identifiable {
             bytes = shell.contents
         } else {
             bytes = Data(scriptText.utf8)
-            if let problem = HookScriptRunner.problem(in: bytes) { throw invalid(problem) }
+            if let problem = HookScriptRunner.localizedProblem(in: bytes) { throw invalid(problem) }
         }
         if let problem = sitePatterns().problem { throw invalid(problem) }
         guard isEverywhere || !chosenPlaces.isEmpty else { throw invalid(localized("Choose where the hook runs.")) }

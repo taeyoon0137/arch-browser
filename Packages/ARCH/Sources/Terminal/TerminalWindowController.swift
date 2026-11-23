@@ -92,7 +92,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         do {
             terminal = try PseudoTerminal(size: screen.size)
         } catch {
-            screen.feed(Data("The shell could not start: \(error.localizedDescription)\r\n".utf8))
+            screen.feed(Data((localized("The shell could not start: \(error.localizedDescription)") + "\r\n").utf8))
             view.screenDidChange()
             return
         }
