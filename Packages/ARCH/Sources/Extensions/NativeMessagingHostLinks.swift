@@ -225,9 +225,8 @@ public final class NativeMessagingHostLinks: ObservableObject {
 
     /// "Arch cannot prove that this extension is the one that 1Password BrowserSupport expects. …", ending with how to give it a proof.
     static func gateSentence(naming description: String, predatesProof: Bool) -> String {
-        let lead = "Arch cannot prove that this extension is the one that \(description) expects."
-        guard predatesProof else { return lead + " Install it from the Web Store or from its signed .crx file." }
-        return lead + " It was installed before Arch checked signatures; install it again from its .crx file or from the Web Store."
+        guard predatesProof else { return localized("Arch cannot prove that this extension is the one that \(description) expects. Install it from the Web Store or from its signed .crx file.") }
+        return localized("Arch cannot prove that this extension is the one that \(description) expects. It was installed before Arch checked signatures; install it again from its .crx file or from the Web Store.")
     }
 
     // MARK: Files

@@ -16,9 +16,9 @@ struct WebExtensionManifest {
     /// Reads `manifest.json` in the package folder at `root`, which the user installs from `source`. Throws `PluginError.invalidPackage` with a sentence that names the field for a manifest Arch cannot install. The name and the action title lose the spaces at either end, so every view shows them alike; a name of nothing but spaces gives the extension its identifier as its name, and an action title of nothing but spaces the name.
     init(packageAt root: URL, source: URL) throws {
         guard let data = try? Data(contentsOf: root.appendingPathComponent(Self.fileName)),
-              let object = try? JSONSerialization.jsonObject(with: data) else { throw PluginError.invalidPackage("manifest.json is not valid JSON.") }
-        guard let fields = object as? [String: Any] else { throw invalidManifest("the manifest must be a JSON object") }
-        guard fields["manifest_version"] as? Int == 3 else { throw invalidManifest("manifest_version must be 3, as Arch runs Manifest V3 extensions only") }
+              let object = try? JSONSerialization.jsonObject(with: data) else { throw PluginError.invalidPackage(localized("manifest.json is not valid JSON.")) }
+        guard let fields = object as? [String: Any] else { throw invalidManifest(localized("the manifest must be a JSON object")) }
+        guard fields["manifest_version"] as? Int == 3 else { throw invalidManifest(localized("manifest_version must be 3, as Arch runs Manifest V3 extensions only")) }
         let messages = try LocalizedMessages(packageAt: root, defaultLocale: fields["default_locale"] as? String)
         let givenName = try messages.text(of: "name", in: fields, required: true).trimmingCharacters(in: .whitespacesAndNewlines)
         let version = try messages.text(of: "version", in: fields, required: true)
@@ -35,7 +35,7 @@ struct WebExtensionManifest {
             commands.append(PluginCommand(id: Self.actionCommand, title: title.isEmpty ? name : title, symbol: "puzzlepiece.extension", keywords: [name]))
         }
         manifest = PluginManifest(
-            id: Self.pluginID(of: extensionID), name: name, version: version, summary: summary.isEmpty ? "A web extension." : summary,
+            id: Self.pluginID(of: extensionID), name: name, version: version, summary: summary.isEmpty ? localized("A web extension.") : summary,
             permissions: Set(requested.compactMap { Self.mappedPermissions[$0] }), sites: Self.sites(in: fields),
             extensionPermissions: requested.filter { Self.mappedPermissions[$0] == nil }, contributions: PluginContributions(commands: commands),
             author: Self.author(in: fields), homepage: Self.homepage(in: fields)
@@ -72,7 +72,7 @@ struct WebExtensionManifest {
     /// The permission names in the list at `key`, as Chromium reads them: each a name, or an object with one key, the name, whose value holds the permission's arguments. Nothing without the key. Throws for a value that is not such a list, which Chromium refuses to load, so that no entry it would grant goes unread.
     static func permissionNames(of key: String, in fields: [String: Any]) throws -> [String] {
         guard let value = fields[key] else { return [] }
-        let problem = invalidManifest("\(key) must be a list of permissions, each a name or an object with one key")
+        let problem = invalidManifest(localized("\(key) must be a list of permissions, each a name or an object with one key"))
         guard let list = value as? [Any] else { throw problem }
         return try list.map { item in
             if let name = item as? String { return name }
@@ -102,7 +102,7 @@ struct WebExtensionManifest {
     /// The identifier that Chromium gives the extension: from the public key in the manifest's `key`, so that each engine and Persona knows it alike, or else from the path the user installs it from, as Chromium names an unpacked extension, so that installing from the same place again updates it. Throws for a `key` that is not Base64 text.
     static func extensionID(key: Any?, source: URL) throws -> String {
         guard let key else { return extensionID(ofBytes: Data(source.standardizedFileURL.path.utf8)) }
-        guard let text = key as? String, let bytes = Data(base64Encoded: text) else { throw invalidManifest("key must be a public key as Base64 text") }
+        guard let text = key as? String, let bytes = Data(base64Encoded: text) else { throw invalidManifest(localized("key must be a public key as Base64 text")) }
         return extensionID(ofBytes: bytes)
     }
 
@@ -165,20 +165,20 @@ private struct LocalizedMessages {
                   let entries = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
             return Dictionary(entries.compactMap { name, entry in ((entry as? [String: Any])?["message"] as? String).map { (name.lowercased(), $0) } }) { first, _ in first }
         }
-        if let defaultLocale, locales.isEmpty { throw invalidManifest("default_locale is \(defaultLocale), but _locales/\(defaultLocale)/messages.json could not be read") }
+        if let defaultLocale, locales.isEmpty { throw invalidManifest(localized("default_locale is \(defaultLocale), but _locales/\(defaultLocale)/messages.json could not be read")) }
     }
 
     /// The text of `key` in `fields`, with a whole `__MSG_<name>__` replaced by its message. A missing text is empty unless `required`.
     func text(of key: String, in fields: [String: Any], required: Bool) throws -> String {
         guard let text = fields[key] as? String, !text.isEmpty else {
-            if required { throw invalidManifest("\(key) is missing") }
+            if required { throw invalidManifest(localized("\(key) is missing")) }
             return ""
         }
         guard text.hasPrefix("__MSG_"), text.hasSuffix("__"), text.count > 8 else { return text }
         let name = String(text.dropFirst(6).dropLast(2))
         guard let message = locales.lazy.compactMap({ $0[name.lowercased()] }).first else {
-            guard let defaultLocale else { throw invalidManifest("\(key) names the message “\(name)”, but default_locale is missing") }
-            throw invalidManifest("\(key) names the message “\(name)”, which _locales/\(defaultLocale)/messages.json does not have")
+            guard let defaultLocale else { throw invalidManifest(localized("\(key) names the message “\(name)”, but default_locale is missing")) }
+            throw invalidManifest(localized("\(key) names the message “\(name)”, which _locales/\(defaultLocale)/messages.json does not have"))
         }
         return message
     }

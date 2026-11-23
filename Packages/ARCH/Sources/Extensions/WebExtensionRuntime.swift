@@ -125,8 +125,8 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
     /// Web extensions are unavailable only while no engine runs them on this Mac.
     public var unavailability: String? {
         guard engines.isEmpty else { return nil }
-        guard #available(macOS 15.4, *) else { return "Web extensions need macOS 15.4 or later." }
-        return "No engine on this Mac runs web extensions."
+        guard #available(macOS 15.4, *) else { return localized("Web extensions need macOS 15.4 or later.") }
+        return localized("No engine on this Mac runs web extensions.")
     }
 
     /// Checks the package in each engine that runs extensions, in the order of `EngineKind`, starting the Persona's profile there as loading does.
@@ -145,7 +145,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
             try await engine.check(packageURL)
             return .runs
         } catch {
-            return .refused("\(kind.displayName) cannot run this extension: \(error.localizedDescription)")
+            return .refused(localized("\(kind.displayName) cannot run this extension: \(error.localizedDescription)"))
         }
     }
 
@@ -350,7 +350,7 @@ public final class WebExtensionRuntime: ObservableObject, PluginRuntime {
                     try await load(engineExtension, of: installed, into: engine, of: kind)
                 } catch {
                     engine.unload(engineExtension.id)
-                    onEngineFailure?(installed.id, kind, "Arch could not start it on \(kind.displayName) tabs: \(error.localizedDescription)")
+                    onEngineFailure?(installed.id, kind, localized("Arch could not start it on \(kind.displayName) tabs: \(error.localizedDescription)"))
                 }
             }
         }
