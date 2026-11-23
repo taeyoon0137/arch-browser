@@ -1,7 +1,6 @@
-// Add to Favorites and Remove from Favorites (`BrowserSession.addFavorite(_:)`, `docs/bookmarks.md`, Favorites): a tab of a space's list moves into the favorites with its page, and goes back to its space when the favorite is removed in the same session; a pinned tab's favorite takes its saved page's address; a small window's, a live folder item's, and an agent's tab keep their place, and the favorite gets a copy of the page.
+// Add to Favorites and Remove from Favorites (`BrowserSession.addFavorite(_:)`, `docs/bookmarks.md`, Favorites): a tab of a space's list moves into the favorites with its page, and goes back to its space when the favorite is removed in the same session; a pinned tab's favorite takes its saved page's address; a small window's and an agent's tab keep their place, and the favorite gets a copy of the page.
 import ARCHEngine
 import Foundation
-import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -60,27 +59,22 @@ import Testing
         #expect(session.tabsOutsideFolders(in: space.id, pinned: true).map(\.id) == [pinned.id])
     }
 
-    @Test func aSmallWindowsTabALiveItemsTabAndAnAgentsTabAddACopy() throws {
+    @Test func aSmallWindowsTabAndAnAgentsTabAddACopy() throws {
         let (session, space, directory) = try makeSession()
         defer { try? FileManager.default.removeItem(at: directory) }
         let small = tab("small", in: session, space)
         small.isInSmallWindow = true
-        let folder = session.makeFolder(in: space.id, pinned: true)
-        session.updateFolder(folder.id) { $0.live = LiveFolderConfiguration(source: .feed(address: URL(string: "https://fixture.invalid/feed.xml")!, isPrivate: true)) }
-        let item = LiveItem(id: "a", url: URL(string: "https://fixture.invalid/a")!, title: "Item a")
-        let itemTab = session.openTab(url: item.url, in: space.id, pinned: true, select: false)
-        LiveFolderTabs.prepare(itemTab, as: item, inFolder: folder.id)
         let agentTab = try #require(session.openAgentTab(url: URL(string: "about:blank#agent")!, engine: nil, owner: UUID(), folderName: "Task", in: space.id))
 
-        for tab in [small, itemTab, agentTab] {
+        for tab in [small, agentTab] {
             #expect(session.canAddFavorite(tab))
             session.addFavorite(tab)
             #expect(session.tabs.contains { $0 === tab } && !session.openFavoriteTabs.contains { $0 === tab })
             // Once its page is a favorite, the command is off.
             #expect(!session.canAddFavorite(tab))
         }
-        #expect(session.favorites.map(\.url) == [small.url, item.url, agentTab.url])
-        #expect(itemTab.folderID == folder.id && agentTab.agentOwnerID != nil && small.isInSmallWindow)
+        #expect(session.favorites.map(\.url) == [small.url, agentTab.url])
+        #expect(agentTab.agentOwnerID != nil && small.isInSmallWindow)
         // Removing a copy leaves the tab where it is.
         session.removeFavorite(try #require(session.favorites.first))
         #expect(session.tabs.contains { $0 === small })

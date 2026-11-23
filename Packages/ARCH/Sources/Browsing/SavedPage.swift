@@ -92,16 +92,16 @@ extension Tab {
         webContents.navigationController.load(URLRequest(url: url))
     }
 
-    /// Use Current Page as Saved Page for a pinned tab: the page it shows becomes its saved page. A live folder item's source owns its tab's saved page.
+    /// Use Current Page as Saved Page for a pinned tab: the page it shows becomes its saved page.
     func useCurrentPageAsSavedPage() {
-        guard isPinned, liveItemID == nil, let page = currentPage else { return }
+        guard isPinned, let page = currentPage else { return }
         savedPage = page
     }
 
     /// Edit Saved Address… for a pinned tab: the address in `text`, read as the address field reads it, becomes the saved page, and a tab without its page moves its stand-in there. The title stays while the address names the same page and is otherwise empty until the page shows one there. Returns false and changes nothing for text that `BrowserSession.url(forInput:)` rejects, and for a live folder item's tab, whose source owns its saved page.
     @discardableResult
     func setSavedAddress(fromInput text: String) -> Bool {
-        guard isPinned, liveItemID == nil, let url = BrowserSession.url(forInput: text) else { return false }
+        guard isPinned, let url = BrowserSession.url(forInput: text) else { return false }
         let title = savedPage.flatMap { url.isSamePage(as: $0.url) ? $0.title : nil } ?? ""
         savedPage = SavedPage(url: url, title: title)
         if !isLoaded { webContents.navigationController.load(URLRequest(url: url)) }
@@ -157,9 +157,9 @@ extension BrowserSession {
         tab.goBack(toSavedPage: url)
     }
 
-    /// Whether Use Current Page as Saved Page applies: the tab has an address and is pinned, but not a live folder item's tab, whose source owns its saved page, or is a favorite's tab whose address no other favorite of its Persona has.
+    /// Whether Use Current Page as Saved Page applies: the tab has an address and is pinned, or is a favorite's tab whose address no other favorite of its Persona has.
     public func canUseCurrentPageAsSavedPage(_ tab: Tab) -> Bool {
-        guard tab.url != nil, tab.liveItemID == nil else { return false }
+        guard tab.url != nil else { return false }
         if tab.isPinned { return true }
         return favorite(ofTab: tab)?.usingCurrentPage(of: tab, among: favorites) != nil
     }

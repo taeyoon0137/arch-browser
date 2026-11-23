@@ -59,7 +59,7 @@ final class BrowserEventSource {
 
         init(_ tab: Tab) {
             self.tab = tab
-            shown = Shown(title: tab.title, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, url: tab.url, committedURL: tab.committedURL, livePage: tab.liveItemID == nil ? nil : tab.savedPage)
+            shown = Shown(title: tab.title, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, url: tab.url, committedURL: tab.committedURL)
             named = shown
         }
     }
@@ -70,11 +70,10 @@ final class BrowserEventSource {
         var suggestedTitle: SuggestedTitle?
         var url: URL?
         var committedURL: URL?
-        var livePage: SavedPage?
 
         /// Whether the tab shows its committed address, so that the shown name is its committed document's.
         var isSettled: Bool { url == committedURL }
-        var name: String { Tab.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: committedURL, livePage: livePage) }
+        var name: String { Tab.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: committedURL) }
     }
 
     private var tabs: [UUID: FollowedTab] = [:]
@@ -117,7 +116,7 @@ final class BrowserEventSource {
             let followed = FollowedTab(tab)
             tabs[tab.id] = followed
             observe(tab, followed)
-            guard postingNewTabs, !tab.isRestored, tab.liveItemID == nil else { continue }
+            guard postingNewTabs, !tab.isRestored else { continue }
             followed.awaitsFirstLoadAfterOpen = true
             if let cause = bus.currentCause { tab.pendingCause = cause }
             bus.post(.tabOpened(tab: ref(tab), openerTabID: openerID(of: tab)))
@@ -154,14 +153,13 @@ final class BrowserEventSource {
             .store(in: &followed.observers)
         // A published value reaches its subscribers before the tab holds it, so the change comes with its new value.
         Publishers.CombineLatest(Publishers.CombineLatest4(tab.$title, tab.$customTitle, tab.$suggestedTitle, tab.$url),
-                                 Publishers.CombineLatest3(tab.$committedURL, tab.$savedPage, tab.$liveItemID)).dropFirst()
-            .sink { [weak self, weak tab] inputs, document in
+                                 tab.$committedURL).dropFirst()
+            .sink { [weak self, weak tab] inputs, committedURL in
                 MainActor.assumeIsolated {
                     let (title, customTitle, suggestedTitle, url) = inputs
-                    let (committedURL, savedPage, itemID) = document
                     if let self, let tab {
                         self.tab(tab, didChangeTo: Shown(title: title, customTitle: customTitle, suggestedTitle: suggestedTitle, url: url,
-                                                       committedURL: committedURL, livePage: itemID == nil ? nil : savedPage))
+                                                       committedURL: committedURL))
                     }
                 }
             }

@@ -45,7 +45,6 @@ let package = Package(
         .library(name: "History", targets: ["History"]),
         .library(name: "Import", targets: ["Import"]),
         .library(name: "AI", targets: ["AI"]),
-        .library(name: "LiveFolders", targets: ["LiveFolders"]),
         .library(name: "Plugins", targets: ["Plugins"]),
         .library(name: "Extensions", targets: ["Extensions"]),
         .library(name: "Terminal", targets: ["Terminal"]),
@@ -81,9 +80,8 @@ let package = Package(
         // `Events` gives script plugins their events (`docs/hooks.md`, Plugins).
         .target(name: "Plugins", dependencies: ["ARCHEngine", "AI", "Events"], path: "Packages/ARCH/Sources/Plugins", resources: [.process("Resources")]),
         .target(name: "Extensions", dependencies: ["ARCHEngine", "Plugins"], path: "Packages/ARCH/Sources/Extensions", resources: [.process("Resources")]),
-        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI", "LiveFolders", "Agent", "Events", "Hooks"], path: "Packages/ARCH/Sources/Browsing", resources: [.process("Resources")]),
+        .target(name: "Browsing", dependencies: ["ARCHEngine", "ARCHPrivateAPI", "History", "Plugins", "Extensions", "AI", "Agent", "Events", "Hooks"], path: "Packages/ARCH/Sources/Browsing", resources: [.process("Resources")]),
         .target(name: "AI", path: "Packages/ARCH/Sources/AI", resources: [.process("Resources")]),
-        .target(name: "LiveFolders", dependencies: ["AI"], path: "Packages/ARCH/Sources/LiveFolders", resources: [.process("Resources")]),
         .target(name: "Terminal", path: "Packages/ARCH/Sources/Terminal", resources: [.process("Resources")]),
         .target(name: "Sync", dependencies: ["Browsing", "ARCHEngine"], path: "Packages/ARCH/Sources/Sync", resources: [.process("Resources")]),
         // libbsm reads process IDs from audit tokens.
@@ -113,7 +111,7 @@ let package = Package(
         // `Fixtures` holds the pages the snapshot and action scripts run on in WebKit.
         .testTarget(name: "AgentTests", dependencies: ["Agent", "ARCHEngineWebKit", "Events"], path: "Packages/ARCH/Tests/AgentTests", resources: [.copy("Fixtures")]),
         // Reads store pages from hosts that stand in for the Web Store's through `Extensions`.
-        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions", "Import", "LiveFolders"], path: "Packages/ARCH/Tests/BrowsingTests"),
+        .testTarget(name: "BrowsingTests", dependencies: ["Browsing", "Extensions", "Import"], path: "Packages/ARCH/Tests/BrowsingTests"),
         .testTarget(name: "EventsTests", dependencies: ["Events"], path: "Packages/ARCH/Tests/EventsTests"),
         // `Fixtures` holds a sample web extension that the tests load into WebKit.
         .testTarget(name: "ExtensionsTests", dependencies: ["Extensions", "ARCHEngineWebKit"], path: "Packages/ARCH/Tests/ExtensionsTests", resources: [.copy("Fixtures")]),
@@ -122,13 +120,11 @@ let package = Package(
         .testTarget(name: "HooksTests", dependencies: ["Hooks"], path: "Packages/ARCH/Tests/HooksTests", resources: [.copy("Fixtures")]),
         // Links SQLite to build its synthetic databases.
         .testTarget(name: "ImportTests", dependencies: ["Import", "Browsing", "History"], path: "Packages/ARCH/Tests/ImportTests", linkerSettings: [.linkedLibrary("sqlite3")]),
-        // Stands in a URL protocol for the network, shell scripts for `gh` and the login shell, and an in-memory store for the Keychain.
-        .testTarget(name: "LiveFoldersTests", dependencies: ["LiveFolders", "AI"], path: "Packages/ARCH/Tests/LiveFoldersTests"),
         // `Fixtures` holds a sample script plugin that the tests install and run.
         .testTarget(name: "PluginsTests", dependencies: ["Plugins"], path: "Packages/ARCH/Tests/PluginsTests", resources: [.copy("Fixtures")]),
         .testTarget(name: "PreferencesTests", dependencies: ["Preferences", "Browsing", "Sync"], path: "Packages/ARCH/Tests/PreferencesTests"),
-        // The settings tests compare the synced keys and values with the constants of `ARCHEngine`, `Browsing`, and `Preferences`; the sidebar record tests build live folders (`LiveFolders`).
-        .testTarget(name: "SyncTests", dependencies: ["Sync", "ARCHEngine", "Browsing", "Preferences", "LiveFolders"], path: "Packages/ARCH/Tests/SyncTests"),
+        // The settings tests compare the synced keys and values with the constants of `ARCHEngine`, `Browsing`, and `Preferences`.
+        .testTarget(name: "SyncTests", dependencies: ["Sync", "ARCHEngine", "Browsing", "Preferences"], path: "Packages/ARCH/Tests/SyncTests"),
         .testTarget(name: "TerminalTests", dependencies: ["Terminal"], path: "Packages/ARCH/Tests/TerminalTests"),
     ],
     cxxLanguageStandard: .cxx20

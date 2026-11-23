@@ -1,4 +1,4 @@
-// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, a hook's name, and a live folder item's title stay, with a rename to that name and a favorite of the page, and how the name follows an install, a rename, and a removal of the extension at once. Tabs run on stand-ins, in a session on a test engine for the rename, the favorite, and the changes, with the extension's name from a callback as the session gives it, or for the changes from the Persona's runtime, to which the test lists the extension as the manager does.
+// The title that the sidebar's rows, the window's title, and the tab switcher show for a web extension's own page (`Tab.shownTitle`): the extension's name in place of a page title that only repeats the address, as WebKit and Chromium report a page without a title, while a page's own title, the user's name, and a hook's name stay, with a rename to that name and a favorite of the page, and how the name follows an install, a rename, and a removal of the extension at once. Tabs run on stand-ins, in a session on a test engine for the rename, the favorite, and the changes, with the extension's name from a callback as the session gives it, or for the changes from the Persona's runtime, to which the test lists the extension as the manager does.
 import ARCHEngine
 import Combine
 import Extensions
@@ -44,13 +44,6 @@ private let options = URL(string: "webkit-extension://\(identifier)/options.html
         // A name the user turned down leaves the page's title, which the extension's name stands in for.
         suggested.suggestedTitle = SuggestedTitle(title: nil, url: options)
         #expect(suggested.shownTitle == "Reader")
-        // A live folder item's tab on its saved page shows the item's title, which the saved page keeps, and the extension's name only for an item without one.
-        let item = tab(title: "")
-        item.liveItemID = "item"
-        item.savedPage = SavedPage(url: options, title: "An item")
-        #expect(item.shownTitle == "An item")
-        item.savedPage = SavedPage(url: options, title: "")
-        #expect(item.shownTitle == "Reader")
     }
 
     @Test func otherPagesKeepTheirTitles() {

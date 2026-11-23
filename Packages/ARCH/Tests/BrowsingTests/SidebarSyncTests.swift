@@ -1,7 +1,6 @@
 import ARCHEngine
 @testable import Browsing
 import Foundation
-import LiveFolders
 import Testing
 
 @MainActor @Suite struct SidebarSyncTests {
@@ -51,29 +50,22 @@ import Testing
         #expect(result.withFirstCopies == result)
     }
 
-    @Test func restoringOlderSnapshotsKeepsPrivateFeedsTheirItemsAndAgentTabsLocal() throws {
-        let publicFeed = TabFolder(spaceID: space.id, name: "News", isPinned: true,
-            live: LiveFolderConfiguration(source: .feed(address: page, isPrivate: false)))
-        let secretFeed = TabFolder(spaceID: space.id, name: "Private", isPinned: true,
-            live: LiveFolderConfiguration(source: .feed(address: page, isPrivate: true)))
-        let legacyFeed = TabFolder(spaceID: space.id, name: "Unmarked", isPinned: true,
-            live: LiveFolderConfiguration(source: .feed(address: URL(string: "https://example.test/feed?private=fixture")!, isPrivate: false)))
+    @Test func restoringOlderSnapshotsKeepsOpenFoldersAndAgentTabsLocal() throws {
         let agent = TabFolder(spaceID: space.id, name: "Agent", isPinned: false, agentSessionID: UUID())
         let ordinary = TabFolder(spaceID: space.id, name: "Pinned", isPinned: true)
         let open = TabFolder(spaceID: space.id, name: "Open", isPinned: false)
-        let folders = [ordinary, open, publicFeed, secretFeed, legacyFeed, agent]
+        let folders = [ordinary, open, agent]
         let tabs = folders.map { folder in
             let tab = Tab(id: UUID(), webContents: PageStub(engine: .webKit, url: page), spaceID: space.id,
                           isPinned: folder.isPinned, personaID: Persona.defaultID)
             tab.folderID = folder.id
-            if folder.live != nil { tab.liveItemID = "fixture-item" }
             return tab
         }
         var saved = snapshot(tabs, folders: folders)
         saved.version = 15
         let restored = try JSONDecoder().decode(SessionSnapshot.self, from: JSONEncoder().encode(saved)).normalized()
         let result = state(restored)
-        #expect(result.folders.map(\.id) == [ordinary.id, publicFeed.id])
+        #expect(result.folders.map(\.id) == [ordinary.id])
         #expect(result.pinnedTabs.map(\.id) == [tabs[0].id])
     }
 

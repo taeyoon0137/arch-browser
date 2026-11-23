@@ -1,8 +1,7 @@
 // A sidebar tab row holds its icon, inline name field, hover buttons, badges, shortcut numbers while Command is held, and the new-tab row.
-// Hover actions close, unload a pinned tab, dismiss a live-folder item, or return a pinned tab to its saved page. The inline field renames a tab or folder.
+// Hover actions close, unload a pinned tab, or return a pinned tab to its saved page. The inline field renames a tab or folder.
 import AI
 import AppKit
-import LiveFolders
 import SwiftUI
 
 struct TabRowView: View {
@@ -60,10 +59,7 @@ struct TabRowView: View {
                     if tab.isOffSavedSite, let saved = tab.savedPage {
                         TabRowButton(symbol: "arrow.uturn.backward", label: localized("Go Back to Saved Page"), help: localized("Go Back to \(saved.url.absoluteString)")) { session.goBackToSavedPage(tab) }
                     }
-                    if tab.liveItemID != nil {
-                        // Closing an item's tab dismisses the item (live folder rule 4).
-                        TabRowButton(symbol: "xmark", label: localized("Dismiss"), help: localized("Dismiss")) { session.requestCloseTab(tab) }
-                    } else if !tab.isPinned {
+                    if !tab.isPinned {
                         TabRowButton(symbol: "xmark", label: localized("Close Tab"), help: localized("Close Tab")) { session.requestCloseTab(tab) }
                     } else if tab.isLoaded {
                         TabRowButton(symbol: "minus", label: localized("Unload Tab"), help: localized("Unload Tab")) { session.requestCloseTab(tab) }
@@ -84,45 +80,20 @@ struct TabRowView: View {
         // Only the light appearance lifts the selected row; in the dark one its lighter fill is enough.
         .shadow(color: .black.opacity(isSelected && colorScheme == .light ? 0.08 : 0), radius: 1.5, y: 0.5)
         .contentShape(Rectangle())
-        // The row truncates long titles, so the tooltip has the whole title and the address, and for a GitHub item what its row cannot show.
-        .help(([tab.shownTitle] + (tab.liveItem?.gitHub.map(Self.details) ?? []) + [tab.url?.absoluteString].compactMap { $0 }).joined(separator: "\n"))
+        // The row truncates long titles, so the tooltip has the whole title and the address.
+        .help(([tab.shownTitle] + [tab.url?.absoluteString].compactMap { $0 }).joined(separator: "\n"))
         .onTapGesture { windowModel.selectTab(tab.id) }
         // The first click selects the tab at once; the second starts renaming it.
         .simultaneousGesture(TapGesture(count: 2).onEnded { windowModel.renamingTabID = tab.id })
         .onHover { isHovering = $0 }
-        .contextMenu {
-            if tab.liveItemID != nil {
-                LiveItemTabItems(session: session, windowModel: windowModel, tab: tab)
-            } else {
-                menuItems
-            }
-        }
+        .contextMenu { menuItems }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         // A tap gesture alone does not answer the accessibility press, so VoiceOver could not select the tab.
         .accessibilityAction { windowModel.selectTab(tab.id) }
     }
 
-    /// A GitHub item's detail line ("owner/repo #123 · author"), its review decision, the state of its checks, and a conflict, for its row's tooltip.
-    static func details(of item: GitHubItem) -> [String] {
-        var lines = [item.detail]
-        switch item.reviewDecision {
-        case .approved?: lines.append(localized("Approved"))
-        case .changesRequested?: lines.append(localized("Changes requested"))
-        case .reviewRequired?: lines.append(localized("Review required"))
-        case nil: break
-        }
-        switch item.checks {
-        case .success?: lines.append(localized("Checks passed"))
-        case .failure?, .error?: lines.append(localized("Checks failed"))
-        case .pending?, .expected?: lines.append(localized("Checks running"))
-        case nil: break
-        }
-        if item.mergeable == .conflicting { lines.append(localized("Has conflicts")) }
-        return lines
-    }
-
-    /// The menu of a tab that is no live folder item's.
+    /// The tab's menu.
     @ViewBuilder private var menuItems: some View {
         Button(localized("Rename Tab")) {
             windowModel.selectTab(tab.id)
@@ -167,35 +138,6 @@ struct SidebarAgentMenuItem: View {
         if let context = windowModel.sidebarAgentDraft(for: tab, settings: settings) {
             Button(localized("Ask Agent About This Tab…")) { windowModel.askAgentAboutSidebarTab(tab, reviewed: context, settings: settings) }
         }
-    }
-}
-
-/// A live folder item's tab's menu (`docs/bookmarks.md`, Live folders ▸ Interface): Mark as Read or Mark as Unread, Dismiss, Rename Tab, Copy Address, Go Back to Saved Page while off it, Open in Split View, Add to Favorites, and Move to Folder, which takes the tab out of its folder. The source owns the saved page, so the saved page items that change it are left out, and the tab never joins the closed list, so it has no Delete Tab.
-private struct LiveItemTabItems: View {
-    @ObservedObject var session: BrowserSession
-    let windowModel: BrowserWindowModel
-    @ObservedObject var tab: Tab
-
-    var body: some View {
-        Button(tab.isUnread ? localized("Mark as Read") : localized("Mark as Unread")) { session.setRead(tab.isUnread, ofItemTab: tab) }
-        Button(localized("Dismiss")) { session.requestCloseTab(tab) }
-        Divider()
-        Button(localized("Rename Tab")) {
-            windowModel.selectTab(tab.id)
-            windowModel.renamingTabID = tab.id
-        }
-        Button(localized("Copy Address")) { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
-        if session.isOffSavedPage(tab) {
-            Button(localized("Go Back to Saved Page")) { session.goBackToSavedPage(tab) }
-        }
-        Divider()
-        Button(localized("Open in Split View")) { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
-        Button(localized("Add to Favorites")) { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
-        let tree = session.folderTree
-        MoveToFolderMenu(lists: [tree.moveTargets(forTab: tab, pinned: true), tree.moveTargets(forTab: tab, pinned: false)]) { folderID in
-            withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folderID) }
-        }
-        PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
     }
 }
 
@@ -416,7 +358,7 @@ struct TabRowButton: View {
     }
 }
 
-/// A tab's icon: a spinner while it loads, its page's icon, or a globe without one. A live folder item's tab without its page shows its GitHub item's state, or its feed folder's icon, or the feed symbol until that loads, since it requests no icon from the item's site.
+/// A tab's icon: a spinner while it loads, its page's icon, or a globe without one.
 struct TabIconView: View {
     @ObservedObject var tab: Tab
     /// The globe's size for a page without an icon, as large as the symbols in the rows around it.
@@ -427,40 +369,17 @@ struct TabIconView: View {
             ProgressView()
                 .controlSize(.small)
                 .scaleEffect(0.7)
-        } else if !tab.isLoaded, let item = tab.liveItem?.gitHub {
-            let state = Self.symbol(for: item)
-            Image(systemName: state.name)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(state.color)
-                .accessibilityLabel(state.label)
         } else if let favicon = tab.favicon {
             Image(nsImage: favicon)
                 .resizable()
                 .interpolation(.high)
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                 .accessibilityHidden(true)
-        } else if !tab.isLoaded, tab.liveItem != nil {
-            Image(systemName: "dot.radiowaves.up.forward")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
         } else {
             Image(systemName: "globe")
                 .font(.system(size: symbolSize, weight: .medium))
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-        }
-    }
-
-    /// The symbol, color, and spoken name of a GitHub item's state (`docs/bookmarks.md`, Items as tabs).
-    static func symbol(for item: GitHubItem) -> (name: String, color: Color, label: String) {
-        switch (item.kind, item.state) {
-        case (.pullRequest, .open): return ("arrow.triangle.pull", .green, localized("Open Pull Request"))
-        case (.pullRequest, .draft): return ("arrow.triangle.pull", .gray, localized("Draft Pull Request"))
-        case (.pullRequest, .merged): return ("arrow.triangle.merge", .purple, localized("Merged Pull Request"))
-        case (.pullRequest, .closed): return ("xmark.circle", .red, localized("Closed Pull Request"))
-        case (.issue, .closed), (.issue, .merged): return ("checkmark.circle", .purple, localized("Closed Issue"))
-        case (.issue, .open), (.issue, .draft): return ("circle.circle", .green, localized("Open Issue"))
         }
     }
 }

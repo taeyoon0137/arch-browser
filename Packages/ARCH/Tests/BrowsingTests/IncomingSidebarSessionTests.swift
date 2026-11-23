@@ -2,7 +2,6 @@ import ARCHEngine
 @testable import Browsing
 import Events
 import Foundation
-import LiveFolders
 import Testing
 
 @MainActor @Suite struct IncomingSidebarSessionTests {
@@ -17,95 +16,72 @@ import Testing
         try await body(session, directory)
     }
 
+    /// Counts the calls that stand in for deleting the removed live folders' Keychain items.
+    private final class KeychainRemovals: @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0
+        var count: Int { lock.withLock { calls } }
+        func record() { lock.withLock { calls += 1 } }
+    }
+
+    /// A version 16 file, as the builds with live folders write it: a live folder whose source made two item tabs, beside a tab the user put in it, and its stored items in `live-folders.json`. Live folders were removed (`docs/bookmarks.md`, Live sources): the folder loads as an ordinary pinned folder with the user's tab, the item tabs go, and once the session has saved, `live-folders.json` and the Keychain items go.
+    @Test func aSavedLiveFolderLoadsAsAnOrdinaryFolderAndItsStoredDataGoesOnceTheSessionSaved() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let space = UUID(), folder = UUID(), kept = UUID(), first = UUID(), second = UUID()
+        func record(_ id: UUID, item: String?) -> SessionSnapshot.TabRecord {
+            var record = SessionSnapshot.TabRecord(id: id, spaceID: space, url: URL(string: "https://fixture.invalid/\(id.uuidString)"), title: "Tab", isPinned: true, folderID: folder,
+                                                   savedPage: SavedPage(url: URL(string: "https://fixture.invalid/\(id.uuidString)")!, title: "Tab"))
+            record.liveItemID = item
+            return record
+        }
+        let snapshot = SessionSnapshot(version: 16, spaces: [Space(id: space, name: "Personal")], currentSpaceID: space, favorites: [],
+                                       tabs: [record(first, item: "a"), record(kept, item: nil), record(second, item: "b")],
+                                       folders: [TabFolder(id: folder, spaceID: space, name: "News", isPinned: true)], splitViews: [[0, 1]])
+        let text = try #require(String(data: JSONEncoder().encode(snapshot), encoding: .utf8))
+        let live = #""live":{"source":{"feed":{"address":"https:\/\/fixture.invalid\/feed","isPrivate":true}},"itemLimit":50},"name":"News""#
+        try Data(text.replacingOccurrences(of: #""name":"News""#, with: live).utf8).write(to: directory.appendingPathComponent("session.json"))
+        try Data(#"{"version":1,"folders":{}}"#.utf8).write(to: directory.appendingPathComponent("live-folders.json"))
+
+        let removals = KeychainRemovals()
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory, removeLiveFolderKeychainItems: removals.record)
+        #expect(session.folders.map(\.id) == [folder] && session.folders.allSatisfy(\.isPinned))
+        #expect(session.tabs.map(\.id) == [kept] && session.tabs.allSatisfy { $0.folderID == folder && $0.isPinned })
+        // The split view of an item tab and the user's tab has one tab left, so it goes.
+        #expect(session.splitTabIDs.isEmpty)
+        // Nothing goes before the session saved.
+        #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("live-folders.json").path) && removals.count == 0)
+
+        try session.saveNow().get()
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("live-folders.json").path) && removals.count == 1)
+        let saved = try Data(contentsOf: directory.appendingPathComponent("session.json"))
+        #expect([#""live""#, #""liveItemID""#].allSatisfy { saved.range(of: Data($0.utf8)) == nil })
+        // Later saves remove nothing again.
+        try session.saveNow().get()
+        #expect(removals.count == 1)
+    }
+
+    /// Without live folders in `session.json` or a `live-folders.json`, saving touches no Keychain item; a `live-folders.json` left alone, as beside a file that did not decode, still goes.
     @Test(arguments: [false, true])
-    func aFreshOrUnreadableSessionKeepsKeychainItemsItsStoreDoesNotList(_ unreadable: Bool) async throws {
+    func onlyLeftoverLiveFolderDataIsRemoved(_ leftover: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        if unreadable { try Data("unreadable".utf8).write(to: directory.appendingPathComponent("session.json")) }
-
-        let addresses = InMemoryLiveFolderKeychain()
-        let orphan = UUID(), feed = try #require(URL(string: "https://fixture.invalid/feed?key=fixture"))
-        try await addresses.setAddress(feed, for: orphan, folderName: "Local feed")
-        let registry = EngineRegistry()
-        registry.register(SessionTestEngine())
-        let session = try BrowserSession(testRegistry: registry, directory: directory, addresses: addresses)
-        // This write is queued after the initial registration's cleanup.
-        try await session.liveFolderService.setPrivateAddress(feed, for: UUID(), folderName: "New feed")
-
-        #expect(try await addresses.address(for: orphan) == feed)
-        #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.unreadable.json").path) == unreadable)
-    }
-
-    /// A `session.json` that does not decode moves aside, and a private feed's folder that it may hold keeps its entry in `live-folders.json` and its Keychain item for a repaired file; without a file, registering removes both.
-    @Test(arguments: [true, false])
-    func aSetAsideFileKeepsTheEntryAndKeychainItemOfALiveFolder(_ unreadable: Bool) async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        if unreadable { try Data("unreadable".utf8).write(to: directory.appendingPathComponent("session.json")) }
-        let folder = UUID(), feed = try #require(URL(string: "https://fixture.invalid/feed?key=fixture"))
-        let stored = LiveFolderStore(fileURL: directory.appendingPathComponent(LiveFolderStore.fileName))
-        stored.update(folder) { $0.dismiss("item") }
-        stored.saveNow()
-        let addresses = InMemoryLiveFolderKeychain()
-        try await addresses.setAddress(feed, for: folder, folderName: "Feed")
-
-        let registry = EngineRegistry()
-        registry.register(SessionTestEngine())
-        let session = try BrowserSession(testRegistry: registry, directory: directory, addresses: addresses)
-        // This write is queued after the initial registration's cleanup.
-        try await session.liveFolderService.setPrivateAddress(feed, for: UUID(), folderName: "New feed")
-
-        #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.unreadable.json").path) == unreadable)
-        #expect(try await addresses.address(for: folder) == (unreadable ? feed : nil))
-        #expect((session.liveFolderService.store.folders[folder] != nil) == unreadable)
-    }
-
-    /// `session.json` has a private feed's folder as an ordinary folder, as a build that could not keep its live configuration has it, while `live-folders.json` and the Keychain still hold the folder's entry and address. A copy that has the folder as a live folder keeps both, whatever the versions of the copy and the file, also the copy that a newer build's file leaves, whose live configuration this build cannot decode; otherwise registering removes them.
-    @Test(arguments: [
-        // A newer build's file, which leaves its copy as it loads.
-        (SessionSnapshot.currentVersion + 1, true, [:], true),
-        // A newer build's copy, and one of this build's version, as once this build has saved over an older build's file.
-        (SessionSnapshot.currentVersion, false, [SessionSnapshot.currentVersion + 1: true], true),
-        (SessionSnapshot.currentVersion, false, [SessionSnapshot.currentVersion: true], true),
-        // No copy, or one that has the folder as an ordinary folder.
-        (SessionSnapshot.currentVersion, false, [:], false),
-        (SessionSnapshot.currentVersion, false, [SessionSnapshot.currentVersion + 1: false], false),
-    ] as [(Int, Bool, [Int: Bool], Bool)])
-    func aCopyKeepsTheEntryAndKeychainItemOfALiveFolderTheFileLacks(file version: Int, liveInFile: Bool, copies: [Int: Bool], keeps: Bool) async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let space = UUID(), folder = UUID(), feed = try #require(URL(string: "https://fixture.invalid/feed?key=fixture"))
-        let made = try LiveFolderSource.makeFeed(address: feed)
-        func file(version: Int, live: Bool) throws -> Data {
-            let folders = [TabFolder(id: folder, spaceID: space, name: "Feed", isPinned: true, live: live ? LiveFolderConfiguration(source: made.source) : nil)]
-            return try JSONEncoder().encode(SessionSnapshot(version: version, spaces: [Space(id: space, name: "Personal")], currentSpaceID: space, favorites: [], tabs: [], folders: folders))
+        if leftover {
+            try Data("unreadable".utf8).write(to: directory.appendingPathComponent("session.json"))
+            try Data("{}".utf8).write(to: directory.appendingPathComponent("live-folders.unreadable.json"))
         }
-        var saved = try file(version: version, live: liveInFile)
-        if liveInFile {
-            // A source that this build does not know.
-            saved = Data(try #require(String(data: saved, encoding: .utf8)).replacingOccurrences(of: #""feed":"#, with: #""laterFeed":"#).utf8)
-        }
-        try saved.write(to: directory.appendingPathComponent("session.json"))
-        for (copy, live) in copies { try file(version: copy, live: live).write(to: directory.appendingPathComponent("session-v\(copy).json")) }
-        let stored = LiveFolderStore(fileURL: directory.appendingPathComponent(LiveFolderStore.fileName))
-        stored.update(folder) { $0.dismiss("item") }
-        stored.saveNow()
-        let addresses = InMemoryLiveFolderKeychain()
-        try await addresses.setAddress(feed, for: folder, folderName: "Feed")
-
+        let removals = KeychainRemovals()
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
-        let session = try BrowserSession(testRegistry: registry, directory: directory, addresses: addresses)
-        // This write is queued after the initial registration's cleanup.
-        try await session.liveFolderService.setPrivateAddress(feed, for: UUID(), folderName: "New feed")
-
-        #expect(session.folders.map(\.id) == [folder] && session.folders.allSatisfy { $0.live == nil })
-        if version > SessionSnapshot.currentVersion { #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session-v\(version).json").path)) }
-        #expect(try await addresses.address(for: folder) == (keeps ? feed : nil))
-        #expect((session.liveFolderService.store.folders[folder] != nil) == keeps)
+        let session = try BrowserSession(testRegistry: registry, directory: directory, removeLiveFolderKeychainItems: removals.record)
+        try session.saveNow().get()
+        #expect(removals.count == (leftover ? 1 : 0))
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("live-folders.unreadable.json").path))
+        #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("session.unreadable.json").path) == leftover)
     }
 
     @Test func anUnavailableChromiumProfileFallsBackOnlyForThatPersonaAndRecovers() throws {
@@ -201,7 +177,7 @@ import Testing
             let shown = URL(string: "about:blank#current")!
             let loadedPage = PageStub(engine: .webKit, url: shown)
             let loaded = session.adopt(loadedPage, spaceID: space.id, personaID: space.resolvedPersonaID, pinned: true, select: false)
-            let folder = SidebarSyncState.Folder(id: UUID(), personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Read", live: nil)
+            let folder = SidebarSyncState.Folder(id: UUID(), personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Read")
             func pin(_ id: UUID, _ saved: SavedPage, engine: EngineKind = .webKit) -> SidebarSyncState.PinnedTab {
                 .init(id: id, personaID: space.resolvedPersonaID, spaceID: space.id, folderID: folder.id, savedPage: saved, customTitle: nil, engine: engine)
             }
@@ -244,7 +220,7 @@ import Testing
             let local = session.adopt(PageStub(engine: .webKit, url: URL(string: "about:blank#local")), spaceID: space.id, personaID: space.resolvedPersonaID, pinned: true, select: false)
             local.savedPage = SavedPage(url: URL(string: "about:blank#local")!, title: "Local")
             #expect(opened == [local.id])
-            let folder = SidebarSyncState.Folder(id: UUID(), personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Read", live: nil)
+            let folder = SidebarSyncState.Folder(id: UUID(), personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Read")
             func pin(_ id: UUID, in folderID: UUID?, _ address: String) -> SidebarSyncState.PinnedTab {
                 .init(id: id, personaID: space.resolvedPersonaID, spaceID: space.id, folderID: folderID,
                       savedPage: SavedPage(url: URL(string: address)!, title: "Page"), customTitle: nil, engine: .webKit)
@@ -265,30 +241,6 @@ import Testing
             local.pendingSyncEngine = .chromium
             local.isPinned = false
             #expect(local.pendingSyncEngine == nil)
-        }
-    }
-
-    /// A live folder that another Mac moved to another space takes its item tabs, which do not sync, and they stay its items across a save and a load.
-    @Test func aLiveFolderMovedToAnotherSpaceKeepsItsItemTabs() async throws {
-        try await temporarySession { session, directory in
-            let home = try #require(session.spaces.first)
-            let work = session.makeSpace(in: home.resolvedPersonaID, named: "Work")
-            let news = TabFolder(spaceID: home.id, name: "News", isPinned: true,
-                                 live: LiveFolderConfiguration(source: .feed(address: URL(string: "https://fixture.invalid/feed")!, isPrivate: false)))
-            session.appendFolder(news)
-            let item = session.adopt(PageStub(engine: .webKit, url: URL(string: "about:blank#item")), spaceID: home.id, personaID: home.resolvedPersonaID,
-                                     pinned: true, select: false, folderID: news.id)
-            item.liveItemID = "item-1"
-            let state = session.sidebarSyncState
-            let moved = state.folders.map { folder in
-                folder.id == news.id ? SidebarSyncState.Folder(id: folder.id, personaID: folder.personaID, spaceID: work.id, parentID: nil, name: folder.name, live: folder.live) : folder
-            }
-            session.applySidebarSync(SidebarSyncState(personas: state.personas, spaces: state.spaces, folders: moved, favorites: state.favorites, pinnedTabs: state.pinnedTabs), deletions: .init())
-            #expect(item.spaceID == work.id && item.folderID == news.id && item.liveItemID == "item-1")
-            try session.saveNow().get()
-            let file = try #require(SessionStore(directory: directory, seal: SessionStateSeal { nil }).load())
-            let record = try #require(file.tabs.first { $0.id == item.id })
-            #expect(record.spaceID == work.id && record.folderID == news.id && record.liveItemID == "item-1")
         }
     }
 
@@ -327,7 +279,7 @@ import Testing
             let space = Space(name: "Room", personaID: persona.id)
             var laterSpace = space
             laterSpace.name = "Later"
-            let folder = SidebarSyncState.Folder(id: UUID(), personaID: persona.id, spaceID: space.id, parentID: nil, name: "Folder", live: nil)
+            let folder = SidebarSyncState.Folder(id: UUID(), personaID: persona.id, spaceID: space.id, parentID: nil, name: "Folder")
             let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Favorite", personaID: persona.id)
             let pin = SidebarSyncState.PinnedTab(id: UUID(), personaID: persona.id, spaceID: space.id, folderID: folder.id,
                                                  savedPage: SavedPage(url: URL(string: "about:blank#pin")!, title: "Pin"), customTitle: nil, engine: .webKit)
@@ -389,7 +341,7 @@ import Testing
             let remoteFavorite = Favorite(url: favorite.url, title: "Remote", personaID: oldSpace.resolvedPersonaID)
             let newSpace = Space(name: oldSpace.name, personaID: oldSpace.resolvedPersonaID)
             let newFolder = SidebarSyncState.Folder(id: UUID(), personaID: oldSpace.resolvedPersonaID, spaceID: newSpace.id,
-                                                     parentID: nil, name: oldFolder.name, live: nil)
+                                                     parentID: nil, name: oldFolder.name)
             let newPin = SidebarSyncState.PinnedTab(id: UUID(), personaID: oldSpace.resolvedPersonaID, spaceID: newSpace.id,
                                                      folderID: newFolder.id, savedPage: pin.savedPage, customTitle: nil, engine: .webKit)
             let state = SidebarSyncState(personas: original.personas, spaces: [newSpace], folders: [newFolder], favorites: [remoteFavorite], pinnedTabs: [newPin])
@@ -455,18 +407,15 @@ import Testing
             session.appendFolder(agent)
             let agentTab = session.adopt(PageStub(engine: .webKit, url: nil), spaceID: space.id, personaID: space.resolvedPersonaID,
                                          pinned: false, select: false, folderID: agent.id)
-            let other = SidebarSyncState.Folder(id: agent.id, personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Claimed", live: nil)
+            let other = SidebarSyncState.Folder(id: agent.id, personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Claimed")
             let data = [openTab, agentTab].map { SidebarSyncState.PinnedTab(id: $0.id, personaID: space.resolvedPersonaID,
                 spaceID: space.id, folderID: nil, savedPage: nil, customTitle: "Claimed", engine: .webKit) }
-            let unsafe = SidebarSyncState.Folder(id: UUID(), personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Private",
-                live: LiveFolderConfiguration(source: .feed(address: URL(string: "https://example.test/feed?token=fixture")!, isPrivate: true)))
-            let incoming = SidebarSyncState(personas: initial.personas, spaces: initial.spaces, folders: [other, unsafe], favorites: [], pinnedTabs: data)
+            let incoming = SidebarSyncState(personas: initial.personas, spaces: initial.spaces, folders: [other], favorites: [], pinnedTabs: data)
             var removed = SidebarSyncDeletions()
             removed.folders.insert(agent.id)
             removed.tabs = [openTab.id, agentTab.id]
             session.applySidebarSync(incoming, deletions: removed)
             #expect(session.folders.contains { $0.id == agent.id && $0.name == "Agent" && $0.isAgentFolder })
-            #expect(!session.folders.contains { $0.id == unsafe.id })
             #expect(session.tabs.contains { $0 === agentTab } && agentTab.folderID == agent.id && agentTab.customTitle == nil)
             #expect(session.tabs.contains { $0 === openTab } && !openTab.isPinned && !session.hasClosedTabs)
         }

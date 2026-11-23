@@ -7,7 +7,6 @@ import ARCHEngineWebKit
 import CEFBridge
 import CryptoKit
 import Foundation
-import LiveFolders
 
 private struct CheckFailure: LocalizedError {
     let errorDescription: String?
@@ -59,7 +58,7 @@ private let personaName = "Restore fixture"
         guard keyData.count == 32 else { throw CheckFailure("Missing disposable session key.") }
         let session = try BrowserSession(registry: registry, userDataDirectory: profile, builtInPlugins: [], cefVersion: nil,
                                          sessionSeal: SessionStateSeal { SymmetricKey(data: keyData) },
-                                         liveFolderAddresses: InMemoryLiveFolderKeychain())
+                                         removeLiveFolderKeychainItems: {})
         let configuration = EngineApplicationConfiguration(userDataDirectory: profile, cacheDirectory: profile.appendingPathComponent("Cache"))
         let firstID = root.appendingPathComponent("first-id")
         let tab: Tab

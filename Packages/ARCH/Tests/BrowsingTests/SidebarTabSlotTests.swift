@@ -2,7 +2,6 @@
 import ARCHEngine
 import CoreGraphics
 import Foundation
-import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -316,39 +315,6 @@ import Testing
         #expect(PinState(p2) == PinState(p1))
         #expect(p2.savedPage == nil && p2.agentOwnerID == nil)
         #expect(session.folders(in: space.id).map(\.id) == [agentFolder.id] && agentTab.folderID == agentFolder.id && agentTab.agentOwnerID != nil)
-    }
-
-    @Test func aLiveFolderItemsTabDraggedAmongTheOpenTabsLeavesItsFolderAsUnpinTabDoes() throws {
-        let (session, space, directory) = try makeSession()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        // A private feed's live folder that has fetched two items. Its address is not in the Keychain store, so no refresh reaches the network.
-        let folder = session.makeFolder(in: space.id, pinned: true)
-        session.updateFolder(folder.id) { $0.live = LiveFolderConfiguration(source: .feed(address: URL(string: "https://fixture.invalid/feed.xml")!, isPrivate: true)) }
-        let items = ["a", "b"].map { LiveItem(id: $0, url: URL(string: "https://fixture.invalid/\($0)")!, title: "Item \($0)") }
-        session.liveFolderService.store.update(folder.id) { $0.recordSuccess(items: items, at: Date()) }
-        let itemTabs = items.map { item in
-            let tab = session.openTab(url: item.url, in: space.id, pinned: true, select: false)
-            LiveFolderTabs.prepare(tab, as: item, inFolder: folder.id)
-            return tab
-        }
-        let dragged = itemTabs[0], unpinned = itemTabs[1]
-        let o1 = tab("o1", pinned: false, in: session, space)
-        #expect(session.folderTree.isLive(dragged.folderID) && dragged.savedPage?.url == items[0].url)
-
-        // The first open tab's upper half takes the item's tab before it.
-        let placement = SidebarTabSlot.placement(beside: o1, rowFrame: frame(y: 188), dragging: dragged, slotFrame: frame(y: 100), current: nil, at: point(195))
-        let slot = try #require(placement).slot
-        #expect(slot == .beside(o1.id, folder: nil, pinned: false, after: false))
-        slot.commit(dragged, in: space, session: session)
-        #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == [dragged.id, o1.id])
-        session.togglePinned(unpinned)
-        // Each is an ordinary open tab without a saved page, and the folder has a new tab for each item (live folder rule 4).
-        #expect(PinState(dragged) == PinState(unpinned))
-        #expect(!dragged.isPinned && dragged.folderID == nil && dragged.liveItemID == nil && dragged.savedPage == nil)
-        #expect(unpinned.liveItemID == nil && unpinned.savedPage == nil)
-        let inFolder = session.folderTree.tabs(inFolder: folder.id)
-        #expect(inFolder.compactMap(\.liveItemID).sorted() == ["a", "b"])
-        #expect(!inFolder.contains { $0 === dragged || $0 === unpinned })
     }
 
     @Test func anAgentsTabDraggedAmongThePinnedTabsBecomesTheUsersAsPinTabMakesIt() throws {

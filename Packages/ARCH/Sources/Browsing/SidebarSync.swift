@@ -1,7 +1,6 @@
 // The portion of a saved session that may be shared with another Mac (docs/sync.md, Outgoing changes).
 import ARCHEngine
 import Foundation
-import LiveFolders
 
 /// The sidebar records eligible for sharing with another Mac.
 public struct SidebarSyncState: Equatable {
@@ -12,15 +11,13 @@ public struct SidebarSyncState: Equatable {
         public let spaceID: UUID
         public let parentID: UUID?
         public let name: String
-        public let live: LiveFolderConfiguration?
 
-        public init(id: UUID, personaID: UUID, spaceID: UUID, parentID: UUID?, name: String, live: LiveFolderConfiguration?) {
+        public init(id: UUID, personaID: UUID, spaceID: UUID, parentID: UUID?, name: String) {
             self.id = id
             self.personaID = personaID
             self.spaceID = spaceID
             self.parentID = parentID
             self.name = name
-            self.live = live
         }
     }
 
@@ -60,7 +57,7 @@ public struct SidebarSyncState: Equatable {
     }
 
     /// Uses the captured session after migration or a successful save. A folder can only enter the
-    /// result through its own space and an ordinary pinned ancestor at every level. A loaded session
+    /// result through its own space and a pinned ancestor at every level. A loaded session
     /// holds each ID once (`SessionSnapshot.normalized()`); an item that a snapshot lists twice still
     /// enters once, as its first copy (`docs/sync.md`, Mapping the session store to records).
     init(snapshot: SessionSnapshot, defaultEngine: EngineKind) {
@@ -71,26 +68,21 @@ public struct SidebarSyncState: Equatable {
         let source = Self.firstCopies(snapshot.folders ?? [])
         let byParent = Dictionary(grouping: source, by: \.parentID)
         var allowed = Set<UUID>()
-        var ordinary = Set<UUID>()
         var pending = byParent[nil] ?? []
         while let folder = pending.popLast() {
-            guard folder.isPinned, !folder.isAgentFolder, owners[folder.spaceID] != nil,
-                  Self.canShare(folder.live), allowed.insert(folder.id).inserted else { continue }
-            if folder.live == nil {
-                ordinary.insert(folder.id)
-                pending.append(contentsOf: (byParent[folder.id] ?? []).filter { $0.spaceID == folder.spaceID })
-            }
+            guard folder.isPinned, !folder.isAgentFolder, owners[folder.spaceID] != nil, allowed.insert(folder.id).inserted else { continue }
+            pending.append(contentsOf: (byParent[folder.id] ?? []).filter { $0.spaceID == folder.spaceID })
         }
         folders = source.compactMap { folder in
             guard allowed.contains(folder.id), let owner = owners[folder.spaceID] else { return nil }
             return Folder(id: folder.id, personaID: owner, spaceID: folder.spaceID, parentID: folder.parentID,
-                          name: folder.name, live: folder.live)
+                          name: folder.name)
         }
         let folderSpaces = Dictionary(folders.map { ($0.id, $0.spaceID) }, uniquingKeysWith: { first, _ in first })
         pinnedTabs = Self.firstCopies(snapshot.tabs.compactMap { tab in
-            guard tab.isPinned, tab.liveItemID == nil, let id = tab.id, let owner = owners[tab.spaceID],
+            guard tab.isPinned, let id = tab.id, let owner = owners[tab.spaceID],
                   tab.personaID == nil || tab.personaID == owner else { return nil }
-            if let folder = tab.folderID, !ordinary.contains(folder) || folderSpaces[folder] != tab.spaceID { return nil }
+            if let folder = tab.folderID, !allowed.contains(folder) || folderSpaces[folder] != tab.spaceID { return nil }
             return PinnedTab(id: id, personaID: owner, spaceID: tab.spaceID, folderID: tab.folderID,
                              savedPage: tab.savedPage, customTitle: tab.customTitle, engine: tab.pendingSyncEngine ?? tab.engine ?? defaultEngine)
         })
@@ -106,18 +98,6 @@ public struct SidebarSyncState: Equatable {
     static func firstCopies<Item: Identifiable>(_ items: [Item]) -> [Item] {
         var seen = Set<Item.ID>()
         return items.filter { seen.insert($0.id).inserted }
-    }
-
-    /// Accepts ordinary folders and only live folder sources safe to share.
-    public static func canShare(_ live: LiveFolderConfiguration?) -> Bool {
-        switch live?.source {
-        case nil: return true
-        case .gitHub(let search): return GitHubSearch.isValidHost(search.host)
-        case .feed(let address, let isPrivate):
-            // Refuse private and malformed incoming configurations before a service can open them.
-            return !isPrivate && address.scheme?.lowercased() == "https" && address.host?.isEmpty == false
-                && address.query == nil && address.fragment == nil && address.user == nil && address.password == nil
-        }
     }
 }
 

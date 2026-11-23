@@ -2,7 +2,6 @@ import ARCHEngine
 @testable import Browsing
 import CloudKit
 import Foundation
-import LiveFolders
 import Testing
 @testable import Sync
 
@@ -62,7 +61,6 @@ import Testing
     @MainActor private final class Mac {
         let name = UUID().uuidString
         let directory: URL
-        private let addresses = InMemoryLiveFolderKeychain()
         let defaults: UserDefaults
         let zone: Zone
         var session: BrowserSession!
@@ -86,7 +84,7 @@ import Testing
             let registry = EngineRegistry(defaults: defaults)
             registry.register(NoPages())
             session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil,
-                                         sessionSeal: SessionStateSeal { nil }, liveFolderAddresses: addresses)
+                                         sessionSeal: SessionStateSeal { nil }, removeLiveFolderKeychainItems: {})
             let target = zone.database
             controller = SyncController(sidebar: session, directory: directory, defaults: defaults, check: { .available(target) },
                 factory: FakeSyncEngine.factory { [unowned self] engine in

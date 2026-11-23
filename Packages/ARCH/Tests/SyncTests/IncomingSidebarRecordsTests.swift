@@ -54,6 +54,20 @@ import Testing
         #expect(merged.sidebar.spaces.count == 1 && merged.sidebar.folders.count == 1 && merged.sidebar.pinnedTabs.count == 1)
     }
 
+    /// An older Mac's live folder, whose `live` field this build does not read, loads as an ordinary folder that holds folders and tabs, also with a private feed's configuration or one that does not decode (`docs/sync.md`, Schema versions).
+    @Test func anOlderMacsLiveFolderLoadsAsAnOrdinaryFolder() throws {
+        var feed = folder(10, 1), broken = folder(11, 1)
+        feed.fields["live"] = .text(#"{"source":{"feed":{"address":"https://fixture.invalid/feed","isPrivate":true}}}"#)
+        broken.fields["live"] = .text("not a configuration")
+        let rows = [persona(), space(1), feed, broken, folder(12, 1, 10), tab(20, 1, 11)]
+        let plan = try IncomingSidebarRecords.plan(records: rows, deleted: [:], foundAt: now, defaultEngine: .webKit)
+        let parents = Dictionary(uniqueKeysWithValues: plan.sidebar.folders.map { ($0.id.uuidString, $0.parentID?.uuidString) })
+        #expect(parents == [name(10): nil, name(11): nil, name(12): name(10)])
+        #expect(plan.sidebar.pinnedTabs.map(\.folderID?.uuidString) == [name(11)])
+        #expect(plan.repairs.isEmpty && plan.recordsToDelete.isEmpty)
+        #expect(IncomingSidebarRecords.heldOut(server: rows, local: []).isEmpty)
+    }
+
     @Test func missingOwnersAndCrossPersonaParentsNeverMoveItemsToAnotherPersona() throws {
         let other = name(50)
         let rows = [persona(), persona(other), space(1, order: 9), space(2, order: 1), space(51, other),
@@ -101,18 +115,16 @@ import Testing
         #expect(plan.repairs.isEmpty && plan.recordsToDelete.isEmpty)
     }
 
-    /// A newer build's values, a feed this Mac would not share, and a home page that is not a web page wait with what they hold, so the fetch applies without them; a tab without an engine takes the default one, and a deletion of another type removes nothing.
+    /// A newer build's values and a home page that is not a web page wait with what they hold, so the fetch applies without them; a tab without an engine takes the default one, and a deletion of another type removes nothing.
     @Test func recordsThisBuildCannotApplyWaitWithTheRecordsUnderThem() throws {
         var newer = space(2)
         newer[.tint] = .text("ultraviolet")
         var home = space(3)
         home[.homeURL] = .text("javascript:alert(1)")
-        var unsafe = folder(10, 1)
-        unsafe[.live] = .text(#"{"source":{"feed":{"address":"https://example.test/feed?private=value","isPrivate":false}},"itemLimit":10,"refreshMinutes":60}"#)
         var bare = tab(22, 1, nil)
         bare[.engine] = nil
-        let rows = [persona(), space(1), newer, home, unsafe, folder(11, 2), tab(20, 2, 11), tab(21, 1, 10), bare]
-        #expect(IncomingSidebarRecords.heldOut(server: rows, local: []) == Set([2, 3, 10, 11, 20, 21].map(name)))
+        let rows = [persona(), space(1), newer, home, folder(11, 2), tab(20, 2, 11), bare]
+        #expect(IncomingSidebarRecords.heldOut(server: rows, local: []) == Set([2, 3, 11, 20].map(name)))
         let plan = try IncomingSidebarRecords.plan(records: rows, deleted: [name(1): .tab], foundAt: now, defaultEngine: .chromium)
         #expect(plan.sidebar.spaces.map(\.id.uuidString) == [name(1)] && plan.sidebar.folders.isEmpty)
         #expect(plan.sidebar.pinnedTabs.map(\.id.uuidString) == [name(22)] && plan.sidebar.pinnedTabs.first?.engine == .chromium)

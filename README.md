@@ -62,7 +62,7 @@ Out of scope:
 
 ## 🚀 Getting started
 
-The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Agent`, `AgentControl`, `AI`, `Browsing`, `Events`, `Extensions`, `History`, `Hooks`, `Import`, `LiveFolders`, `Plugins`, `Preferences`, `Sync`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
+The repository contains the engine abstraction, the WebKit adapter, the Chromium adapter built on the Chromium Embedded Framework (CEF), the first feature modules (`Agent`, `AgentControl`, `AI`, `Browsing`, `Events`, `Extensions`, `History`, `Hooks`, `Import`, `Plugins`, `Preferences`, `Sync`, and `Terminal`), the `Arch` app shell, and `arch-cli`, the agents' command-line tool. Feature modules are written one feature at a time, using `docs/features.md`.
 
 Download the pinned CEF distribution once, build every target, then assemble the app bundle. The Chromium engine runs only from the bundle.
 
@@ -104,7 +104,7 @@ git config core.hooksPath .githooks
 - [`docs/import-browsers.md`](./docs/import-browsers.md): browser import: formats read, mapping to Personas, spaces, and favorites, permissions, and the import sheet.
 - [`docs/web-store.md`](./docs/web-store.md): installing web extensions from the Web Store: package proof for `.crx` files, the client that downloads and stages store packages, the entry points, Chromium's store button, and updates (built), with the store's page addresses waiting for the user's step.
 - [`docs/password-managers.md`](./docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps, the proof gate, installing Arch in `/Applications`, and the status in Settings (built), and the user's steps.
-- [`docs/bookmarks.md`](./docs/bookmarks.md): the bookmarks and live folders design (saved pages, unloading, nested folders with their dragging, the Bookmarks menu, the `LiveFolders` module, and live folders in the sidebar with the New Live Folder sheet built): saved pages, unloading, nested folders, the Bookmarks menu, and folders filled from feeds and GitHub.
+- [`docs/bookmarks.md`](./docs/bookmarks.md): the bookmarks design (saved pages, unloading, nested folders with their dragging, and the Bookmarks menu built): saved pages, unloading, nested folders, the Bookmarks menu, and the removed live folders.
 - [`docs/localization.md`](./docs/localization.md): the interface's languages: string catalogs per module, Settings ▸ General ▸ Language, pages' `Accept-Language` on both engines, and how to add a string or a language.
 
 <a id="scripts"></a>
@@ -136,8 +136,8 @@ git config core.hooksPath .githooks
 arch-browser
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
-│   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Events, Extensions, History, Hooks, Import, LiveFolders, Plugins, Preferences, Sync, Terminal
-│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AgentTests, AITests, BrowsingTests, EventsTests, ExtensionsTests, HistoryTests, HooksTests, ImportTests, LiveFoldersTests, PluginsTests, PreferencesTests, SyncTests, TerminalTests
+│   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Events, Extensions, History, Hooks, Import, Plugins, Preferences, Sync, Terminal
+│   ├── ARCH/Tests/                 # Tests: AgentControlTests, AgentTests, AITests, BrowsingTests, EventsTests, ExtensionsTests, HistoryTests, HooksTests, ImportTests, PluginsTests, PreferencesTests, SyncTests, TerminalTests
 │   ├── ARCHApp/Sources/            # App target, CEF helper executable, and arch-cli
 │   ├── ARCHKit/Sources/
 │   │   ├── ARCHEngine/             # Engine protocols, registry, and shared helpers

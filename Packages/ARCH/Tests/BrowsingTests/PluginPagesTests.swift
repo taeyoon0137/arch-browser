@@ -1,7 +1,6 @@
 // Plugins' page scripts in the session's tabs (`docs/plugins.md`, Page scripts): a tab where a `whenInvoked` plugin has access takes the plugin's scripts after its Persona's, except while its web contents shares its script list with another tab's, as on WebKit a page that it opens does, and a web contents that the tab gets afterwards takes none of them.
 import ARCHEngine
 import Foundation
-import LiveFolders
 import Plugins
 import Testing
 @testable import Browsing
@@ -39,7 +38,7 @@ private final class TabAccessPlugin: BuiltInPlugin {
         let registry = EngineRegistry()
         registry.register(SessionTestEngine())
         let session = try BrowserSession(registry: registry, userDataDirectory: directory, builtInPlugins: [TabAccessPlugin.self], cefVersion: nil,
-                                         sessionSeal: .fixture, liveFolderAddresses: InMemoryLiveFolderKeychain())
+                                         sessionSeal: .fixture, removeLiveFolderKeychainItems: {})
         let space = try #require(session.spaces.first)
         let tab = session.openTab(url: URL(string: "https://example.org/x"), in: space.id, select: false)
         let page = try #require(tab.webContents as? PageDouble)
