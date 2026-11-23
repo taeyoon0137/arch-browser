@@ -689,7 +689,7 @@ import Foundation
 
     /// The panel's header for a grant: the client, its access, and its place as "Persona / Space".
     private func describeInPanel(_ grant: AgentGrant) {
-        panel.describe(AgentPanelOwner(name: grant.client.displayName, access: grant.level.title, place: place(of: grant)), for: grant.id)
+        panel.describe(AgentPanelOwner(name: grant.client.displayName, access: grant.level.localizedTitle, place: place(of: grant)), for: grant.id)
     }
 
     /// The grant's "Persona / Space", or its Persona alone while the Persona has no space.

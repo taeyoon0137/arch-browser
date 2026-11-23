@@ -59,7 +59,7 @@ public struct AgentSessionPanel: View {
         .confirmAgentSessionDeletion($deleting) { reviewed in
             Task { await service.deleteSession(reviewed.id) }
         }
-        .confirmationDialog(raisingTo.map { localized("Raise this session to \($0.title)?") } ?? "", isPresented: Binding(get: { raisingTo != nil }, set: { if !$0 { raisingTo = nil } })) {
+        .confirmationDialog(raisingTo.map { localized("Raise this session to \($0.localizedTitle)?") } ?? "", isPresented: Binding(get: { raisingTo != nil }, set: { if !$0 { raisingTo = nil } })) {
             if let raisingTo {
                 Button(localized("Raise to \(raisingTo.title)")) { session.setMode(raisingTo) }
             }
@@ -186,12 +186,12 @@ public struct AgentSessionPanel: View {
 
     /// Lowering takes effect at once; raising asks first.
     private var modeMenu: some View {
-        Menu(session.mode.title) {
+        Menu(session.mode.localizedTitle) {
             ForEach(AgentAccessLevel.allCases, id: \.self) { level in
                 Button {
                     if level.rank > session.mode.rank { raisingTo = level } else { session.setMode(level) }
                 } label: {
-                    if level == session.mode { Label(level.title, systemImage: "checkmark") } else { Text(level.title) }
+                    if level == session.mode { Label(level.localizedTitle, systemImage: "checkmark") } else { Text(level.localizedTitle) }
                 }
             }
         }

@@ -63,7 +63,7 @@ struct AgentSettingsPage: View {
     private var sessionsSection: some View {
         Section {
             Picker(localized("New sessions start in"), selection: Binding(get: { service.newSessionMode }, set: service.setNewSessionMode)) {
-                ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+                ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.localizedTitle).tag($0) }
             }
             Toggle(localized("Let In-App Agents Search History"), isOn: Binding(get: { service.settings.inAppAgentsSearchHistory }, set: service.setInAppAgentsSearchHistory))
             Toggle(localized("Keep Codex\u{2019}s Copy of Agent Conversations"), isOn: Binding(get: { service.keepsCodexCopy }, set: service.setKeepsCodexCopy))
@@ -161,7 +161,7 @@ struct AgentSettingsPage: View {
         let spaces = service.host.spaces(in: grant.personaID)
         let space = (spaces.first { $0.id == grant.spaceID } ?? spaces.first)?.name
         // A Persona's place reads as "Persona / Space".
-        var parts = [grant.level.title, space.map { "\(persona) / \($0)" } ?? persona]
+        var parts = [grant.level.localizedTitle, space.map { "\(persona) / \($0)" } ?? persona]
         if grant.scopes.searchHistory { parts.append(localized("searches history")) }
         if grant.scopes.startTasks { parts.append(localized("starts agent tasks")) }
         if grant.scopes.watchEvents { parts.append(localized("watches browser events")) }

@@ -274,7 +274,7 @@ public struct AgentComposer: View {
                     label(localized("Mode"))
                     // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
                     Picker(localized("Mode"), selection: Binding(get: { chosenMode }, set: { context.mode = $0 })) {
-                        ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
+                        ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.localizedTitle).tag($0) }
                     }
                     .labelsHidden()
                     .accessibilityLabel(localized("Mode"))

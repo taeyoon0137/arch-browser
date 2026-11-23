@@ -8,6 +8,17 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
+extension AgentAccessLevel {
+    /// The level's name in the language Arch runs in, for the interface. `title` stays English for the agent channel and `arch-cli`, which have no string catalog.
+    public var localizedTitle: String {
+        switch self {
+        case .readOnly: return localized("Read Only")
+        case .askBeforeActing: return localized("Ask Before Acting")
+        case .actInAgentTabs: return localized("Act in Agent Tabs")
+        }
+    }
+}
+
 @MainActor final class AgentGrantSheetPresenter: AgentGrantPrompting {
     private weak var host: (any AgentBrowserHost)?
     /// Each open sheet's way to close as an answer.
@@ -106,7 +117,7 @@ struct AgentGrantSheetView: View {
                     }
                 }
                 Picker(localized("Access"), selection: $choice.level) {
-                    ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+                    ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.localizedTitle).tag($0) }
                 }
                 Toggle(localized("Search history"), isOn: $choice.scopes.searchHistory)
                 Toggle(isOn: $choice.scopes.startTasks) {

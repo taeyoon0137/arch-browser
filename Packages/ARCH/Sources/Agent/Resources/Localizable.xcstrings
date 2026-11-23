@@ -151,6 +151,16 @@
         }
       }
     },
+    "Act in Agent Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 탭에서 작업"
+          }
+        }
+      }
+    },
     "Agent" : {
       "localizations" : {
         "ko" : {
@@ -347,6 +357,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arch 터미널"
+          }
+        }
+      }
+    },
+    "Ask Before Acting" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작업 전에 묻기"
           }
         }
       }
@@ -987,6 +1007,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 수준으로 올리기"
+          }
+        }
+      }
+    },
+    "Read Only" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽기 전용"
           }
         }
       }

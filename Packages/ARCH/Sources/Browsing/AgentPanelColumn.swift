@@ -124,7 +124,7 @@ private struct ConnectedAgentRow: View {
 
     var body: some View {
         let name = grant.client.displayName
-        let access = "\(grant.level.title) \u{00B7} \(agents.place(of: grant))"
+        let access = "\(grant.level.localizedTitle) \u{00B7} \(agents.place(of: grant))"
         HStack(spacing: 8) {
             Button { windowModel.showClientPanel(grant.id) } label: {
                 HStack(spacing: 8) {
