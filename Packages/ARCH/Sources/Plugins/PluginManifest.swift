@@ -165,7 +165,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         switch self {
         case .tabs: return localized("Read the titles and addresses of your tabs")
         case .renameTabs: return localized("Suggest names for your tabs")
-        case .manageTabs: return localized("Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs")
+        case .manageTabs: return localized("Open any website in your tabs, signed in as you, and close, select, move, pin, and suggest names for your tabs")
         case .clipboard: return localized("Write text to the clipboard")
         case .nativeMessaging: return localized("Exchange messages with apps on this Mac")
         case .ai: return localized("Send text to the AI models you connected")

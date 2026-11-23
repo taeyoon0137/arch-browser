@@ -451,12 +451,12 @@
         }
       }
     },
-    "Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs" : {
+    "Open any website in your tabs, signed in as you, and close, select, move, pin, and suggest names for your tabs" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "로그인된 상태로 탭에서 아무 웹사이트나 열고, 탭을 닫기, 선택, 이동하고 이름 제안"
+            "value" : "로그인된 상태로 탭에서 아무 웹사이트나 열고, 탭을 닫기, 선택, 이동, 고정하고 이름 제안"
           }
         }
       }

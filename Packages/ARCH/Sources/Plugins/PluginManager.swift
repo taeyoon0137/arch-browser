@@ -1314,14 +1314,14 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Events
 
-    /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. A plugin never receives the events its own calls caused, such as the title change of its rename, and receives at most 10 events for one subject and 60 in all within a minute, so a listener that reacts to another plugin's or a hook's changes cannot keep them going without end. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
+    /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. A plugin receives the tab events of its own calls, as a web extension hears of the tabs its own calls create, update, select, move, and remove: the opening, selection, first address, and first load of a tab it opens, and the events of its closes, selections, and moves. Only the title change of its own rename stays away (`isOwnRename(_:of:)`). A plugin receives at most 10 events for one subject and 60 in all within a minute, so a listener that reacts to its own, another plugin's, or a hook's changes cannot keep them going without end. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
     /// A plugin with `ai` receives its events through the shared hook scheduler instead (`hookStep(for:view:)`): one step for each, which joins the event's chain at `hookOrder`.
     private func deliver(_ event: BrowserEvent) {
         guard !isClosed else { return }
         endSiteAccess(after: event)
         var steps: [AIHookStep] = []
         for installed in plugins where installed.isEnabled && installed.unavailability == nil && installed.manifest.events.contains(event.kind) {
-            if event.cause?.origin == .plugin(id: installed.id.rawValue) { continue }
+            if Self.isOwnRename(event, of: installed.id) { continue }
             let grant = installed.grant
             // Only a plugin that reaches its sites `whenInvoked` needs the tab, whose access its addresses need.
             let tab = grant.siteAccess == .whenInvoked ? eventTab(event) : nil
@@ -1336,6 +1336,11 @@ public final class PluginManager: ObservableObject {
         guard let ai, !steps.isEmpty else { return }
         ai.hooks.scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: event.id, document: Self.document(of: event),
                                 documentID: event.tab?.documentID, urls: event.urls, causes: Self.owners(causing: event))
+    }
+
+    /// Whether the event is a title change that the plugin's own rename caused, its suggested name or its removal, which the plugin does not hear: a web extension sets no tab's title, so no extension hears of one it set, and a listener that renames a tab on each title change would otherwise answer itself. A page's own title comes later, without the plugin's cause, also in a tab that the plugin opened.
+    private static func isOwnRename(_ event: BrowserEvent, of id: PluginID) -> Bool {
+        event.kind == .titleChanged && event.cause?.origin == .plugin(id: id.rawValue)
     }
 
     /// The step that runs the plugin's listeners for one event under the plugin's feature, so that the scheduler applies the feature's checks: it is on and automatic, has a model of its own, the event's addresses are not excluded from AI, and the daily limit for automatic requests and the monthly spending limit leave room. It runs while the plugin is still enabled with `ai`, after the plugin's earlier steps, within the scheduler's 30-second timeout; what the listener throws goes nowhere. `tab` and `document` are the event's tab and, for a page, address, or title event, its address, to which the step's renames of that tab apply.
@@ -1638,7 +1643,13 @@ public final class PluginManager: ObservableObject {
         return try browserHost?.moveTab(id, to: place, cause: Self.cause(plugin)) ?? false
     }
 
-    /// The cause of a change that the plugin's call makes, by which the plugin hears of none of the events it posts.
+    /// Pins or unpins one of the Persona's tabs that `personaTabs()` lists, with the plugin as the cause of its events. Throws `PluginError.notGranted` for any other tab.
+    fileprivate func setPinned(_ isPinned: Bool, tab id: UUID, by plugin: PluginID) throws -> Bool {
+        guard personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        return browserHost?.setPinned(isPinned, tab: id, cause: Self.cause(plugin)) ?? false
+    }
+
+    /// The cause of a change that the plugin's call makes, by which the plugin tells the title changes of its own renames (`isOwnRename(_:of:)`).
     private static func cause(_ plugin: PluginID) -> BrowserEventCause {
         BrowserEventCause(origin: .plugin(id: plugin.rawValue))
     }
@@ -1988,7 +1999,7 @@ final class ScopedPluginContext: PluginPanelContext {
         return manager.shown(tab, to: grant, of: pluginID)
     }
 
-    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, selecting, and moving do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes, selects, and moves its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
+    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, selecting, moving, and pinning do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes, selects, moves, and pins its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)
@@ -2023,7 +2034,15 @@ final class ScopedPluginContext: PluginPanelContext {
         try manageTab(id, inStep: false) { try $0.moveTab(id, to: place, by: pluginID) }
     }
 
-    /// A close, a selection, or a move of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
+    func setPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool {
+        try manageTab(id, inStep: true) { try $0.setPinned(isPinned, tab: id, by: pluginID) }
+    }
+
+    func panelSetPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool {
+        try manageTab(id, inStep: false) { try $0.setPinned(isPinned, tab: id, by: pluginID) }
+    }
+
+    /// A close, a selection, a move, or a pin of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
     private func manageTab<Value>(_ id: PluginTab.ID, inStep: Bool, _ change: (PluginManager) throws -> Value) throws -> Value {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)

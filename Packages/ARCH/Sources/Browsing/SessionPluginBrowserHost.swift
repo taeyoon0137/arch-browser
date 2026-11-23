@@ -93,7 +93,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         session.events.withCause(cause) { select(tab, in: session) }
     }
 
-    /// The tab moves as a drag to a tab's row (`BrowserSession.moveTab(_:to:after:)`) or a drop on a space's symbol (`moveTab(_:toSpace:)`) moves it, or to the end of its own list (`moveTabToListEnd(_:pinned:)`), and keeps its list, so that it stays pinned or open. A move next to a tab of another space first goes to that space, which takes the tab out of its split view and has each window that selects it follow it there, with the `spaceSwitched` carrying the cause. A tab that a space's lists do not show, a favorite's or a small window's, and a live folder's tab, which keeps its source's order (live folder rule 4) and which nothing else enters, neither move nor take a tab next to them.
+    /// The tab moves as a drag to a tab's row (`BrowserSession.moveTab(_:to:after:)`) or a drop on a space's symbol (`moveTab(_:toSpace:)`) moves it, or to the end of its own list (`moveTabToListEnd(_:pinned:)`), and keeps its list, so that it stays pinned or open; `setPinned(_:tab:cause:)` changes the list. A move next to a tab of another space first goes to that space, which takes the tab out of its split view and has each window that selects it follow it there, with the `spaceSwitched` carrying the cause. A tab that a space's lists do not show, a favorite's or a small window's, and a live folder's tab, which keeps its source's order (live folder rule 4) and which nothing else enters, neither move nor take a tab next to them.
     public func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool {
         guard let session, let tab = pluginTab(id) else { return false }
         switch place {
@@ -111,6 +111,13 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
                 if tab.spaceID == spaceID { session.moveTabToListEnd(tab.id, pinned: tab.isPinned) } else { session.moveTab(tab.id, toSpace: spaceID) }
             }
         }
+        return true
+    }
+
+    /// The tab pins or unpins as Pin Tab and Unpin Tab do (`BrowserSession.togglePinned(_:)`): pinning saves the page it shows as its saved page, unpinning forgets it, and a tab in a folder leaves the folder. A tab that a plugin does not move, a favorite's, a small window's, or a live folder's, keeps its state.
+    public func setPinned(_ isPinned: Bool, tab id: UUID, cause: BrowserEventCause) -> Bool {
+        guard let session, let tab = pluginTab(id), Self.isMovable(tab, in: session) else { return false }
+        if tab.isPinned != isPinned { session.events.withCause(cause) { session.togglePinned(tab) } }
         return true
     }
 

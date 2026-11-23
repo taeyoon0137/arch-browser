@@ -112,6 +112,8 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             close: (id) => call("tabs.close", [id]),
             select: (id) => call("tabs.select", [id]),
             move: (id, place) => call("tabs.move", [id, ...given(place)]),
+            pin: (id) => call("tabs.pin", [id]),
+            unpin: (id) => call("tabs.unpin", [id]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
           downloads: Object.freeze({
@@ -311,6 +313,12 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     private func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool {
         if role == .panel, let context = context as? any PluginPanelContext { return try context.panelMoveTab(id, to: place) }
         return try context.moveTab(id, to: place)
+    }
+
+    /// Pins or unpins the tab for a call of the document: a panel's call belongs to no hook step of the plugin.
+    private func setPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool {
+        if role == .panel, let context = context as? any PluginPanelContext { return try context.panelSetPinned(isPinned, tab: id) }
+        return try context.setPinned(isPinned, tab: id)
     }
 
     /// Starts reading the reply of an `arch.ai.stream` call and returns the stream's number, with which the script asks for its text.
@@ -514,6 +522,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "tabs.move":
             guard call.args.count <= 2, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try moveTab(id, to: try Self.tabPlace(call.value(1))))
+        case "tabs.pin", "tabs.unpin":
+            guard call.args.count == 1, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
+            return .bool(try setPinned(call.call == "tabs.pin", tab: id))
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try renameTab(id, to: try call.optionalText(1)))
