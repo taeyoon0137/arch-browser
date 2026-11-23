@@ -31,10 +31,9 @@ Signing keeps the order it had before Sparkle. The script signs the bundle with 
 
 Sparkle's EdDSA (ed25519) key pair signs and checks the update archives.
 
-- The private key stays in the login Keychain under its account, where `generate_keys` keeps it. It never goes into the repository, a build, or a release.
-- The public key goes into `scripts/bundle_app.sh` as the default of `SPARKLE_PUBLIC_KEY`. `ARCH_SPARKLE_PUBLIC_KEY` overrides it for one run.
-- No key pair exists yet. `generate_keys` may show a Keychain dialog, so it runs only on the user's Mac, by the user (User steps).
-- Losing the private key means installed copies can never update again. A copy exported with `generate_keys --account <account> -x <file>` belongs in a safe place outside the repository.
+- The key pair was made on November 23 with CryptoKit, without the Keychain, so no dialog appeared. The private key is the Base64 of its 32-byte seed in `the key file` on the release Mac, readable only by the user. `release_app.sh` passes it to `sign_update --ed-key-file`. It never goes into the repository, a build, or a release.
+- The public key is the default of `SPARKLE_PUBLIC_KEY` in `scripts/bundle_app.sh`. `ARCH_SPARKLE_PUBLIC_KEY` overrides it for one run.
+- Losing the private key means installed copies can never update again. A copy belongs in a safe place outside the repository, such as an encrypted backup.
 
 ## Release steps
 
@@ -55,9 +54,7 @@ Notarization requires the hardened runtime on every executable. Sparkle's parts 
 
 These steps need the user's own hands, credentials, or approval:
 
-1. Make the key pair on the Mac that makes releases: `.build/artifacts/sparkle/Sparkle/bin/generate_keys --account <account>`. Allow the Keychain dialog if one appears. The tool prints the public key.
-2. Put the public key in `scripts/bundle_app.sh` as `SPARKLE_PUBLIC_KEY="${ARCH_SPARKLE_PUBLIC_KEY:-<public key>}"`, then commit and push it. Only the public key goes into the repository.
-3. Export a backup of the private key with `generate_keys --account <account> -x <file>` and keep it outside the repository.
-4. For notarization, store a profile once with `xcrun notarytool store-credentials <profile name>`, using an app-specific password or an App Store Connect API key, and set `ARCH_NOTARY_PROFILE=<profile name>` when releasing.
-5. Approve and run the first `./scripts/release_app.sh --publish`. The first time `sign_update` reads the private key, the Keychain may ask to allow it.
-6. In an installed copy, check Check for Updates… and Settings ▸ General ▸ Updates once a newer release exists (V.12 in `docs/plan.md`).
+1. Back up the private key file named under Keys to a safe place outside the repository.
+2. For notarization, store a profile once with `xcrun notarytool store-credentials <profile name>`, using an app-specific password or an App Store Connect API key, and set `ARCH_NOTARY_PROFILE=<profile name>` when releasing.
+3. Approve and run the first `./scripts/release_app.sh --publish`.
+4. In an installed copy, check Check for Updates… and Settings ▸ General ▸ Updates once a newer release exists (V.12 in `docs/plan.md`).

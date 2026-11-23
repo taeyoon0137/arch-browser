@@ -1,7 +1,7 @@
 #!/bin/sh
 # Make an update release of a built Arch.app for Sparkle (`docs/updates.md`): the update archive, its EdDSA signature, and the appcast, in `build/release/<build number>/`. With `ARCH_NOTARY_PROFILE`, a `notarytool` keychain profile, the app is notarized and stapled first. Only `--publish` uploads the archive and the appcast as a GitHub release of the project; without it the script prints what it would upload.
 # Usage: scripts/release_app.sh [--publish] [path/to/Arch.app]
-# `sign_update` reads the private key from the login Keychain under its account, where `generate_keys --account <account>` keeps it, or from the file at `ARCH_SPARKLE_KEY_FILE`.
+# `sign_update` reads the private key from the file at `ARCH_SPARKLE_KEY_FILE`, by default `the key file`, or else from the login Keychain under its account.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="taeyoon0137/arch-browser"
@@ -58,7 +58,8 @@ fi
 
 ditto -c -k --keepParent "$APP" "$ARCHIVE"
 rm -rf "$APP"
-if [ -n "${ARCH_SPARKLE_KEY_FILE:-}" ]; then
+ARCH_SPARKLE_KEY_FILE="${ARCH_SPARKLE_KEY_FILE:-}"
+if [ -f "$ARCH_SPARKLE_KEY_FILE" ]; then
   SIGNATURE="$("$TOOLS/sign_update" --ed-key-file "$ARCH_SPARKLE_KEY_FILE" -p "$ARCHIVE")"
 else
   SIGNATURE="$("$TOOLS/sign_update" --account "$KEY_ACCOUNT" -p "$ARCHIVE")"

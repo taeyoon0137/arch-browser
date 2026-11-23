@@ -18,7 +18,7 @@ MIN_MACOS="14.0"
 # Sparkle checks this appcast, which `scripts/release_app.sh` uploads to each GitHub release, and installs only archives signed with the private key of this EdDSA public key (`docs/updates.md`). The public key is the one `generate_keys --account <account>` prints; `ARCH_SPARKLE_PUBLIC_KEY` overrides it. Without a key, the app has no updater.
 SPARKLE="$BIN/Sparkle.framework"
 SPARKLE_FEED_URL="https://github.com/taeyoon0137/arch-browser/releases/latest/download/appcast.xml"
-SPARKLE_PUBLIC_KEY="${ARCH_SPARKLE_PUBLIC_KEY:-}"
+SPARKLE_PUBLIC_KEY="${ARCH_SPARKLE_PUBLIC_KEY:-qcqorQoz1m8ybNW/E6Z6AQuSWvWip65LJfKoqKxXamw=}"
 
 [ -x "$BIN/Arch" ] || { echo "missing $BIN/Arch; run swift build -c $CONFIG first" >&2; exit 1; }
 [ -x "$BIN/ArchHelper" ] || { echo "missing $BIN/ArchHelper" >&2; exit 1; }
