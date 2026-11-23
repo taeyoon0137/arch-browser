@@ -311,4 +311,83 @@ import Testing
         try await a.flush()
         expectSane(a, "\(input) on the first Mac")
     }
+
+    /// What the two Macs hold under one ID, as when one Mac's data folder came from the other.
+    enum SharedID: String, CaseIterable, Sendable {
+        /// A pinned tab on one Mac, an open tab on the other.
+        case tab
+        /// A pinned folder holding a pin on one Mac, an open folder holding an open tab on the other.
+        case folder
+    }
+
+    /// One Mac pins a tab or folder whose ID the other Mac's open tab or open folder has, which never syncs. The open item takes a new ID and keeps its page, contents, and window's selection, the pin joins beside it, and neither Mac deletes the pin: when the Mac with the open item finds the pin at its first sync, when it finds it in a later fetch after the pinning Mac's first sync uploads it, and from the pinning Mac's side in both.
+    @Test(arguments: SharedID.allCases, [true, false])
+    func anOpenItemThatSharesAPinsIDTakesANewIDAndThePinStays(item: SharedID, openMacSyncsFirst: Bool) async throws {
+        let zone = Zone()
+        let pinning = try Mac(zone: zone), open = try Mac(zone: zone)
+        defer { pinning.clean(); open.clean() }
+        let shared = UUID(), page = URL(string: "about:blank#open")!
+        // The pinning Mac's pin, or its pinned folder with a pin inside.
+        let pinSpace = try #require(pinning.session.spaces.first)
+        if item == .folder {
+            pinning.session.appendFolder(TabFolder(id: shared, spaceID: pinSpace.id, name: "Pinned folder", isPinned: true))
+        }
+        let pinState = pinning.session.sidebarSyncState
+        let pin = SidebarSyncState.PinnedTab(id: item == .tab ? shared : UUID(), personaID: Persona.defaultID, spaceID: pinSpace.id, folderID: item == .folder ? shared : nil,
+                                             savedPage: SavedPage(url: URL(string: "about:blank#pin")!, title: "Pin"), customTitle: nil, engine: .webKit)
+        pinning.session.applySidebarSync(.init(personas: pinState.personas, spaces: pinState.spaces, folders: pinState.folders, favorites: [], pinnedTabs: [pin]),
+                                         deletions: .init())
+        try pinning.session.saveNow().get()
+        // The other Mac's open tab, or its open folder with an open tab inside, selected in a hidden window.
+        let openSpace = try #require(open.session.spaces.first)
+        if item == .folder { open.session.appendFolder(TabFolder(id: shared, spaceID: openSpace.id, name: "Open folder", isPinned: false)) }
+        let openTab = open.session.adopt(open.session.makeWebContents(url: page, engine: .webKit, state: nil, in: Persona.defaultID), id: item == .tab ? shared : UUID(),
+                                         spaceID: openSpace.id, personaID: Persona.defaultID, pinned: false, select: false, folderID: item == .folder ? shared : nil)
+        openTab.customTitle = "Open"
+        try open.session.saveNow().get()
+        let window = open.session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: openSpace.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        window.selectTab(openTab.id)
+
+        if openMacSyncsFirst {
+            await open.controller.setEnabled(true)
+            try await open.flush()
+            await pinning.controller.setEnabled(true)
+            try await pinning.flush()
+            await open.controller.refresh()
+        } else {
+            await pinning.controller.setEnabled(true)
+            try await pinning.flush()
+            await open.controller.setEnabled(true)
+        }
+        try await open.flush()
+        await pinning.controller.refresh()
+        try await pinning.flush()
+
+        let name = shared.uuidString
+        #expect(zone.records[name] != nil, "the pin's record stays")
+        for mac in [pinning, open] {
+            expectSane(mac, "\(item)")
+            switch item {
+            case .tab: #expect(mac.session.tabs.contains { $0.id == shared && $0.isPinned })
+            case .folder: #expect(mac.session.folders.contains { $0.id == shared && $0.isPinned })
+            }
+            #expect(!mac.engine.pendingChanges.contains(.deleteRecord(name)))
+        }
+        // The open item is the same item under a new ID.
+        let kept = try #require(open.session.tabs.first { $0.customTitle == "Open" })
+        #expect(kept.id != shared && !kept.isPinned && kept.url == page && window.selectedTabID == kept.id)
+        if item == .folder {
+            let folder = try #require(open.session.folders.first { $0.name == "Open folder" })
+            #expect(folder.id != shared && !folder.isPinned && kept.folderID == folder.id)
+        } else {
+            #expect(open.session.tabs.filter { $0.id == shared }.count == 1)
+        }
+        #expect(pinning.session.sidebarSyncState == open.session.sidebarSyncState)
+        open.session.windowWillClose(window)
+        try open.launch()
+        await open.controller.refreshIfRequested()
+        try await open.flush()
+        expectSane(open, "\(item) relaunched")
+        #expect(open.session.tabs.contains { $0.customTitle == "Open" && $0.id != shared } && zone.records[name] != nil)
+    }
 }
