@@ -17,5 +17,17 @@ final class PreferencesLocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Site Search"], "사이트 검색")
         XCTAssertEqual(strings["Providers"], "제공자")
         XCTAssertEqual(strings["After %lld Hours"], "%lld시간 후")
+        XCTAssertEqual(strings["System (default)"], "시스템 (기본값)")
+    }
+
+    /// The app shell has no test target of its own; `swift build` builds its bundle beside the others.
+    func testAppShellHasKoreanForKeyStrings() throws {
+        let products = Bundle(for: PreferencesLocalizationTests.self).bundleURL.deletingLastPathComponent()
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: products.appendingPathComponent("ArchBrowser_Arch.bundle").path), "swift build has not built the app shell")
+        let strings = try koreanStrings(of: "Arch")
+        XCTAssertEqual(strings["New Tab"], "새 탭")
+        XCTAssertEqual(strings["Settings\u{2026}"], "설정\u{2026}")
+        XCTAssertEqual(strings["Show Sidebar"], "사이드바 보기")
+        XCTAssertEqual(strings["About Arch"], "Arch에 관하여")
     }
 }

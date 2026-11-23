@@ -1,5 +1,5 @@
 // Settings sections for General, Sidebar, and Appearance.
-// General controls the default browser, links from other apps, new pages, and downloads. Sidebar controls tab archiving. Appearance controls the app's appearance.
+// General controls the default browser, links from other apps, new pages, downloads, and the app's language. Sidebar controls tab archiving. Appearance controls the app's appearance.
 import AppKit
 import ARCHEngine
 import Browsing
@@ -18,7 +18,7 @@ func formFootnote(_ text: String) -> some View {
         .frame(maxWidth: .infinity, alignment: .leading)
 }
 
-/// The default browser, whether links from other apps open in small windows, the engine and search engine for new pages, and where downloads go.
+/// The default browser, whether links from other apps open in small windows, the engine and search engine for new pages, where downloads go, and the language Arch uses from its next launch.
 struct GeneralSection: View {
     @State private var isDefaultBrowser = DefaultBrowser.isDefault
     @AppStorage(BrowserSession.opensLinksInSmallWindowKey) private var opensLinksInSmallWindow = BrowserSession.opensLinksInSmallWindowByDefault
@@ -27,6 +27,9 @@ struct GeneralSection: View {
     @AppStorage(SearchEngine.defaultsKey) private var searchEngine = SearchEngine.google
     @AppStorage(BrowserSession.downloadsFolderKey) private var downloadsFolderPath: String?
     @AppStorage(BrowserSession.asksWhereToSaveDownloadsKey) private var asksWhereToSaveDownloads = false
+    /// The language choice, nil for the system's, and the one the window opened with, which the running app still uses.
+    @State private var language = LanguageSetting().chosen
+    @State private var languageAtOpen = LanguageSetting().chosen
 
     var body: some View {
         Form {
@@ -65,6 +68,24 @@ struct GeneralSection: View {
                     }
                 }
                 Toggle(localized("Ask where to save each download"), isOn: $asksWhereToSaveDownloads)
+            }
+            Section {
+                Picker(localized("Language"), selection: Binding(get: { language }, set: { language = $0; LanguageSetting().choose($0) })) {
+                    Text(localized("System (default)")).tag(String?.none)
+                    ForEach(LanguageSetting.languages, id: \.self) { code in
+                        Text(verbatim: LanguageSetting.name(of: code)).tag(Optional(code))
+                    }
+                }
+            } footer: {
+                // A choice applies from the next launch; only an app bundle can open itself again.
+                if language != languageAtOpen {
+                    HStack(alignment: .firstTextBaseline) {
+                        formFootnote(localized("Arch uses this language the next time it opens."))
+                        if DefaultBrowser.canBecomeDefault {
+                            Button(localized("Relaunch")) { LanguageSetting.relaunch() }
+                        }
+                    }
+                }
             }
         }
         .formStyle(.grouped)
