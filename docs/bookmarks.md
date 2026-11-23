@@ -421,11 +421,7 @@ Regression checks 68 to 71 in `docs/plan.md` cover saved pages, unloading, neste
 Until the user decides otherwise, the implementation uses the option this note describes.
 
 1. Other sources, such as calendars and documents: none yet (this note); a later plugin contribution in `docs/plugins.md` could add sources that a plugin fetches.
-  - Decided in X5: ship no additional live folder source yet.
 2. JSON Feed: not read (this note); it can join `FeedParser` later.
-  - Decided in X5: leave JSON Feed out until a source needs it.
 3. Notifications for new items: none (this note); the dots and counts are enough for now.
-  - Decided in X5: use the existing dots and counts without new-item notifications.
 4. Requests to the user's teams in Review Requests: left out (this note); a search with `review-requested:@me` includes them.
-  - Decided in X5: exclude team requests from Review Requests.
 5. Chromium back lists across an unload: lost (this note), since CEF has no public API that restores navigation entries; a change in `arch-chromium` could add one for unloaded and restored tabs alike.
