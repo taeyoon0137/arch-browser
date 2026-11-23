@@ -361,7 +361,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         panel.viewWillAppear()
         #expect(await eventually { storage.value(forKey: "panel") != nil })
         #expect(storage.value(forKey: "panel") == .object([
-            "members": .array(["ai", "downloads", "net", "secrets", "settings", "storage", "tabs", "ui"].map(PluginValue.string)), "stream": .string("function"), "deliver": .string("undefined"),
+            "members": .array(["ai", "downloads", "history", "net", "secrets", "settings", "storage", "tabs", "ui"].map(PluginValue.string)), "stream": .string("function"), "deliver": .string("undefined"),
         ]))
         let count = PluginCommandRef(plugin: id, command: "count")
         await manager.run(count, PluginInvocation(tab: nil))

@@ -118,6 +118,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             list: () => call("downloads.list", []),
             rename: (id, name) => call("downloads.rename", [id, name]),
           }),
+          history: Object.freeze({ search: (text, limit) => call("history.search", [text, ...given(limit)]) }),
           storage: Object.freeze({
             get: (key) => call("storage.get", [key]),
             set: (key, value) => call("storage.set", [key, ...given(value)]),
@@ -178,7 +179,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
-    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, an AI reply's call once its reply has come, a stream's `ai.next` call once text arrives or the reply ends, and `pages.run` once the page has run the script. The other calls reply before the handler returns.
+    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, an AI reply's call once its reply has come, a stream's `ai.next` call once text arrives or the reply ends, `pages.run` once the page has run the script, and `history.search` once the history store has read the pages. The other calls reply before the handler returns.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard !hasEnded else { return replyHandler(nil, PluginError.stopped.bridgeName) }
@@ -250,6 +251,24 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             Task {
                 defer { waitsForArch?(false) }
                 do { Self.reply(.success(try await context.runPageScript(.file(file), in: id)), to: replyHandler) }
+                catch { Self.reply(.failure(error), to: replyHandler) }
+            }
+        case "history.search":
+            // `{url, title, lastVisit, visitCount}` for each page. The limit is a whole number from 1, of which the context gives at most `PluginManager.historyLimit`, as it does without one or with null.
+            let text: String
+            let limit: Int
+            do {
+                guard call.args.count <= 2 else { throw BridgeFailure.invalidCall }
+                text = try call.text(0)
+                limit = call.value(1) == nil || call.value(1) == .null ? PluginManager.historyLimit : try call.wholeNumber(1)
+                guard limit >= 1 else { throw BridgeFailure.invalidCall }
+            } catch {
+                return replyHandler(nil, BridgeFailure.invalidCall.rawValue)
+            }
+            waitsForArch?(true)
+            Task {
+                defer { waitsForArch?(false) }
+                do { Self.reply(.success(.array(try await context.history(matching: text, limit: limit).map(\.scriptValue))), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
             }
         case "ai.next":

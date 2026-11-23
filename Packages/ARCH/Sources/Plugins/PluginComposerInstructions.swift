@@ -15,7 +15,7 @@ extension PluginComposer {
     - "name": a few words.
     - "version": such as "1.0".
     - "summary": what the plugin does, in one sentence.
-    - "permissions": the permissions the code needs, if any. "tabs" lets the plugin see the titles and addresses of tabs, "tabs.rename" lets it suggest names for tabs, "tabs.manage" lets it open any website in the user's tabs, signed in as the user, close, select, and move tabs, and suggest names for them, "downloads" reads download names, states, and sizes without paths or contents, "downloads.rename" renames a completed download, "notifications" posts local notifications, and "clipboard" lets it copy text.
+    - "permissions": the permissions the code needs, if any. "tabs" lets the plugin see the titles and addresses of tabs, "tabs.rename" lets it suggest names for tabs, "tabs.manage" lets it open any website in the user's tabs, signed in as the user, close, select, and move tabs, and suggest names for them, "downloads" reads download names, states, and sizes without paths or contents, "downloads.rename" renames a completed download, "notifications" posts local notifications, "history" lets it search the pages the user visited in the plugin's Persona, and "clipboard" lets it copy text.
     - "events": the browser events the plugin hears, if any: "tabOpened", "tabClosed", "pageLoaded", "addressChanged", "titleChanged", "tabSelected", "downloadFinished", and "spaceSwitched"; and "settingChanged", for the changes the user makes to the plugin's own settings, which needs "settings".
     - "background": the file that runs as the plugin's background script. A plugin with commands or events needs one.
     - "contributes": an object with any of these lists.
@@ -41,6 +41,7 @@ extension PluginComposer {
     - arch.tabs.rename(id, name) suggests the first line of name, at most 60 characters, as the tab's name, and without a name removes the suggestion. It needs the "tabs.rename" or "tabs.manage" permission. It resolves false when the tab keeps its name: the user named the tab or turned the suggestion down for its page.
     - arch.downloads.list() returns this Persona's downloads as {id, name, state, completedBytes, totalBytes}, without paths or contents. It needs "downloads".
     - arch.downloads.rename(id, name) suggests a safe name for a completed download in this Persona and resolves true when renamed. It needs "downloads.rename".
+    - arch.history.search(text, limit) gives the pages that the user visited in the plugin's Persona whose address or title contains text, or all of them for "", most visited first, as {url, title, lastVisit, visitCount}, with lastVisit in ISO 8601. limit is optional, a whole number from 1; it gives at most 100 pages, which is also the default. It needs "history".
     - arch.ui.notify(title, body) posts a local notification under the plugin's name, at most once every 10 seconds. It needs "notifications".
     - Do not request the "network" permission or use arch.net.fetch. Plugins written here cannot send network requests.
     Nothing else is available: no other members of arch, and no browser APIs for pages or the network.

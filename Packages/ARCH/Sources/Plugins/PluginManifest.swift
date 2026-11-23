@@ -159,6 +159,8 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case notifications
     /// Send requests to the listed HTTPS hosts without Persona cookies.
     case network
+    /// Search the pages that the plugin's Persona visited (`PluginContext.history(matching:limit:)`).
+    case history
 
     /// What the permission lets a plugin do, as a sentence that Settings shows.
     public var summary: String {
@@ -173,6 +175,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         case .renameDownloads: return localized("Rename completed downloads in this Persona")
         case .notifications: return localized("Show notifications under the plugin's name")
         case .network: return localized("Send requests to the listed hosts")
+        case .history: return localized("Search your browsing history in this Persona")
         }
     }
 }
