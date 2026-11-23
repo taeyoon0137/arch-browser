@@ -4,3 +4,4 @@ Frameworks/
 Packages/ARCHKit/Sources/CEFBridge/cefroot/
 build/
 Packages/ARCHKit/Sources/CEFBridge/wrapper_src/
+.release.env

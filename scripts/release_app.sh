@@ -1,11 +1,11 @@
 #!/bin/sh
 # Make an update release of a built Arch.app for Sparkle (`docs/updates.md`): the update archive, its EdDSA signature, and the appcast, in `build/release/<build number>/`. With `ARCH_NOTARY_PROFILE`, a `notarytool` keychain profile, the app is notarized and stapled first. Only `--publish` uploads the archive and the appcast as a GitHub release of the project; without it the script prints what it would upload.
 # Usage: scripts/release_app.sh [--publish] [path/to/Arch.app]
-# `sign_update` reads the private key from the file at `ARCH_SPARKLE_KEY_FILE`, by default `the key file`, or else from the login Keychain under its account.
+# `sign_update` reads the private key from the file at `ARCH_SPARKLE_KEY_FILE`, or from the login Keychain under the account `ARCH_SPARKLE_KEY_ACCOUNT`. Either comes from the environment or from `.release.env` at the repository root, which git ignores, so the repository never says where the key is.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="taeyoon0137/arch-browser"
-KEY_ACCOUNT=""
+[ -f "$ROOT/.release.env" ] && . "$ROOT/.release.env"
 # SwiftPM's copy of Sparkle's release has its tools.
 TOOLS="$ROOT/.build/artifacts/sparkle/Sparkle/bin"
 PUBLISH=0
@@ -58,11 +58,12 @@ fi
 
 ditto -c -k --keepParent "$APP" "$ARCHIVE"
 rm -rf "$APP"
-ARCH_SPARKLE_KEY_FILE="${ARCH_SPARKLE_KEY_FILE:-}"
-if [ -f "$ARCH_SPARKLE_KEY_FILE" ]; then
+if [ -n "${ARCH_SPARKLE_KEY_FILE:-}" ] && [ -f "$ARCH_SPARKLE_KEY_FILE" ]; then
   SIGNATURE="$("$TOOLS/sign_update" --ed-key-file "$ARCH_SPARKLE_KEY_FILE" -p "$ARCHIVE")"
+elif [ -n "${ARCH_SPARKLE_KEY_ACCOUNT:-}" ]; then
+  SIGNATURE="$("$TOOLS/sign_update" --account "$ARCH_SPARKLE_KEY_ACCOUNT" -p "$ARCHIVE")"
 else
-  SIGNATURE="$("$TOOLS/sign_update" --account "$KEY_ACCOUNT" -p "$ARCHIVE")"
+  fail "set ARCH_SPARKLE_KEY_FILE or ARCH_SPARKLE_KEY_ACCOUNT, in the environment or in .release.env"
 fi
 [ -n "$SIGNATURE" ] || fail "sign_update gave no signature"
 # The app installs only an archive whose signature its own public key checks, so a release signed with another key would never install.
