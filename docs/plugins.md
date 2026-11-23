@@ -161,7 +161,7 @@ A page script is a JavaScript or CSS file from the plugin's package, or JavaScri
 | `tabs.rename` | Rename tabs; included in `tabs.manage`. A name set by code is the tab's suggested name, so the user's own name wins (`docs/hooks.md`, hook decision 13) | Calls throw `permissionDenied` |
 | Sites (`sites` with `siteAccess`) | Page scripts, page messages, and running package scripts in matching pages | No page access |
 | `network` hosts | HTTPS requests to the listed hosts with `arch.net.fetch`, without cookies (see below) | No network access from plugin code, except what page scripts and their styles load through the page (Page scripts) and the pages of the tabs that a plugin with `tabs.manage` opens, whose addresses can carry what it knows to any host |
-| `history` | Search browsing history | Calls throw `permissionDenied` |
+| `history` | Search the pages that the plugin's Persona visited, with what that Persona's visits recorded of them, at most 100 a search; for a plugin with `ai`, none on a site excluded from AI. The install sheet states it as "Search your browsing history in this Persona" | Calls throw `permissionDenied` |
 | `downloads` | Read download names, states, and byte counts with `arch.downloads.list()`; no paths or contents | Calls throw `permissionDenied` |
 | `downloads.rename` | Rename one completed download in the Persona to a safe unused name, keeping its extension | Calls throw `permissionDenied` |
 | `clipboard` | Writing text to the clipboard | Calls throw `permissionDenied` |
@@ -253,7 +253,7 @@ A sidebar item with a `panel` may set `"presentation": "sidebar"`; the default i
 
 ## Personas
 
-- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, and downloads, and, once `history` is built, only its Persona's visits. History stays app-wide for the user (`docs/windows-personas.md`, Persona rule 6), and visits do not record their Persona yet, so `history` waits for that record (open decision 2 there, which recommends a nullable `persona` column) rather than show a plugin every Persona's history. It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it, and `selectedTab()` gives the selected tab of the window that last became main under the same rule. A plugin with `tabs.manage` opens and moves tabs only in its Persona's spaces and selects a tab only in a window of its Persona, so a window of another Persona keeps its Persona / Space.
+- Each Persona has one `PluginManager`. A plugin sees only its Persona's spaces, tabs, downloads, and history visits: each Persona keeps its own history (`docs/windows-personas.md`, Persona rule 6 and open decision 2). It gets events only from them. A command therefore gets the window's selected tab only when the tab belongs to the plugin's Persona, so neither a favorite's tab of another Persona nor the selected tab under the menu of a space whose Persona differs from the tab's reaches it, and `selectedTab()` gives the selected tab of the window that last became main under the same rule. A plugin with `tabs.manage` opens and moves tabs only in its Persona's spaces and selects a tab only in a window of its Persona, so a window of another Persona keeps its Persona / Space.
 - The session creates a Persona's manager when a tab or window of the Persona first needs it (`BrowserSession.plugins(in:)`) and keeps it in the Persona's `PersonaEngines`. A window shows contributions from its current space's Persona, or its tab's Persona for a small window, and runs its palette commands and sidebar items through that Persona's manager. A tab's page scripts and the plugin items of its page's and its row's context menus come from the tab's Persona, and those of a space's menu from the space's. The Plugins menu follows the active window's Persona, or the default one while no window is open. Settings ▸ Plugins shows one Persona's plugins, with a picker once there are two Personas, and installs plugins into that Persona. A review sheet still open when the user deletes its Persona closes without installing, and an install that was waiting for Touch ID then throws `PluginError.closed`.
 - Installing a plugin in two Personas creates two installations with separate grants, storage, secrets, and background processes. When another Persona exists, an installed, unpaired script plugin or web extension offers Install in Another Persona in its Settings section. A pair offers none, since copying both versions is still open. The menu lists the other Personas by name, without a space, and each choice has an ellipsis because it opens a review sheet. A plugin that AI wrote offers none either, since the copy's review would show a file install without the requests and sources that a written plugin's review states. Choosing one stages the installed package's folder in that Persona and opens the same review as Install Plugin… from a folder, so a web extension from the Web Store installs there as from a folder, without its proof or store updates. The target gets a fresh grant review; settings, storage, and secrets are not copied. If the target already has the identifier, the review offers Update as for any install.
 - Built-in plugins exist in every Persona. A new Persona enables the built-in plugins that are on by default.
@@ -476,7 +476,6 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case notifications
     /// Requires the hosts in `PluginManifest.network`.
     case network
-    // Not built yet: waits for visits that record their Persona (`docs/windows-personas.md`, open decision 2).
     case history
     /// The permission as a plain sentence, such as "Read the titles and addresses of your tabs".
     public var summary: String { get }
@@ -701,8 +700,8 @@ public protocol PluginContext: AnyObject {
     func postMessage(_ message: PluginValue, toTab tab: PluginTab.ID) throws
 
     // Data.
-    // Not built yet: waits for visits that record their Persona (`docs/windows-personas.md`, open decision 2).
-    func history(matching text: String, limit: Int) throws -> [PluginHistoryEntry]
+    /// Needs `history`. The Persona's pages whose address or title contains the text, or all of them for empty text, most visited first, at most `limit` and never more than 100; none on a site excluded from AI for a plugin with `ai`.
+    func history(matching text: String, limit: Int) async throws -> [PluginHistoryEntry]
     func downloads() throws -> [PluginDownload]
     func renameDownload(_ id: UUID, to name: String) throws -> Bool
     /// One HTTPS request under the rules in Permissions: checked against the current grant and the rate when it starts, connected to the address Arch checked, without cookies.
@@ -782,12 +781,12 @@ public struct PluginDownload: Identifiable, Hashable, Sendable {
     public let totalBytes: Int64
 }
 
-// Not built yet, as `history(matching:limit:)`.
+/// What the plugin's Persona's visits of a page recorded.
 public struct PluginHistoryEntry: Hashable, Sendable {
-    public var url: URL
-    public var title: String
-    public var lastVisit: Date
-    public var visitCount: Int
+    public let url: URL
+    public let title: String
+    public let lastVisit: Date
+    public let visitCount: Int
 }
 
 /// A script for `runPageScript(_:in:)`, which must parse as a function body on its own, as a page script must.
@@ -1256,7 +1255,7 @@ The runtime adds a bridge script to every plugin document to define `arch`. Each
 | `arch.secrets.get(key)`, `set(key, value)` | `PluginSecrets` |
 | `arch.settings.get(key)` | `setting(_:)` |
 | `arch.net.fetch(url, options)` | `fetch(_:)` |
-| `arch.history.search(text, limit)` (not built yet), `arch.downloads.list()`, `arch.downloads.rename(id, name)` | `history(matching:limit:)` (not built yet), `downloads()`, `renameDownload(_:to:)` |
+| `arch.history.search(text, limit)`, `arch.downloads.list()`, `arch.downloads.rename(id, name)` | `history(matching:limit:)`, `downloads()`, `renameDownload(_:to:)` |
 | `arch.ui.setBadge(itemId, text)`, `setEnabled(commandId, flag)`, `showPanel(itemId)`, `notify(title, body)`, `copy(text)` | The interface members of `PluginContext` |
 
 - A command's listener receives `{tab, spaceId, linkUrl, imageUrl, selection, source, argument}`, with `source` naming where the user ran it, `palette`, `menu`, `contextMenu`, `shortcut`, or `sidebar`, and `argument` the text typed after a command with `takesArgument`, a page message listener `{tab, frameUrl, isMainFrame, body}`, an event listener the event's script view with its dates in ISO 8601, and a `settingChanged` listener `{kind, key}` with the setting's key; a tab is `{id, spaceId, title, url, engine, kind, isPinned, isSelected}` with its identifiers as text, without what the grant does not cover. `tabs.get(id)` resolves `null` for a tab the plugin does not reach, `tabs.selected()` with the tab or `null`, `tabs.rename(id, name)` with `true` or `false`, and `tabs.rename(id)` or `tabs.rename(id, null)` removes the tab's suggested name. Absent values are left out.
