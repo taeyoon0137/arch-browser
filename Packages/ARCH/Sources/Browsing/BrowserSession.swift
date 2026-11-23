@@ -375,12 +375,14 @@ final class EngineRuntime {
         return windows.first { $0.nsWindow === nsWindow }
     }
 
-    /// Window rule 2: before `window` shows the tab it selected, every other window that shows the tab gives it up (`BrowserWindowModel.giveUp(_:)`). The panes that no window shows any longer, the ones given up and the ones `window` left, then show again in the windows whose split views have them (window rule 1).
+    /// Window rule 2: before `window` shows the tab it selected, every other window that shows the tab gives it up (`BrowserWindowModel.giveUp(_:)`). Then every window updates its panes: `window` shows the tab, and the panes that no window shows any longer, the ones `window` left among them, show again in the windows whose split views or selections have them (window rule 1).
     func release(_ tab: Tab?, except window: BrowserWindowModel) {
         if let tab {
             for other in windows where other !== window && other.shows(tab) { other.giveUp(tab) }
         }
-        windows.forEach { $0.updateShownTabs() }
+        // `window` first, so that a window that gave the tab up and keeps it selected does not take it straight back.
+        window.updateShownTabs()
+        windows.forEach { if $0 !== window { $0.updateShownTabs() } }
     }
 
     /// The tab of `focusedTabID`.
@@ -499,6 +501,25 @@ final class EngineRuntime {
         }
         target.nsWindow?.makeKeyAndOrderFront(nil)
         target.focusPage()
+    }
+
+    /// The space a small window's tab moves to when the window switches to the Persona `personaID` (open decision 6): the current space of the Persona's front main window, or the Persona's first space.
+    func smallWindowDestination(in personaID: Persona.ID) -> Space {
+        windows.first { $0.kind == .main && $0.personaID == personaID }?.currentSpace ?? spaces(in: personaID).first ?? preferredSpace(in: personaID)
+    }
+
+    /// The small window's Persona menu: the window's page moves to the Persona `personaID`, in a new tab of that Persona at the same address and engine, whose space is `smallWindowDestination(in:)`. A tab's pages keep their Persona's storage, so the page loads again in the Persona's profile, without the old page's back and forward list or sign-in. The old tab ends without joining the closed list, and the window stays open on the new tab.
+    public func moveSmallWindow(_ window: BrowserWindowModel, toPersona personaID: Persona.ID) {
+        guard window.kind == .small, let old = window.selectedTab, old.personaID != personaID, personas.contains(where: { $0.id == personaID }) else { return }
+        let space = smallWindowDestination(in: personaID)
+        let engine = old.preferredEngine
+        let tab = makeTab(makeWebContents(url: old.url, engine: engine, state: nil, in: personaID), id: UUID(), spaceID: space.id, personaID: personaID, pinned: false)
+        tab.preferredEngine = engine
+        tab.isInSmallWindow = true
+        tabs.append(tab)
+        window.selectTab(tab.id)
+        removeTab(old, closedRecord: nil, reason: .user)
+        window.focusPage()
     }
 
     // MARK: Engines

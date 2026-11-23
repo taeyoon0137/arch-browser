@@ -2131,6 +2131,16 @@
         }
       }
     },
+    "In use in another window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 윈도우에서 사용 중"
+          }
+        }
+      }
+    },
     "Inactive · Uses %@" : {
       "localizations" : {
         "ko" : {
@@ -3921,6 +3931,16 @@
         }
       }
     },
+    "Show Other Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 윈도우 보기"
+          }
+        }
+      }
+    },
     "Show Session" : {
       "localizations" : {
         "ko" : {
@@ -4167,6 +4187,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "요약"
+          }
+        }
+      }
+    },
+    "Switch Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 전환"
           }
         }
       }

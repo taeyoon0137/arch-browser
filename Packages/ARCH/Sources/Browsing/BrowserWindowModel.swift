@@ -44,6 +44,8 @@ public enum BrowserWindowKind {
     private var selectedTabObserver: AnyCancellable?
     /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes. Each change marks the live folder items whose tabs start or stop showing as viewed (live folder rule 5).
     @Published private(set) var shownTabIDs: [UUID] = [] {
+        // Every window's sidebar dims the rows of the tabs that another window shows, so the session announces the change too.
+        willSet { session.objectWillChange.send() }
         didSet { session.windowDidChangeShownTabs(from: oldValue, to: shownTabIDs) }
     }
     /// The internal page covering the page area, opened by its address from the command palette.
@@ -153,7 +155,7 @@ public enum BrowserWindowKind {
 
     /// Selects the tab `id`, or the empty page for nil, and does what a selection does, in this order (`docs/windows-personas.md`, `BrowserWindowModel`). Selecting the tab already selected runs every step except the end of step 2.
     ///
-    /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
+    /// 1. Every other window that shows the tab gives it up (window rule 2): a main window keeps it selected behind a placeholder (open decision 5), and a small window closes. Then the window shows the tab. Selecting the tab already selected behind a placeholder takes it back so.
     /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), follows its space, and, while the agent panel shows an outside client, switches it to the client that owns the newly selected agent tab. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
     /// 3. The session updates the focused tab.
     /// 4. The docked developer tools follow the tab.
@@ -163,8 +165,7 @@ public enum BrowserWindowKind {
     public func selectTab(_ id: UUID?) {
         let previousID = selectedTabID
         selectedTabID = id
-        // 1. The window shows its selected tab, and another window that shows the tab lets go of its page fullscreen and docked tools before this window takes them.
-        updateShownTabs()
+        // 1. Another window that shows the tab lets go of its page fullscreen and docked tools, then the window shows its selected tab (`release` updates every window's panes, this one's too).
         session.release(selectedTab, except: self)
         // 2. Selecting a tab, even the one under the page, leaves an internal page.
         internalPage = nil
@@ -1702,35 +1703,43 @@ public enum BrowserWindowKind {
 
     /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows. A tab without its page gets it before the window shows it (`BrowserSession.loadPage(of:)`). A tab that leaves the window was in view until now, as archiving and automatic unloading count it.
     func updateShownTabs() {
-        let shown = Self.panesToShow(paneTabs, selectedTabID: selectedTabID, shownTabIDs: shownTabIDs, isShownInAnotherWindow: isShownInAnotherWindow)
+        let shown = Self.panesToShow(paneTabs, shownTabIDs: shownTabIDs, isShownInAnotherWindow: isShownInAnotherWindow)
         shown.forEach(session.loadPage(of:))
         let ids = shown.map(\.id)
         guard ids != shownTabIDs else { return }
         let now = Date()
         for tab in session.allTabs where shownTabIDs.contains(tab.id) && !ids.contains(tab.id) { tab.lastActivatedAt = now }
+        let showedSelected = selectedTabID.map(shownTabIDs.contains) == true
         shownTabIDs = ids
+        // A selected tab that comes back, as when the window that took it closes, brings its docked tools back.
+        if let selected = selectedTab, !showedSelected, ids.contains(selected.id) { devToolsDock.track(selected) }
         session.applyPendingSyncEngines()
     }
 
-    /// The panes of `panes` that a window shows, and so loads, after a change: its selected tab, the panes it shows already (`shownTabIDs`), and each other pane that no other window shows.
-    static func panesToShow(_ panes: [Tab], selectedTabID: UUID?, shownTabIDs: [UUID], isShownInAnotherWindow: (Tab) -> Bool) -> [Tab] {
-        panes.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }
+    /// The panes of `panes` that a window shows, and so loads, after a change: the panes it shows already (`shownTabIDs`) and each other pane that no other window shows, its selected tab among them. A selected tab that another window took stays out until the user takes it back or the other window lets it go (open decision 5).
+    static func panesToShow(_ panes: [Tab], shownTabIDs: [UUID], isShownInAnotherWindow: (Tab) -> Bool) -> [Tab] {
+        panes.filter { shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }
     }
 
-    /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen here first. The tab's prompt goes with it.
+    /// Lets another window take `tab` (window rule 2). A small window, which shows only its tab, closes, letting go of the page's fullscreen and docked tools as it does. A main window keeps its selection, as for another pane of its split view (open decision 5): it ends the page's fullscreen here first, and for its selected tab lets go of the docked tools and closes the find bar and the question popover, which belong to the page. Its page area then shows a placeholder in the pane, and its sidebar dims the tab's row, until the user takes the tab back. The tab's prompt goes with it.
     func giveUp(_ tab: Tab) {
         shownTabIDs.removeAll { $0 == tab.id }
-        if tab.id == selectedTabID {
-            guard kind == .main else { return close() }
-            selectTab(fallbackTab(excluding: tab.id)?.id)
-        } else if fullscreenTabID == tab.id {
-            exitPageFullscreen()
+        if tab.id == selectedTabID, kind == .small { return close() }
+        if fullscreenTabID == tab.id { exitPageFullscreen() }
+        guard tab.id == selectedTabID else { return }
+        devToolsDock.track(nil)
+        if isFindBarVisible {
+            tab.webContents.stopFind()
+            isFindBarVisible = false
+            findResult = nil
         }
+        closePageQuestion(ofTab: tab.id)
     }
 
-    /// The tab the window selects when another window takes its tab: the most recent of `recentTabs` other than `excluding` that no other window shows, or nil for the empty page.
-    func fallbackTab(excluding id: UUID) -> Tab? {
-        recentTabs.first { $0.id != id && !isShownInAnotherWindow($0) }
+    /// Brings forward the window that shows `tab` in place of this one, as the placeholder's Show Other Window does.
+    func showWindowShowing(_ tab: Tab) {
+        guard let other = session.window(showing: tab), other !== self else { return }
+        other.nsWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their prompts show as cards over their panes. None once the window has let go of its tabs as it closes.
