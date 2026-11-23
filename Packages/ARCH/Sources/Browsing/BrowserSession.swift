@@ -663,10 +663,20 @@ final class EngineRuntime {
 
     /// Removes a space, unless it is its Persona's last. Its tabs and nested folders move to the space before it in its Persona's group, or to the next one for the group's first space, so no tab closes or leaves its Persona, and every window on the space switches there.
     public func deleteSpace(_ id: UUID) {
-        guard canDeleteSpace(id), let space = spaces.first(where: { $0.id == id }) else { return }
+        guard canDeleteSpace(id), let destination = neighbor(ofSpace: id) else { return }
+        removeSpace(id, movingContentsTo: destination)
+    }
+
+    /// The space before `id` in its Persona's group, or the next one for the group's first space; nil for a Persona's only space.
+    private func neighbor(ofSpace id: UUID) -> UUID? {
+        guard let space = spaces.first(where: { $0.id == id }) else { return nil }
         let group = spaces(in: space.resolvedPersonaID)
-        guard let index = group.firstIndex(where: { $0.id == id }) else { return }
-        let destination = group[index == 0 ? 1 : index - 1].id
+        guard group.count > 1, let index = group.firstIndex(where: { $0.id == id }) else { return nil }
+        return group[index == 0 ? 1 : index - 1].id
+    }
+
+    /// Removes the space `id` after moving its tabs and folders, with their folders and parents, after those of `destination`, a space of the same Persona, and switching every window on it there.
+    private func removeSpace(_ id: UUID, movingContentsTo destination: UUID) {
         // The space's split view goes with it; its tabs join the destination as separate tabs.
         splitTabIDs[id] = nil
         // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders, and the folders their parents, so the tree moves whole.
@@ -893,7 +903,9 @@ final class EngineRuntime {
     func openTab(for favorite: Favorite) -> Tab {
         if let tab = favoriteTabs[favorite.id] { return tab }
         let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
-        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: saved?.id ?? UUID(), spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
+        // A pin that sync added since launch can carry the saved tab's ID, as when this Mac's data came from the Mac that pinned the tab; the favorite's tab then takes a new one, so no two tabs share an ID.
+        let id = saved?.id.flatMap { id in allTabs.contains { $0.id == id } ? nil : id } ?? UUID()
+        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: id, spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
         tab.restoreEngine(saved?.engine ?? defaultEngine, state: saved?.state, at: saved?.url)
         if let saved {
             tab.isRestored = true
@@ -2232,7 +2244,9 @@ extension BrowserSession {
         let oldFolders = Dictionary(before.folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for (old, new) in replacements.folders {
             guard old != new, let source = oldFolders[old], let target = state.folders.first(where: { $0.id == new }),
-                  target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder }) else { continue }
+                  target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder }),
+                  // A server folder that this Mac keeps inside the local one would become its own parent.
+                  !folderTree.ancestors(of: new).contains(where: { $0.id == old }) else { continue }
             for index in folders.indices where folders[index].parentID == old { folders[index].parentID = new }
             for tab in tabs where tab.folderID == old { tab.folderID = new }
             folders.removeAll { $0.id == old }
@@ -2282,6 +2296,7 @@ extension BrowserSession {
     public func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) {
         let state = state.withFirstCopies
         let current = sidebarSyncState
+        yieldIDs(to: state, current: current)
         guard state != current || !deletions.personas.isDisjoint(with: personas.map(\.id))
                 || !deletions.spaces.isDisjoint(with: current.spaces.map(\.id))
                 || !deletions.folders.isDisjoint(with: current.folders.map(\.id))
@@ -2389,6 +2404,48 @@ extension BrowserSession {
         applyPendingSyncEngines()
     }
 
+    /// An open tab or open folder of this Mac whose ID an incoming pinned tab or pinned folder carries, as when this Mac's data came from the Mac that pinned it, is another item, which never syncs: it takes a new ID and keeps its page, place, contents, and selection, so the pin joins beside it and no comparison takes the pin for one deleted here (`docs/sync.md`, Mapping the session store to records ▸ IDs listed twice). Agent tabs and folders, which `session.json` never keeps, are left alone.
+    private func yieldIDs(to state: SidebarSyncState, current: SidebarSyncState) {
+        let pinIDs = Set(state.pinnedTabs.map(\.id)).subtracting(current.pinnedTabs.map(\.id))
+        for old in allTabs where pinIDs.contains(old.id) && !old.isPinned && old.agentOwnerID == nil {
+            let page = old.webContents
+            old.replaceWebContents(with: UnloadedWebContents(url: old.url, title: old.title, engine: old.engineKind, state: nil))
+            let copy = makeTab(page, id: UUID(), spaceID: old.spaceID, personaID: old.personaID, pinned: false)
+            copy.webContentsDidChangeFavicon(page)
+            copy.folderID = old.folderID
+            copy.customTitle = old.customTitle
+            copy.suggestedTitle = old.suggestedTitle
+            copy.preferredEngine = old.preferredEngine
+            copy.lastActivatedAt = old.lastActivatedAt
+            copy.isInSmallWindow = old.isInSmallWindow
+            for (space, panes) in splitTabIDs where panes.contains(old.id) { splitTabIDs[space] = panes.map { $0 == old.id ? copy.id : $0 } }
+            for index in windowsToReopen.indices where windowsToReopen[index].selectedTabID == old.id { windowsToReopen[index].selectedTabID = copy.id }
+            let showing = windows.filter { $0.selectedTabID == old.id }
+            if let favorite = favoriteTabs.first(where: { $0.value === old })?.key {
+                favoriteTabs[favorite] = copy
+                showing.forEach { $0.selectTab(copy.id) }
+                prompts.dismiss(tabID: old.id)
+                tabObservers[old.id] = nil
+                retire(old.webContents, of: old.personaID)
+            } else if let index = tabs.firstIndex(where: { $0 === old }) {
+                // It joins as a restored tab does, so the hooks post no new tab for it.
+                copy.isRestored = true
+                tabs.insert(copy, at: index)
+                copy.isRestored = false
+                showing.forEach { $0.selectTab(copy.id) }
+                _ = removeTab(old, closedRecord: nil, reason: .sync)
+            }
+        }
+        let pinnedFolderIDs = Set(state.folders.map(\.id)).subtracting(current.folders.map(\.id))
+        for index in folders.indices where pinnedFolderIDs.contains(folders[index].id) && !folders[index].isPinned && !folders[index].isAgentFolder {
+            let old = folders[index].id, new = UUID()
+            folders[index].id = new
+            for child in folders.indices where folders[child].parentID == old { folders[child].parentID = new }
+            for tab in tabs where tab.folderID == old { tab.folderID = new }
+            windows.forEach { $0.endRenamingFolder(old) }
+        }
+    }
+
     /// Reorders only items named by synced IDs while preserving all other positions.
     private static func orderedSynced<Item: Identifiable>(_ items: [Item], by ids: [Item.ID]) -> [Item]? {
         let target = Set(ids)
@@ -2412,6 +2469,110 @@ extension BrowserSession {
                 guard let self, let tab else { return false }
                 return tab.pendingSyncEngine == target && self.window(showing: tab) == nil
             }
+        }
+    }
+}
+
+// MARK: Merge Into…
+
+extension BrowserSession {
+    /// The spaces that Merge Space Into… offers for the space `id`, in switcher order: every other space outside the Agents Persona. None for a Persona's only space, since every Persona keeps one (merging it is Merge Persona Into…), or for a space of the Agents Persona (`docs/windows-personas.md`, Merge Into…).
+    public func spaceMergeTargets(for id: UUID) -> [Space] {
+        guard canDeleteSpace(id), let source = spaces.first(where: { $0.id == id }), source.resolvedPersonaID != agentOnlyPersonaID else { return [] }
+        return spaces.filter { $0.id != id && $0.resolvedPersonaID != agentOnlyPersonaID }
+    }
+
+    /// The Personas that Merge Persona Into… offers for `id`, in order: every other Persona but the Agents Persona. None for the default Persona or the Agents Persona, which cannot be merged away.
+    public func personaMergeTargets(for id: Persona.ID) -> [Persona] {
+        guard canDeletePersona(id), id != agentOnlyPersonaID else { return [] }
+        return personas.filter { $0.id != id && $0.id != agentOnlyPersonaID }
+    }
+
+    /// Merge Space Into…: moves the space's pinned tabs, folders with their tree, and open tabs after those of `targetID`, pinned tabs staying pinned, then removes the space. Within one Persona they keep their IDs, as Delete Space moves them. Into another Persona's space they take new IDs and reload in that Persona's profile (`carryContents(ofSpace:toSpace:persona:)`), while agents' folders and small windows' tabs, which stay with their Persona, go to the space's neighbor, as Delete Space moves them.
+    public func mergeSpace(_ id: UUID, into targetID: UUID) {
+        guard let target = spaceMergeTargets(for: id).first(where: { $0.id == targetID }), let source = spaces.first(where: { $0.id == id }),
+              let neighbor = neighbor(ofSpace: id) else { return }
+        guard source.resolvedPersonaID != target.resolvedPersonaID else { return removeSpace(id, movingContentsTo: targetID) }
+        carryContents(ofSpace: id, toSpace: targetID, persona: target.resolvedPersonaID)
+        for window in windows where window.currentSpaceID == id { window.switchToSpace(targetID) }
+        removeSpace(id, movingContentsTo: neighbor)
+    }
+
+    /// Merge Persona Into…: installs in `targetID` the Persona's plugins and extensions that it lacks, moves each of its spaces, with the space's name, symbol, tint, and home page and with its tabs and folders, to the end of the target's spaces, and its favorites whose addresses the target lacks after the target's, all under new IDs, then removes the Persona as Delete Persona does, with its cookies and website data. Its tabs reload in the target's profile. Its agents' tabs and small windows' tabs close with it. A plugin that cannot install stops the merge before anything moves, with its error.
+    public func mergePersona(_ id: Persona.ID, into targetID: Persona.ID) async throws {
+        guard personaMergeTargets(for: id).contains(where: { $0.id == targetID }) else { return }
+        try await copyPlugins(from: id, to: targetID)
+        // The install awaited, so the Personas are checked again.
+        guard personaMergeTargets(for: id).contains(where: { $0.id == targetID }) else { return }
+        for space in spaces(in: id) {
+            var moved = space
+            moved.id = UUID()
+            moved.personaID = targetID
+            insert(moved)
+            carryContents(ofSpace: space.id, toSpace: moved.id, persona: targetID)
+            for window in windows where window.currentSpaceID == space.id { window.switchToSpace(moved.id) }
+            for index in windowsToReopen.indices where windowsToReopen[index].currentSpaceID == space.id { windowsToReopen[index].currentSpaceID = moved.id }
+        }
+        let addresses = Set(favorites(in: targetID).map(\.url))
+        var joining: [Favorite] = []
+        for favorite in favorites(in: id) {
+            if let tab = favoriteTabs[favorite.id] { _ = removeTab(tab, closedRecord: nil, reason: .persona) }
+            savedFavoriteTabs[favorite.id] = nil
+            guard !addresses.contains(favorite.url), !joining.contains(where: { $0.url == favorite.url }) else { continue }
+            joining.append(Favorite(url: favorite.url, title: favorite.title, personaID: targetID))
+        }
+        favorites.removeAll { $0.resolvedPersonaID == id }
+        favorites += joining
+        deletePersona(id)
+    }
+
+    /// Installs in `target` each plugin and extension of `source` that another Persona can install from its package (`PluginManager.packageFolderForCopy(of:)`) and that `target` has none of by identifier, with the grant and the on or off choice it has in `source`. Its storage and secrets stay behind. Bundled plugins are in every Persona already, and those that AI wrote or that pair two engines' versions cannot be copied from their package, so they go with the source.
+    private func copyPlugins(from source: Persona.ID, to target: Persona.ID) async throws {
+        let from = plugins(in: source), into = plugins(in: target)
+        for plugin in from.plugins where !into.plugins.contains(where: { $0.manifest.id == plugin.manifest.id }) {
+            guard let folder = from.packageFolderForCopy(of: plugin.id) else { continue }
+            let package = try await into.stage(folder)
+            do {
+                try into.install(package, grant: plugin.grant, isEnabled: plugin.isEnabled)
+            } catch {
+                into.discard(package)
+                throw error
+            }
+        }
+    }
+
+    /// Moves the pinned and open tabs and the folders of the space `sourceID`, except agents' folders and tabs and small windows' tabs, to `spaceID` of the Persona `personaID`, after its own, as other items: each folder takes a new ID with its tree, and each tab a new ID with a stand-in at its address in that Persona, which loads in the Persona's profile once a window shows it, so a tab's page and its back and forward list stay behind. A tab keeps its saved page, name, folder, and engine, and a window that selected it selects its new tab. A tab's Persona never changes (risk R11 of `docs/windows-personas.md`), and new IDs make the move a sync's new records and deletions.
+    private func carryContents(ofSpace sourceID: UUID, toSpace spaceID: UUID, persona personaID: Persona.ID) {
+        let movedFolders = folders.filter { $0.spaceID == sourceID && !$0.isAgentFolder }
+        var folderIDs: [UUID: UUID] = [:]
+        for folder in movedFolders { folderIDs[folder.id] = UUID() }
+        let carriedFolders = movedFolders.map { folder in
+            var carried = folder
+            carried.id = folderIDs[folder.id] ?? UUID()
+            carried.spaceID = spaceID
+            carried.parentID = folder.parentID.flatMap { folderIDs[$0] }
+            return carried
+        }
+        folders = folders.filter { folderIDs[$0.id] == nil } + carriedFolders
+        let moving = tabs.filter { $0.spaceID == sourceID && $0.agentOwnerID == nil && !$0.isInSmallWindow }
+        let carried = moving.map { old in
+            _ = leaveSplitView(old)
+            let tab = makeTab(UnloadedWebContents(url: old.url, title: old.title, engine: old.preferredEngine, state: nil), id: UUID(), spaceID: spaceID, personaID: personaID, pinned: old.isPinned)
+            tab.folderID = old.folderID.flatMap { folderIDs[$0] }
+            tab.savedPage = old.savedPage
+            tab.customTitle = old.customTitle
+            tab.suggestedTitle = old.suggestedTitle
+            tab.lastActivatedAt = old.lastActivatedAt
+            return (old: old, new: tab)
+        }
+        // They join as restored tabs do, so the hooks post no new tab for them.
+        carried.forEach { $0.new.isRestored = true }
+        tabs.append(contentsOf: carried.map(\.new))
+        carried.forEach { $0.new.isRestored = false }
+        for (old, new) in carried {
+            for window in windows where window.selectedTabID == old.id { window.selectTab(new.id) }
+            for index in windowsToReopen.indices where windowsToReopen[index].selectedTabID == old.id { windowsToReopen[index].selectedTabID = new.id }
+            _ = removeTab(old, closedRecord: nil, reason: .persona)
         }
     }
 }

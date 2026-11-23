@@ -417,7 +417,52 @@ import Testing
             session.applySidebarSync(incoming, deletions: removed)
             #expect(session.folders.contains { $0.id == agent.id && $0.name == "Agent" && $0.isAgentFolder })
             #expect(session.tabs.contains { $0 === agentTab } && agentTab.folderID == agent.id && agentTab.customTitle == nil)
-            #expect(session.tabs.contains { $0 === openTab } && !openTab.isPinned && !session.hasClosedTabs)
+            // The open tab is another item, which never syncs: it takes a new ID with its page, and the pin joins under the ID (`docs/sync.md`, IDs listed twice).
+            let kept = try #require(session.tabs.first { !$0.isPinned && $0.agentOwnerID == nil })
+            #expect(kept.id != openTab.id && kept.customTitle == nil && !session.hasClosedTabs)
+            #expect(session.tabs.contains { $0.id == openTab.id && $0.isPinned && $0.customTitle == "Claimed" })
+            #expect(Set(session.allTabs.map(\.id)).count == session.allTabs.count)
         }
+    }
+
+    /// A first sync whose server folder this Mac keeps inside the local folder it matched, and which the apply leaves where it is, as when its server parent does not apply here: moving the local folder's children into the server folder would make that folder its own parent, and every walk down the sidebar's tree would recurse until the app stops. The local folder stays instead.
+    @Test func aFirstSyncReplacementNeverMakesAFolderItsOwnParent() async throws {
+        try await temporarySession { session, _ in
+            let initial = session.sidebarSyncState, space = try #require(initial.spaces.first)
+            let local = session.makeFolder(in: space.id, pinned: true)
+            let server = session.makeFolder(in: space.id, pinned: true, inside: local.id)
+            let incoming = SidebarSyncState(personas: initial.personas, spaces: initial.spaces,
+                folders: [.init(id: server.id, personaID: space.resolvedPersonaID, spaceID: space.id, parentID: UUID(), name: server.name)],
+                favorites: [], pinnedTabs: [])
+            var replacements = SidebarSyncReplacements()
+            replacements.folders[local.id] = server.id
+            session.applyFirstSidebarSync(incoming, replacements: replacements)
+            #expect(session.folders.allSatisfy { folder in !session.folderTree.ancestors(of: folder.id).contains { $0.id == folder.id } })
+            #expect(session.folders.first { $0.id == server.id }?.parentID == local.id)
+            #expect(session.folderTree.rows(in: space.id, pinned: true).map(\.id) == [local.id, server.id])
+        }
+    }
+
+    /// A pin that sync adds with the ID of a favorite's tab saved from the last session, as when this Mac's data came from the Mac that pinned that tab, keeps its ID, and the favorite's tab takes another when it opens, so no two tabs share one.
+    @Test func aFavoritesSavedTabYieldsItsIDToASyncedPin() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let first = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(first.spaces.first)
+        let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Favorite", personaID: space.resolvedPersonaID)
+        first.addFavorites([favorite], in: space.resolvedPersonaID)
+        let savedID = first.openTab(for: try #require(first.favorites.first)).id
+        try first.saveNow().get()
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let state = session.sidebarSyncState
+        let pin = SidebarSyncState.PinnedTab(id: savedID, personaID: space.resolvedPersonaID, spaceID: space.id, folderID: nil,
+                                             savedPage: SavedPage(url: URL(string: "about:blank#pin")!, title: "Pin"), customTitle: nil, engine: .webKit)
+        session.applySidebarSync(.init(personas: state.personas, spaces: state.spaces, folders: [], favorites: state.favorites, pinnedTabs: [pin]), deletions: .init())
+        let opened = session.openTab(for: try #require(session.favorites.first))
+        #expect(session.tabs.contains { $0.id == savedID && $0.isPinned } && opened.id != savedID)
+        #expect(Set(session.allTabs.map(\.id)).count == session.allTabs.count)
     }
 }

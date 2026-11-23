@@ -842,11 +842,15 @@ struct SpaceMenuItems: View {
         Button(localized("New Space"), action: windowModel.addSpace)
         Button(localized("Delete Space")) { session.deleteSpace(space.id) }
             .disabled(!session.canDeleteSpace(space.id))
+        Button(localized("Merge Space Into\u{2026}")) { windowModel.confirmMergeSpace(space) }
+            .disabled(session.spaceMergeTargets(for: space.id).isEmpty)
         Divider()
         Button(localized("New Persona\u{2026}"), action: windowModel.promptForNewPersona)
         Button(localized("Rename Persona\u{2026}")) { windowModel.promptToRenamePersona(space.resolvedPersonaID) }
         Button(localized("Delete Persona\u{2026}")) { windowModel.confirmDeletePersona(ofSpace: space) }
             .disabled(!session.canDeletePersona(space.resolvedPersonaID))
+        Button(localized("Merge Persona Into\u{2026}")) { windowModel.confirmMergePersona(ofSpace: space) }
+            .disabled(session.personaMergeTargets(for: space.resolvedPersonaID).isEmpty)
         PluginMenuSections(plugins: session.plugins(in: space.resolvedPersonaID), location: .spaceMenu) { windowModel.runPluginCommand($0, inSpace: space) }
     }
 }
