@@ -243,12 +243,14 @@ private final class Relay: CKSyncEngineDelegate {
         guard await canBuildBatch else { return nil }
         let scope = context.options.scope
         let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
+        await beginBatch()
         var batch = await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { recordID in
             if let record = await self.record(toSave: recordID.recordName) { return record }
             guard await self.canBuildBatch else { return nil }
             syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
             return nil
         }
+        await endBatch()
         // The provider can suspend while stop() clears the queue.
         guard await canBuildBatch else { return nil }
         batch?.atomicByZone = true
@@ -260,6 +262,19 @@ private final class Relay: CKSyncEngineDelegate {
     }
 
     private var canBuildBatch: Bool { !isStopped && delegate?.canSendRecords == true }
+
+    /// The delegates told that a batch build began, kept until it ends, so each `willBuildBatch()` gets its `didBuildBatch()` even after a stop or a weak delegate's release.
+    private var buildingFor: [(any SyncEngineDelegate)?] = []
+
+    private func beginBatch() {
+        buildingFor.append(delegate)
+        delegate?.willBuildBatch()
+    }
+
+    private func endBatch() {
+        guard !buildingFor.isEmpty else { return }
+        buildingFor.removeLast()?.didBuildBatch()
+    }
 
     private var isRunning: Bool {
         !isStopped && delegate != nil

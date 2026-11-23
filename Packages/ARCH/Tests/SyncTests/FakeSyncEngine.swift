@@ -28,6 +28,8 @@ final class FakeSyncEngine: SyncEngineClient {
     var fetchToken: Data?
     var onFetch: (() -> [SyncEvent])?
     var onSavedBatch: ((Batch) -> Void)?
+    /// Called before the engine asks its delegate for each record of a batch.
+    var beforeRecord: ((String) -> Void)?
     /// The failure of the next fetch's zone fetch, which its end reports and its call throws, as after a network that dropped between pages.
     var fetchFailure: CKError.Code?
     /// The failure for the next save of each record name. A batch with a failure saves nothing, as an atomic batch does, and its other changes stay pending, as `CloudKitSyncEngine` adds them back, so the send's next batch takes them.
@@ -163,10 +165,14 @@ final class FakeSyncEngine: SyncEngineClient {
         var deletions: [String] = []
         var failures: [SyncFailedSave] = []
         var sent: [SyncPendingChange] = []
+        let building = delegate
+        building?.willBuildBatch()
+        defer { building?.didBuildBatch() }
         while sent.count < batchLimit, !recordChanges.isEmpty {
             let change = recordChanges.removeFirst()
             switch change {
             case .saveRecord(let name):
+                beforeRecord?(name)
                 guard let record = delegate?.record(toSave: name) else { continue }
                 records.append(record)
                 sent.append(change)

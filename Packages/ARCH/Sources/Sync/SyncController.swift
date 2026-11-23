@@ -47,9 +47,11 @@ import Foundation
     private static let discardStateKey = "ARCHSyncDiscardPreviousState"
     /// Set while a confirmed Delete iCloud Data waits for the server, so that a launch after a quit in that time can say the data is still there.
     private static let deletionRequestedKey = "ARCHSyncDeletionRequested"
-    /// Set while the controller applies incoming changes or builds an outgoing record (`docs/sync.md`, Crash-loop guard).
+    /// Set while the controller applies incoming changes or builds a batch of outgoing records (`docs/sync.md`, Crash-loop guard).
     static let applyingKey = "ARCHSyncApplyingChanges"
-    static let interruptedApplyMessage = "Sync turned off because Arch quit while it applied changes from iCloud. Turn it on to try again."
+    /// The key marks the time of an apply or a batch build, not a crash, so the message names only the quit.
+    static let interruptedApplyMessage = "Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again."
+    private var guardHolds = 0
     private var quitBeforeDeletion: (any SyncEngineClient)?
     private var first = false
     private var fetching = false
@@ -120,7 +122,7 @@ import Foundation
     /// Saves the user's sync choice, checking availability when turning it on and stopping the engine when turning it off.
     public func setEnabled(_ enabled: Bool) async {
         guard !isDeletingCloudData else { return }
-        if defaults.bool(forKey: Self.applyingKey) {
+        if guardHolds == 0, defaults.bool(forKey: Self.applyingKey) {
             // The user's choice ends the hold: turning sync on applies the changes again.
             defaults.removeObject(forKey: Self.applyingKey)
             lastError = nil
@@ -308,19 +310,21 @@ import Foundation
     /// Builds a pending record only after the first fetch and outside an apply or deletion.
     func record(toSave name: String) -> CKRecord? {
         guard canSendRecords, let save = mirror.pendingSaves.first(where: { $0.recordName == name }) else { return nil }
-        return withCrashLoopGuard {
-            let base = mirror.records[name]
-            guard base.map({ $0.recordType == save.recordType.rawValue }) ?? true else { return nil }
-            return SyncCloudKitRecords.ckRecord(from: save, base: base)
-        }
+        let base = mirror.records[name]
+        guard base.map({ $0.recordType == save.recordType.rawValue }) ?? true else { return nil }
+        return SyncCloudKitRecords.ckRecord(from: save, base: base)
     }
 
-    /// Marks an outgoing conversion so an interrupted conversion disables sync on the next launch.
-    private func withCrashLoopGuard<T>(_ body: () -> T) -> T {
-        let wasSet = defaults.bool(forKey: Self.applyingKey)
-        defaults.set(true, forKey: Self.applyingKey)
-        defer { if !wasSet { defaults.removeObject(forKey: Self.applyingKey) } }
-        return body()
+    /// Holds the crash-loop guard: the first hold sets `applyingKey` and the last release removes it, so an apply and a batch build that overlap write it once and leave it set until both end.
+    private func holdGuard() {
+        if guardHolds == 0 { defaults.set(true, forKey: Self.applyingKey) }
+        guardHolds += 1
+    }
+
+    private func releaseGuard() {
+        guard guardHolds > 0 else { return }
+        guardHolds -= 1
+        if guardHolds == 0 { defaults.removeObject(forKey: Self.applyingKey) }
     }
 
     private var bases: [SyncRecord] { mirror.records.values.compactMap(SyncCloudKitRecords.syncRecord(from:)) }
@@ -517,8 +521,8 @@ import Foundation
     private func finishFetch() {
         guard let engine else { return }
         // Set before the settings check below, so that a change notification this write delivers at once counts as one that came before the fetch ended.
-        defaults.set(true, forKey: Self.applyingKey)
-        defer { defaults.removeObject(forKey: Self.applyingKey) }
+        holdGuard()
+        defer { releaseGuard() }
         applying = true
         do {
             let date = now()
@@ -705,8 +709,11 @@ import Foundation
         }
         func record(toSave name: String) -> CKRecord? {
             guard canSendRecords else { return nil }
-            return owner?.withCrashLoopGuard { owner?.record(toSave: name) }
+            return owner?.record(toSave: name)
         }
+        // Not gated on `canSendRecords`: each call before a batch has its call after, even once the engine stops.
+        func willBuildBatch() { owner?.holdGuard() }
+        func didBuildBatch() { owner?.releaseGuard() }
         func handle(_ event: SyncEvent) {
             guard owner?.delegate === self else { return }
             owner?.handle(event)

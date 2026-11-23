@@ -141,10 +141,15 @@ public protocol SyncEngineDelegate: AnyObject {
     func record(toSave recordName: String) -> CKRecord?
     /// A controller holds record batches until a fetch has been applied and its session saved.
     var canSendRecords: Bool { get }
+    /// Called once before the engine asks for a batch's records, and `didBuildBatch()` once after, so that the controller holds the crash-loop guard for the whole batch rather than for each record (`docs/sync.md`, Crash-loop guard).
+    func willBuildBatch()
+    func didBuildBatch()
 }
 
 extension SyncEngineDelegate {
     public var canSendRecords: Bool { true }
+    public func willBuildBatch() {}
+    public func didBuildBatch() {}
 }
 
 /// The sync engine on one database (`SyncDatabase`) and the zone `ArchSync1`. It starts when it is created (`SyncEngineFactory`) and then syncs on its own: it fetches at its start and when CloudKit reports changes, and it sends pending changes in batches, each saved atomically, retrying network failures, rate limits, and unavailable service itself.
