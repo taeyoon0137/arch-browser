@@ -58,7 +58,7 @@ public enum IncomingSidebarRecords {
         try plan(records: records, deleted: deleted, foundAt: foundAt, defaultEngine: defaultEngine, held: heldRecords(server: records, local: []))
     }
 
-    /// The sidebar records that this build leaves alone, by name: a server record whose name or a field it needs this build cannot read, such as a tint, engine, or live folder source of a newer build, a live folder this Mac would not share, or a space's home address that is not http or https; a server record that would move `local`'s row of the same name to another Persona or type; and every record under one of them, since the repairs would otherwise move it. The plans skip them, and the comparisons neither save nor delete them, so sync goes on without them and keeps what another build wrote.
+    /// The sidebar records that this build leaves alone, by name: a server record whose name or a field it needs this build cannot read, such as a tint, engine, or live folder source of a newer build, a live folder this Mac would not share, or a space's home address that is not http or https; a server record that would move `local`'s row of the same name to another Persona or type; a server Persona whose Personal space name (`personalSpaceID(for:)`) another record holds that is not one of its spaces; and every record under one of them, since the repairs would otherwise move it. The plans skip them, and the comparisons neither save nor delete them, so sync goes on without them and keeps what another build wrote.
     public static func heldOut(server: [SyncRecord], local: [SyncRecord]) -> Set<String> {
         Set(heldRecords(server: server, local: local).keys)
     }
@@ -70,6 +70,12 @@ public enum IncomingSidebarRecords {
         for item in server where item.recordType != .setting {
             let moved = localByName[item.recordName].map { $0.recordType != item.recordType || $0[.persona] != item[.persona] } ?? false
             if moved || !canApply(item) { held[item.recordName] = item }
+        }
+        // A Persona left without spaces gets a Personal space of a fixed name (`personalSpaceID(for:)`). Another record of that name, which no build writes, would fail every fetch's plan, so the Persona waits instead.
+        let byName = Dictionary((server + local).map { ($0.recordName, $0) }) { first, _ in first }
+        for item in server where item.recordType == .persona && held[item.recordName] == nil {
+            guard let name = try? personalSpaceID(for: item).uuidString, let other = byName[name] else { continue }
+            if other.recordType != .space || other[.persona] != .reference(item.recordName) { held[item.recordName] = item }
         }
         var grew = !held.isEmpty
         while grew {

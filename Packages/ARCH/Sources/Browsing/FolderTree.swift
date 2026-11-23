@@ -19,8 +19,19 @@ import Foundation
     init(folders: [TabFolder], tabs: [Tab]) {
         self.folders = folders
         self.tabs = tabs
-        foldersByID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        subfoldersByParent = Dictionary(grouping: folders.filter { $0.parentID != nil }) { $0.parentID! }
+        let foldersByID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        self.foldersByID = foldersByID
+        // `repairingParents` leaves no cycle in a loaded file, and no change makes one. A folder whose parents lead back into a cycle all the same would make every walk down the tree recurse without end, which stops the app as the sidebar draws, so it is left out of its parent's folders and no row shows it.
+        let linked = folders.filter { folder in
+            var seen: Set<UUID> = [folder.id]
+            var current = folder.parentID
+            while let id = current {
+                guard seen.insert(id).inserted else { return false }
+                current = foldersByID[id]?.parentID
+            }
+            return folder.parentID != nil
+        }
+        subfoldersByParent = Dictionary(grouping: linked) { $0.parentID! }
         tabsByFolder = Dictionary(grouping: tabs.filter { $0.folderID != nil }) { $0.folderID! }
     }
 

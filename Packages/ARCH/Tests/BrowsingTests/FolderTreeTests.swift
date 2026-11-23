@@ -76,6 +76,26 @@ import Testing
         #expect(chain.map { tree.level(of: $0.id) } == [1, 2, 3, 4, 1, 2])
     }
 
+    /// Folders whose parents lead back to themselves, which no loaded file or change holds, leave the walks down the tree finite: the rows, the tabs inside, the descendants, the moves, and a drop on another space build without the cycle, which the rows leave out, instead of recursing until the app stops.
+    @Test func aCycleOfParentsLeavesEveryWalkDownTheTreeFinite() {
+        let work = folder("Work")
+        var first = folder("First"), second = folder("Second", in: first), itself = folder("Itself")
+        first.parentID = second.id
+        itself.parentID = itself.id
+        var below = folder("Below")
+        below.parentID = second.id
+        let inside = tab("Inside", in: second), loose = tab("Loose")
+        var tree = FolderTree(folders: [work, first, second, itself, below], tabs: [inside, loose])
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["Work", "Loose"])
+        #expect(tree.descendants(of: first.id).isEmpty && tree.tabs(inside: second.id).map(\.id) == [inside.id])
+        #expect(names(tree.tabs(in: spaceID, pinned: true)) == ["Loose"] && tree.moveTargets(forFolder: work.id).isEmpty)
+        #expect(tree.ancestors(of: below.id).count <= 5 && !tree.canMoveFolder(work.id, into: first.id))
+        tree.moveFolder(first.id, toSpace: otherSpaceID)
+        #expect(tree.folders.first { $0.id == first.id }?.spaceID == otherSpaceID)
+        tree.deleteFolder(second.id)
+        #expect(tree.folders.count == 4)
+    }
+
     // MARK: Rows
 
     @Test func rowsListFoldersBeforeTabsAtEveryLevelWithTheirDepths() {

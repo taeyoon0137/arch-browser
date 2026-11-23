@@ -871,7 +871,9 @@ final class EngineRuntime {
     func openTab(for favorite: Favorite) -> Tab {
         if let tab = favoriteTabs[favorite.id] { return tab }
         let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
-        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: saved?.id ?? UUID(), spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
+        // A pin that sync added since launch can carry the saved tab's ID, as when this Mac's data came from the Mac that pinned the tab; the favorite's tab then takes a new one, so no two tabs share an ID.
+        let id = saved?.id.flatMap { id in allTabs.contains { $0.id == id } ? nil : id } ?? UUID()
+        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: id, spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
         tab.restoreEngine(saved?.engine ?? defaultEngine, state: saved?.state, at: saved?.url)
         if let saved {
             tab.isRestored = true
@@ -2215,7 +2217,9 @@ extension BrowserSession {
         let oldFolders = Dictionary(before.folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for (old, new) in replacements.folders {
             guard old != new, let source = oldFolders[old], let target = state.folders.first(where: { $0.id == new }),
-                  target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder && SidebarSyncState.canShare($0.live) }) else { continue }
+                  target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder && SidebarSyncState.canShare($0.live) }),
+                  // A server folder that this Mac keeps inside the local one would become its own parent.
+                  !folderTree.ancestors(of: new).contains(where: { $0.id == old }) else { continue }
             for index in folders.indices where folders[index].parentID == old { folders[index].parentID = new }
             for tab in tabs where tab.folderID == old { tab.folderID = new }
             folders.removeAll { $0.id == old }
