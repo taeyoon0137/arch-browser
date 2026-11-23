@@ -1,7 +1,7 @@
 // The tool host applies one table of rules (docs/agents.md, Permissions, approvals, and injection defenses).
 // It decides from the mode, client kind, tab, and element facts. The host classifies each call and asks `decide(_:in:)`; this file runs no step.
 // P16 checks every agent-written address, main-frame navigation, redirect hop, popup, read, and displayed result title in an agent tab.
-// `Browsing` applies P8, P9, and P10 in agent tabs and reports them as events. The word lists live only here and go to the page script with each operation.
+// `Browsing` applies P8, P9, and P10 in agent tabs and reports them as events. The word lists live only here; the page script receives the secret words with each operation.
 import AgentControl
 import Foundation
 

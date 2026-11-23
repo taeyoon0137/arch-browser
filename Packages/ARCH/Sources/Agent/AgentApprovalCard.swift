@@ -2,7 +2,7 @@
 // The facts name the step, tab, site, marked viewport element, and exact text, address, or tab name to send.
 // A card warns first when the agent's words name a secret. The P19 card explains what Allow for This Tab permits.
 // No card has a default button, so Return and Space answer none.
-// Sensitive Allow, Share, and Done require a real pointer click on their button.
+// Sensitive Allow, Share, and Done require a pointer click on their button that no other program posted (`AgentPointerCheck`).
 // For outside clients, sensitive Allow and Share also require Touch ID or the login password (`AgentApprovals.answer(_:with:)`).
 import AgentControl
 import AppKit

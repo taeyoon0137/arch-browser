@@ -140,7 +140,7 @@ extension AgentToolHost {
     /// Another tab is refused with P17; an AI-excluded site is refused with P16. A user-named or declined name answers `userNamed` without a card.
     /// A name belongs to the committed document, ignoring its fragment. Loading another address answers `stale`; a shared tab's document ending or tab closing withdraws its card and also answers `stale`.
     /// After Allow, cancellation renames nothing. The tab is checked again: one moved into the client's agent folder follows the agent-tab rule; one that left the client is refused with P17.
-    /// The first line is trimmed to 60 characters. An empty name clears the suggestion through `BrowserAgentHost` and `AgentTabNaming`, with the grant as its cause.
+    /// The first line is trimmed and cut to 60 characters. An empty name clears the suggestion through `BrowserAgentHost` and `AgentTabNaming`, with the grant as its cause.
     func renameTab(_ arguments: [String: AgentJSON], _ client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let handle = arguments["tab"]?.stringValue ?? ""
         guard let id = state.handles.tabs.id(for: handle), let tab = host.tabs(withIDs: [id]).first else { return Self.error("tabNotFound", "This client has no tab \(handle).") }
