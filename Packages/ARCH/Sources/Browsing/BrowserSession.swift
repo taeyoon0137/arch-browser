@@ -791,18 +791,37 @@ final class EngineRuntime {
     /// The favorites' tabs from the last session, by favorite ID. Each opens where it was when its favorite is next opened, so launching loads none of them.
     @Published private var savedFavoriteTabs: [UUID: SessionSnapshot.FavoriteTabRecord] = [:]
 
-    /// Whether the tab shows a page that is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
+    /// Where a tab that Add to Favorites moved came from, so that Remove from Favorites gives it back: its space, and its saved page while it was pinned.
+    private struct MovedFavoriteSource {
+        let spaceID: UUID
+        let savedPage: SavedPage?
+    }
+
+    /// The favorites made by moving a tab into them in this session, by favorite ID.
+    private var movedFavoriteSources: [UUID: MovedFavoriteSource] = [:]
+
+    /// The address a favorite made from the tab takes: a pinned tab's saved page, which the tab may be off, or else the page it shows.
+    private func favoriteAddress(of tab: Tab) -> URL? {
+        tab.isPinned ? tab.savedPage?.url ?? tab.url : tab.url
+    }
+
+    /// Whether Add to Favorites moves the tab itself into the favorites: the user's own tab in a space's list. A small window's tab, a live folder item's tab, an agent's tab, and a favorite's own tab keep their place, and the favorite gets a copy of the page.
+    private func movesIntoFavorites(_ tab: Tab) -> Bool {
+        tab.spaceID != nil && tab.isListedInSidebar && tab.agentOwnerID == nil && !folderTree.isLive(tab.folderID) && tabs.contains { $0 === tab }
+    }
+
+    /// Whether the tab's page, a pinned tab's saved page, is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
     public func canAddFavorite(_ tab: Tab) -> Bool {
-        guard let url = tab.url, tab.spaceID != nil, tab.isListedInSidebar,
-              tab.agentOwnerID == nil, !tab.isInSmallWindow,
-              !folderTree.isLive(tab.folderID), tabs.contains(where: { $0 === tab }) else { return false }
+        guard let url = favoriteAddress(of: tab) else { return false }
         return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
     }
 
-    /// Moves the tab and its live page into the favorites of its Persona.
+    /// Moves the tab and its live page into the favorites of its Persona, at its saved page's address for a pinned tab, or adds a copy of the page for a tab that stays (`movesIntoFavorites`).
     public func addFavorite(_ tab: Tab) {
-        guard canAddFavorite(tab), let url = tab.url else { return }
+        guard canAddFavorite(tab), let url = favoriteAddress(of: tab) else { return }
         let favorite = Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID)
+        guard movesIntoFavorites(tab), let spaceID = tab.spaceID else { return favorites.append(favorite) }
+        movedFavoriteSources[favorite.id] = MovedFavoriteSource(spaceID: spaceID, savedPage: tab.isPinned ? tab.savedPage : nil)
         leaveSplitView(tab)
         tabs.removeAll { $0 === tab }
         tab.spaceID = nil
@@ -810,6 +829,22 @@ final class EngineRuntime {
         tab.isPinned = false
         favoriteTabs[favorite.id] = tab
         favorites.append(favorite)
+    }
+
+    /// Gives a favorite's tab back to the space it was moved from, at the end of the list it left, pinned with its saved page if it was pinned. False when the favorite was not made by a move in this session, has no open tab, or its space has gone or belongs to another Persona.
+    private func returnMovedFavoriteTab(_ favorite: Favorite) -> Bool {
+        guard let source = movedFavoriteSources.removeValue(forKey: favorite.id), let tab = favoriteTabs[favorite.id],
+              spaces.contains(where: { $0.id == source.spaceID && $0.resolvedPersonaID == tab.personaID }) else { return false }
+        favoriteTabs[favorite.id] = nil
+        savedFavoriteTabs[favorite.id] = nil
+        favorites.removeAll { $0.id == favorite.id }
+        tab.spaceID = source.spaceID
+        if let savedPage = source.savedPage {
+            tab.isPinned = true
+            tab.savedPage = savedPage
+        }
+        tabs.append(tab)
+        return true
     }
 
     /// Appends, in order, the favorites whose addresses are not favorites of the Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
@@ -831,8 +866,9 @@ final class EngineRuntime {
         change(&favorites[index])
     }
 
-    /// Removes a favorite once its tab, if it has one, agrees to close.
+    /// Removes a favorite once its tab, if it has one, agrees to close. A tab that Add to Favorites moved into the favorites in this session goes back to its space instead, so that adding and removing a favorite loses no page.
     public func removeFavorite(_ favorite: Favorite) {
+        if returnMovedFavoriteTab(favorite) { return }
         endFavoriteTab(favorite) { [weak self] in
             self?.favorites.removeAll { $0.id == favorite.id }
         }
