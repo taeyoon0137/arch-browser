@@ -279,6 +279,8 @@ private struct PluginSection: View {
     @State private var isConfirmingRemoval = false
     @State private var isJoining = false
     @State private var settingsPage: SettingsPageSheet?
+    /// Whether Open Settings… waits for the plugin to start, during which a second click would open a second page.
+    @State private var isOpeningSettings = false
     /// The version whose removal the user confirms.
     @State private var removingVersion: InstalledPlugin?
     /// The registered AI features, whose triggers the note on a plugin's models follows, and the providers, without which the note does not show.
@@ -333,11 +335,13 @@ private struct PluginSection: View {
                     }
                     if plugin.kind == .script, plugin.manifest.settingsPage != nil {
                         Button("Open Settings…") {
+                            isOpeningSettings = true
                             Task {
+                                defer { isOpeningSettings = false }
                                 if let controller = await plugins.settingsPage(for: plugin.id) { settingsPage = SettingsPageSheet(controller: controller) }
                             }
                         }
-                        .disabled(!plugin.isEnabled)
+                        .disabled(!plugin.isEnabled || isOpeningSettings)
                     }
                     if reloadable {
                         Button("Reload Matching Tabs") { session.reloadTabs(coveredByPageScriptsOf: plugin.id, in: personaID) }
@@ -424,11 +428,13 @@ private struct PluginSection: View {
                     Spacer()
                     Button("Done") { settingsPage = nil }
                         .keyboardShortcut(.defaultAction)
-                        .padding(.trailing, 16)
                 }
+                .padding(.horizontal, 20)
                 .frame(height: 40)
             }
             .frame(width: 480, height: 520)
+            // Escape closes the sheet as Cancel closes the install sheet; Done has Return.
+            .onExitCommand { settingsPage = nil }
             .onAppear { (page.controller as? PluginEndingPanel)?.onEnd = { settingsPage = nil } }
             .onDisappear { (page.controller as? PluginEndingPanel)?.onEnd = nil }
         }
