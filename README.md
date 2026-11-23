@@ -105,6 +105,7 @@ git config core.hooksPath .githooks
 - [`docs/web-store.md`](./docs/web-store.md): installing web extensions from the Web Store: package proof for `.crx` files, the client that downloads and stages store packages, the entry points, Chromium's store button, and updates (built), with the store's page addresses waiting for the user's step.
 - [`docs/password-managers.md`](./docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps, the proof gate, installing Arch in `/Applications`, and the status in Settings (built), and the user's steps.
 - [`docs/bookmarks.md`](./docs/bookmarks.md): the bookmarks and live folders design (saved pages, unloading, nested folders with their dragging, the Bookmarks menu, the `LiveFolders` module, and live folders in the sidebar with the New Live Folder sheet built): saved pages, unloading, nested folders, the Bookmarks menu, and folders filled from feeds and GitHub.
+- [`docs/localization.md`](./docs/localization.md): the interface's languages: string catalogs per module, Settings ▸ General ▸ Language, pages' `Accept-Language` on both engines, and how to add a string or a language.
 
 <a id="scripts"></a>
 
