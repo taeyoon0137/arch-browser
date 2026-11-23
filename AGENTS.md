@@ -91,7 +91,8 @@ Check each item before reporting a task as finished:
 ## Security and record keeping
 
 - Never commit secrets, tokens, credentials, or private keys.
-- Do not add analytics, crash reporting, remote feature flag, or update services, or their identifiers and keys. Local flags on the `flags://` page are allowed.
+- Do not add analytics, crash reporting, or remote feature flag services, or their identifiers and keys. Local flags on the `flags://` page are allowed.
+- The one update check is Sparkle's, against the appcast and archives in the project's own GitHub Releases, with system profiling off (`docs/updates.md`). Add no update server or other update service. Only the EdDSA public key goes into the repository.
 - Do not add trailers such as `Co-Authored-By`, agent or model names, or "generated with" notes unless the user asks.
 
 ## Commits

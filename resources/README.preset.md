@@ -56,7 +56,7 @@ Out of scope:
 
 - Our own hosted services, including accounts, sync servers, and telemetry.
 - A built-in password or payment manager.
-- Public distribution. The project is for internal use.
+- Distribution outside the repository's GitHub Releases, which Arch's update checks read.
 
 <a id="getting-started"></a>
 
@@ -74,6 +74,8 @@ open build/Arch.app
 ```
 
 The bridge needs the experimental DevTools, picture-in-picture, extension runtime, notification, and password AutoFill APIs listed under Engine Plan in `docs/plan.md`. The pinned `arch-8078-7` includes these engine changes and the isolated script worlds that page scripts use. To try a local build of `arch-8078` before its release, install it with `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
+
+A bundle checks the repository's GitHub Releases for updates once a day through Sparkle, once the update signing key is set. `docs/updates.md` covers the key, the release steps with `./scripts/release_app.sh`, and notarization.
 
 After cloning, enable the commit message hook once:
 
@@ -105,6 +107,7 @@ git config core.hooksPath .githooks
 - [`docs/web-store.md`](../docs/web-store.md): installing web extensions from the Web Store: package proof for `.crx` files, the client that downloads and stages store packages, the entry points, Chromium's store button, and updates (built), with the store's page addresses waiting for the user's step.
 - [`docs/password-managers.md`](../docs/password-managers.md): the 1Password and iCloud Passwords plugins: finding native apps, the proof gate, installing Arch in `/Applications`, and the status in Settings (built), and the user's steps.
 - [`docs/bookmarks.md`](../docs/bookmarks.md): the bookmarks design (saved pages, unloading, nested folders with their dragging, and the Bookmarks menu built): saved pages, unloading, nested folders, the Bookmarks menu, and the removed live folders.
+- [`docs/updates.md`](../docs/updates.md): app updates through Sparkle from the repository's GitHub Releases: the design, the bundle's signing, the keys, the release steps, notarization, and the steps that need the user.
 - [`docs/localization.md`](../docs/localization.md): the interface's languages: string catalogs per module, Settings ▸ General ▸ Language, pages' `Accept-Language` on both engines, and how to add a string or a language.
 
 <a id="scripts"></a>
@@ -120,7 +123,8 @@ git config core.hooksPath .githooks
 | Command | Description |
 | :-- | :-- |
 | `./scripts/setup_cef.sh` | Downloads the pinned CEF distribution, a release of the private `taeyoon0137/arch-chromium` repository, with the GitHub CLI into `Frameworks/cef` and copies its wrapper sources into the `CEFBridge` target. Run once per checkout and again after the pin changes. `ARCH_CEF_ARCHIVE` installs a local archive instead, to try an engine build before its release (see Getting started). |
-| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the helper apps, `arch-cli` with its `arch-mcp` link, the app icon, and the scripting definition, and signs it. It runs `scripts/opaque_icon.swift` to prepare the icon. With a provisioning profile that suits the signing identity, it embeds the profile and gives the app the iCloud and push entitlements the profile grants. |
+| `./scripts/bundle_app.sh` | Assembles `build/Arch.app` from the build products, the CEF framework, the Sparkle framework for updates, the helper apps, `arch-cli` with its `arch-mcp` link, the app icon, and the scripting definition, and signs it, Sparkle's parts from the inside out. It runs `scripts/opaque_icon.swift` to prepare the icon. With a provisioning profile that suits the signing identity, it embeds the profile and gives the app the iCloud and push entitlements the profile grants. |
+| `./scripts/release_app.sh` | Makes an update release from a built `build/Arch.app`: the zip archive, its Sparkle signature, and `appcast.xml` in `build/release/`, notarized when `ARCH_NOTARY_PROFILE` names a `notarytool` profile. Only `--publish` uploads them as the latest GitHub release; otherwise it prints what it would upload (`docs/updates.md`). |
 | `./scripts/check_page_reads.py` | Checks Chromium's visible text and editable-field exclusion on a local fixture page with a temporary profile. `swift test` covers WebKit (`WebKitReadableContentTests`). Run after assembling the debug bundle. |
 | `./scripts/check_engine_restore/run.py` | Checks that one pinned tab keeps its Chromium choice through a temporary WebKit fallback and a third launch. Run after assembling the debug bundle. It uses a disposable profile and a local page. |
 | `./scripts/provision_app.sh` | Gets the development and Developer ID provisioning profiles for `xyz.taeyoon.arch` through Xcode's automatic signing of a stand-in project in a temporary folder, signed in with the Xcode account or an App Store Connect API key (`ARCH_ASC_KEY_ID`, `ARCH_ASC_ISSUER_ID`, `ARCH_ASC_KEY_PATH`), and reports each profile without the team. `--dry-run` prints the steps and the installed profiles. |
