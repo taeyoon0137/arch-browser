@@ -35,7 +35,7 @@ struct SiteSearchSection: View {
                     Button(localized("Add Shortcut\u{2026}")) { editing = SiteSearchShortcut(keyword: "", name: "", template: "") }
                 }
             } footer: {
-                formFootnote("Type a keyword and a space in the command palette to search its site.")
+                formFootnote(localized("Type a keyword and a space in the command palette to search its site."))
             }
         }
         .formStyle(.grouped)
@@ -78,7 +78,7 @@ private struct SiteSearchEditor: View {
                     TextField(localized("Address"), text: $shortcut.template, prompt: Text(verbatim: "https://example.com/search?q=%s"))
                 } footer: {
                     // The footnote's text is verbatim, so `%s` stays as typed.
-                    formFootnote("Put %s in the address where the search text goes.")
+                    formFootnote(localized("Put \("%s") in the address where the search text goes."))
                 }
             }
             .formStyle(.grouped)

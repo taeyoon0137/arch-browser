@@ -43,6 +43,13 @@ public final class HookScriptRunner: HookScriptRunning {
         return ScriptPlugin.syntaxError(in: source).map { "The script does not parse: \($0)." }
     }
 
+    /// As `problem(in:)`, in the language Arch runs in, for the editor; `problem(in:)` stays English for the programs that propose hooks. JavaScriptCore's own words for a syntax error stay as it gives them.
+    public nonisolated static func localizedProblem(in script: Data) -> String? {
+        guard script.count <= maximumScriptSize else { return localized("The script is larger than \(maximumScriptSize / 1024) KB.") }
+        guard let source = String(data: script, encoding: .utf8) else { return localized("The script is not UTF-8 text.") }
+        return ScriptPlugin.syntaxError(in: source).map { localized("The script does not parse: \($0).") }
+    }
+
     /// Checks the script, starts or reuses an instance, and returns its listener's bounded outcome.
     public func run(_ invocation: HookInvocation) async -> HookRunOutcome {
         if !parsedDigests.contains(invocation.hook.script.digest) {

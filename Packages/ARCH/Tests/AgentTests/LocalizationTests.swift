@@ -16,6 +16,8 @@ final class AgentLocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Hand Back"], "돌려주기")
         XCTAssertEqual(strings["Waiting for your decision"], "결정을 기다리는 중")
         XCTAssertEqual(strings["Tab %lld · %@"], "탭 %1$lld · %2$@")
+        XCTAssertEqual(strings["Agent Runs from Programs"], "프로그램의 에이전트 실행")
+        XCTAssertEqual(strings["Agent Task"], "에이전트 작업")
     }
 
     /// The English text that task events carry to outside clients stays English whatever language Arch runs in.

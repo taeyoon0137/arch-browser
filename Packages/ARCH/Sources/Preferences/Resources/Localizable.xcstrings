@@ -1621,6 +1621,16 @@
         }
       }
     },
+    "Brings Arch forward and opens the new tab palette while another app is in front. To change a shortcut, click it and press the new keys; Escape cancels and Delete removes the shortcut." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 앱이 앞에 있을 때 Arch를 앞으로 가져오고 새 탭 팔레트를 엽니다. 단축키를 바꾸려면 단축키를 클릭하고 새 키를 누르세요. Esc 키는 취소하고 Delete 키는 단축키를 제거합니다."
+          }
+        }
+      }
+    },
     "By Feature" : {
       "localizations" : {
         "ko" : {
@@ -4741,6 +4751,16 @@
         }
       }
     },
+    "Put %@ in the address where the search text goes." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소에서 검색어가 들어갈 자리에 %@ 기호를 넣으세요."
+          }
+        }
+      }
+    },
     "Ran out of time" : {
       "localizations" : {
         "ko" : {
@@ -5107,6 +5127,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "대치하면 ‘%@’에 단축키가 없어집니다."
+          }
+        }
+      }
+    },
+    "Reply with one short sentence." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "짧은 한 문장으로 답하세요."
           }
         }
       }
@@ -6387,6 +6417,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "단축키 입력"
+          }
+        }
+      }
+    },
+    "Type a keyword and a space in the command palette to search its site." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "명령 팔레트에 키워드와 공백을 입력하면 해당 사이트에서 검색합니다."
           }
         }
       }

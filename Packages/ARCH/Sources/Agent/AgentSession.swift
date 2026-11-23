@@ -206,7 +206,7 @@ extension AgentAPISession: AgentSessionRunning {
     /// The folder name from the task's first words: at most six words and 40 characters.
     static func title(forTask task: String) -> String {
         let words = task.split(whereSeparator: \.isWhitespace).prefix(6).joined(separator: " ")
-        guard !words.isEmpty else { return "Agent Task" }
+        guard !words.isEmpty else { return localized("Agent Task") }
         return words.count > 40 ? String(words.prefix(39)) + "\u{2026}" : words
     }
 

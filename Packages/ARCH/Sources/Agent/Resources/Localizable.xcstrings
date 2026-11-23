@@ -171,6 +171,26 @@
         }
       }
     },
+    "Agent Runs from Programs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로그램의 에이전트 실행"
+          }
+        }
+      }
+    },
+    "Agent Task" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 작업"
+          }
+        }
+      }
+    },
     "Agent Tasks" : {
       "localizations" : {
         "ko" : {
@@ -187,6 +207,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "에이전트 작업이 꺼져 있음"
+          }
+        }
+      }
+    },
+    "Agents" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트"
           }
         }
       }
@@ -961,6 +991,16 @@
         }
       }
     },
+    "Personal" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인"
+          }
+        }
+      }
+    },
     "Preview excerpt" : {
       "localizations" : {
         "ko" : {
@@ -1177,6 +1217,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "연결한 모델로 Arch의 도구와 권한을 사용해 브라우저 세션을 실행합니다."
+          }
+        }
+      }
+    },
+    "Runs one agent for a program you allowed, on the tabs it opened or you shared with it, within its grant." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용한 프로그램을 위해 그 프로그램이 연 탭이나 공유한 탭에서 권한 범위 안의 에이전트 하나를 실행합니다."
           }
         }
       }

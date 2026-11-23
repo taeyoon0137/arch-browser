@@ -211,7 +211,7 @@ private extension Array {
 private struct AITestPromptRows: View {
     @ObservedObject var service: AIService
     @ObservedObject var settings: AISettingsStore
-    @State private var prompt = "Reply with one short sentence."
+    @State private var prompt = localized("Reply with one short sentence.")
     @State private var reply = ""
     @State private var status: String?
     @State private var isError = false

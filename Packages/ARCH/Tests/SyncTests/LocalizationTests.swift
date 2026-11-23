@@ -15,6 +15,7 @@ final class SyncLocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Sign in to iCloud in System Settings to sync."], "동기화하려면 시스템 설정에서 iCloud에 로그인하세요.")
         XCTAssertEqual(strings["iCloud is restricted on this Mac."], "이 Mac에서 iCloud가 제한되어 있습니다.")
         XCTAssertEqual(strings["A sync save failed (%lld)."], "동기화 저장에 실패했습니다(%lld).")
+        XCTAssertEqual(strings["Personal"], "개인")
     }
 }
 

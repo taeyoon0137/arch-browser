@@ -15,6 +15,7 @@ final class HooksLocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Allow…"], "허용…")
         XCTAssertEqual(strings["When a new tab opens"], "새 탭이 열릴 때")
         XCTAssertEqual(strings["Limits: %lld seconds, %@, %@, %lld runs a day"], "제한: %1$lld초, %2$@, %3$@, 하루 %4$lld회 실행")
+        XCTAssertEqual(strings["The script is larger than %lld KB."], "스크립트가 %lldKB보다 큽니다.")
     }
 }
 

@@ -80,6 +80,16 @@
           }
         }
       }
+    },
+    "The shell could not start: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "셸을 시작할 수 없습니다: %@"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

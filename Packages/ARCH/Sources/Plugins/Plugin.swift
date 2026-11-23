@@ -518,12 +518,12 @@ extension PluginError: LocalizedError {
         case let .permissionDenied(permission): return localized("The plugin may not \(permission.summary.prefix(1).lowercased() + permission.summary.dropFirst()).")
         case .stopped: return localized("The plugin has stopped.")
         case .noPage: return localized("The command needs a page.")
-        case let .invalidMatchPattern(text): return "“\(text)” is not a site pattern."
-        case let .invalidShortcut(text): return "“\(text)” is not a shortcut."
+        case let .invalidMatchPattern(text): return localized("“\(text)” is not a site pattern.")
+        case let .invalidShortcut(text): return localized("“\(text)” is not a shortcut.")
         case let .reservedKey(key): return localized("The storage key “\(key)” belongs to the plugin\u{2019}s settings.")
         case .quotaExceeded: return localized("The plugin has no room left for the value.")
         case let .invalidPackage(reason): return reason
-        case let .unsupportedAPIVersion(version): return "The plugin needs a newer version of Arch, with plugin API version \(version)."
+        case let .unsupportedAPIVersion(version): return localized("The plugin needs a newer version of Arch, with plugin API version \(version).")
         case .timedOut: return localized("The plugin did not answer in time.")
         case let .invalidVersions(reason): return reason
         case .closed: return localized("The plugin\u{2019}s Persona was deleted.")
