@@ -60,7 +60,7 @@ import Testing
         let menu = handedMenu([EngineContextMenuItem.cut, EngineContextMenuItem.copy, EngineContextMenuItem.paste, EngineContextMenuItem.selectAll], for: element)
         let share = try shareTitle(menu)
         tab.webContents(tab.webContents, willShowContextMenuFor: element, menu: menu)
-        #expect(titles(menu) == ["Open Link in New Tab", "Copy Link", "—", "Look Up “Next page”"] + translate("“Next page”") + ["—", search, "—",
+        #expect(titles(menu) == ["Open Link in New Tab", "Download Linked File", "Copy Link", "—", "Look Up “Next page”"] + translate("“Next page”") + ["—", search, "—",
                                  "Cut", "Copy", "Paste", "Select All", "—", "Spelling and Grammar", "Substitutions", "Transformations", "Speech", "—", share])
     }
 
@@ -123,7 +123,7 @@ import Testing
         let linkMenu = handedMenu([], for: link)
         let share = try shareTitle(linkMenu)
         tab.webContents(tab.webContents, willShowContextMenuFor: link, menu: linkMenu)
-        #expect(titles(linkMenu) == ["Open Link in New Tab", "Copy Link", "—", share])
+        #expect(titles(linkMenu) == ["Open Link in New Tab", "Download Linked File", "Copy Link", "—", share])
         // A video has only Share…, so Back, Forward, and Reload stay out.
         let video = EngineContextMenuElement(mediaURL: URL(string: "https://example.com/clip.mp4"))
         let videoMenu = handedMenu([], for: video)

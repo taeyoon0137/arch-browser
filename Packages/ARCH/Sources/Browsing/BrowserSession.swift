@@ -123,17 +123,10 @@ final class EngineRuntime {
     private var downloadOnlyTabIDs: Set<UUID> = []
     /// The downloads a page's `PageDownloadGate` let through. WebKit asks for a destination again when Resume starts a download over without resume data, which the gate does not count again.
     private let admittedDownloads = NSHashTable<AnyObject>.weakObjects()
-    private var pageSaveRequests: [ObjectIdentifier: URL] = [:]
 
-    /// Starts a page download and keeps its requested address until the engine handles it or the request expires.
+    /// Downloads the tab's committed address and asks where to save it (`Tab.download(_:savingPage:)`).
     public func savePageAs(_ tab: Tab, url: URL) {
-        let key = ObjectIdentifier(tab.webContents)
-        pageSaveRequests[key] = url
-        tab.pageDownloads.userDidAct()
-        tab.webContents.download(url)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
-            if self?.pageSaveRequests[key] == url { self?.pageSaveRequests.removeValue(forKey: key) }
-        }
+        tab.download(url, savingPage: true)
     }
     /// Pages of closed or engine-switched tabs whose downloads would stop if the pages closed, as on Chromium, each with the runtime that created it. Each stays open without a tab, on a blank page, until its own downloads are no longer in progress, paused, or interrupted.
     private var downloadPages: [(runtime: EngineRuntime, webContents: any EngineWebContents)] = []
@@ -2559,6 +2552,11 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
 
     /// A download from a tab's page that `PageDownloadGate` holds waits for the answer to a card over the tab, and a refused one ends and leaves the downloads list, so that a page that keeps trying adds no rows. A tab that only pointed at the file downloads as a download of the page that opened it, through that page's gate and with the card over that page's tab, so that a page cannot open file after file in new tabs without asking, as with `window.open`; one that no tab's page opened, as one the user opened, or a page without a tab, has nothing to ask about, and an agent tab's download has had the user's answer on the agent's card (rule P6), so no card over a tab that the user may not be looking at holds it. The others go on as `chooseDestination` says.
     public func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void) {
+        // A download the user asked for in the tab's own menus goes on outside the page's gate, also after the user refused the page's downloads.
+        if let savesPage = allTabs.first(where: { $0.webContents === item.webContents })?.takeUserDownloadRequest(for: item) {
+            admittedDownloads.add(item)
+            return chooseDestination(for: item, in: downloads, defaultFilename: defaultFilename, alwaysAsks: savesPage, completion: completion)
+        }
         let choose = { [weak self] in self?.chooseDestination(for: item, in: downloads, defaultFilename: defaultFilename, completion: completion) ?? completion(nil) }
         guard let source = allTabs.first(where: { $0.webContents === item.webContents }), source.agentOwnerID == nil, !admittedDownloads.contains(item),
               let tab = source.isDownloadOnly ? allTabs.first(where: { $0.webContents === source.opener }) : source, tab.agentOwnerID == nil else { return choose() }
@@ -2588,22 +2586,16 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
         }
     }
 
-    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
-    private func chooseDestination(for item: any EngineDownloadItem, in downloads: any EngineDownloads, defaultFilename: String, completion: @escaping (URL?) -> Void) {
+    /// Saves in the downloads folder with an unused name, or opens a save panel when the profile is set to ask or `alwaysAsks`, as for Save Page As…: a sheet on the key window, or a panel of its own over a small window. A small window closes with its tab, which a tab that only downloads does on the next turn of the run loop, and closing would cancel a sheet on it.
+    private func chooseDestination(for item: any EngineDownloadItem, in downloads: any EngineDownloads, defaultFilename: String, alwaysAsks: Bool = false,
+                                   completion: @escaping (URL?) -> Void) {
         guard let entry = entry(for: item), let preferences = runtime(owning: downloads)?.context.preferences else { return completion(nil) }
         // A restarted transfer keeps its accepted name unless a file now occupies it.
         if let url = entry.chosenDestination, !FileManager.default.fileExists(atPath: url.path), entry.reserveDestination(url) {
             return completion(url)
         }
         let directory = downloadsDirectory(for: preferences)
-        let isPageSave: Bool
-        if let contents = item.webContents, pageSaveRequests[ObjectIdentifier(contents)] == item.sourceURL {
-            pageSaveRequests.removeValue(forKey: ObjectIdentifier(contents))
-            isPageSave = true
-        } else {
-            isPageSave = false
-        }
-        guard preferences.promptForDownloadPath || isPageSave else {
+        guard preferences.promptForDownloadPath || alwaysAsks else {
             let url = entry.unusedDestination(for: defaultFilename, in: directory)
             return completion(entry.reserveDestination(url) ? url : nil)
         }

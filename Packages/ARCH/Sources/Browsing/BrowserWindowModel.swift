@@ -1305,7 +1305,7 @@ public enum BrowserWindowKind {
     }
 
     public var canSavePageAs: Bool {
-        guard !isSelectedPageCovered, let url = selectedTab?.committedURL, let scheme = url.scheme?.lowercased() else { return false }
+        guard !isSelectedPageCovered, selectedTab?.isLoaded == true, let url = selectedTab?.committedURL, let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
     }
 

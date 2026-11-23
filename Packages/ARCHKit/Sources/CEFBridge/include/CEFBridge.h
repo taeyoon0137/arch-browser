@@ -218,7 +218,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFExtensionPromptKind) {
 /// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
 @interface ARCHCEFDownload : NSObject
 @property (nonatomic, readonly) uint32_t identifier;
+/// The address after redirects.
 @property (nonatomic, readonly, copy) NSString *url;
+/// The address the download was requested at, before redirects.
+@property (nonatomic, readonly, copy) NSString *originalURL;
 /// The destination after the engine chooses it.
 @property (nonatomic, readonly, copy, nullable) NSString *path;
 @property (nonatomic, readonly) int64_t receivedBytes;

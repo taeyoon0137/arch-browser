@@ -43,7 +43,7 @@ const int64_t kScriptReplyTimeout = 10 * NSEC_PER_SEC;
 @property (nonatomic, readwrite) ARCHCEFDownloadState state;
 /// Set once the app cancels the download. CEF applies a cancel later, and never to an interrupted download, so the browser stops counting it at once.
 @property (nonatomic, readonly) BOOL isCancelledByApp;
-- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url;
+- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url originalURL:(NSString *)originalURL;
 - (void)applyItem:(CefRefPtr<CefDownloadItem>)item callback:(CefRefPtr<CefDownloadItemCallback>)callback;
 @end
 
@@ -53,13 +53,14 @@ const int64_t kScriptReplyTimeout = 10 * NSEC_PER_SEC;
     BOOL _cancelRequested;
 }
 
-- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url {
+- (instancetype)initWithIdentifier:(uint32_t)identifier url:(NSString *)url originalURL:(NSString *)originalURL {
     self = [super init];
     if (!self) {
         return nil;
     }
     _identifier = identifier;
     _url = [url copy];
+    _originalURL = [originalURL copy];
     _state = ARCHCEFDownloadStateInProgress;
     return self;
 }
@@ -1386,7 +1387,7 @@ private:
     NSNumber *key = @(item->GetId());
     ARCHCEFDownload *download = _downloads[key];
     if (!download) {
-        download = [[ARCHCEFDownload alloc] initWithIdentifier:item->GetId() url:ToNSString(item->GetURL())];
+        download = [[ARCHCEFDownload alloc] initWithIdentifier:item->GetId() url:ToNSString(item->GetURL()) originalURL:ToNSString(item->GetOriginalUrl())];
         _downloads[key] = download;
     }
     return download;
