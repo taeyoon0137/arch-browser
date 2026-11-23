@@ -64,7 +64,7 @@ struct PluginInstallSheet: View {
     /// How the review names the Persona from where the install started (Persona rule 7): "Installs in the Persona of “Work / Research” for all its spaces." from a tab or a window, with its space, "Installs in “Work” for all its spaces." from Settings ▸ Plugins, without one, and nil while the default Persona is the only one.
     static func personaSentence(persona: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: persona, space: space, among: personas) else { return nil }
-        return space == nil ? "Installs in \u{201C}\(place)\u{201D} for all its spaces." : "Installs in the Persona of \u{201C}\(place)\u{201D} for all its spaces."
+        return space == nil ? localized("Installs in \u{201C}\(place)\u{201D} for all its spaces.") : localized("Installs in the Persona of \u{201C}\(place)\u{201D} for all its spaces.")
     }
 
     /// The review's height, which keeps the sheet within Settings ▸ Plugins: its form scrolls between the header and the buttons.
@@ -214,14 +214,14 @@ private struct PluginReviewView: View {
                         return true
                     }
                     ForEach(lost, id: \.self) { engine in
-                        WarningLabel(text: "\(engine.displayName) tabs lose \u{201C}\(name(of: target))\u{201D}.")
+                        WarningLabel(text: localized("\(engine.displayName) tabs lose \u{201C}\(name(of: target))\u{201D}."))
                     }
                 }
                 if let joined, let engine = choiceEngine, refusal == nil, let takeover = plugins.versionTakeover(for: package, joining: joined.id, for: engine) {
                     WarningLabel(text: takeover)
                 }
                 if let joined, review.versionOf != nil, refusal == nil, differsInNameOrDeveloper(from: joined) {
-                    WarningLabel(text: "Its name or developer differs from \u{201C}\(name(of: joined))\u{201D}. Join only if both come from the same developer.")
+                    WarningLabel(text: localized("Its name or developer differs from \u{201C}\(name(of: joined))\u{201D}. Join only if both come from the same developer."))
                 }
                 if let refusal {
                     Text(refusal)
@@ -241,7 +241,7 @@ private struct PluginReviewView: View {
                             ForEach(package.joinableEngines, id: \.self) { engine in
                                 Text("Install as the \(engine.displayName) version", bundle: .module).tag(Choice.version(engine))
                             }
-                            Text(package.updates == match.id ? "Update \u{201C}\(name(of: match))\u{201D}" : "Install as a separate plugin").tag(Choice.plugin)
+                            Text(package.updates == match.id ? localized("Update \u{201C}\(name(of: match))\u{201D}") : localized("Install as a separate plugin")).tag(Choice.plugin)
                         }
                         .pickerStyle(.radioGroup)
                         .labelsHidden()
@@ -263,7 +263,7 @@ private struct PluginReviewView: View {
                         Text("None", bundle: .module)
                     }
                     ForEach(permissions, id: \.self) { permission in
-                        RequestRow(text: permission == .network ? "Send requests to \(manifest.network.map(\.description).joined(separator: ", "))" : permission.summary,
+                        RequestRow(text: permission == .network ? localized("Send requests to \(manifest.network.map(\.description).joined(separator: ", "))") : permission.summary,
                                    isNew: target.map { !$0.manifest.permissions.contains(permission) || (permission == .network && $0.manifest.network != manifest.network) } ?? false)
                     }
                     if let summary = manifest.aiDataSummary {
@@ -349,12 +349,12 @@ private struct PluginReviewView: View {
 
     private var title: String {
         let name = package.manifest.name
-        if let joined, let engine = choiceEngine { return "Install the \(engine.displayName) Version of \u{201C}\(self.name(of: joined))\u{201D}?" }
+        if let joined, let engine = choiceEngine { return localized("Install the \(engine.displayName) Version of \u{201C}\(self.name(of: joined))\u{201D}?") }
         if let target {
-            guard let engine = target.pairEngine else { return "Update \u{201C}\(name)\u{201D}?" }
-            return "Update the \(engine.displayName) Version of \u{201C}\(self.name(of: target))\u{201D}?"
+            guard let engine = target.pairEngine else { return localized("Update \u{201C}\(name)\u{201D}?") }
+            return localized("Update the \(engine.displayName) Version of \u{201C}\(self.name(of: target))\u{201D}?")
         }
-        return "Install \u{201C}\(name)\u{201D}?"
+        return localized("Install \u{201C}\(name)\u{201D}?")
     }
 
     /// The name of the plugin, or of the pair it is a version of.
@@ -365,7 +365,7 @@ private struct PluginReviewView: View {
     /// "The Chromium Version", for a version of a pair, or the plugin's name.
     private func versionTitle(of id: PluginID) -> String {
         guard let plugin = plugins.plugins.first(where: { $0.id == id }) else { return id.rawValue }
-        return plugin.pairEngine.map { "The \($0.displayName) Version" } ?? plugin.manifest.name
+        return plugin.pairEngine.map { localized("The \($0.displayName) Version") } ?? plugin.manifest.name
     }
 
     /// How AI wrote the package, if it did.
@@ -377,23 +377,23 @@ private struct PluginReviewView: View {
     /// Where the package came from, as the subtitle says it.
     private var origin: String {
         switch package.origin {
-        case .bundled: return "built into Arch"
-        case let .file(url): return "from \(url.lastPathComponent)"
-        case .webStore: return "from the Web Store"
-        case let .generated(composition): return "written by AI with \(composition.model)"
+        case .bundled: return localized("built into Arch")
+        case let .file(url): return localized("from \(url.lastPathComponent)")
+        case .webStore: return localized("from the Web Store")
+        case let .generated(composition): return localized("written by AI with \(composition.model)")
         }
     }
 
     /// The warning for a package that updates the installed plugin from another place: another file than the one it was installed from, or a file for a plugin that AI wrote.
     private func otherSourceWarning(for installed: InstalledPlugin) -> String? {
-        let replaces = "This package replaces \u{201C}\(name(of: installed))\u{201D}"
+        let installedName = name(of: installed)
         switch (installed.origin, package.origin) {
         case let (.file(source), .file(packageSource)) where packageSource.standardizedFileURL.path == source.standardizedFileURL.path:
             return nil
         case let (.file(source), _):
-            return "\(replaces), which you installed from \(source.lastPathComponent), and takes over its data. Update only if both come from the same developer."
+            return localized("This package replaces \u{201C}\(installedName)\u{201D}, which you installed from \(source.lastPathComponent), and takes over its data. Update only if both come from the same developer.")
         case (.generated, .file):
-            return "\(replaces), which AI wrote, and takes over its data. Update only if you made this package from it."
+            return localized("This package replaces \u{201C}\(installedName)\u{201D}, which AI wrote, and takes over its data. Update only if you made this package from it.")
         default:
             return nil
         }
@@ -508,7 +508,7 @@ private struct VersionLastStep: View {
 
 /// The note of a plugin that asks for the engine's version, such as "It runs on WebKit tabs. Its developer may offer a separate version for Chromium; install it to use “Reader” on Chromium tabs too."
 func versionNote(for plugin: InstalledPlugin, engine: EngineKind) -> String {
-    "It runs on \(EngineKind.tabsList(plugin.engines)) tabs. Its developer may offer a separate version for \(engine.displayName); install it to use \u{201C}\(plugin.manifest.name)\u{201D} on \(engine.displayName) tabs too."
+    localized("It runs on \(EngineKind.tabsList(plugin.engines)) tabs. Its developer may offer a separate version for \(engine.displayName); install it to use \u{201C}\(plugin.manifest.name)\u{201D} on \(engine.displayName) tabs too.")
 }
 
 /// Where Install <Engine> Version… takes the version's package from.
@@ -526,7 +526,7 @@ struct InstallVersionMenu: View {
     let choose: (PackageSource) -> Void
 
     var body: some View {
-        let title = "Install \(engine.displayName) Version\u{2026}"
+        let title = localized("Install \(engine.displayName) Version\u{2026}")
         if offersWebStore {
             Menu(title) {
                 Button(localized("From a File\u{2026}")) { choose(.file) }
@@ -547,8 +547,9 @@ func chooseVersionPackage(of plugin: InstalledPlugin, for engine: EngineKind, in
     panel.canChooseFiles = true
     panel.canChooseDirectories = true
     panel.allowedContentTypes = plugins.packageTypes(forVersionOf: plugin.id, for: engine)
-    panel.message = "Choose the \(engine.displayName) version of \u{201C}\(plugins.leadVersion(of: plugin.id)?.manifest.name ?? plugin.manifest.name)\u{201D}."
-    panel.prompt = "Review"
+    let name = plugins.leadVersion(of: plugin.id)?.manifest.name ?? plugin.manifest.name
+    panel.message = localized("Choose the \(engine.displayName) version of \u{201C}\(name)\u{201D}.")
+    panel.prompt = localized("Review")
     let finish = { (response: NSApplication.ModalResponse) in
         guard response == .OK, let url = panel.url else { return staged(nil) }
         Task {
@@ -570,8 +571,9 @@ extension EngineKind {
     /// The engines' names as a sentence lists them, in the order of `EngineKind`, such as "WebKit and Chromium".
     static func tabsList(_ engines: Set<EngineKind>) -> String {
         let names = allCases.filter(engines.contains).map(\.displayName)
-        guard let last = names.last else { return "no" }
-        return names.count < 3 ? names.joined(separator: " and ") : names.dropLast().joined(separator: ", ") + ", and " + last
+        guard let last = names.last else { return localized("no") }
+        guard names.count > 1 else { return last }
+        return localized("\(names.dropLast().joined(separator: localized(", "))) and \(last)")
     }
 }
 

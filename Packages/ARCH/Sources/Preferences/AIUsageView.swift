@@ -47,7 +47,7 @@ struct AIUsagePage: View {
         } header: {
             Text("Limits", bundle: .module)
         } footer: {
-            formFootnote("The daily limit applies to each feature that runs on its own. At the spending limit, every AI request stops until the next month or a higher limit. Costs are estimates from the prices entered for each model.")
+            formFootnote(localized("The daily limit applies to each feature that runs on its own. At the spending limit, every AI request stops until the next month or a higher limit. Costs are estimates from the prices entered for each model."))
         }
     }
 
@@ -77,11 +77,11 @@ struct AIUsagePage: View {
     }
 
     private static func summary(of row: Row) -> String {
-        var parts = ["\(row.requests) \(row.requests == 1 ? "request" : "requests")"]
-        if row.errors > 0 { parts.append("\(row.errors) failed") }
-        parts.append("\(row.tokens.formatted()) tokens")
+        var parts = [row.requests == 1 ? localized("1 request") : localized("\(row.requests) requests")]
+        if row.errors > 0 { parts.append(localized("\(row.errors) failed")) }
+        parts.append(localized("\(row.tokens.formatted()) tokens"))
         // Single requests often cost a fraction of a cent.
-        parts += row.costs.sorted { $0.key < $1.key }.map { "about \($0.value.formatted(.currency(code: $0.key).precision(.fractionLength(2...4))))" }
+        parts += row.costs.sorted { $0.key < $1.key }.map { localized("about \($0.value.formatted(.currency(code: $0.key).precision(.fractionLength(2...4))))") }
         return parts.joined(separator: " \u{00B7} ")
     }
 }
@@ -114,7 +114,7 @@ struct AIActivityPage: View {
                     Text(details(of: entry)).font(.subheadline).foregroundStyle(.secondary)
                     // A request that records no content, as an agent hook's run at Keep Nothing, has nothing to show.
                     if !entry.content.isEmpty {
-                        Button(shownContent.contains(entry.id) ? "Hide Content" : "Show Content") {
+                        Button(shownContent.contains(entry.id) ? localized("Hide Content") : localized("Show Content")) {
                             if shownContent.contains(entry.id) { shownContent.remove(entry.id) } else { shownContent.insert(entry.id) }
                         }
                         .buttonStyle(.link)
@@ -134,26 +134,26 @@ struct AIActivityPage: View {
         } header: {
             Text("Recent Requests", bundle: .module)
         } footer: {
-            formFootnote("Kept in memory until Arch quits. Replies are not kept.")
+            formFootnote(localized("Kept in memory until Arch quits. Replies are not kept."))
         }
     }
 
     private func details(of entry: AIActivityEntry) -> String {
-        var parts = [entry.model.map(settings.title(of:)) ?? "No model"]
-        parts += entry.parts.map { "\($0.kind) \($0.characters.formatted()) \($0.characters == 1 ? "character" : "characters")" }
+        var parts = [entry.model.map(settings.title(of:)) ?? localized("No model")]
+        parts += entry.parts.map { $0.characters == 1 ? localized("\($0.kind) 1 character") : localized("\($0.kind) \($0.characters.formatted()) characters") }
         if let usage = entry.usage {
-            parts.append("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens")
+            parts.append(localized("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens"))
         }
         return parts.joined(separator: " \u{00B7} ")
     }
 
     private static func result(of entry: AIActivityEntry) -> String {
         switch entry.result {
-        case .completed(.lengthLimit): return "Cut at the length limit"
-        case .completed: return "Answered"
-        case .cancelled: return "Cancelled"
+        case .completed(.lengthLimit): return localized("Cut at the length limit")
+        case .completed: return localized("Answered")
+        case .cancelled: return localized("Cancelled")
         // The reason shows on its own line under the row's first line.
-        case .failed: return "Failed"
+        case .failed: return localized("Failed")
         }
     }
 

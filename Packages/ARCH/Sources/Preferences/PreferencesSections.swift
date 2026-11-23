@@ -96,7 +96,7 @@ struct GeneralSection: View {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.directoryURL = downloadsFolder
-        panel.prompt = "Choose"
+        panel.prompt = localized("Choose")
         let finish = { (response: NSApplication.ModalResponse) in
             if response == .OK, let url = panel.url { downloadsFolderPath = url.path }
         }
@@ -122,7 +122,7 @@ struct SidebarSection: View {
             Section {
                 ForEach(favoriteRows.indices, id: \.self) { index in
                     HStack {
-                        favoriteCountPicker("Row \(index + 1)", selection: Binding(
+                        favoriteCountPicker(localized("Row \(index + 1)"), selection: Binding(
                             get: { favoriteRows.indices.contains(index) ? favoriteRows[index] : favoriteColumns },
                             set: { count in
                                 var rows = favoriteRows
@@ -143,7 +143,7 @@ struct SidebarSection: View {
                     }
                 }
                 // The default follows the rows it sets, as the grid lays them out.
-                favoriteCountPicker(favoriteRows.isEmpty ? "All rows" : "Other rows", selection: Binding(
+                favoriteCountPicker(favoriteRows.isEmpty ? localized("All rows") : localized("Other rows"), selection: Binding(
                     get: { FavoriteTileLayout.columnCount(favoriteColumns) },
                     set: { favoriteColumns = $0 }))
                 Button(localized("Add Row")) {
@@ -152,7 +152,7 @@ struct SidebarSection: View {
             } header: {
                 Text("Favorites per row", bundle: .module)
             } footer: {
-                if !favoriteRows.isEmpty { formFootnote("Rows after these use this number.") }
+                if !favoriteRows.isEmpty { formFootnote(localized("Rows after these use this number.")) }
             }
 
             Section {
@@ -163,7 +163,7 @@ struct SidebarSection: View {
                     }
                 }
             } footer: {
-                formFootnote("Unpinned tabs not selected for this long move to the closed list.")
+                formFootnote(localized("Unpinned tabs not selected for this long move to the closed list."))
             }
             Section {
                 Picker(localized("Unload pinned tabs and favorites"), selection: Binding(get: { max(unloadAfterHours, 0) }, set: { unloadAfterHours = $0 })) {
@@ -174,9 +174,9 @@ struct SidebarSection: View {
             } footer: {
                 // The longer footer wraps through the shared footnote style. Never also keeps every page when the Mac runs low on memory (`TabUnloading.tabsToUnload`).
                 if unloadAfterHours <= 0 {
-                    formFootnote("Tabs keep their pages until you close them, also when the Mac runs low on memory.")
+                    formFootnote(localized("Tabs keep their pages until you close them, also when the Mac runs low on memory."))
                 } else {
-                    formFootnote("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play audio or video with sound, show a video in picture in picture, use the camera or microphone, hold text you typed, or may post notifications stay loaded; sound that a page makes in other ways, as many games do, does not keep it loaded.")
+                    formFootnote(localized("Pinned tabs and favorites not shown for this long close their pages and keep their places. When the Mac runs low on memory, every tab not shown does. Tabs that play audio or video with sound, show a video in picture in picture, use the camera or microphone, hold text you typed, or may post notifications stay loaded; sound that a page makes in other ways, as many games do, does not keep it loaded."))
                 }
             }
         }
@@ -196,11 +196,11 @@ struct SidebarSection: View {
     /// "Never", "After 1 Hour", "After 1 Day", "After 1 Week", or "After 5 Hours".
     static func title(for hours: Int) -> String {
         switch hours {
-        case 0: return "Never"
-        case 1: return "After 1 Hour"
-        case 24: return "After 1 Day"
-        case 168: return "After 1 Week"
-        default: return "After \(hours) Hours"
+        case 0: return localized("Never")
+        case 1: return localized("After 1 Hour")
+        case 24: return localized("After 1 Day")
+        case 168: return localized("After 1 Week")
+        default: return localized("After \(hours) Hours")
         }
     }
 }

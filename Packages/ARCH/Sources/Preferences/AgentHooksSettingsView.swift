@@ -67,7 +67,7 @@ struct AgentHooksPage: View {
                     .disabled(!registry.isReady)
             }
         } footer: {
-            formFootnote("A hook runs a script when something happens in a tab, such as a new tab loading its first page. Hooks run one after another, in this list's order, after Arch's own AI features. While Run Hooks is off, no hook runs. A shell script runs outside Arch's sandbox with your rights, only while Allow Shell Scripts is on and after you trust its file with Touch ID or your login password.")
+            formFootnote(localized("A hook runs a script when something happens in a tab, such as a new tab loading its first page. Hooks run one after another, in this list's order, after Arch's own AI features. While Run Hooks is off, no hook runs. A shell script runs outside Arch's sandbox with your rights, only while Allow Shell Scripts is on and after you trust its file with Touch ID or your login password."))
         }
         Section {
             if registry.hooks.isEmpty {
@@ -93,7 +93,7 @@ struct AgentHooksPage: View {
         } header: {
             Text("Hooks", bundle: .module)
         } footer: {
-            formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run. A hook that keeps the session keeps its agent's transcript in memory until you choose Delete Session or Clear Activity, or quit Arch. With a model on an API key, the Activity page also keeps what each request sent until Arch quits.")
+            formFootnote(localized("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run. A hook that keeps the session keeps its agent's transcript in memory until you choose Delete Session or Clear Activity, or quit Arch. With a model on an API key, the Activity page also keeps what each request sent until Arch quits."))
         }
         .sheet(item: $sheet) { draft in
             ScriptHookSheet(registry: registry, draft: draft, currentTab: currentTab) { sheet = nil }
@@ -159,7 +159,7 @@ struct AgentHooksPage: View {
 
     private func pauseRow(for hook: Hook, reason: HookPauseReason) -> some View {
         HStack {
-            Text(reason == .scriptChanged && hook.script.isShell ? "Its script or its interpreter changed." : HookSummary.sentence(for: reason)).font(.caption).foregroundStyle(.orange)
+            Text(reason == .scriptChanged && hook.script.isShell ? localized("Its script or its interpreter changed.") : HookSummary.sentence(for: reason)).font(.caption).foregroundStyle(.orange)
             switch reason {
             case .scriptChanged:
                 Button(localized("Review")) { edit(hook, reviewing: true) }
@@ -236,7 +236,7 @@ struct AgentHooksPage: View {
         if !kept.isEmpty {
             let isShown = shownSessions.contains(run.id)
             HStack {
-                Button(isShown ? "Hide Session" : "Show Session") {
+                Button(isShown ? localized("Hide Session") : localized("Show Session")) {
                     if isShown { shownSessions.remove(run.id) } else { shownSessions.insert(run.id) }
                 }
                 .buttonStyle(.link)
@@ -269,7 +269,7 @@ struct AgentHooksPage: View {
 
     private func runOnCurrentTab(_ hook: Hook) {
         guard let tab = currentTab() else {
-            message = "Select a tab in a browser window first."
+            message = localized("Select a tab in a browser window first.")
             return
         }
         Task {
@@ -320,7 +320,7 @@ enum HookScriptActions {
 
     /// The sheet's draft for the hook with the file's text, in review when the user asked for it or the file no longer matches its digest. Refused for a file that is missing or not text, which an empty editor would replace unseen. A shell script's bytes go to the trust sheet as they are.
     static func draft(editing hook: Hook, file: HookScriptFile?, places: [HookPersonaPlaces], reviewing: Bool) throws -> ScriptHookDraft {
-        guard let file, let script = String(data: file.contents, encoding: .utf8) else { throw Refusal(sentence: "Arch cannot read the script of \u{201C}\(hook.name)\u{201D}.") }
+        guard let file, let script = String(data: file.contents, encoding: .utf8) else { throw Refusal(sentence: localized("Arch cannot read the script of \u{201C}\(hook.name)\u{201D}.")) }
         return ScriptHookDraft(editing: hook, script: script, places: places, reviewing: reviewing || !file.matchesDigest, contents: hook.script.isShell ? file.contents : nil,
                                matchesDigest: file.matchesDigest)
     }
@@ -328,13 +328,13 @@ enum HookScriptActions {
     /// A copy for after the list's last hook, with the original's script, switched on and the user's. Refused for a file that is missing or changed outside Arch, and for an outside program's hook, whose copy would lose the caps of its origin.
     static func copy(of hook: Hook, file: HookScriptFile?) throws -> (hook: Hook, script: Data) {
         let name = "\u{201C}\(hook.name)\u{201D}"
-        guard !hook.origin.isOutsideProgram else { throw Refusal(sentence: "Hooks that other programs added cannot be duplicated.") }
-        guard !hook.script.isShell else { throw Refusal(sentence: "A shell script is trusted for its own hook only. Make a new hook with its file instead.") }
-        guard let file else { throw Refusal(sentence: "Arch cannot read the script of \(name).") }
-        guard file.matchesDigest else { throw Refusal(sentence: "The script of \(name) changed outside Arch. Review it before you duplicate the hook.") }
+        guard !hook.origin.isOutsideProgram else { throw Refusal(sentence: localized("Hooks that other programs added cannot be duplicated.")) }
+        guard !hook.script.isShell else { throw Refusal(sentence: localized("A shell script is trusted for its own hook only. Make a new hook with its file instead.")) }
+        guard let file else { throw Refusal(sentence: localized("Arch cannot read the script of \(name).")) }
+        guard file.matchesDigest else { throw Refusal(sentence: localized("The script of \(name) changed outside Arch. Review it before you duplicate the hook.")) }
         var copy = hook
         copy.id = UUID()
-        copy.name = "\(hook.name) Copy"
+        copy.name = localized("\(hook.name) Copy")
         copy.state = .active
         copy.origin = .user
         copy.created = Date()
@@ -351,7 +351,7 @@ enum HookSummary {
     static func lines(for hook: Hook, places: [HookPersonaPlaces], lastRun: HookRunSummary?) -> [String] {
         var lines = [[situation(of: hook.trigger), scope(of: hook.filter.scope, places: places), sites(of: hook.filter)].joined(separator: " · ")]
         if case .shell(let source, _, _) = hook.script {
-            lines.append("Shell script · \((source as NSString).lastPathComponent)")
+            lines.append(localized("Shell script · \((source as NSString).lastPathComponent)"))
         }
         if hook.usesAgent, let agent = hook.agent {
             lines.append([model(of: agent.model), record(of: hook.record)].joined(separator: " · "))
@@ -362,33 +362,33 @@ enum HookSummary {
             lines.append("\(lastRun.date.formatted(.relative(presentation: .named))) · \(description(of: lastRun))")
         }
         if case .outsideClient(_, let name) = hook.origin {
-            lines.append("Added by \(name)")
+            lines.append(localized("Added by \(name)"))
         }
         return lines
     }
 
     static func situation(of trigger: HookTrigger) -> String {
         switch trigger {
-        case .tabOpened: return "When a new tab opens"
-        case .tabClosed(let reasons): return reasons == [.user] ? "When you close a tab" : "When a tab closes"
+        case .tabOpened: return localized("When a new tab opens")
+        case .tabClosed(let reasons): return reasons == [.user] ? localized("When you close a tab") : localized("When a tab closes")
         case .pageLoaded(let loads, _):
             switch loads {
-            case .firstAfterOpen: return "When a new tab loads its first page"
-            case .newAddress: return "When a tab loads a new address"
-            case .every: return "When a tab loads a page"
+            case .firstAfterOpen: return localized("When a new tab loads its first page")
+            case .newAddress: return localized("When a tab loads a new address")
+            case .every: return localized("When a tab loads a page")
             }
-        case .addressChanged(let changes): return changes == .newHost ? "When a tab moves to another site" : "When a tab's address changes"
-        case .titleChanged: return "When a tab's title changes"
-        case .tabSelected: return "When you select a tab"
-        case .downloadFinished: return "When a download finishes"
-        case .spaceSwitched(let personaChangesOnly): return personaChangesOnly ? "When you switch to another Persona" : "When you switch spaces"
+        case .addressChanged(let changes): return changes == .newHost ? localized("When a tab moves to another site") : localized("When a tab's address changes")
+        case .titleChanged: return localized("When a tab's title changes")
+        case .tabSelected: return localized("When you select a tab")
+        case .downloadFinished: return localized("When a download finishes")
+        case .spaceSwitched(let personaChangesOnly): return personaChangesOnly ? localized("When you switch to another Persona") : localized("When you switch spaces")
         }
     }
 
     /// "Everywhere", or each place as `name(of:places:)` names it.
     static func scope(of scope: BrowserEventScope, places: [HookPersonaPlaces]) -> String {
-        guard case .places(let chosen) = scope else { return "Everywhere" }
-        guard !chosen.isEmpty else { return "Nowhere" }
+        guard case .places(let chosen) = scope else { return localized("Everywhere") }
+        guard !chosen.isEmpty else { return localized("Nowhere") }
         return chosen.map { name(of: $0, places: places) }.joined(separator: ", ")
     }
 
@@ -397,56 +397,56 @@ enum HookSummary {
         let personas = places.map { Persona(id: $0.id, name: $0.name) }
         switch place {
         case .persona(let id):
-            guard places.contains(where: { $0.id == id }) else { return "Deleted Persona" }
-            return BrowserSession.displayedPlace(ofPersona: id, space: nil, among: personas) ?? "Everywhere"
+            guard places.contains(where: { $0.id == id }) else { return localized("Deleted Persona") }
+            return BrowserSession.displayedPlace(ofPersona: id, space: nil, among: personas) ?? localized("Everywhere")
         case .space(let id):
-            guard let persona = places.first(where: { $0.spaces.contains { $0.id == id } }), let space = persona.spaces.first(where: { $0.id == id }) else { return "Deleted Space" }
+            guard let persona = places.first(where: { $0.spaces.contains { $0.id == id } }), let space = persona.spaces.first(where: { $0.id == id }) else { return localized("Deleted Space") }
             return BrowserSession.displayedPlace(ofPersona: persona.id, space: Space(id: space.id, name: space.name, personaID: persona.id), among: personas) ?? space.name
         }
     }
 
     static func sites(of filter: BrowserEventFilter) -> String {
-        if !filter.sites.isEmpty { return "Only " + filter.sites.map(\.value).joined(separator: ", ") }
-        if !filter.exceptSites.isEmpty { return "All sites except " + filter.exceptSites.map(\.value).joined(separator: ", ") }
-        return "All sites"
+        if !filter.sites.isEmpty { return localized("Only \(filter.sites.map(\.value).joined(separator: ", "))") }
+        if !filter.exceptSites.isEmpty { return localized("All sites except \(filter.exceptSites.map(\.value).joined(separator: ", "))") }
+        return localized("All sites")
     }
 
     static func model(of choice: AIRouteChoice) -> String {
         switch choice {
         case .tier(let tier):
             let model = AIService.shared.settings.route(for: .tier(tier)).models.first?.model
-            return model.map { "\(tier.title) · \($0.isEmpty ? "default model" : $0)" } ?? "\(tier.title) · no model"
+            return model.map { "\(tier.title) · \($0.isEmpty ? localized("default model") : $0)" } ?? localized("\(tier.title) · no model")
         case .models(let models):
-            return models.first.map { $0.model.isEmpty ? "Default model" : $0.model } ?? "No model"
+            return models.first.map { $0.model.isEmpty ? localized("Default model") : $0.model } ?? localized("No model")
         }
     }
 
     static func record(of record: AgentRunRecord) -> String {
         switch record {
-        case .session: return "Keeps the session"
-        case .activity: return "Keeps activity only"
-        case .none: return "Keeps nothing"
+        case .session: return localized("Keeps the session")
+        case .activity: return localized("Keeps activity only")
+        case .none: return localized("Keeps nothing")
         }
     }
 
     /// "Completed · renamed a tab", "Failed: …", "Skipped: rate limit", and so on.
     static func description(of run: HookRunSummary) -> String {
-        let prefix = run.test ? "Test · " : ""
+        let prefix = run.test ? localized("Test · ") : ""
         switch run.outcome {
         case .completed:
             let renames = run.actions?["renameTab"] ?? 0
-            return prefix + (renames == 0 ? "Completed" : renames == 1 ? "Renamed a tab" : "Renamed \(renames) tabs")
-        case .failed: return prefix + "Failed" + (run.code.map { " (\($0))" } ?? "")
-        case .timedOut: return prefix + "Ran out of time"
-        case .cancelled: return prefix + "Stopped"
+            return prefix + (renames == 0 ? localized("Completed") : renames == 1 ? localized("Renamed a tab") : localized("Renamed \(renames) tabs"))
+        case .failed: return prefix + localized("Failed") + (run.code.map { " (\($0))" } ?? "")
+        case .timedOut: return prefix + localized("Ran out of time")
+        case .cancelled: return prefix + localized("Stopped")
         case .skipped:
             switch run.reason {
-            case .loop?: return "Skipped: its own change or a chain of hooks"
-            case .rateLimit?: return "Skipped: too many runs in a minute"
-            case .dailyLimit?: return "Skipped: today's runs are used up"
-            case .budget?: return "Skipped: an AI limit was reached"
-            case .dropped?: return "Skipped: too many runs waited"
-            case nil: return "Skipped"
+            case .loop?: return localized("Skipped: its own change or a chain of hooks")
+            case .rateLimit?: return localized("Skipped: too many runs in a minute")
+            case .dailyLimit?: return localized("Skipped: today's runs are used up")
+            case .budget?: return localized("Skipped: an AI limit was reached")
+            case .dropped?: return localized("Skipped: too many runs waited")
+            case nil: return localized("Skipped")
             }
         }
     }
@@ -468,20 +468,20 @@ enum HookSummary {
                 switch part {
                 case .text(let text): return text
                 case .page(let page): return pageLine(title: page.title, url: page.url, text: page.text)
-                case .selection(let selection): return "Selection from " + pageLine(title: selection.pageTitle, url: selection.pageURL, text: selection.text)
-                case .file(let file): return "File \(file.name)"
-                case .download(let download): return "Download \(download.filename)"
+                case .selection(let selection): return localized("Selection from ") + pageLine(title: selection.pageTitle, url: selection.pageURL, text: selection.text)
+                case .file(let file): return localized("File \(file.name)")
+                case .download(let download): return localized("Download \(download.filename)")
                 case .toolCall(let call):
                     toolNames[call.id] = call.name
-                    return "Called \(call.name) \(String(decoding: call.arguments, as: UTF8.self))"
+                    return localized("Called \(call.name) \(String(decoding: call.arguments, as: UTF8.self))")
                 case .toolResult(let result):
-                    return "Result of \(toolNames[result.callID] ?? "a tool"): " + lines(of: result.parts).joined(separator: "\n")
+                    return localized("Result of \(toolNames[result.callID] ?? localized("a tool")): ") + lines(of: result.parts).joined(separator: "\n")
                 }
             }
         }
         return messages.map { message in
             let body = lines(of: message.parts).flatMap(splitLines).map { $0.isEmpty ? "" : "  " + $0 }
-            return ([message.role == .assistant ? "Agent" : "Arch"] + body).joined(separator: "\n")
+            return ([message.role == .assistant ? localized("Agent") : "Arch"] + body).joined(separator: "\n")
         }.joined(separator: "\n\n")
     }
 
@@ -502,21 +502,21 @@ enum HookSummary {
     static func description(of result: HookRunResult, hookName: String) -> String {
         let name = "\u{201C}\(hookName)\u{201D}"
         switch result {
-        case .notRun(let sentence): return "\(name) did not run. \(sentence)"
+        case .notRun(let sentence): return localized("\(name) did not run. \(sentence)")
         case .finished(let outcome):
             switch outcome {
             case .completed(let actions, _):
                 let renames = actions.filter { $0.kind == "renameTab" }.count
-                return renames == 0 ? "\(name) ran and changed nothing." : "\(name) ran and renamed \(renames == 1 ? "a tab" : "\(renames) tabs")."
-            case .failed(_, let message): return "\(name) failed: \(message)"
-            case .timedOut: return "\(name) ran out of time."
-            case .cancelled: return "\(name) was stopped."
+                return renames == 0 ? localized("\(name) ran and changed nothing.") : renames == 1 ? localized("\(name) ran and renamed a tab.") : localized("\(name) ran and renamed \(renames) tabs.")
+            case .failed(_, let message): return localized("\(name) failed: \(message)")
+            case .timedOut: return localized("\(name) ran out of time.")
+            case .cancelled: return localized("\(name) was stopped.")
             }
         }
     }
 
     /// What the provider review says first: the settings came from outside Settings ▸ AI ▸ Providers.
-    static let reviewIntro = "Arch did not see these provider settings set up in Settings ▸ AI ▸ Providers, so another program may have changed them. The hook sends nothing until you allow them. Allow only settings you recognize."
+    static var reviewIntro: String { localized("Arch did not see these provider settings set up in Settings ▸ AI ▸ Providers, so another program may have changed them. The hook sends nothing until you allow them. Allow only settings you recognize.") }
 
     /// A provider as its review shows it, from its settings now: an HTTP provider's base address, or a command-line tool's executable, arguments, and environment, which can send its requests elsewhere, with the values of variables whose names suggest a secret hidden. The digest that `hooks.json` records changes with any of them, so it would show nothing to compare.
     static func review(of provider: AIProviderConfiguration) -> String {
@@ -535,26 +535,26 @@ enum HookSummary {
 
     static func sentence(for reason: HookPauseReason) -> String {
         switch reason {
-        case .user: return "Paused."
-        case .failures: return "Paused after \(HookRegistry.failuresBeforePause) failed runs in a row."
-        case .providerErrors: return "Paused after repeated errors from its model's provider."
-        case .ranTooOften: return "This hook ran too often, so Arch paused it."
-        case .stopAllAgents: return "Paused by Stop All Agents."
-        case .placeDeleted: return "Paused: the Personas and spaces it ran in were deleted."
-        case .scriptChanged: return "Its script changed outside Arch."
-        case .shellScriptsOff: return "Shell scripts are off."
-        case .needsNewerArch: return "This hook needs a newer version of Arch."
-        case .grantEnded: return "The program's access ended."
-        case .unknownProvider: return "Its run would reach a provider that was not set up in Arch."
+        case .user: return localized("Paused.")
+        case .failures: return localized("Paused after \(HookRegistry.failuresBeforePause) failed runs in a row.")
+        case .providerErrors: return localized("Paused after repeated errors from its model's provider.")
+        case .ranTooOften: return localized("This hook ran too often, so Arch paused it.")
+        case .stopAllAgents: return localized("Paused by Stop All Agents.")
+        case .placeDeleted: return localized("Paused: the Personas and spaces it ran in were deleted.")
+        case .scriptChanged: return localized("Its script changed outside Arch.")
+        case .shellScriptsOff: return localized("Shell scripts are off.")
+        case .needsNewerArch: return localized("This hook needs a newer version of Arch.")
+        case .grantEnded: return localized("The program's access ended.")
+        case .unknownProvider: return localized("Its run would reach a provider that was not set up in Arch.")
         }
     }
 
     static func sentence(for notice: HookStoreNotice) -> String {
         switch notice {
-        case .setAside: return "hooks.json could not be opened, so Arch renamed it hooks.json.unreadable and started with no hooks."
-        case .keyUnavailable(let reason): return "The Keychain did not give the key of hooks.json, so no hook runs: \(reason)"
-        case .newerVersion(let version): return "hooks.json is from a newer version of Arch, version \(version). Arch lists the hooks it cannot read without running them."
-        case .notSaved(let reason): return "Arch could not save the last change to the hooks: \(reason)"
+        case .setAside: return localized("hooks.json could not be opened, so Arch renamed it hooks.json.unreadable and started with no hooks.")
+        case .keyUnavailable(let reason): return localized("The Keychain did not give the key of hooks.json, so no hook runs: \(reason)")
+        case .newerVersion(let version): return localized("hooks.json is from a newer version of Arch, version \(version). Arch lists the hooks it cannot read without running them.")
+        case .notSaved(let reason): return localized("Arch could not save the last change to the hooks: \(reason)")
         }
     }
 }

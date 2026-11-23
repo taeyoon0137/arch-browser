@@ -46,8 +46,8 @@ struct WebStoreInstallSheet: View {
                 Text(title)
                     .font(.headline)
                 Text(start.update == nil
-                     ? "Arch downloads the extension\u{2019}s current package from the Web Store, and you review what it asks for before it installs."
-                     : "Arch downloads the version that the last check found, without asking the Web Store for a newer one, and you review what it asks for before it installs.")
+                     ? localized("Arch downloads the extension\u{2019}s current package from the Web Store, and you review what it asks for before it installs.")
+                     : localized("Arch downloads the version that the last check found, without asking the Web Store for a newer one, and you review what it asks for before it installs."))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -109,10 +109,10 @@ struct WebStoreInstallSheet: View {
 
     private var title: String {
         if let update = start.update, let plugin = plugins.plugins.first(where: { $0.id == update }) {
-            return "Update \u{201C}\(plugin.manifest.name)\u{201D} from the Web Store"
+            return localized("Update \u{201C}\(plugin.manifest.name)\u{201D} from the Web Store")
         }
-        guard let engine = start.engine, let plugin = start.versionOf.flatMap(plugins.leadVersion(of:)) else { return "Install from the Web Store" }
-        return "Install the \(engine.displayName) Version of \u{201C}\(plugin.manifest.name)\u{201D} from the Web Store"
+        guard let engine = start.engine, let plugin = start.versionOf.flatMap(plugins.leadVersion(of:)) else { return localized("Install from the Web Store") }
+        return localized("Install the \(engine.displayName) Version of \u{201C}\(plugin.manifest.name)\u{201D} from the Web Store")
     }
 
     /// Whether Continue has something to stage: the update, or the extension that the field names.

@@ -46,7 +46,7 @@ struct AIProvidersPage: View {
         } header: {
             Text("Providers", bundle: .module)
         } footer: {
-            formFootnote("Connect a service you subscribe to with its API key, a model server on this Mac, or a command-line tool you install and sign in to in the terminal. Keys stay in the Keychain and go only to their provider. Nothing is sent until a feature makes a request.")
+            formFootnote(localized("Connect a service you subscribe to with its API key, a model server on this Mac, or a command-line tool you install and sign in to in the terminal. Keys stay in the Keychain and go only to their provider. Nothing is sent until a feature makes a request."))
         }
     }
 
@@ -56,16 +56,16 @@ struct AIProvidersPage: View {
     }
 
     private static func detail(of provider: AIProviderConfiguration) -> String {
-        let models = provider.models.count == 1 ? "1 model" : "\(provider.models.count) models"
+        let models = provider.models.count == 1 ? localized("1 model") : localized("\(provider.models.count) models")
         switch provider.kind {
         case .http(let http):
-            let key = http.hasKey ? "key saved" : "no key"
+            let key = http.hasKey ? localized("key saved") : localized("no key")
             return [http.format.title, http.baseURL.host ?? http.baseURL.absoluteString, key, models].joined(separator: " \u{00B7} ")
         case .commandLine(let tool) where tool.agent != nil:
-            return ["\(tool.agent?.title ?? "") on your subscription", tool.executable.lastPathComponent, "agent sessions", models].joined(separator: " \u{00B7} ")
+            return [localized("\(tool.agent?.title ?? "") on your subscription"), tool.executable.lastPathComponent, localized("agent sessions"), models].joined(separator: " \u{00B7} ")
         case .commandLine(let tool):
-            let data = tool.runsWithoutTools ? "may get page data" : "text only"
-            return ["Command-line tool", tool.executable.lastPathComponent, data, models].joined(separator: " \u{00B7} ")
+            let data = tool.runsWithoutTools ? localized("may get page data") : localized("text only")
+            return [localized("Command-line tool"), tool.executable.lastPathComponent, data, models].joined(separator: " \u{00B7} ")
         }
     }
 }
@@ -117,7 +117,7 @@ struct AIProviderDraft: Identifiable {
     init() {
         id = AIProviderID()
         isNew = true
-        name = "New Provider"
+        name = localized("New Provider")
         format = .chatCompletions
         baseURL = ""
         headers = []
@@ -172,7 +172,7 @@ private struct AIProviderEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(draft.isNew ? "Add HTTP API Provider" : "Edit HTTP API Provider")
+            Text(draft.isNew ? localized("Add HTTP API Provider") : localized("Edit HTTP API Provider"))
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding([.horizontal, .top], 20)
@@ -182,14 +182,14 @@ private struct AIProviderEditor: View {
                     Picker(localized("Format"), selection: $draft.format) {
                         ForEach(AIWireFormat.allCases, id: \.self) { Text($0.title) }
                     }
-                    TextField(localized("Base URL"), text: $draft.baseURL, prompt: Text("https://api.example.com/v1", bundle: .module))
+                    TextField(localized("Base URL"), text: $draft.baseURL, prompt: Text(verbatim: "https://api.example.com/v1"))
                     if !draft.baseURL.isEmpty, draft.validBaseURL == nil {
                         Text("Use an https address, or http for a server on this Mac.", bundle: .module).font(.callout).foregroundStyle(.red)
                     }
                 } footer: {
                     formFootnote(draft.format == .chatCompletions
-                                 ? "Requests go to the base URL followed by /chat/completions, with the key as a bearer token."
-                                 : "Requests go to the base URL followed by /messages, with the key in an x-api-key header. Add the version header the server requires under Headers.")
+                                 ? localized("Requests go to the base URL followed by /chat/completions, with the key as a bearer token.")
+                                 : localized("Requests go to the base URL followed by /messages, with the key in an x-api-key header. Add the version header the server requires under Headers."))
                 }
                 keySection
                 headersSection
@@ -201,7 +201,7 @@ private struct AIProviderEditor: View {
             AIProviderEditorButtons(name: draft.name, isNew: draft.isNew,
                                     canSave: draft.configuration != nil && !draft.name.trimmingCharacters(in: .whitespaces).isEmpty,
                                     failure: message,
-                                    removalNote: "Its key leaves the Keychain, and features that used its models fall back to their other models.",
+                                    removalNote: localized("Its key leaves the Keychain, and features that used its models fall back to their other models."),
                                     remove: remove, save: save)
         }
         .frame(width: 480, height: 500)
@@ -213,7 +213,7 @@ private struct AIProviderEditor: View {
         Section {
             if draft.hasKey && !isReplacingKey {
                 LabeledContent(localized("Key")) {
-                    Text(draft.removesKey ? "Removed when you save" : "Saved in the Keychain").foregroundStyle(.secondary)
+                    Text(draft.removesKey ? localized("Removed when you save") : localized("Saved in the Keychain")).foregroundStyle(.secondary)
                 }
                 HStack {
                     Spacer()
@@ -225,12 +225,12 @@ private struct AIProviderEditor: View {
                     }
                 }
             } else {
-                SecureField(localized("Key"), text: $draft.newKey, prompt: Text(draft.hasKey ? "New API key" : "API key"))
+                SecureField(localized("Key"), text: $draft.newKey, prompt: Text(draft.hasKey ? localized("New API key") : localized("API key")))
             }
         } header: {
             Text("API Key", bundle: .module)
         } footer: {
-            formFootnote("A server on this Mac may need no key. The key is entered once and never shown again.")
+            formFootnote(localized("A server on this Mac may need no key. The key is entered once and never shown again."))
         }
     }
 
@@ -238,11 +238,11 @@ private struct AIProviderEditor: View {
 
     @ViewBuilder private var headersSection: some View {
         Section {
-            AINameValueRows(rows: $draft.headers, addTitle: "Add Header", removeTitle: "Remove Header")
+            AINameValueRows(rows: $draft.headers, addTitle: localized("Add Header"), removeTitle: localized("Remove Header"))
         } header: {
             Text("Headers", bundle: .module)
         } footer: {
-            formFootnote("Headers are saved in ai.json, so they must not hold secrets. The key goes under API Key.")
+            formFootnote(localized("Headers are saved in ai.json, so they must not hold secrets. The key goes under API Key."))
         }
     }
 
@@ -257,14 +257,14 @@ private struct AIProviderEditor: View {
             }
             // The button keeps its width while it runs, so the field beside it stays still.
             if isRefreshing {
-                AIProgressRow(text: "Asking the provider for its models\u{2026}")
+                AIProgressRow(text: localized("Asking the provider for its models\u{2026}"))
             } else if let refreshResult {
                 Text(refreshResult).font(.callout).foregroundStyle(refreshFailed ? .red : .secondary)
             }
         } header: {
             Text("Models", bundle: .module)
         } footer: {
-            formFootnote("Refresh asks the provider for its models; it is the only request Settings sends on its own.")
+            formFootnote(localized("Refresh asks the provider for its models; it is the only request Settings sends on its own."))
         }
     }
 
@@ -282,7 +282,7 @@ private struct AIProviderEditor: View {
             let names = try await service.listModels(of: configuration, key: draft.enteredKey)
             let added = names.filter { name in !draft.models.contains(where: { $0.name == name }) }
             draft.models += added.map { AIModelConfiguration(name: $0) }
-            refreshResult = added.isEmpty ? "No new models." : "Added \(added.count) of \(names.count) models."
+            refreshResult = added.isEmpty ? localized("No new models.") : localized("Added \(added.count) of \(names.count) models.")
         } catch {
             refreshResult = settings.message(for: error)
             refreshFailed = true
@@ -295,14 +295,14 @@ private struct AIProviderEditor: View {
         guard let configuration = draft.configuration else { return }
         let key = draft.enteredKey
         if draft.hasKey && (draft.removesKey || !key.isEmpty) {
-            guard await Self.authorize("change the API key for \(configuration.name)") else {
-                message = "The key was not changed."
+            guard await Self.authorize(localized("change the API key for \(configuration.name)")) else {
+                message = localized("The key was not changed.")
                 return
             }
         } else if draft.hasKey, let saved = settings.providers.first(where: { $0.id == configuration.id }), !saved.keepsItsKey(in: configuration) {
             // The saved key would go to the new base URL from now on, which asks as much as replacing the key does.
-            guard await Self.authorize("send the API key for \(configuration.name) to a new base URL") else {
-                message = "The provider was not changed."
+            guard await Self.authorize(localized("send the API key for \(configuration.name) to a new base URL")) else {
+                message = localized("The provider was not changed.")
                 return
             }
         }
@@ -320,8 +320,8 @@ private struct AIProviderEditor: View {
     }
 
     private func remove() async {
-        if draft.hasKey, !(await Self.authorize("remove the API key for \(draft.name.trimmingCharacters(in: .whitespaces))")) {
-            message = "The provider was not removed."
+        if draft.hasKey, !(await Self.authorize(localized("remove the API key for \(draft.name.trimmingCharacters(in: .whitespaces))"))) {
+            message = localized("The provider was not removed.")
             return
         }
         do {
@@ -494,7 +494,7 @@ struct AIProviderEditorButtons: View {
                 Spacer()
                 Button(localized("Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(isNew ? "Add" : "Save") { Task { await save() } }
+                Button(isNew ? localized("Add") : localized("Save")) { Task { await save() } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canSave)
             }
@@ -515,7 +515,7 @@ private struct AIModelRow: View {
     let remove: () -> Void
 
     var body: some View {
-        DisclosureGroup(model.name.isEmpty ? "Default model" : model.name) {
+        DisclosureGroup(model.name.isEmpty ? localized("Default model") : model.name) {
             TextField(localized("Input limit (characters)"), value: $model.inputCharacterLimit, format: .number)
             Toggle(localized("Price per million tokens"), isOn: Binding(
                 get: { model.price != nil },
@@ -555,11 +555,11 @@ private struct AIModelRow: View {
 extension AIModelCapability {
     var title: String {
         switch self {
-        case .tools: return "Tool calls"
-        case .jsonOutput: return "JSON replies"
-        case .images: return "Images"
-        case .files: return "PDF files"
-        case .agent: return "Agent sessions"
+        case .tools: return localized("Tool calls")
+        case .jsonOutput: return localized("JSON replies")
+        case .images: return localized("Images")
+        case .files: return localized("PDF files")
+        case .agent: return localized("Agent sessions")
         }
     }
 }

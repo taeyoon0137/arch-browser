@@ -101,14 +101,14 @@ struct ScriptHookDraft: Identifiable {
         stored = nil
         isReview = false
         self.places = places
-        name = "New Hook"
+        name = localized("New Hook")
         kind = .pageLoaded
         script = Self.template(for: .pageLoaded)
         renamesTabs = !guided
         self.guided = guided
         generated = guided
         enablesAgent = guided
-        if guided { name = "New Agent Hook" }
+        if guided { name = localized("New Agent Hook") }
     }
 
     /// `contents` is a shell script's file, whose bytes the trust sheet shows and copies as they are, and `matchesDigest` whether it is still the copy the user trusted.
@@ -206,24 +206,24 @@ struct ScriptHookDraft: Identifiable {
         func invalid(_ reason: String) -> HookRegistryError { .invalidAgentOptions(reason) }
         let bytes: Data
         if isShell {
-            guard let shell else { throw invalid("Choose the script's file.") }
+            guard let shell else { throw invalid(localized("Choose the script's file.")) }
             if let problem = shell.problem { throw invalid(problem) }
-            guard shell.resolution != nil else { throw invalid("Arch is still looking for the script's interpreter.") }
+            guard shell.resolution != nil else { throw invalid(localized("Arch is still looking for the script's interpreter.")) }
             bytes = shell.contents
         } else {
             bytes = Data(scriptText.utf8)
             if let problem = HookScriptRunner.problem(in: bytes) { throw invalid(problem) }
         }
         if let problem = sitePatterns().problem { throw invalid(problem) }
-        guard isEverywhere || !chosenPlaces.isEmpty else { throw invalid("Choose where the hook runs.") }
-        guard kind != .titleChanged || !titleSources.isEmpty else { throw invalid("Choose which title changes start the hook.") }
-        guard tabKinds.isEmpty || !tabKinds.isDisjoint(with: Self.offeredTabKinds) else { throw invalid("Choose its tab kinds.") }
+        guard isEverywhere || !chosenPlaces.isEmpty else { throw invalid(localized("Choose where the hook runs.")) }
+        guard kind != .titleChanged || !titleSources.isEmpty else { throw invalid(localized("Choose which title changes start the hook.")) }
+        guard tabKinds.isEmpty || !tabKinds.isDisjoint(with: Self.offeredTabKinds) else { throw invalid(localized("Choose its tab kinds.")) }
         var hook = stored ?? Hook(id: id, name: name, trigger: trigger, origin: origin)
         if isShell, let shell, let interpreter = shell.resolution?.interpreter {
             hook.script = .shell(source: shell.source, digest: hook.script.digest, interpreter: interpreter)
         }
         hook.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !hook.name.isEmpty else { throw invalid("Name the hook.") }
+        guard !hook.name.isEmpty else { throw invalid(localized("Name the hook.")) }
         if hook.trigger.kind != kind { hook.timing = HookTiming(for: trigger) }
         hook.trigger = trigger
         hook.filter = filter
@@ -265,7 +265,7 @@ struct ScriptHookDraft: Identifiable {
             hook.agent = nil
             return
         }
-        guard let agentModel else { throw HookRegistryError.invalidAgentOptions("Choose the model for this hook.") }
+        guard let agentModel else { throw HookRegistryError.invalidAgentOptions(localized("Choose the model for this hook.")) }
         var grant = hook.grant.agent ?? AgentRunGrant(tools: [], maximumRecord: .none)
         // The agent runs' daily count agrees with the hook's, so that the runner does not refuse runs the registry starts.
         grant.runsPerDay = min(max(hook.timing.runsPerDay, 1), 2_000)
@@ -301,7 +301,7 @@ struct ScriptHookDraft: Identifiable {
     func sitePatterns() -> (patterns: [AISitePattern], problem: String?) {
         var patterns: [AISitePattern] = []
         for entry in siteList.split(whereSeparator: { $0.isNewline || $0 == "," }).map({ $0.trimmingCharacters(in: .whitespaces) }) where !entry.isEmpty {
-            guard let pattern = AISitePattern(parsing: entry) else { return (patterns, "\u{201C}\(entry)\u{201D} is not a site.") }
+            guard let pattern = AISitePattern(parsing: entry) else { return (patterns, localized("\u{201C}\(entry)\u{201D} is not a site.")) }
             patterns.append(pattern)
         }
         return (patterns, nil)
@@ -328,17 +328,17 @@ struct ScriptHookDraft: Identifiable {
     /// A close reason in words, as `TabCloseReason` describes the closes it stands for.
     static func label(of reason: BrowserTabCloseReason) -> String {
         switch reason {
-        case .user: return "You close it"
-        case .page: return "The page closes itself"
-        case .crash: return "Its page\u{2019}s process quits"
-        case .archive: return "Arch archives it"
-        case .download: return "It only opened a download"
-        case .webExtension: return "A web extension closes it"
-        case .plugin: return "A plugin closes it"
-        case .hook: return "A hook closes it"
-        case .agent: return "An agent closes it"
-        case .spaceDeleted: return "Its Persona is deleted"
-        case .sync: return "Sync removes it"
+        case .user: return localized("You close it")
+        case .page: return localized("The page closes itself")
+        case .crash: return localized("Its page\u{2019}s process quits")
+        case .archive: return localized("Arch archives it")
+        case .download: return localized("It only opened a download")
+        case .webExtension: return localized("A web extension closes it")
+        case .plugin: return localized("A plugin closes it")
+        case .hook: return localized("A hook closes it")
+        case .agent: return localized("An agent closes it")
+        case .spaceDeleted: return localized("Its Persona is deleted")
+        case .sync: return localized("Sync removes it")
         }
     }
 
@@ -416,8 +416,8 @@ struct ScriptHookSheet: View {
             Form {
                 if draft.isReview {
                     Section {
-                        Text(draft.isShell ? "Its script or its interpreter changed. Read both below; trusting them again lets the hook run."
-                                           : "Its script changed outside Arch. Read the script below; saving it lets the hook run it again.").foregroundStyle(.secondary)
+                        Text(draft.isShell ? localized("Its script or its interpreter changed. Read both below; trusting them again lets the hook run.")
+                                           : localized("Its script changed outside Arch. Read the script below; saving it lets the hook run it again.")).foregroundStyle(.secondary)
                     }
                 }
                 Section {
@@ -481,11 +481,11 @@ struct ScriptHookSheet: View {
                 TextField(localized("Instructions"), text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language.", bundle: .module), axis: .vertical)
                 if draft.isShell {
                     // The trust sheet's Let Agent Runs Read Pages decides a shell hook's page reads.
-                    Text(draft.letsAgentReadPages ? "The model may read page text on the allowed tabs. Sites excluded from AI are skipped."
-                                                  : "The model receives titles and reduced addresses on the allowed tabs.").font(.caption)
+                    Text(draft.letsAgentReadPages ? localized("The model may read page text on the allowed tabs. Sites excluded from AI are skipped.")
+                                                  : localized("The model receives titles and reduced addresses on the allowed tabs.")).font(.caption)
                 } else {
-                    Toggle(draft.kind == .tabClosed ? "Read Text of the Tabs Left" : "Read Page Text", isOn: $draft.readsPageText)
-                    Toggle(draft.kind == .tabClosed ? "Read Outlines of the Tabs Left" : "Read Page Outline", isOn: $draft.readsPageOutline)
+                    Toggle(draft.kind == .tabClosed ? localized("Read Text of the Tabs Left") : localized("Read Page Text"), isOn: $draft.readsPageText)
+                    Toggle(draft.kind == .tabClosed ? localized("Read Outlines of the Tabs Left") : localized("Read Page Outline"), isOn: $draft.readsPageOutline)
                     if draft.readsPageOutline { Text("Outlines include headings, labels, and links, not the page\u{2019}s text. Form values are hidden.", bundle: .module).font(.caption) }
                     if draft.readsPageText {
                         Text("The model may read page text on the allowed tabs. Sites excluded from AI are skipped.", bundle: .module).font(.caption)
@@ -522,7 +522,7 @@ struct ScriptHookSheet: View {
                 }
             }
             Section(localized("Allowed actions")) {
-                Toggle(draft.kind == .tabClosed ? "Rename the Tabs Left" : "Rename the Tab", isOn: $draft.agentRenamesTabs)
+                Toggle(draft.kind == .tabClosed ? localized("Rename the Tabs Left") : localized("Rename the Tab"), isOn: $draft.agentRenamesTabs)
             }
             if draft.guided {
                 Section(localized("Record")) {
@@ -534,10 +534,10 @@ struct ScriptHookSheet: View {
                     Text(recordDetail).font(.caption)
                 }
                 Section(localized("Limits")) {
-                    numberRow("Time limit", value: $draft.seconds, in: 5...600, unit: "seconds")
-                    numberRow("Model rounds", value: $draft.rounds, in: 1...20, unit: nil)
-                    numberRow("Tool calls", value: $draft.toolCalls, in: 1...50, unit: nil)
-                    numberRow("Runs per day", value: $draft.dailyLimit, in: 1...2_000, unit: nil)
+                    numberRow(localized("Time limit"), value: $draft.seconds, in: 5...600, unit: localized("seconds"))
+                    numberRow(localized("Model rounds"), value: $draft.rounds, in: 1...20, unit: nil)
+                    numberRow(localized("Tool calls"), value: $draft.toolCalls, in: 1...50, unit: nil)
+                    numberRow(localized("Runs per day"), value: $draft.dailyLimit, in: 1...2_000, unit: nil)
                     Stepper(localized("Wait before running · \(draft.delay.formatted()) seconds"), value: $draft.delay, in: 0...60, step: 0.5)
                 }
             }
@@ -563,9 +563,9 @@ struct ScriptHookSheet: View {
 
     private var recordDetail: String {
         switch draft.agentRecord {
-        case .none: return "Keep usage totals only."
-        case .activity: return "Keep activity without page content or replies."
-        case .session: return "Keep the transcript in memory until quit."
+        case .none: return localized("Keep usage totals only.")
+        case .activity: return localized("Keep activity without page content or replies.")
+        case .session: return localized("Keep the transcript in memory until quit.")
         }
     }
 
@@ -612,7 +612,7 @@ struct ScriptHookSheet: View {
             }
         }
         HStack {
-            Button(draft.shell == nil ? "Choose File\u{2026}" : "Choose Another File\u{2026}") { chooseShellFile() }
+            Button(draft.shell == nil ? localized("Choose File\u{2026}") : localized("Choose Another File\u{2026}")) { chooseShellFile() }
             if draft.stored != nil, let source = draft.shell?.source {
                 Button(localized("Update from File")) { loadShellFile(at: URL(fileURLWithPath: source)) }
             }
@@ -658,9 +658,9 @@ struct ScriptHookSheet: View {
     }
 
     private func changeSummary(_ shell: ShellScriptChoice) -> String {
-        let changed = shell.changedLines.count == 1 ? "1 line is new or changed" : "\(shell.changedLines.count) lines are new or changed"
-        guard shell.removedLines > 0 else { return "\(changed), marked below." }
-        return "\(changed), marked below, and \(shell.removedLines == 1 ? "1 line is" : "\(shell.removedLines) lines are") gone."
+        let changed = shell.changedLines.count == 1 ? localized("1 line is new or changed") : localized("\(shell.changedLines.count) lines are new or changed")
+        guard shell.removedLines > 0 else { return localized("\(changed), marked below.") }
+        return shell.removedLines == 1 ? localized("\(changed), marked below, and 1 line is gone.") : localized("\(changed), marked below, and \(shell.removedLines) lines are gone.")
     }
 
     /// An open panel for the script's file, over the settings window.
@@ -670,8 +670,8 @@ struct ScriptHookSheet: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
-        panel.message = "Choose the shell script this hook runs. Arch shows it before it trusts it."
-        panel.prompt = "Review"
+        panel.message = localized("Choose the shell script this hook runs. Arch shows it before it trusts it.")
+        panel.prompt = localized("Review")
         if let source = draft.shell?.source { panel.directoryURL = URL(fileURLWithPath: source).deletingLastPathComponent() }
         let finish = { (response: NSApplication.ModalResponse) in
             if response == .OK, let url = panel.url { loadShellFile(at: url) }
@@ -726,9 +726,9 @@ struct ScriptHookSheet: View {
     private var testSection: some View {
         Section(localized("Test")) {
             Toggle(localized("Apply Changes"), isOn: $appliesTest)
-            Button(testing == nil ? "Test on Current Tab" : "Stop Test") {
+            Button(testing == nil ? localized("Test on Current Tab") : localized("Stop Test")) {
                 if let testing { testing.cancel(); return }
-                guard let tab = currentTab() else { testResult = "Select a tab first."; return }
+                guard let tab = currentTab() else { testResult = localized("Select a tab first."); return }
                 do {
                     let (hook, bytes) = try draft.makeHook()
                     let applying = appliesTest
@@ -737,11 +737,11 @@ struct ScriptHookSheet: View {
                         let result = await registry.testDraft(hook, script: bytes, onTab: tab, applying: applying)
                         var lines = [HookSummary.description(of: result, hookName: hook.name)]
                         if case .finished(.completed(let actions, let use)) = result {
-                            lines = [applying ? "Applied changes" : "Preview"]
-                            if actions.isEmpty { lines.append("No changes.") }
-                            for case .renamedTab(_, let name) in actions { lines.append("Suggested name: \(name)") }
+                            lines = [applying ? localized("Applied changes") : localized("Preview")]
+                            if actions.isEmpty { lines.append(localized("No changes.")) }
+                            for case .renamedTab(_, let name) in actions { lines.append(localized("Suggested name: \(name)")) }
                             if let reply = use?.reply { lines.append(reply) }
-                            if let use, let model = use.model { lines.append("\(aiSettings.title(of: model)) · \(use.usage.inputTokens) input · \(use.usage.outputTokens) output tokens") }
+                            if let use, let model = use.model { lines.append(localized("\(aiSettings.title(of: model)) · \(use.usage.inputTokens) input · \(use.usage.outputTokens) output tokens")) }
                         }
                         lines.append(started.duration(to: .now).formatted())
                         testResult = lines.joined(separator: "\n")
@@ -780,9 +780,9 @@ struct ScriptHookSheet: View {
                     Text("Any change", bundle: .module).tag(HookAddressChanges.any)
                 }
             case .titleChanged:
-                setToggle("The page's title", .page, in: $draft.titleSources)
-                setToggle("Your names", .user, in: $draft.titleSources)
-                setToggle("Names from hooks and agents", .suggested, in: $draft.titleSources)
+                setToggle(localized("The page's title"), .page, in: $draft.titleSources)
+                setToggle(localized("Your names"), .user, in: $draft.titleSources)
+                setToggle(localized("Names from hooks and agents"), .suggested, in: $draft.titleSources)
             case .tabClosed:
                 if draft.guided {
                     ForEach(ScriptHookDraft.offeredCloseReasons, id: \.self) { reason in setToggle(ScriptHookDraft.label(of: reason), reason, in: $draft.closeReasons) }
@@ -818,17 +818,17 @@ struct ScriptHookSheet: View {
                 Text("All Sites Except These", bundle: .module).tag(ScriptHookDraft.SiteChoice.except)
             }
             if draft.siteChoice != .all {
-                TextField(localized("Sites"), text: $draft.siteList, prompt: Text("example.com, news.example.org", bundle: .module), axis: .vertical)
+                TextField(localized("Sites"), text: $draft.siteList, prompt: Text(verbatim: "example.com, news.example.org"), axis: .vertical)
             }
             Picker(localized("Engines"), selection: $draft.engine) {
                 Text("Both", bundle: .module).tag(ScriptHookDraft.EngineChoice.both)
                 Text(EngineKind.webKit.displayName).tag(ScriptHookDraft.EngineChoice.webKit)
                 Text(EngineKind.chromium.displayName).tag(ScriptHookDraft.EngineChoice.chromium)
             }
-            tabKindToggle("Open tabs", .open)
-            tabKindToggle("Pinned tabs", .pinned)
-            tabKindToggle("Favorites' tabs", .favorite)
-            tabKindToggle("Small windows' tabs", .smallWindow)
+            tabKindToggle(localized("Open tabs"), .open)
+            tabKindToggle(localized("Pinned tabs"), .pinned)
+            tabKindToggle(localized("Favorites' tabs"), .favorite)
+            tabKindToggle(localized("Small windows' tabs"), .smallWindow)
         }
     }
 
@@ -865,14 +865,14 @@ struct ScriptHookSheet: View {
 
     private var routeProblem: String? {
         guard draft.enablesAgent, draft.stored?.origin.isOutsideProgram != true else { return nil }
-        guard let route = draft.agentModel else { return "Choose the model for this hook." }
+        guard let route = draft.agentModel else { return localized("Choose the model for this hook.") }
         let refs = models(on: route)
-        guard !refs.isEmpty, refs.allSatisfy(connectedModels.contains) else { return "Choose a connected model that supports agent runs." }
+        guard !refs.isEmpty, refs.allSatisfy(connectedModels.contains) else { return localized("Choose a connected model that supports agent runs.") }
         let cli = refs.compactMap { ref in aiSettings.providers.first { $0.id == ref.provider } }.filter { provider in
             if case .commandLine = provider.kind { return true }
             return false
         }
-        return cli.isEmpty || cli.count == refs.count ? nil : "Choose only API models or only command-line models for this route."
+        return cli.isEmpty || cli.count == refs.count ? nil : localized("Choose only API models or only command-line models for this route.")
     }
 
     private var agentRoutes: [AIRouteChoice] {
@@ -882,8 +882,8 @@ struct ScriptHookSheet: View {
     }
 
     private var saveTitle: String {
-        guard draft.needsTrust else { return draft.stored == nil ? "Add" : "Save" }
-        return draft.stored == nil ? "Trust and Add" : "Trust and Save"
+        guard draft.needsTrust else { return draft.stored == nil ? localized("Add") : localized("Save") }
+        return draft.stored == nil ? localized("Trust and Add") : localized("Trust and Save")
     }
 
     /// Saves the hook; a shell script that needs trust waits for Touch ID or the login password first, and the bytes the sheet showed are the ones Arch copies.
@@ -893,10 +893,10 @@ struct ScriptHookSheet: View {
             guard draft.needsTrust else { return try commit(hook, data, trusted: false) }
             trusting = Task { @MainActor in
                 defer { trusting = nil }
-                let trusted = await AgentDeviceOwnerAuthentication().authenticate(reason: "trust the shell script of the hook \u{201C}\(hook.name)\u{201D}")
+                let trusted = await AgentDeviceOwnerAuthentication().authenticate(reason: localized("trust the shell script of the hook \u{201C}\(hook.name)\u{201D}"))
                 guard !Task.isCancelled else { return }
                 guard trusted else {
-                    problem = "Arch did not trust the script."
+                    problem = localized("Arch did not trust the script.")
                     return
                 }
                 do {

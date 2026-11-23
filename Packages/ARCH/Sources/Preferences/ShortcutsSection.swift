@@ -36,7 +36,7 @@ struct ShortcutsSection: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { notification in
             if let window = recordingWindow, notification.object as? NSWindow === window { stopRecording() }
         }
-        .alert(conflict.map { "\($0.shortcut.displayName) is already used by \($0.owner.title)." } ?? "", isPresented: isShowingConflict, presenting: conflict) { conflict in
+        .alert(conflict.map { localized("\($0.shortcut.displayName) is already used by \($0.owner.title).") } ?? "", isPresented: isShowingConflict, presenting: conflict) { conflict in
             Button(localized("Replace")) {
                 shortcuts.setShortcut(nil, for: conflict.owner)
                 shortcuts.setShortcut(conflict.shortcut, for: conflict.command)
@@ -78,9 +78,9 @@ struct ShortcutsSection: View {
 
     private func label(for command: ShortcutCommand) -> String {
         if recording?.id == command.id {
-            return heldModifiers.isEmpty ? "Type Shortcut" : KeyShortcut.symbols(for: heldModifiers)
+            return heldModifiers.isEmpty ? localized("Type Shortcut") : KeyShortcut.symbols(for: heldModifiers)
         }
-        return shortcuts.shortcut(for: command)?.displayName ?? "None"
+        return shortcuts.shortcut(for: command)?.displayName ?? localized("None")
     }
 
     /// The menu commands under their top-level menus, in menu bar order.

@@ -17,8 +17,8 @@ struct SyncSectionState: Equatable {
             isOn = false
             canToggle = !checking
             canDelete = false
-            account = checking ? "Checking…" : "Not checked"
-            explanation = checking ? nil : "Turn on sync to check this Mac’s iCloud account."
+            account = checking ? localized("Checking…") : localized("Not checked")
+            explanation = checking ? nil : localized("Turn on sync to check this Mac’s iCloud account.")
         } else {
             switch availability {
             case .unavailable(let reason):
@@ -26,14 +26,14 @@ struct SyncSectionState: Equatable {
                 isOn = false
                 canToggle = false
                 canDelete = false
-                account = "Unavailable"
+                account = localized("Unavailable")
                 explanation = reason.message
             case .available:
                 canPause = false
                 isOn = enabled
                 canToggle = !checking && !deleting
                 canDelete = enabled && !checking && !deleting
-                account = "Available"
+                account = localized("Available")
                 explanation = offReason?.message
             }
         }
@@ -66,7 +66,7 @@ struct SyncSection: View {
                 if let date = controller.lastSync {
                     LabeledContent(localized("Last completed sync")) { Text(date, format: .dateTime) }
                 } else {
-                    LabeledContent(localized("Last completed sync"), value: "Never")
+                    LabeledContent(localized("Last completed sync"), value: localized("Never"))
                 }
                 if let message = controller.lastError { LabeledContent(localized("Sync status"), value: message) }
             }
