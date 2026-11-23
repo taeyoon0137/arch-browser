@@ -7,8 +7,8 @@ import JavaScriptCore
 
 extension AIFeature {
     /// The composer's feature, which Settings registers.
-    public static let pluginComposer = AIFeature(id: .pluginComposer, name: "Plugin Writer",
-                                                 summary: "Writes a plugin, which you review before it runs, from the feature you describe in Settings \u{25B8} Plugins and Arch\u{2019}s plugin reference.",
+    public static let pluginComposer = AIFeature(id: .pluginComposer, name: localized("Plugin Writer"),
+                                                 summary: localized("Writes a plugin, which you review before it runs, from the feature you describe in Settings \u{25B8} Plugins and Arch\u{2019}s plugin reference."),
                                                  trigger: .user, data: .textOnly, requirements: [.jsonOutput])
 }
 
@@ -57,7 +57,7 @@ public final class PluginComposer {
                 continue
             } catch AIError.replyTooLong {
                 // The same request would be cut at the same limit.
-                throw PluginComposerError.unusableReply("The plugin is too long for one reply.")
+                throw PluginComposerError.unusableReply(localized("The plugin is too long for one reply."))
             }
             let composition = PluginComposition(requests: requests + [request], model: service.settings.title(of: reply.model))
             do {
@@ -143,7 +143,7 @@ extension PluginComposerError: LocalizedError {
     /// The message shown for a composer failure.
     public var errorDescription: String? {
         switch self {
-        case let .unusableReply(problem): return "AI wrote a plugin that Arch cannot use. \(problem)"
+        case let .unusableReply(problem): return localized("AI wrote a plugin that Arch cannot use. \(problem)")
         }
     }
 }

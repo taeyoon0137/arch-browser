@@ -213,7 +213,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
                     // The time the script waited for Arch's answers is Arch's, not the call's.
                     let counted = ContinuousClock.now - startedAt - (archWaited - waitedBefore)
                     guard counted < hang else {
-                        return fail("The background script left a call unanswered for \(String(format: "%g", limits.hang)) seconds.", throwing: .timedOut)
+                        return fail(localized("The background script left a call unanswered for \(String(format: "%g", limits.hang)) seconds."), throwing: .timedOut)
                     }
                     deadline = .now + max(hang - counted, .milliseconds(100))
                 }
@@ -301,7 +301,7 @@ public final class ScriptPlugin: NSObject, Plugin, WKNavigationDelegate {
     }
 
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        fail("The background script\u{2019}s process ended unexpectedly.", throwing: .stopped)
+        fail(localized("The background script\u{2019}s process ended unexpectedly."), throwing: .stopped)
     }
 }
 

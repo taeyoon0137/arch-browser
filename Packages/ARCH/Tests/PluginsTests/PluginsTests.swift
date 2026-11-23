@@ -177,7 +177,7 @@ import WebKit
 
     @Test func matchesTheStartsOfWordsInTitlesAndKeywords() {
         for text in ["copy", "Copy page", "addr", "PAGE co", "url", " copy  ", "cöpy"] {
-            #expect(index.paletteCommands(matching: text).map(\.item.title) == ["Copy Page Address"], "\(text)")
+            #expect(index.paletteCommands(matching: text).map(\.item.title) == [catalogText("Copy Page Address")], "\(text)")
         }
     }
 

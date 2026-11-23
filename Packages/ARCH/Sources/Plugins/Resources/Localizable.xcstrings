@@ -1,6 +1,996 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    " and " : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " 및 "
+          }
+        }
+      }
+    },
+    "%@ and %lld more" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 외 %2$lld개"
+          }
+        }
+      }
+    },
+    "%@ and its subdomains" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 및 하위 도메인"
+          }
+        }
+      }
+    },
+    "%@ cannot run this package, and the other version of “%@” runs on %@ tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 이 패키지를 실행할 수 없으며, “%2$@”의 다른 버전은 %3$@ 탭에서 실행됩니다."
+          }
+        }
+      }
+    },
+    "%@ does not run this version." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 이 버전을 실행하지 않습니다."
+          }
+        }
+      }
+    },
+    "%@ does not run “%@”, so it cannot be the %@ version." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 “%2$@” 실행을 지원하지 않으므로 %3$@ 버전이 될 수 없습니다."
+          }
+        }
+      }
+    },
+    "%@ does not run “%@”, so it cannot keep %@ tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 “%2$@” 실행을 지원하지 않으므로 %3$@ 탭을 유지할 수 없습니다."
+          }
+        }
+      }
+    },
+    "%@ has no key for its extension’s identifier." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 확장 프로그램 식별자에 대한 키가 없습니다."
+          }
+        }
+      }
+    },
+    "%@ has not checked this package." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 아직 이 패키지를 확인하지 않았습니다."
+          }
+        }
+      }
+    },
+    "%@ has not checked “%@” yet, so it cannot be the %@ version." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 아직 “%2$@” 확인을 마치지 않아 %3$@ 버전이 될 수 없습니다."
+          }
+        }
+      }
+    },
+    "%@ holds no .zip archive after its header." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 헤더 뒤에 .zip 아카이브가 없습니다."
+          }
+        }
+      }
+    },
+    "%@ holds no web extension." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 웹 확장 프로그램이 없습니다."
+          }
+        }
+      }
+    },
+    "%@ is a .crx file of format version %u, which Chromium no longer installs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 파일은 형식 버전 %2$u의 .crx 파일이며, Chromium에서 더 이상 설치하지 않습니다."
+          }
+        }
+      }
+    },
+    "%@ is not a .crx file." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 파일은 .crx 파일이 아닙니다."
+          }
+        }
+      }
+    },
+    "%@ is not a complete .crx file." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 파일은 완전한 .crx 파일이 아닙니다."
+          }
+        }
+      }
+    },
+    "%@ runs no web extensions on this Mac, so no version can run on it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에서 %@ 엔진은 웹 확장 프로그램을 실행하지 않으므로 어떤 버전도 실행할 수 없습니다."
+          }
+        }
+      }
+    },
+    "%@ runs no web extensions on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에서 %@ 엔진은 웹 확장 프로그램을 실행하지 않습니다."
+          }
+        }
+      }
+    },
+    "%@, which you installed from %@, has this package’s identifier, so as its %@ version the package takes over the data that %@ keeps on %@ tabs. Join only if both come from the same developer." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@에서 설치한 %1$@의 식별자가 이 패키지와 같으므로, 이 패키지가 %3$@ 버전으로서 %4$@의 %5$@ 탭 데이터를 이어받습니다. 두 항목의 개발자가 같은 경우에만 합치세요."
+          }
+        }
+      }
+    },
+    "%lld websites" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹사이트 %lld개"
+          }
+        }
+      }
+    },
+    "A plugin built into Arch has the identifier %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch에 내장된 플러그인이 이미 %@ 식별자를 사용하고 있습니다."
+          }
+        }
+      }
+    },
+    "A version of an installed plugin has the identifier %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치된 플러그인의 한 버전이 이미 %@ 식별자를 사용하고 있습니다."
+          }
+        }
+      }
+    },
+    "AI wrote a plugin that Arch cannot use. %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI가 작성한 플러그인을 Arch에서 사용할 수 없습니다. %@"
+          }
+        }
+      }
+    },
+    "An installed plugin has the identifier this version would take." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 버전이 사용할 식별자를 설치된 플러그인이 이미 사용하고 있습니다."
+          }
+        }
+      }
+    },
+    "An installed plugin of another kind has the identifier %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 종류의 설치된 플러그인이 이미 %@ 식별자를 사용하고 있습니다."
+          }
+        }
+      }
+    },
+    "Another installed plugin has this package’s identifier, so it cannot join “%@” here. Join With… joins installed plugins." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치된 다른 플러그인이 이 패키지의 식별자를 사용하고 있어 여기서 “%@”에 합칠 수 없습니다. 설치된 플러그인은 ‘다음과 합치기…’로 합치세요."
+          }
+        }
+      }
+    },
+    "Arch can prove the identifier of only one of the two, and a native app on this Mac accepts the other’s, so they cannot be one plugin." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 둘 중 하나의 식별자만 증명할 수 있고 이 Mac의 네이티브 앱이 다른 하나의 식별자를 허용하므로, 하나의 플러그인으로 합칠 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch cannot reach this tab’s page for the plugin without your gesture now." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금은 사용자의 동작 없이 Arch가 플러그인을 위해 이 탭의 페이지에 접근할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch could not save the plugin list, so changes to it since then last only until Arch quits. %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 플러그인 목록을 저장할 수 없어, 이후의 변경 사항은 Arch를 종료할 때까지만 유지됩니다. %@"
+          }
+        }
+      }
+    },
+    "Arch keeps a file named %@ beside the installed plugins, so no plugin can have it as its identifier." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 설치된 플러그인 옆에 %@ 파일을 보관하므로, 어떤 플러그인도 이 식별자를 사용할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch keeps identifiers that start with %@ for the plugins built into it, so no plugin can have %@ as its identifier." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 접두사로 시작하는 식별자는 Arch 내장 플러그인용이므로, 어떤 플러그인도 %2$@ 식별자를 사용할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch renames the identifier %@ to %@ at launch, so no plugin can have it as its identifier." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 실행 시 %1$@ 식별자를 %2$@ 식별자로 변경하므로, 어떤 플러그인도 이 식별자를 사용할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch switched the plugin off after it failed three times within five minutes. %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 5분 안에 세 번 실패하여 Arch가 플러그인을 껐습니다. %@"
+          }
+        }
+      }
+    },
+    "Both versions of “%@” have one identifier, which each engine loads only once, so they stay one plugin. Remove a version instead." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”의 두 버전은 식별자가 같고 각 엔진이 한 번만 불러오므로 하나의 플러그인으로 유지됩니다. 대신 한 버전을 제거하세요."
+          }
+        }
+      }
+    },
+    "Copies the address of a tab." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭의 주소를 복사합니다."
+          }
+        }
+      }
+    },
+    "Copies the page’s title with its address, such as [Arch](https://example.com/)." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Arch](https://example.com/)처럼 페이지 제목을 주소와 함께 복사합니다."
+          }
+        }
+      }
+    },
+    "Copy Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소 복사"
+          }
+        }
+      }
+    },
+    "Copy Page Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 주소 복사"
+          }
+        }
+      }
+    },
+    "Copy as a Markdown link" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markdown 링크로 복사"
+          }
+        }
+      }
+    },
+    "Each engine needs one of the two versions." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "각 엔진에 두 버전 중 하나가 필요합니다."
+          }
+        }
+      }
+    },
+    "Exchange messages with apps on this Mac" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac의 앱과 메시지 교환"
+          }
+        }
+      }
+    },
+    "Keychain error %d." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인 오류 %d."
+          }
+        }
+      }
+    },
+    "No engine on this Mac runs it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에는 이 항목을 실행하는 엔진이 없습니다."
+          }
+        }
+      }
+    },
+    "Only an installed web extension can have a version for %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치된 웹 확장 프로그램만 %@용 버전을 가질 수 있습니다."
+          }
+        }
+      }
+    },
+    "Only in a tab where you use one of its commands, until the tab leaves the website" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "명령 중 하나를 사용한 탭에서만, 탭이 해당 웹사이트를 벗어날 때까지"
+          }
+        }
+      }
+    },
+    "Only installed web extensions can be versions of one plugin." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치된 웹 확장 프로그램만 한 플러그인의 버전이 될 수 있습니다."
+          }
+        }
+      }
+    },
+    "Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인된 상태로 탭에서 아무 웹사이트나 열고, 탭을 닫기, 선택, 이동하고 이름 제안"
+          }
+        }
+      }
+    },
+    "Page Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 주소"
+          }
+        }
+      }
+    },
+    "Plugin Writer" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인 작성기"
+          }
+        }
+      }
+    },
+    "Read the names, states, and sizes of your downloads" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드의 이름, 상태, 크기 읽기"
+          }
+        }
+      }
+    },
+    "Read the titles and addresses of your tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭의 제목과 주소 읽기"
+          }
+        }
+      }
+    },
+    "Rename completed downloads in this Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페르소나에서 완료된 다운로드 이름 변경"
+          }
+        }
+      }
+    },
+    "Run scripts on pages from %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 페이지에서 스크립트 실행"
+          }
+        }
+      }
+    },
+    "Runs on %@ tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 탭에서 실행됩니다."
+          }
+        }
+      }
+    },
+    "Send %@ to the AI models you connected" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결한 AI 모델에 %@ 보내기"
+          }
+        }
+      }
+    },
+    "Send requests to %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 요청 보내기"
+          }
+        }
+      }
+    },
+    "Send requests to the listed hosts" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "목록의 호스트에 요청 보내기"
+          }
+        }
+      }
+    },
+    "Send text to the AI models you connected" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결한 AI 모델에 텍스트 보내기"
+          }
+        }
+      }
+    },
+    "Sends the text this plugin writes, as you use it and as browser events reach it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인을 사용할 때와 브라우저 이벤트가 전달될 때 이 플러그인이 작성한 텍스트를 보냅니다."
+          }
+        }
+      }
+    },
+    "Sends the text this plugin writes, as you use it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인을 사용할 때 이 플러그인이 작성한 텍스트를 보냅니다."
+          }
+        }
+      }
+    },
+    "Show notifications under the plugin's name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인 이름으로 알림 표시"
+          }
+        }
+      }
+    },
+    "Suggest names for your tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름 제안"
+          }
+        }
+      }
+    },
+    "The Web Store sent the package of another extension." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어가 다른 확장 프로그램의 패키지를 보냈습니다."
+          }
+        }
+      }
+    },
+    "The background script left a call unanswered for %@ seconds." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "백그라운드 스크립트가 %@초 동안 호출에 응답하지 않았습니다."
+          }
+        }
+      }
+    },
+    "The background script’s process ended unexpectedly." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "백그라운드 스크립트의 프로세스가 예기치 않게 종료되었습니다."
+          }
+        }
+      }
+    },
+    "The command needs a page." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 명령에는 페이지가 필요합니다."
+          }
+        }
+      }
+    },
+    "The header of %@ could not be read." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 헤더를 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "The installed version is signed by its developer; this package is not." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치된 버전은 개발자가 서명했지만 이 패키지는 서명되지 않았습니다."
+          }
+        }
+      }
+    },
+    "The network redirect is outside the plugin's grant." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네트워크 리디렉션이 플러그인 권한 범위를 벗어납니다."
+          }
+        }
+      }
+    },
+    "The network request has an unsupported method, header, or body." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네트워크 요청에 지원되지 않는 메서드, 헤더 또는 본문이 있습니다."
+          }
+        }
+      }
+    },
+    "The network response is not UTF-8 text." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네트워크 응답이 UTF-8 텍스트가 아닙니다."
+          }
+        }
+      }
+    },
+    "The network response is too large." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네트워크 응답이 너무 큽니다."
+          }
+        }
+      }
+    },
+    "The package is not signed by the Web Store." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "패키지가 웹 스토어에서 서명되지 않았습니다."
+          }
+        }
+      }
+    },
+    "The page is not on a website this plugin may reach." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 플러그인이 접근할 수 있는 웹사이트의 페이지가 아닙니다."
+          }
+        }
+      }
+    },
+    "The plugin did not answer in time." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 제때 응답하지 않았습니다."
+          }
+        }
+      }
+    },
+    "The plugin has made as many requests within a minute as it may." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 1분 동안 보낼 수 있는 요청 수에 도달했습니다."
+          }
+        }
+      }
+    },
+    "The plugin has no room left for the value." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인에 값을 저장할 공간이 남아 있지 않습니다."
+          }
+        }
+      }
+    },
+    "The plugin has stopped." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 중단되었습니다."
+          }
+        }
+      }
+    },
+    "The plugin is too long for one reply." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 너무 길어 한 번의 응답에 담을 수 없습니다."
+          }
+        }
+      }
+    },
+    "The plugin may not %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인은 다음 작업을 할 수 없습니다: %@."
+          }
+        }
+      }
+    },
+    "The plugin may not reach this network host." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 이 네트워크 호스트에 접근할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The plugin opened as many tabs within a minute as it may." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 1분 동안 열 수 있는 탭 수에 도달했습니다."
+          }
+        }
+      }
+    },
+    "The plugin's network request could not reach its host." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인의 네트워크 요청이 호스트에 도달하지 못했습니다."
+          }
+        }
+      }
+    },
+    "The plugin’s Persona was deleted." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인의 페르소나가 삭제되었습니다."
+          }
+        }
+      }
+    },
+    "The plugin’s script set no listener for the event." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인의 스크립트가 이벤트 리스너를 설정하지 않았습니다."
+          }
+        }
+      }
+    },
+    "The signature of “%@” does not match its contents." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”의 서명이 내용과 일치하지 않습니다."
+          }
+        }
+      }
+    },
+    "The storage key “%@” belongs to the plugin’s settings." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장소 키 “%@”: 플러그인 설정용 키입니다."
+          }
+        }
+      }
+    },
+    "The tab or space is not one this plugin or hook may reach." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 플러그인이나 훅이 접근할 수 있는 탭 또는 스페이스가 아닙니다."
+          }
+        }
+      }
+    },
+    "Use the extension APIs %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램 API %@ 사용"
+          }
+        }
+      }
+    },
+    "Write text to the clipboard" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클립보드에 텍스트 쓰기"
+          }
+        }
+      }
+    },
+    "Writes a plugin, which you review before it runs, from the feature you describe in Settings ▸ Plugins and Arch’s plugin reference." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 ▸ 플러그인에서 설명한 기능과 Arch의 플러그인 레퍼런스를 바탕으로 플러그인을 작성합니다. 플러그인은 실행 전에 검토할 수 있습니다."
+          }
+        }
+      }
+    },
+    "every .%@ website" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 .%@ 웹사이트"
+          }
+        }
+      }
+    },
+    "every website" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 웹사이트"
+          }
+        }
+      }
+    },
+    "exchange messages with apps on this Mac" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac의 앱과 메시지 교환"
+          }
+        }
+      }
+    },
+    "let “%@” %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@”에 %2$@ 권한 부여"
+          }
+        }
+      }
+    },
+    "run scripts on every website" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 웹사이트에서 스크립트 실행"
+          }
+        }
+      }
+    },
+    "“%@” already has a version for each engine." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”에는 이미 엔진별 버전이 있습니다."
+          }
+        }
+      }
+    },
+    "“%@” is a theme, which Arch does not use." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”: Arch에서 사용하지 않는 테마입니다."
+          }
+        }
+      }
+    },
+    "“%@” is already one of two versions." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”: 이미 두 버전 중 하나입니다."
+          }
+        }
+      }
+    },
+    "“%@” is not the address of a web page." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”: 웹 페이지 주소가 아닙니다."
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }
