@@ -54,6 +54,25 @@ import Testing
     }
 
     /// A page visited in two Personas keeps a row in each, with each Persona's own count, title, and last visit, and every read, removal, and clear covers only the Persona it names.
+    /// Merge Persona Into… moves the source's visits into the target: a page in both adds up its visits and keeps the later visit and the target's title, and the source keeps none.
+    @Test func movingVisitsJoinsThemToTheTargetPersona() async throws {
+        let folder = try TemporaryFolder()
+        let store = Self.store(in: folder)
+        let shared = try #require(URL(string: "https://shared.example/"))
+        let only = try #require(URL(string: "https://only.example/"))
+        for _ in 0..<2 { store.record(shared, title: "Shared in source", persona: Self.other) }
+        store.record(only, title: "Only in source", persona: Self.other)
+        store.record(shared, title: "Shared in target", persona: Self.persona)
+        store.moveVisits(from: Self.other, to: Self.persona)
+
+        #expect(await Self.entries(of: store, in: Self.other).isEmpty)
+        let target = await Self.entries(of: store)
+        #expect(Set(target.map(\.url)) == [shared, only])
+        #expect(target.first { $0.url == shared }?.visitCount == 3)
+        #expect(target.first { $0.url == shared }?.title == "Shared in target")
+        #expect(target.first { $0.url == only }?.title == "Only in source")
+    }
+
     @Test func eachPersonaKeepsItsOwnVisits() async throws {
         let folder = try TemporaryFolder()
         let store = Self.store(in: folder)

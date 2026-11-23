@@ -118,6 +118,28 @@ public final class SitePermissionStore: ObservableObject {
         didChange.send((personaID, origin, types))
     }
 
+    /// Moves the Persona's answers into `target`, as Merge Persona Into… does before it removes the Persona. The target keeps its own answer wherever both have one, and its profiles take each moved answer at once through `didChange`.
+    func moveAnswers(from source: UUID, to target: UUID) {
+        guard source != target, let moving = answers.removeValue(forKey: source) else { return }
+        var merged = answers[target] ?? Answers()
+        var changed: [(String, [EnginePermissionType])] = []
+        for (origin, decisions) in moving.decisions {
+            var originAnswers = merged.decisions[origin] ?? [:]
+            let added = decisions.filter { originAnswers[$0.key] == nil }
+            guard !added.isEmpty else { continue }
+            originAnswers.merge(added) { kept, _ in kept }
+            merged.decisions[origin] = originAnswers
+            if var removedTypes = merged.removed[origin] {
+                removedTypes.subtract(added.keys)
+                merged.removed[origin] = removedTypes.isEmpty ? nil : removedTypes
+            }
+            changed.append((origin, Array(added.keys)))
+        }
+        answers[target] = merged.isEmpty ? nil : merged
+        save()
+        for (origin, types) in changed { didChange.send((target, origin, types)) }
+    }
+
     /// Forgets a deleted Persona's answers, at the launch that removes its data (`PersonaDataRemoval`), and reports whether the file holds none of them.
     func removeAnswers(ofPersona personaID: UUID) -> Bool {
         guard answers.removeValue(forKey: personaID) != nil else { return true }

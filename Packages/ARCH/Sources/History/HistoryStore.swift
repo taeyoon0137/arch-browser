@@ -212,6 +212,18 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Moves the Persona's visits into `target`, as Merge Persona Into… does before it removes the Persona: a page in both keeps the target's title unless that is empty, the sum of their visit counts, and the later last visit. It runs in one transaction on the store's queue, ahead of the removal of the source's data that follows.
+    public func moveVisits(from source: UUID, to target: UUID) {
+        guard source != target else { return }
+        queue.async {
+            guard self.execute("BEGIN") != nil else { return }
+            guard self.execute("INSERT INTO visits (url, persona, title, visit_count, last_visit) SELECT url, ?2, title, visit_count, last_visit FROM visits WHERE persona = ?1 AND true ON CONFLICT(url, persona) DO UPDATE SET visit_count = visits.visit_count + excluded.visit_count, last_visit = MAX(visits.last_visit, excluded.last_visit), title = CASE WHEN visits.title = '' THEN excluded.title ELSE visits.title END",
+                                  bindings: [.text(source.uuidString), .text(target.uuidString)]) != nil,
+                  self.execute("DELETE FROM visits WHERE persona = ?1", bindings: [.text(source.uuidString)]) != nil,
+                  self.execute("COMMIT") != nil else { return self.rollBack() }
+        }
+    }
+
     /// Removes the Persona's stored visits and pending import entries, or every Persona's for nil, as when the user clears all history or the session removes a deleted Persona's data.
     public func clear(persona: UUID?) {
         queue.async {

@@ -12,6 +12,27 @@ import Testing
     private static let allow = PromptResponse.answered(PromptAnswer(buttonID: "allow"))
     private static let deny = PromptResponse.answered(PromptAnswer(buttonID: "deny"))
 
+    /// Merge Persona Into… moves the source's remembered answers into the target, where the target's own answer for a type stays, and tells the target's profiles; the source keeps none, also after the file is read again.
+    @Test func movingAnswersKeepsTheTargetsOwnAndTellsItsProfiles() throws {
+        let folder = try TemporaryFolder()
+        let store = SitePermissionStore(directory: folder.url)
+        let source = UUID(), target = Persona.defaultID
+        store.set(.allow, for: [.camera, .microphone], origin: Self.origin, in: source)
+        store.set(.deny, for: [.camera], origin: Self.origin, in: target)
+        var changes: [(UUID, String, [EnginePermissionType])] = []
+        let watching = store.didChange.sink { changes.append(($0.personaID, $0.origin, $0.types)) }
+        store.moveAnswers(from: source, to: target)
+        watching.cancel()
+
+        let reread = SitePermissionStore(directory: folder.url)
+        for current in [store, reread] {
+            #expect(current.decision(for: .camera, origin: Self.origin, in: target) == .deny)
+            #expect(current.decision(for: .microphone, origin: Self.origin, in: target) == .allow)
+            #expect(current.decisions(in: source).isEmpty)
+        }
+        #expect(changes.count == 1 && changes[0].0 == target && changes[0].2 == [.microphone])
+    }
+
     @Test func rememberedAnswersDecideWithoutACard() throws {
         let folder = try TemporaryFolder()
         let store = SitePermissionStore(directory: folder.url)

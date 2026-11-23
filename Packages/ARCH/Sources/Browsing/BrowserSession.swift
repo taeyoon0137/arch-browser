@@ -1,6 +1,6 @@
 // The session owns each engine application and one runtime per engine for each Persona: its profile and browser. A runtime starts when a tab first needs it, so both engines can run beside each other.
 // It also owns each Persona's plugins and sidebar state: Personas, spaces, favorites and their tabs, open tabs, folders, split views, and closed tabs.
-// Stores in its folder hold history, kept per Persona, and the app-wide remembered site permissions, and site search.
+// Stores in its folder hold history and remembered site permissions, both kept per Persona, and site search.
 // A timer archives inactive tabs and unloads inactive pinned tabs and favorites. Memory pressure unloads tabs no window shows.
 // The session opens main windows with a sidebar and small windows for links from other apps, then tracks which becomes main or closes.
 // Each window's state and commands live in `BrowserWindowModel`. Views, menus, and scripts reach them through `activeWindow` or `sidebarTarget()`.
@@ -2498,7 +2498,7 @@ extension BrowserSession {
         removeSpace(id, movingContentsTo: neighbor)
     }
 
-    /// Merge Persona Into…: installs in `targetID` the Persona's plugins and extensions that it lacks, moves each of its spaces, with the space's name, symbol, tint, and home page and with its tabs and folders, to the end of the target's spaces, and its favorites whose addresses the target lacks after the target's, all under new IDs, then removes the Persona as Delete Persona does, with its cookies and website data. Its tabs reload in the target's profile. Its agents' tabs and small windows' tabs close with it. A plugin that cannot install stops the merge before anything moves, with its error.
+    /// Merge Persona Into…: installs in `targetID` the Persona's plugins and extensions that it lacks, moves each of its spaces, with the space's name, symbol, tint, and home page and with its tabs and folders, to the end of the target's spaces, and its favorites whose addresses the target lacks after the target's, all under new IDs, moves its history and remembered site permissions to the target, then removes the Persona as Delete Persona does, with its cookies and website data. Its tabs reload in the target's profile. Its agents' tabs and small windows' tabs close with it. A plugin that cannot install stops the merge before anything moves, with its error.
     public func mergePersona(_ id: Persona.ID, into targetID: Persona.ID) async throws {
         guard personaMergeTargets(for: id).contains(where: { $0.id == targetID }) else { return }
         try await copyPlugins(from: id, to: targetID)
@@ -2523,6 +2523,9 @@ extension BrowserSession {
         }
         favorites.removeAll { $0.resolvedPersonaID == id }
         favorites += joining
+        // History and remembered site permissions are kept per Persona (Persona rule 6), so they join the target's before the Persona's data goes.
+        history.moveVisits(from: id, to: targetID)
+        sitePermissions.moveAnswers(from: id, to: targetID)
         deletePersona(id)
     }
 
