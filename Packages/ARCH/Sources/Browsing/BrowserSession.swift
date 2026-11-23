@@ -1073,17 +1073,11 @@ final class EngineRuntime {
                 DispatchQueue.main.async { [weak tab] in tab?.webContents.exitFullscreen() }
             }
         }
-        // A modified link or a context-menu link stays in the source Persona and engine. Only a requested foreground tab selects a new page.
-        tab.openURLInNewTab = { [weak self, weak tab] url, foreground in
+        // A context-menu link opens behind, marked unread, in the source Persona and engine. A link clicked with Command or the middle button opens through `openNewTab`.
+        tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
-            let window = self.window(showing: tab)
-            if foreground, let window {
-                let page = self.makeWebContents(url: url, engine: tab.preferredEngine, state: nil, in: tab.personaID)
-                window.showOpenedPage(page, personaID: tab.personaID, preferredEngine: tab.preferredEngine)
-            } else {
-                let spaceID = tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: tab.personaID).id
-                self.openTab(url: url, in: spaceID, select: false, engine: tab.preferredEngine).isUnread = true
-            }
+            let spaceID = tab.spaceID ?? self.window(showing: tab)?.currentSpaceID ?? self.preferredSpace(in: tab.personaID).id
+            self.openTab(url: url, in: spaceID, select: false, engine: tab.preferredEngine).isUnread = true
         }
         // Search with in a page's context menu shows the results for the page's selection as a page the tab opens: in a new tab that the window showing the page selects, in the page's engine and Persona, or behind, marked unread, when no window shows the page.
         tab.searchInNewTab = { [weak self, weak tab] text in

@@ -84,35 +84,58 @@ import Testing
         #expect(session.sitePermissions.decision(for: .clipboard, origin: origin) == .deny)
     }
 
-    @Test func modifiedLinksOpenOneTabInTheRequestedDisposition() async throws {
-        let tab = Self.tab()
+    /// A web or file link clicked with Command or the middle button goes back to the engine on both engines, which opens it in a new web contents with the page's referrer and reports it as the page's new tab. A tab without the session's callback lets the engine load it in place, and an agent's tab opens none.
+    @Test func modifiedLinksGoBackToTheEngineOnBothEngines() throws {
         let link = try #require(URL(string: "https://example.org/next"))
-        var opened: [URL] = []
-        var foreground: [Bool] = []
-        tab.openURLInNewTab = { url, selects in
-            opened.append(url)
-            foreground.append(selects)
+        let file = URL(fileURLWithPath: "/private/tmp/next.html")
+        for engine in [EngineKind.chromium, .webKit] {
+            let page = UnloadedWebContents(url: link, title: "", engine: engine, state: nil)
+            let tab = Tab(id: UUID(), webContents: page, spaceID: UUID(), isPinned: false, personaID: UUID())
+            let actions = [EngineNavigationDisposition.newBackgroundTab, .newForegroundTab].flatMap { disposition in
+                [link, file].map { EngineNavigationAction(url: $0, disposition: disposition, isUserInitiated: true, opensLinkInNewTab: true) }
+            }
+            #expect(actions.allSatisfy { tab.webContents(page, decidePolicyFor: $0) == .allow })
+            tab.openNewTab = { _, _, _ in Issue.record("The engine reports the new tab") }
+            #expect(actions.allSatisfy { tab.webContents(page, decidePolicyFor: $0) == .openLinkInNewTab })
+            // An ordinary target=_blank link is adopted as the engine's popup, with its opener intact.
+            let popup = EngineNavigationAction(url: link, disposition: .newForegroundTab, isUserInitiated: true)
+            #expect(tab.webContents(page, decidePolicyFor: popup) == .allow)
+            tab.folderID = UUID()
+            tab.agentOwnerOfFolder = { _ in UUID() }
+            #expect(actions.allSatisfy { tab.webContents(page, decidePolicyFor: $0) == .cancel })
         }
-        for disposition in [EngineNavigationDisposition.newBackgroundTab, .newForegroundTab] {
-            let action = EngineNavigationAction(url: link, disposition: disposition, isUserInitiated: true, opensLinkInNewTab: true)
-            #expect(tab.webContents(tab.webContents, decidePolicyFor: action) == .cancel)
-        }
-        // An ordinary target=_blank link is adopted as the engine's popup, with its opener intact.
-        let popup = EngineNavigationAction(url: link, disposition: .newForegroundTab, isUserInitiated: true)
-        #expect(tab.webContents(tab.webContents, decidePolicyFor: popup) == .allow)
-        await withCheckedContinuation { continuation in DispatchQueue.main.async { continuation.resume() } }
-        #expect(opened == [link, link])
-        #expect(foreground == [false, true])
     }
 
-    @Test func webKitHandlesItsOriginalModifiedLinkRequestAfterTheTabsPolicyCheck() throws {
-        let url = try #require(URL(string: "https://example.org/next"))
-        let page = UnloadedWebContents(url: url, title: "", engine: .webKit, state: nil)
-        let tab = Tab(id: UUID(), webContents: page, spaceID: UUID(), isPinned: false, personaID: UUID())
-        tab.openURLInNewTab = { _, _ in Issue.record("WebKit has the original request") }
-        for destination in [EngineNavigationDisposition.newForegroundTab, .newBackgroundTab] {
-            let action = EngineNavigationAction(url: url, disposition: destination, isUserInitiated: true, opensLinkInNewTab: true)
-            #expect(tab.webContents(page, decidePolicyFor: action) == .openLinkInNewTab)
+    /// The tab that the engine reports for such a link opens alike on both engines: behind the page, unread, in its space, with the page as its opener, or with Shift as well in front in the window that shows the page.
+    @Test func aModifiedLinksTabOpensAlikeOnBothEngines() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine(kind: .chromium))
+        registry.register(SessionTestEngine(kind: .webKit))
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+        defer { for window in session.windows { session.windowWillClose(window) } }
+        let link = try #require(URL(string: "https://example.org/next"))
+        for engine in [EngineKind.chromium, .webKit] {
+            let source = session.openTab(url: URL(string: "https://example.org/"), in: space.id, select: false, engine: engine)
+            window.selectTab(source.id)
+            let click = EngineNavigationAction(url: link, disposition: .newBackgroundTab, isUserInitiated: true, opensLinkInNewTab: true)
+            #expect(source.webContents(source.webContents, decidePolicyFor: click) == .openLinkInNewTab)
+
+            let behind = PageDouble(url: link, engine: engine)
+            source.webContents(source.webContents, didCreateNewWebContents: behind, targetURL: link, disposition: .newBackgroundTab)
+            let behindTab = try #require(session.tabs.first { $0.webContents === behind })
+            #expect(behindTab.opener === source.webContents && behindTab.isUnread && behindTab.spaceID == space.id && behindTab.personaID == source.personaID)
+            #expect(session.tabs.last === behindTab && window.selectedTabID == source.id)
+
+            let front = PageDouble(url: link, engine: engine)
+            source.webContents(source.webContents, didCreateNewWebContents: front, targetURL: link, disposition: .newForegroundTab)
+            let frontTab = try #require(session.tabs.first { $0.webContents === front })
+            #expect(frontTab.opener === source.webContents && !frontTab.isUnread && frontTab.spaceID == space.id)
+            #expect(session.tabs.last === frontTab && window.selectedTabID == frontTab.id)
         }
     }
 

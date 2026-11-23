@@ -318,7 +318,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var pictureInPicture: ChromiumPictureInPicture?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
-    init(context: ChromiumBrowserContext?, requestContext: ARCHCEFRequestContext, configuration: EngineWebContentsConfiguration) {
+    /// `referrer` goes with the first request of the main frame, as for a link the user opened in a new tab.
+    init(context: ChromiumBrowserContext?, requestContext: ARCHCEFRequestContext, configuration: EngineWebContentsConfiguration, referrer: URL? = nil) {
         self.context = context
         self.requestContext = requestContext
         self.view = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -326,8 +327,8 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         self.url = configuration.initialURL
         self.pageScripts = configuration.pageScripts
         super.init()
-        browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", requestContext: requestContext,
-                                 pageScripts: Self.bridgeScripts(pageScripts), delegate: self)
+        browser = ARCHCEFBrowser(parentView: view, url: configuration.initialURL?.absoluteString ?? "about:blank", referrer: referrer?.absoluteString,
+                                 requestContext: requestContext, pageScripts: Self.bridgeScripts(pageScripts), delegate: self)
     }
 
     /// Adopts a popup that a page of `opener` opened, which CEF created in the opener's browsing context and profile with the opener's page scripts. The popup may download, as a WebKit popup may.
@@ -569,15 +570,41 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture, isRedirect: isRedirect)) == .allow
     }
 
-    /// Lets the source tab handle a user-requested tab or window before Alloy loads the link in place.
-    public func cefBrowserShouldOpenURL(_ url: String, disposition: ARCHCEFPopupDisposition) -> Bool {
+    /// Asks the navigation delegate about a link the user clicked with Command, the middle button, or Shift, before Alloy loads it in place. As on the WebKit engine, a delegate that answers `openLinkInNewTab` for a Command or middle-button click gets the link in a new web contents of this profile with this page's scripts, sent with the referrer of the frame the link is in (`linkReferrer(fromFrameAt:)`), through `webContents(_:didCreateNewWebContents:targetURL:disposition:)`; CEF asks while it decides on the navigation, so the report waits until that decision returns. Without a UI delegate, that answer opens nothing.
+    public func cefBrowserShouldOpenURL(_ url: String, disposition: ARCHCEFPopupDisposition, frameURL: String) -> Bool {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
+        let action = Self.linkAction(to: target, disposition: disposition)
+        let decision = navigationDelegate.webContents(self, decidePolicyFor: action)
+        guard decision == .openLinkInNewTab, action.opensLinkInNewTab else { return decision == .allow }
+        guard uiDelegate != nil else { return false }
+        let referrer = Self.linkReferrer(fromFrameAt: frameURL)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let uiDelegate = self.uiDelegate else { return }
+            let opened = ChromiumWebContents(context: context, requestContext: requestContext,
+                                             configuration: EngineWebContentsConfiguration(initialURL: target, pageScripts: pageScripts), referrer: referrer)
+            uiDelegate.webContents(self, didCreateNewWebContents: opened, targetURL: target, disposition: action.disposition)
+        }
+        return false
+    }
+
+    /// Chromium gives a link clicked with Command or the middle button a background tab, with Shift as well a foreground tab, and with Shift alone a new window, as the WebKit adapter reads the click.
+    static func linkAction(to url: URL, disposition: ARCHCEFPopupDisposition) -> EngineNavigationAction {
         let requested: EngineNavigationDisposition = switch disposition {
         case .backgroundTab: .newBackgroundTab
         case .foregroundTab: .newForegroundTab
         default: .newWindow
         }
-        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: requested, isUserInitiated: true, opensLinkInNewTab: requested != .newWindow)) == .allow
+        return EngineNavigationAction(url: url, disposition: requested, isUserInitiated: true, opensLinkInNewTab: requested != .newWindow)
+    }
+
+    /// The referrer a link opened in a new tab sends: the address of the frame it is in, without its fragment and credentials, for an http or https frame only, as Chromium sends none from other pages. The bridge applies Chromium's default policy to it.
+    static func linkReferrer(fromFrameAt frameURL: String) -> URL? {
+        guard var components = URLComponents(string: frameURL), let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              components.host?.isEmpty == false else { return nil }
+        components.fragment = nil
+        components.user = nil
+        components.password = nil
+        return components.url
     }
     /// Only the UI delegate adopts popups, so without one the page opens none, as on the WebKit engine.
     public func cefBrowserCanAdoptPopup() -> Bool { uiDelegate != nil }
