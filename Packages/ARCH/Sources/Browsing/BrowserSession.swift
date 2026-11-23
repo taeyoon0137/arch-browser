@@ -41,7 +41,7 @@ final class EngineRuntime {
     public let userDataDirectory: URL
     /// The pages visited in every Persona. The tabs record their pages there, and the palette, the History window, and imports read and add pages.
     public let history: HistoryStore
-    /// The remembered answers to websites' permission requests in every Persona, which Settings ▸ Websites changes.
+    /// The remembered answers to websites' permission requests, each Persona's own (Persona rule 6), which Settings ▸ Websites changes.
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
@@ -182,11 +182,13 @@ final class EngineRuntime {
         liveFolderService = LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)),
                                               addresses: liveFolderAddresses, keepsUnknownFolders: keptLiveFolders == nil, keptFolders: keptLiveFolders ?? [])
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
+        let permissions = sitePermissions
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
             let pluginDataRemoved = PluginManager.removeData(ofPersona: $0, in: userDataDirectory)
             let cookieRecordRemoved = CookieSync.removeRecord(ofPersona: $0, in: userDataDirectory)
-            return pluginDataRemoved && cookieRecordRemoved
+            let permissionsRemoved = permissions.removeAnswers(ofPersona: $0)
+            return pluginDataRemoved && cookieRecordRemoved && permissionsRemoved
         }
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
         var primary: (any EngineApplication)?
@@ -198,6 +200,8 @@ final class EngineRuntime {
         // The windows open once the app has built its menus (`restoreWindows()`). Normalizing gives every snapshot a window.
         windowsToReopen = snapshot.windows ?? []
         personas = snapshot.personas ?? []
+        // A `permissions.json` from before Personas kept their own answers gives its app-wide answers to every Persona but the Agents Persona once, before any profile starts (Persona rule 6).
+        permissions.adoptAppWideAnswers(into: (snapshot.personas.map { $0.map(\.id) } ?? [Persona.defaultID]).filter { $0 != Self.agentOnly(agentOnlyPersonaID) })
         spaces = snapshot.spaces
         favorites = snapshot.favorites
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
@@ -1055,7 +1059,7 @@ final class EngineRuntime {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.remembersAnswersInSeveralPersonas, ask: { makeContent, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), persona: self.permissionCardPersonaName(for: tab), ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
@@ -1610,7 +1614,7 @@ final class EngineRuntime {
 
     // MARK: Site permissions
 
-    /// Answers the tabs' permission requests from `sitePermissions` or with a card on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
+    /// Answers the tabs' permission requests from their Persona's answers in `sitePermissions` or with a card on the tab, and keeps each profile's own kept answers in line with its Persona's answers.
     let permissionAnswers: SitePermissionAnswers
 
     /// The Agents Persona, which the session takes from `agent.json` when it is created and the agents' service then names through `BrowserAgentHost`: its profiles get no remembered answers, and its requests are denied without a card (agent decision 9). Never the default Persona, whose profile follows the answers from launch.
@@ -1619,9 +1623,28 @@ final class EngineRuntime {
         set { permissionAnswers.agentOnlyPersonaID = Self.agentOnly(newValue) }
     }
 
-    /// Whether a remembered site answer holds in several Personas, which the permission card and Settings ▸ Websites then say. The Agents Persona does not count.
+    /// Whether several Personas keep remembered site answers of their own, so that the permission card and Settings ▸ Websites name the Persona. The Agents Persona does not count.
     public var remembersAnswersInSeveralPersonas: Bool {
         permissionAnswers.holdsInSeveralPersonas(personas)
+    }
+
+    /// The Personas whose remembered answers Settings ▸ Websites shows: every Persona but the Agents Persona, which remembers none.
+    public var personasWithRememberedAnswers: [Persona] {
+        personas.filter { $0.id != agentOnlyPersonaID }
+    }
+
+    /// The Persona whose answers Settings ▸ Websites shows first: the active window's, unless it is the Agents Persona, else the default Persona.
+    public var personaForWebsiteSettings: Persona.ID {
+        let id = activeWindow?.currentSpace.resolvedPersonaID ?? Persona.defaultID
+        return personasWithRememberedAnswers.contains { $0.id == id } ? id : Persona.defaultID
+    }
+
+    /// How a tab's permission card names the Persona that remembers its answer (Persona rule 7), as "the Persona of “Work / Research”", or nil while only one Persona keeps answers.
+    private func permissionCardPersonaName(for tab: Tab) -> String? {
+        guard remembersAnswersInSeveralPersonas else { return nil }
+        let space = BrowserWindowModel.sheetSpace(ofTabIn: tab.spaceID, personaID: tab.personaID, spaces: spaces,
+                                                  currentSpace: window(showing: tab)?.currentSpace ?? preferredSpace(in: tab.personaID))
+        return BrowserWindowModel.sheetName(ofPersona: tab.personaID, space: space, among: personas)
     }
 
     /// The rule of `agentOnlyPersonaID`: the default Persona is never agent-only.
@@ -2421,7 +2444,7 @@ extension BrowserSession {
         if page.isInPictureInPicture { exclusions.insert(.pictureInPicture) }
         if tab.webContents.isCapturingMedia { exclusions.insert(.capture) }
         if tab.hasTypedInput { exclusions.insert(.typedInput) }
-        if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin) == .allow {
+        if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin, in: tab.personaID) == .allow {
             exclusions.insert(.notifications)
         }
         if prompts.hasPrompt(for: tab.id) { exclusions.insert(.prompt) }

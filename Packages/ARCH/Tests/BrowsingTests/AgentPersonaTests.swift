@@ -1,4 +1,4 @@
-// The Agents Persona's exception to Persona rule 6 (agent decision 9): its profiles take no remembered permission answers, also when the answers are made with it, as the session makes them before any engine starts, its requests are denied without a card and remembered nowhere, also not in the profile, and a profile of it follows the answers once it becomes an ordinary Persona again. And the one sidebar order that AppleScript's `tabs` and the agents' `list_tabs` read (`BrowserSession.tabsInSidebarOrder`).
+// The Agents Persona's exception to Persona rule 6 (agent decision 9): its profiles take no remembered permission answers, also when the answers are made with it, as the session makes them before any engine starts, its requests are denied without a card and remembered nowhere, also not in the profile, and a profile of it follows its own Persona's answers once it becomes an ordinary Persona again. And the one sidebar order that AppleScript's `tabs` and the agents' `list_tabs` read (`BrowserSession.tabsInSidebarOrder`).
 import AppKit
 import ARCHEngine
 import Foundation
@@ -16,27 +16,30 @@ import Testing
         func note(_ persona: UUID) -> String? {
             store.agentPermissionNote(for: persona, agentOnlyPersonaID: agents)
         }
-        store.set(.allow, for: [.notifications, .clipboard], origin: Self.origin)
+        store.set(.allow, for: [.notifications, .clipboard], origin: Self.origin, in: ordinary)
         #expect(note(ordinary) == nil)
         // Agent tabs deny requests themselves, so a denial needs no note.
-        store.set(.deny, for: [.microphone], origin: Self.origin)
+        store.set(.deny, for: [.microphone], origin: Self.origin, in: ordinary)
         #expect(note(ordinary) == nil)
-        store.set(.allow, for: [.camera, .microphone, .geolocation], origin: "https://other.example")
+        store.set(.allow, for: [.camera, .microphone, .geolocation], origin: "https://other.example", in: ordinary)
         let mixed = try #require(note(ordinary))
         for name in ["Sites you allowed to use the camera", "the microphone", "your location", "keep that access in agent tabs that run in Chromium."] { #expect(mixed.contains(name)) }
         #expect(!mixed.contains("example"))
-        #expect(note(Persona.defaultID) == mixed && note(agents) == nil)
-        store.set(nil, for: [.camera, .microphone, .geolocation], origin: "https://other.example")
-        store.set(nil, for: [.microphone], origin: Self.origin)
+        // Another Persona's answers give no note.
+        #expect(note(Persona.defaultID) == nil && note(agents) == nil)
+        store.set(nil, for: [.camera, .microphone, .geolocation], origin: "https://other.example", in: ordinary)
+        store.set(nil, for: [.microphone], origin: Self.origin, in: ordinary)
         #expect(note(ordinary) == nil)
     }
 
     @Test func theAgentsPersonaTakesNoRememberedAnswersUntilItIsOrdinary() throws {
         let folder = try Folder()
         let store = SitePermissionStore(directory: folder.url)
-        store.set(.allow, for: [.camera], origin: Self.origin)
-        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let agents = UUID()
+        store.set(.allow, for: [.camera], origin: Self.origin, in: Persona.defaultID)
+        // Answers the Persona remembered before it became agent-only stay in the file.
+        store.set(.allow, for: [.geolocation], origin: Self.origin, in: agents)
+        let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         answers.agentOnlyPersonaID = agents
         let agentProfile = KeptAnswers()
         let ordinaryProfile = KeptAnswers()
@@ -45,15 +48,16 @@ import Testing
         #expect(agentProfile.kept.isEmpty)
         #expect(ordinaryProfile.kept["camera \(Self.origin)"] == .some(true))
         // A change in Settings reaches only the ordinary profile.
-        store.set(.deny, for: [.microphone], origin: Self.origin)
+        store.set(.deny, for: [.microphone], origin: Self.origin, in: Persona.defaultID)
         #expect(agentProfile.kept.isEmpty)
-        // Once agent.json no longer names it, its running profile follows the answers.
+        // Once agent.json no longer names it, its running profile follows its own Persona's answers, never another Persona's.
         answers.agentOnlyPersonaID = nil
-        #expect(agentProfile.kept["camera \(Self.origin)"] == .some(true))
+        #expect(agentProfile.kept == ["geolocation \(Self.origin)": .some(true)])
+        store.set(.deny, for: [.microphone], origin: Self.origin, in: agents)
         #expect(agentProfile.kept["microphone \(Self.origin)"] == .some(false))
     }
 
-    /// The card and Settings ▸ Websites say that an answer holds in every Persona only while there are several besides the Agents Persona.
+    /// The card and Settings ▸ Websites name the Persona that keeps an answer only while there are several besides the Agents Persona.
     @Test func theAgentsPersonaDoesNotCountAsAPersonaThatSharesAnswers() throws {
         let folder = try Folder()
         let answers = SitePermissionAnswers(store: SitePermissionStore(directory: folder.url), notifications: NotificationAuthorization(system: nil))
@@ -68,20 +72,20 @@ import Testing
     @Test func answersMadeWithTheAgentsPersonaGiveItsFirstProfileNothing() throws {
         let folder = try Folder()
         let store = SitePermissionStore(directory: folder.url)
-        store.set(.allow, for: [.camera], origin: Self.origin)
+        store.set(.allow, for: [.camera], origin: Self.origin, in: Persona.defaultID)
         let agents = UUID()
         let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil), agentOnlyPersonaID: agents)
         #expect(answers.agentOnlyPersonaID == agents)
         let profile = KeptAnswers()
         answers.follow(profile, of: agents)
-        store.set(.allow, for: [.microphone], origin: Self.origin)
+        store.set(.allow, for: [.microphone], origin: Self.origin, in: Persona.defaultID)
         #expect(profile.kept.isEmpty)
     }
 
     @Test func theAgentsPersonasRequestsAreDeniedWithoutACardAndNotRemembered() async throws {
         let folder = try Folder()
         let store = SitePermissionStore(directory: folder.url)
-        store.set(.allow, for: [.camera], origin: Self.origin)
+        store.set(.allow, for: [.camera], origin: Self.origin, in: Persona.defaultID)
         let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil))
         let agents = UUID()
         answers.agentOnlyPersonaID = agents
@@ -93,7 +97,7 @@ import Testing
                        ask: { _, _ in cards += 1 }) { granted.append($0) }
         #expect(granted == [false])
         #expect(cards == 0)
-        #expect(store.decision(for: .geolocation, origin: Self.origin) == nil)
+        #expect(store.decision(for: .geolocation, origin: Self.origin, in: Persona.defaultID) == nil)
         // The profile forgets the denial on the next turn, as Chromium would otherwise keep it.
         try await Task.sleep(for: .milliseconds(50))
         #expect(profile.kept["camera \(Self.site.absoluteString)"] == .some(nil))
@@ -105,7 +109,7 @@ import Testing
         #expect(cards == 0)
     }
 
-    /// The permission card and Settings ▸ Websites say "in every Persona" only while answers reach more than one Persona, and the Agents Persona takes none.
+    /// The permission card and Settings ▸ Websites name the Persona only while more than one Persona keeps answers, and the Agents Persona takes none.
     @Test func theAgentsPersonaDoesNotCountAmongThePersonasThatTakeAnswers() throws {
         let folder = try Folder()
         let registry = EngineRegistry()
@@ -121,7 +125,7 @@ import Testing
     @Test func aDenialWithoutAskingLeavesTheKeptAnswersAsRemembered() async throws {
         let folder = try Folder()
         let store = SitePermissionStore(directory: folder.url)
-        store.set(.allow, for: [.camera], origin: Self.origin)
+        store.set(.allow, for: [.camera], origin: Self.origin, in: Persona.defaultID)
         let agents = UUID()
         let answers = SitePermissionAnswers(store: store, notifications: NotificationAuthorization(system: nil), agentOnlyPersonaID: agents)
         let request = EnginePermissionRequest(origin: Self.site, types: [.camera, .geolocation])
@@ -135,7 +139,7 @@ import Testing
         #expect(user.kept["camera \(Self.site.absoluteString)"] == .some(true))
         #expect(user.kept["geolocation \(Self.site.absoluteString)"] == .some(nil))
         #expect(agentOnly.kept["camera \(Self.site.absoluteString)"] == .some(nil))
-        #expect(store.decision(for: .geolocation, origin: Self.origin) == nil)
+        #expect(store.decision(for: .geolocation, origin: Self.origin, in: Persona.defaultID) == nil)
     }
 
     @Test func appleScriptAndListTabsReadOneSidebarOrder() {

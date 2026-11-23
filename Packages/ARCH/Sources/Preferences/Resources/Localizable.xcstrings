@@ -1441,16 +1441,6 @@
         }
       }
     },
-    "Arch remembers your answer in every Persona when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can’t show notifications in WebKit tabs." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "웹사이트가 카메라 같은 권한을 요청하면 Arch는 모든 페르소나에서 사용자의 응답을 기억합니다. 응답을 제거하면 웹사이트가 다시 묻습니다. 화면 기록은 항상 묻습니다. WebKit 탭에서는 웹사이트가 알림을 표시할 수 없습니다."
-          }
-        }
-      }
-    },
     "Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can’t show notifications in WebKit tabs." : {
       "localizations" : {
         "ko" : {
@@ -2387,6 +2377,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "복제"
+          }
+        }
+      }
+    },
+    "Each Persona remembers its own answers when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can’t show notifications in WebKit tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹사이트가 카메라 같은 권한을 요청하면 페르소나마다 사용자의 응답을 따로 기억합니다. 응답을 제거하면 웹사이트가 다시 묻습니다. 화면 기록은 항상 묻습니다. WebKit 탭에서는 웹사이트가 알림을 표시할 수 없습니다."
           }
         }
       }
