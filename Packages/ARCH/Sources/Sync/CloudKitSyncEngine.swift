@@ -1,11 +1,13 @@
 // The sync engine on CloudKit (`docs/sync.md`, Container, database, and zone, Conflicts, and Offline behavior): one `CKSyncEngine` on the private database of the container that the app's entitlements name, which fetches only the zone `ArchSync1` and sends each batch atomically. It turns the engine's events and CloudKit's errors into Arch's own (`SyncEvent`), so the controller and its tests use no `CKSyncEngine` type.
 import CloudKit
 import Foundation
+import os
 
 /// Implements `SyncEngineClient` with `CKSyncEngine`.
 @MainActor
 public final class CloudKitSyncEngine: SyncEngineClient {
     private let engine: CKSyncEngine
+    nonisolated private static let log = Logger(subsystem: "xyz.taeyoon.arch", category: "Sync")
     /// The engine's delegate. The engine holds it weakly, so this keeps it.
     private let relay: Relay
 
@@ -130,7 +132,12 @@ public final class CloudKitSyncEngine: SyncEngineClient {
             savedRecords: savedRecords,
             deletedRecordNames: deletedRecordIDs.map(\.recordName),
             failedSaves: failedSaves.compactMap { failed in
-                failure(for: failed.error).map { SyncFailedSave(recordName: failed.record.recordID.recordName, failure: $0) }
+                guard let refusal = failure(for: failed.error) else { return nil }
+                if case .other = refusal {
+                    // The status shows only the code; the server's reason, such as a record type that the Production schema lacks, goes to the system log (`log show --predicate 'subsystem == "xyz.taeyoon.arch" AND category == "Sync"'`).
+                    log.error("CloudKit refused the save of a \(failed.record.recordType, privacy: .public) record: \(failed.error.localizedDescription, privacy: .public)")
+                }
+                return SyncFailedSave(recordName: failed.record.recordID.recordName, failure: refusal)
             }
         )
     }
