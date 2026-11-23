@@ -10,7 +10,7 @@ enum PageCapture {
     enum CaptureError: LocalizedError {
         case encodingFailed
 
-        var errorDescription: String? { "The image could not be encoded as PNG." }
+        var errorDescription: String? { localized("The image could not be encoded as PNG.") }
     }
 
     /// Writes `image` as a PNG file named after the page and `date`, adding a number when that name is taken, and returns the file. The file's resolution records the image's pixels per point, as the system's screenshots do.
@@ -60,7 +60,7 @@ enum PageCapture {
             .prefix(200)
         while name.decomposedStringWithCanonicalMapping.utf8.count > 200 { name = name.dropLast() }
         let short = name.trimmingCharacters(in: trimmed)
-        return short.isEmpty ? "Capture" : short
+        return short.isEmpty ? localized("Capture") : short
     }
 
     /// The date and time as the system's screenshots write them, with dots in the time because a colon shows as a slash in the Finder.

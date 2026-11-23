@@ -13,13 +13,13 @@ enum PromptSiteIdentity {
             if let url, url.isFileURL, let file = ([url] + (tabURL.map { [$0] } ?? [])).first(where: { $0.isFileURL && !$0.path.isEmpty && $0.path != "/" }) {
                 return PromptIdentity(icon: .symbol("doc"), name: file.lastPathComponent, isSecure: false)
             }
-            return PromptIdentity(icon: .symbol("doc"), name: "This page", isSecure: false)
+            return PromptIdentity(icon: .symbol("doc"), name: localized("This page"), isSecure: false)
         }
         let isSecure = url.scheme?.lowercased() == "https"
         let tabHost = tabURL?.host.flatMap { $0.isEmpty ? nil : $0 }
-        let context = tabHost.flatMap { $0.lowercased() == host.lowercased() ? nil : "in \(tabURL.flatMap(extensionName) ?? $0)" }
+        let context = tabHost.flatMap { $0.lowercased() == host.lowercased() ? nil : localized("in \(tabURL.flatMap(extensionName) ?? $0)") }
         if let name = extensionName(url) {
-            return PromptIdentity(icon: .symbol("puzzlepiece.extension"), name: name, isSecure: false, tag: "Extension", context: context)
+            return PromptIdentity(icon: .symbol("puzzlepiece.extension"), name: name, isSecure: false, tag: localized("Extension"), context: context)
         }
         guard let context else {
             return PromptIdentity(icon: favicon.map(PromptIcon.image) ?? .symbol("globe"), name: host, isSecure: isSecure)
@@ -45,7 +45,7 @@ enum PromptSiteIdentity {
     /// The server that asks for a login: a proxy with its own symbol and tag, or the site as `make` names it. The lock shows only for a site reached over https; a method that keeps the password from the wire, such as Digest, encrypts nothing else, and the protection space does not say whether the connection to a proxy is encrypted.
     static func signIn(_ space: URLProtectionSpace, tabURL: URL?, favicon: NSImage?) -> PromptIdentity {
         if space.isProxy() {
-            return PromptIdentity(icon: .symbol("network"), name: space.host, isSecure: false, tag: "Proxy")
+            return PromptIdentity(icon: .symbol("network"), name: space.host, isSecure: false, tag: localized("Proxy"))
         }
         var components = URLComponents()
         components.scheme = space.protocol ?? "https"

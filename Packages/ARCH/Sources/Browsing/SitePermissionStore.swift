@@ -49,9 +49,9 @@ public final class SitePermissionStore: ObservableObject {
     /// A draft shows only permission types, never the sites whose answers an ordinary Persona inherits. Agent tabs deny every request they make themselves, so only an allowed answer, which a Chromium profile applies before asking, needs a note.
     func agentPermissionNote(for personaID: UUID, agentOnlyPersonaID: UUID?) -> String? {
         guard personaID != agentOnlyPersonaID else { return nil }
-        let types: [(EnginePermissionType, String)] = [(.camera, "the camera"), (.microphone, "the microphone"), (.geolocation, "your location")]
+        let types: [(EnginePermissionType, String)] = [(.camera, localized("the camera")), (.microphone, localized("the microphone")), (.geolocation, localized("your location"))]
         let allowed = types.filter { type, _ in decisions.values.contains { $0[type] == .allow } }.map(\.1)
-        return allowed.isEmpty ? nil : "Sites you allowed to use \(allowed.formatted(.list(type: .or))) keep that access in agent tabs that run in Chromium."
+        return allowed.isEmpty ? nil : localized("Sites you allowed to use \(allowed.formatted(.list(type: .or))) keep that access in agent tabs that run in Chromium.")
     }
 
     /// Remembers `decision` for each of `types`, or forgets their answers when it is `nil` and lists them in `removed`, and saves the file.

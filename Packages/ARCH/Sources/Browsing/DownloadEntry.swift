@@ -56,6 +56,17 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         case reveal = "Couldn’t show file in Finder"
         case restore = "Couldn’t restore original name"
         case folder = "Couldn’t open folder"
+
+        /// The words the downloads list shows and VoiceOver reads.
+        var message: String {
+            switch self {
+            case .missing: localized("File not found")
+            case .open: localized("Couldn’t open file")
+            case .reveal: localized("Couldn’t show file in Finder")
+            case .restore: localized("Couldn’t restore original name")
+            case .folder: localized("Couldn’t open folder")
+            }
+        }
     }
 
     /// Resolve the file again on every attempt. Finder may have moved it, or a hook may have renamed it since the menu opened.
@@ -188,9 +199,9 @@ final class DownloadSummary: ObservableObject {
 
     /// VoiceOver's progress for an active download, including one whose size is unknown.
     var progressDescription: String {
-        guard let progress else { return "Downloading" }
-        if progress > 0, progress < 0.01 { return "Downloading, less than 1%" }
-        return "Downloading, " + progress.formatted(.percent.precision(.fractionLength(0)).rounded(rule: .down))
+        guard let progress else { return localized("Downloading") }
+        if progress > 0, progress < 0.01 { return localized("Downloading, less than \((0.01).formatted(.percent))") }
+        return localized("Downloading, \(progress.formatted(.percent.precision(.fractionLength(0)).rounded(rule: .down)))")
     }
 
     func refresh(from entries: [DownloadEntry]) {

@@ -5,11 +5,11 @@ import Combine
 import SwiftUI
 
 extension AIFeature {
-    static let pageReader = AIFeature(id: .pageReader, name: "Page Reader",
-                                      summary: "Summarizes the page in a panel beside it and answers follow-up questions about it.",
+    static let pageReader = AIFeature(id: .pageReader, name: localized("Page Reader"),
+                                      summary: localized("Summarizes the page in a panel beside it and answers follow-up questions about it."),
                                       trigger: .user, data: AIDataScope(kinds: [.page, .selection]))
-    static let pageQuestion = AIFeature(id: .pageQuestion, name: "Page Questions",
-                                        summary: "Answers a question about the page or the selected text in a popover over the page.",
+    static let pageQuestion = AIFeature(id: .pageQuestion, name: localized("Page Questions"),
+                                        summary: localized("Answers a question about the page or the selected text in a popover over the page."),
                                         trigger: .user, data: AIDataScope(kinds: [.page, .selection]))
 }
 
@@ -74,7 +74,7 @@ public final class PageAssistant: ObservableObject {
 
     /// How a notice names `url`'s site.
     static func siteName(of url: URL) -> String {
-        guard let host = url.host, !host.isEmpty else { return "local files" }
+        guard let host = url.host, !host.isEmpty else { return localized("local files") }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
@@ -106,7 +106,7 @@ public final class PageAssistant: ObservableObject {
 
     /// Requests a summary in the tab's reader conversation.
     func summarize(_ tab: Tab) {
-        readerConversation(for: tab).ask(Self.summaryPrompt, title: "Summary")
+        readerConversation(for: tab).ask(Self.summaryPrompt, title: localized("Summary"))
     }
 
     /// A follow-up question carries the text selected in the page when it goes out.

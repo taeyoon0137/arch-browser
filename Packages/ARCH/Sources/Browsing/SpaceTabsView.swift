@@ -19,7 +19,7 @@ private struct SidebarPluginPanelContent: View {
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
-                SidebarIconButton(symbol: "chevron.left", label: "Back to Tabs") { windowModel.closeSidebarPanel() }
+                SidebarIconButton(symbol: "chevron.left", label: localized("Back to Tabs")) { windowModel.closeSidebarPanel() }
                 Text(panel.title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
@@ -765,7 +765,7 @@ struct SpaceHeaderView: View {
     @ViewBuilder private var spaceName: some View {
         if windowModel.renamingSpaceID == space.id {
             // A hidden copy of the name sizes the field, which would otherwise take a share of the row from the Persona's name. So the header keeps its layout when renaming starts, and the Persona's name still truncates first.
-            Text(draftName.isEmpty ? "Space Name" : draftName)
+            Text(draftName.isEmpty ? localized("Space Name") : draftName)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
                 .hidden()

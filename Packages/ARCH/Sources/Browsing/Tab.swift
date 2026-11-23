@@ -287,7 +287,7 @@ import LiveFolders
 
     nonisolated private static func pageTitle(title: String, url: URL?) -> String {
         if !title.isEmpty { return title }
-        return url?.host ?? "New Tab"
+        return url?.host ?? localized("New Tab")
     }
 
     /// The user acted in the tab's page, with a click that reaches it or a key that activates its focused link or button (`PageDownloadGate`), which lets the page start one more download without asking, as for the link of a file.
@@ -528,21 +528,21 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         var sections = [handed.suggestions, handed.spelling]
         // WebKit puts a link's items before the selection's in a field; outside one, a click on a link or image gets no selection items.
         if let link = element.linkURL {
-            sections.append([newTabItem("Open Link in New Tab", for: link), downloadItem("Download Linked File", for: link), EngineActionMenuItem("Copy Link") { Self.copyToPasteboard(link) }].compactMap { $0 })
+            sections.append([newTabItem(localized("Open Link in New Tab"), for: link), downloadItem(localized("Download Linked File"), for: link), EngineActionMenuItem(localized("Copy Link")) { Self.copyToPasteboard(link) }].compactMap { $0 })
         }
         if let image = element.imageURL {
-            sections.append([newTabItem("Open Image in New Tab", for: image), downloadItem("Download Image", for: image), EngineActionMenuItem("Copy Image Address") { Self.copyToPasteboard(image) }].compactMap { $0 })
+            sections.append([newTabItem(localized("Open Image in New Tab"), for: image), downloadItem(localized("Download Image"), for: image), EngineActionMenuItem(localized("Copy Image Address")) { Self.copyToPasteboard(image) }].compactMap { $0 })
         }
         sections.append(handed.lookUp)
         if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
-            sections.append([EngineActionMenuItem("Search with \(SearchEngine.current.title)") { searchInNewTab(selection) }])
+            sections.append([EngineActionMenuItem(localized("Search with \(SearchEngine.current.title)")) { searchInNewTab(selection) }])
         }
         sections.append(handed.editing)
         // Text in a field is never sent, so the question needs a selection outside one. The question goes out under the page's site, so a selection in a frame inside the page, which can come from another site, gets none.
         if let selection = element.selectedText, !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !element.isEditable, element.isInMainFrame,
            let sourceURL = url, let askAboutSelection, PageAssistant.isQuestionAvailable {
             let sourceDocument = documentID
-            sections.append([EngineActionMenuItem("Ask About Selection\u{2026}") { [weak self] in
+            sections.append([EngineActionMenuItem(localized("Ask About Selection\u{2026}")) { [weak self] in
                 guard self?.documentID == sourceDocument else { return }
                 askAboutSelection(selection, sourceURL)
             }])
@@ -550,15 +550,15 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         sections += [handed.fieldSubmenus, handed.share]
         if sections.allSatisfy(\.isEmpty) {
             sections = [[
-                EngineActionMenuItem("Back", isEnabled: webContents.canGoBack) { [weak self, weak webContents] in
+                EngineActionMenuItem(localized("Back"), isEnabled: webContents.canGoBack) { [weak self, weak webContents] in
                     self?.pendingCause = nil
                     webContents?.navigationController.goBack()
                 },
-                EngineActionMenuItem("Forward", isEnabled: webContents.canGoForward) { [weak self, weak webContents] in
+                EngineActionMenuItem(localized("Forward"), isEnabled: webContents.canGoForward) { [weak self, weak webContents] in
                     self?.pendingCause = nil
                     webContents?.navigationController.goForward()
                 },
-                EngineActionMenuItem("Reload") { [weak self, weak webContents] in
+                EngineActionMenuItem(localized("Reload")) { [weak self, weak webContents] in
                     self?.pendingCause = nil
                     webContents?.navigationController.reload()
                 },

@@ -133,38 +133,38 @@ final class SitePermissionAnswers {
         var notes: [PromptNote] = []
         if remembersAnswer {
             // With several Personas the answer holds in all of them (Persona rule 6); with one, the note says nothing of Personas (Persona rule 7).
-            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: "Arch remembers your answer for this website\(inEveryPersona ? " in every Persona" : ""). You can change it in Settings \u{25B8} Websites.", tone: .info))
+            notes.append(PromptNote(id: "remembers", symbol: "info.circle", text: inEveryPersona ? localized("Arch remembers your answer for this website in every Persona. You can change it in Settings \u{25B8} Websites.") : localized("Arch remembers your answer for this website. You can change it in Settings \u{25B8} Websites."), tone: .info))
         }
         switch notificationStatus {
         case .notDetermined:
-            notes.append(PromptNote(id: "asksMacOS", symbol: "bell", text: "After you click Allow, macOS asks whether Arch can send you notifications.", tone: .info))
+            notes.append(PromptNote(id: "asksMacOS", symbol: "bell", text: localized("After you click Allow, macOS asks whether Arch can send you notifications."), tone: .info))
         case .denied:
-            notes.append(PromptNote(id: "notificationsOff", symbol: "bell.slash", text: "Notifications for Arch are off in System Settings, so this website\u{2019}s notifications won\u{2019}t show.", tone: .info))
+            notes.append(PromptNote(id: "notificationsOff", symbol: "bell.slash", text: localized("Notifications for Arch are off in System Settings, so this website\u{2019}s notifications won\u{2019}t show."), tone: .info))
         case .unavailable:
-            notes.append(PromptNote(id: "noNotifications", symbol: "bell.slash", text: "This copy of Arch runs without its app bundle, so it can\u{2019}t show notifications.", tone: .info))
+            notes.append(PromptNote(id: "noNotifications", symbol: "bell.slash", text: localized("This copy of Arch runs without its app bundle, so it can\u{2019}t show notifications."), tone: .info))
         case .allowed, nil:
             break
         }
-        var buttons = [PromptButton(id: "deny", title: "Don\u{2019}t Allow"), PromptButton(id: "allow", title: "Allow", needsArming: true)]
+        var buttons = [PromptButton(id: "deny", title: localized("Don\u{2019}t Allow")), PromptButton(id: "allow", title: localized("Allow"), needsArming: true)]
         if notificationStatus == .denied {
-            buttons.insert(PromptButton(id: "openSystemSettings", title: "Open System Settings", isAlternative: true), at: 0)
+            buttons.insert(PromptButton(id: "openSystemSettings", title: localized("Open System Settings"), isAlternative: true), at: 0)
         }
-        let asker = request.origin.host?.isEmpty == false ? "this website" : "this page"
+        let asker = request.origin.host?.isEmpty == false ? localized("this website") : localized("this page")
         return PromptContent(kind: .sitePermission, identity: identity, glyph: glyph(for: request.types),
-                             title: "Allow \(asker) to \(description(of: request.types))?", notes: notes,
+                             title: localized("Allow \(asker) to \(description(of: request.types))?"), notes: notes,
                              buttons: buttons, defaultButtonID: "allow", cancelButtonID: "deny")
     }
 
     private static func glyph(for types: [EnginePermissionType]) -> PromptGlyph {
         let order: [EnginePermissionType] = [.screenCapture, .camera, .microphone, .geolocation, .notifications, .clipboard, .midi]
         switch order.first(where: types.contains) ?? .camera {
-        case .screenCapture: return .symbol("rectangle.dashed.badge.record", tint: .purple, label: "Screen Recording")
-        case .camera: return .symbol("video.fill", tint: .green, label: "Camera")
-        case .microphone: return .symbol("mic.fill", tint: .orange, label: "Microphone")
-        case .geolocation: return .symbol("location.fill", tint: .accent, label: "Location")
-        case .notifications: return .symbol("bell.badge.fill", tint: .accent, label: "Notifications")
-        case .clipboard: return .symbol("doc.on.clipboard", tint: .accent, label: "Clipboard")
-        case .midi: return .symbol("pianokeys", tint: .accent, label: "MIDI Devices")
+        case .screenCapture: return .symbol("rectangle.dashed.badge.record", tint: .purple, label: localized("Screen Recording"))
+        case .camera: return .symbol("video.fill", tint: .green, label: localized("Camera"))
+        case .microphone: return .symbol("mic.fill", tint: .orange, label: localized("Microphone"))
+        case .geolocation: return .symbol("location.fill", tint: .accent, label: localized("Location"))
+        case .notifications: return .symbol("bell.badge.fill", tint: .accent, label: localized("Notifications"))
+        case .clipboard: return .symbol("doc.on.clipboard", tint: .accent, label: localized("Clipboard"))
+        case .midi: return .symbol("pianokeys", tint: .accent, label: localized("MIDI Devices"))
         }
     }
 
@@ -173,13 +173,13 @@ final class SitePermissionAnswers {
         let both = Set(types) == [.camera, .microphone]
         let phrases = types.compactMap { type -> String? in
             switch type {
-            case .camera: return both ? "use the camera and microphone" : "use the camera"
-            case .microphone: return both ? nil : "use the microphone"
-            case .screenCapture: return "record the screen"
-            case .geolocation: return "see your location"
-            case .notifications: return "send notifications"
-            case .clipboard: return "read the clipboard"
-            case .midi: return "use MIDI devices"
+            case .camera: return both ? localized("use the camera and microphone") : localized("use the camera")
+            case .microphone: return both ? nil : localized("use the microphone")
+            case .screenCapture: return localized("record the screen")
+            case .geolocation: return localized("see your location")
+            case .notifications: return localized("send notifications")
+            case .clipboard: return localized("read the clipboard")
+            case .midi: return localized("use MIDI devices")
             }
         }
         return ListFormatter.localizedString(byJoining: phrases)

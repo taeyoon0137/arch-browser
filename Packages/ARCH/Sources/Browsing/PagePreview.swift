@@ -128,7 +128,7 @@ struct PagePreviewPanel: View {
             .help(preview.url.absoluteString)
             Spacer(minLength: 8)
             Button(localized("Open in Tab"), action: windowModel.openPreviewInTab)
-            SidebarIconButton(symbol: "xmark", label: "Close Preview", action: windowModel.closePreview)
+            SidebarIconButton(symbol: "xmark", label: localized("Close Preview"), action: windowModel.closePreview)
         }
         .padding(.leading, 6)
         .frame(height: Self.headerHeight)

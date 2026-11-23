@@ -33,18 +33,18 @@ struct PageContextMenuSections {
         let guesses = handed.filter { $0.identifier == EngineContextMenuItem.spellingSuggestion }
         if !guesses.isEmpty {
             suggestions = Array(guesses.prefix(5))
-        } else if let noGuesses = titled(EngineContextMenuItem.noSpellingSuggestions, "No Guesses Found") {
+        } else if let noGuesses = titled(EngineContextMenuItem.noSpellingSuggestions, localized("No Guesses Found")) {
             noGuesses.isEnabled = false
             suggestions = [noGuesses]
         } else {
             suggestions = []
         }
-        spelling = [titled(EngineContextMenuItem.ignoreSpelling, "Ignore Spelling"), titled(EngineContextMenuItem.learnSpelling, "Learn Spelling")].compactMap { $0 }
+        spelling = [titled(EngineContextMenuItem.ignoreSpelling, localized("Ignore Spelling")), titled(EngineContextMenuItem.learnSpelling, localized("Learn Spelling"))].compactMap { $0 }
         lookUp = [item(EngineContextMenuItem.lookUp), item(EngineContextMenuItem.translate)].compactMap { $0 }
         if element.isEditable {
-            editing = [titled(EngineContextMenuItem.cut, "Cut"), titled(EngineContextMenuItem.copy, "Copy"), titled(EngineContextMenuItem.paste, "Paste"),
-                       titled(EngineContextMenuItem.selectAll, "Select All")].compactMap { $0 }
-        } else if element.linkURL == nil, element.imageURL == nil, element.mediaURL == nil, let copy = titled(EngineContextMenuItem.copy, "Copy") {
+            editing = [titled(EngineContextMenuItem.cut, localized("Cut")), titled(EngineContextMenuItem.copy, localized("Copy")), titled(EngineContextMenuItem.paste, localized("Paste")),
+                       titled(EngineContextMenuItem.selectAll, localized("Select All"))].compactMap { $0 }
+        } else if element.linkURL == nil, element.imageURL == nil, element.mediaURL == nil, let copy = titled(EngineContextMenuItem.copy, localized("Copy")) {
             // WebKit offers Copy outside fields only when the click is not on a link, image, or media, so Chromium follows it.
             editing = [copy]
         } else {

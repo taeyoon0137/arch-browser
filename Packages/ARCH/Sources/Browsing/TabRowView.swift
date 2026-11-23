@@ -34,7 +34,7 @@ struct TabRowView: View {
                 .frame(width: 18, height: 18)
                 .opacity(isDimmed ? SidebarDimming.unopened : 1)
             if windowModel.renamingTabID == tab.id {
-                SidebarNameField(placeholder: "Tab Name", name: tab.shownTitle,
+                SidebarNameField(placeholder: localized("Tab Name"), name: tab.shownTitle,
                                  onRename: { windowModel.renameTab(tab.id, to: $0) }, onEnd: { windowModel.endRenaming(tab.id) })
             } else {
                 Text(tab.shownTitle)
@@ -53,15 +53,15 @@ struct TabRowView: View {
             if showsHover {
                 HStack(spacing: 2) {
                     if tab.isOffSavedSite, let saved = tab.savedPage {
-                        TabRowButton(symbol: "arrow.uturn.backward", label: "Go Back to Saved Page", help: "Go Back to \(saved.url.absoluteString)") { session.goBackToSavedPage(tab) }
+                        TabRowButton(symbol: "arrow.uturn.backward", label: localized("Go Back to Saved Page"), help: localized("Go Back to \(saved.url.absoluteString)")) { session.goBackToSavedPage(tab) }
                     }
                     if tab.liveItemID != nil {
                         // Closing an item's tab dismisses the item (live folder rule 4).
-                        TabRowButton(symbol: "xmark", label: "Dismiss", help: "Dismiss") { session.requestCloseTab(tab) }
+                        TabRowButton(symbol: "xmark", label: localized("Dismiss"), help: localized("Dismiss")) { session.requestCloseTab(tab) }
                     } else if !tab.isPinned {
-                        TabRowButton(symbol: "xmark", label: "Close Tab", help: "Close Tab") { session.requestCloseTab(tab) }
+                        TabRowButton(symbol: "xmark", label: localized("Close Tab"), help: localized("Close Tab")) { session.requestCloseTab(tab) }
                     } else if tab.isLoaded {
-                        TabRowButton(symbol: "minus", label: "Unload Tab", help: "Unload Tab") { session.requestCloseTab(tab) }
+                        TabRowButton(symbol: "minus", label: localized("Unload Tab"), help: localized("Unload Tab")) { session.requestCloseTab(tab) }
                     }
                 }
             } else if commandKey.showsShortcuts, let number = windowModel.shortcutNumber(for: tab) {
@@ -102,18 +102,18 @@ struct TabRowView: View {
     static func details(of item: GitHubItem) -> [String] {
         var lines = [item.detail]
         switch item.reviewDecision {
-        case .approved?: lines.append("Approved")
-        case .changesRequested?: lines.append("Changes requested")
-        case .reviewRequired?: lines.append("Review required")
+        case .approved?: lines.append(localized("Approved"))
+        case .changesRequested?: lines.append(localized("Changes requested"))
+        case .reviewRequired?: lines.append(localized("Review required"))
         case nil: break
         }
         switch item.checks {
-        case .success?: lines.append("Checks passed")
-        case .failure?, .error?: lines.append("Checks failed")
-        case .pending?, .expected?: lines.append("Checks running")
+        case .success?: lines.append(localized("Checks passed"))
+        case .failure?, .error?: lines.append(localized("Checks failed"))
+        case .pending?, .expected?: lines.append(localized("Checks running"))
         case nil: break
         }
-        if item.mergeable == .conflicting { lines.append("Has conflicts") }
+        if item.mergeable == .conflicting { lines.append(localized("Has conflicts")) }
         return lines
     }
 
@@ -123,7 +123,7 @@ struct TabRowView: View {
             windowModel.selectTab(tab.id)
             windowModel.renamingTabID = tab.id
         }
-        Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
+        Button(tab.isPinned ? localized("Unpin Tab") : localized("Pin Tab")) { session.togglePinned(tab) }
         Button(localized("Add to Favorites")) { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
         Button(localized("Open in Split View")) { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
         Divider()
@@ -172,7 +172,7 @@ private struct LiveItemTabItems: View {
     @ObservedObject var tab: Tab
 
     var body: some View {
-        Button(tab.isUnread ? "Mark as Read" : "Mark as Unread") { session.setRead(tab.isUnread, ofItemTab: tab) }
+        Button(tab.isUnread ? localized("Mark as Read") : localized("Mark as Unread")) { session.setRead(tab.isUnread, ofItemTab: tab) }
         Button(localized("Dismiss")) { session.requestCloseTab(tab) }
         Divider()
         Button(localized("Rename Tab")) {
@@ -439,12 +439,12 @@ struct TabIconView: View {
     /// The symbol, color, and spoken name of a GitHub item's state (`docs/bookmarks.md`, Items as tabs).
     static func symbol(for item: GitHubItem) -> (name: String, color: Color, label: String) {
         switch (item.kind, item.state) {
-        case (.pullRequest, .open): return ("arrow.triangle.pull", .green, "Open Pull Request")
-        case (.pullRequest, .draft): return ("arrow.triangle.pull", .gray, "Draft Pull Request")
-        case (.pullRequest, .merged): return ("arrow.triangle.merge", .purple, "Merged Pull Request")
-        case (.pullRequest, .closed): return ("xmark.circle", .red, "Closed Pull Request")
-        case (.issue, .closed), (.issue, .merged): return ("checkmark.circle", .purple, "Closed Issue")
-        case (.issue, .open), (.issue, .draft): return ("circle.circle", .green, "Open Issue")
+        case (.pullRequest, .open): return ("arrow.triangle.pull", .green, localized("Open Pull Request"))
+        case (.pullRequest, .draft): return ("arrow.triangle.pull", .gray, localized("Draft Pull Request"))
+        case (.pullRequest, .merged): return ("arrow.triangle.merge", .purple, localized("Merged Pull Request"))
+        case (.pullRequest, .closed): return ("xmark.circle", .red, localized("Closed Pull Request"))
+        case (.issue, .closed), (.issue, .merged): return ("checkmark.circle", .purple, localized("Closed Issue"))
+        case (.issue, .open), (.issue, .draft): return ("circle.circle", .green, localized("Open Issue"))
         }
     }
 }

@@ -15,7 +15,7 @@ public enum InternalPage {
     /// The page's name, which its heading and the window's title show.
     var title: String {
         switch self {
-        case .flags: return "Flags"
+        case .flags: return localized("Flags")
         }
     }
 
@@ -70,14 +70,14 @@ struct FlagsPageView: View {
                         .accessibilityLabel(localized("Use private APIs"))
                         .toggleStyle(.switch)
                 }
-                FlagsSection(title: "Private APIs", emptyText: "Arch uses no private API yet.", isEmpty: flags.apis.isEmpty) {
+                FlagsSection(title: localized("Private APIs"), emptyText: localized("Arch uses no private API yet."), isEmpty: flags.apis.isEmpty) {
                     ForEach(flags.apis) { api in
                         FlagRow(title: api.name, detail: "\(api.framework) · \(availabilityText(api.id))", isMonospaced: true,
                                 isOn: Binding(get: { flags.isOn(api: api.id) }, set: { flags.setOn($0, api: api.id) }))
                     }
                 }
                 .disabled(!flags.allowsPrivateAPIs)
-                FlagsSection(title: "Features", emptyText: "No feature uses a private API yet.", isEmpty: flags.features.isEmpty) {
+                FlagsSection(title: localized("Features"), emptyText: localized("No feature uses a private API yet."), isEmpty: flags.features.isEmpty) {
                     ForEach(flags.features) { feature in
                         FlagRow(title: feature.name, detail: featureDetail(feature), isMonospaced: false,
                                 isOn: Binding(get: { flags.isOn(feature: feature.id) }, set: { flags.setOn($0, feature: feature.id) }))
@@ -95,16 +95,16 @@ struct FlagsPageView: View {
     /// Names a private API's current availability check result.
     private func availabilityText(_ id: String) -> String {
         switch flags.availability[id] {
-        case true?: return "Available"
-        case false?: return "Missing on this system"
-        case nil: return "Checking…"
+        case true?: return localized("Available")
+        case false?: return localized("Missing on this system")
+        case nil: return localized("Checking…")
         }
     }
 
     /// Summarizes a feature's active state and the private APIs it uses.
     private func featureDetail(_ feature: PrivateAPIFeature) -> String {
         let names = feature.apiIDs.map { id in flags.apis.first { $0.id == id }?.name ?? id }.joined(separator: ", ")
-        return "\(flags.allows(feature.id) ? "Active" : "Inactive") · Uses \(names)"
+        return flags.allows(feature.id) ? localized("Active · Uses \(names)") : localized("Inactive · Uses \(names)")
     }
 }
 
