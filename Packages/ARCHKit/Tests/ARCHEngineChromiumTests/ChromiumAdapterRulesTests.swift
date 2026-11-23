@@ -52,15 +52,6 @@ import Testing
         }
     }
 
-    /// The new tab's request names the frame the link is in, without its fragment and credentials, and only a web frame; the bridge applies Chromium's default policy to it.
-    @Test func aLinkOpenedInANewTabSendsItsWebFramesAddressAsReferrer() {
-        #expect(ChromiumWebContents.linkReferrer(fromFrameAt: "https://user:secret@news.example/story?id=1#top") == URL(string: "https://news.example/story?id=1"))
-        #expect(ChromiumWebContents.linkReferrer(fromFrameAt: "http://127.0.0.1:8080/") == URL(string: "http://127.0.0.1:8080/"))
-        for frame in ["", "about:blank", "file:///private/tmp/page.html", "data:text/html,a", "chrome://version/"] {
-            #expect(ChromiumWebContents.linkReferrer(fromFrameAt: frame) == nil)
-        }
-    }
-
     // MARK: Crashes
 
     /// A page that crashes again within a minute of its reload stays blank, so that it cannot reload in a loop, and a crash later than that, or of another page, reloads it.

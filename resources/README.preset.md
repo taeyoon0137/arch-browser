@@ -73,7 +73,7 @@ swift build
 open build/Arch.app
 ```
 
-The bridge needs the experimental DevTools, picture-in-picture, extension runtime, notification, and password AutoFill APIs listed under Engine Plan in `docs/plan.md`. The pinned `arch-8078-7` includes these engine changes and the isolated script worlds that page scripts use. To try a local build of `arch-8078` before its release, install it with `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
+The bridge needs the experimental DevTools, picture-in-picture, extension runtime, notification, password AutoFill, and link referrer APIs listed under Engine Plan in `docs/plan.md`. The pinned `arch-8078-8` includes these engine changes and the isolated script worlds that page scripts use. To try a local build of `arch-8078` before its release, install it with `ARCH_CEF_ARCHIVE=<path to the archive> ./scripts/setup_cef.sh`.
 
 After cloning, enable the commit message hook once:
 

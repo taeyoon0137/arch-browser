@@ -7,9 +7,9 @@
 # `ARCH_CEF_ARCHIVE` to that archive's path; the pin's checksum does not apply to it.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CEF_RELEASE="arch-8078-7"
-CEF_VERSION="156.0.61-arch-8078.3706+g7c39d42+chromium-156.0.8078.48"
-CEF_SHA256="cb754dadaf5882c978fc0996fa73a506fa084a1cbadc1920d9040991d6835ff8"
+CEF_RELEASE="arch-8078-8"
+CEF_VERSION="156.0.64-arch-8078.3709+gda4936c+chromium-156.0.8078.48"
+CEF_SHA256="5fd5f93347548380432640da86ac929a743947717fc608087f83c41c735d30d8"
 NAME="cef_binary_${CEF_VERSION}_macosarm64_arch_minimal.tar.bz2"
 DOWNLOADS="$ROOT/Frameworks/cef-download"
 CEF="$ROOT/Frameworks/cef"
