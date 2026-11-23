@@ -64,12 +64,14 @@ import Testing
         }
         func newController() {
             controller = SyncController(sidebar: sidebar, directory: directory, defaults: defaults, notifications: center,
-                check: { [unowned self] in
+                // Weak, not unowned: under load a check or an engine can still call in after the test that made the fixture has ended.
+                check: { [weak self] in
+                    guard let self else { return .unavailable(.temporarilyUnavailable) }
                     checks += 1
                     if let answer { return await answer() }
                     return .available(database)
-                }, factory: FakeSyncEngine.factory { [unowned self] engine in engines.append(engine); onCreate?(engine) },
-                now: { [unowned self] in clock })
+                }, factory: FakeSyncEngine.factory { [weak self] engine in self?.engines.append(engine); self?.onCreate?(engine) },
+                now: { [weak self] in self?.clock ?? Date(timeIntervalSinceReferenceDate: 100) })
         }
         var file: URL { directory.appendingPathComponent(SyncMirror.fileName) }
         var copy: SyncMirror { SyncMirror.read(from: file, database: database) }

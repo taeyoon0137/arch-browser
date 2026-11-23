@@ -87,10 +87,13 @@ import Testing
                                          sessionSeal: SessionStateSeal { nil }, removeLiveFolderKeychainItems: {})
             let target = zone.database
             controller = SyncController(sidebar: session, directory: directory, defaults: defaults, check: { .available(target) },
-                factory: FakeSyncEngine.factory { [unowned self] engine in
+                // Weak, not unowned: under load the engine can still call in after the test that made the fixture has ended.
+                factory: FakeSyncEngine.factory { [weak self] engine in
+                    guard let self else { return }
                     self.engine = engine
                     var cursor = engine.startedFrom.flatMap { try? JSONDecoder().decode(Int.self, from: $0) }
-                    engine.onFetch = { [unowned self, unowned engine] in
+                    engine.onFetch = { [weak self, weak engine] in
+                        guard let self, let engine else { return [] }
                         var changes: [SyncFetchedChanges]
                         if let cursor { changes = Array(zone.pages.dropFirst(cursor)) }
                         else {
@@ -102,7 +105,7 @@ import Testing
                         engine.fetchToken = try? JSONEncoder().encode(cursor)
                         return changes.map(SyncEvent.fetchedChanges)
                     }
-                    engine.onSavedBatch = { [unowned self] batch in zone.accept(batch) }
+                    engine.onSavedBatch = { [weak self] batch in self?.zone.accept(batch) }
                 })
         }
         func flush() async throws {
