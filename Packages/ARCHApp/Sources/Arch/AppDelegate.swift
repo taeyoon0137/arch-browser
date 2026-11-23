@@ -403,7 +403,8 @@ import Terminal
         fileMenu.addItem(withTitle: "Import from Browser\u{2026}", action: #selector(importFromBrowser), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Import Bookmarks and History\u{2026}", action: #selector(importBookmarksAndHistory), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
-        fileMenu.addItem(withTitle: "Save Page As\u{2026}", action: #selector(savePageAs), keyEquivalent: "s")
+        // ⌘S stays Show Sidebar's.
+        fileMenu.addItem(withTitle: "Save Page As\u{2026}", action: #selector(savePageAs), keyEquivalent: "S").keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
         mainMenu.addItem(submenu(fileMenu, title: "File"))
