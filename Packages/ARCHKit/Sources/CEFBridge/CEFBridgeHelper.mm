@@ -225,6 +225,12 @@ std::optional<CefString> EvaluateString(CefRefPtr<CefFrame> frame, const CefStri
     return result;
 }
 
+// Whether `context` is the page's main world context of the frame's document.
+bool IsMainWorld(CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) {
+    CefRefPtr<CefV8Context> main = frame->GetV8Context();
+    return main && main->IsSame(context);
+}
+
 // Calls the function a world's endpoint holds under `name`, in the context the caller entered.
 void CallEndpoint(CefRefPtr<CefV8Value> endpoint, const char *name, const CefV8ValueList &arguments) {
     CefRefPtr<CefV8Value> function = endpoint->GetValue(name);
@@ -249,8 +255,9 @@ public:
     }
 
     // Every frame's document reports its audible state and its media, through functions pages can call but not replace. Then the document gets its opener of page script endpoints, and the page scripts run, before the page's own scripts.
+    // CEF calls this for the context of every world, also the extensions' content script worlds and the worlds DevTools makes, so only the page's main world gets the media script and the page scripts.
     void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
-        if (!context->Enter()) {
+        if (!IsMainWorld(frame, context) || !context->Enter()) {
             return;
         }
         context->GetGlobal()->SetValue("__archReportAudible", CefV8Value::CreateFunction("__archReportAudible", new AudibleReporter()),
