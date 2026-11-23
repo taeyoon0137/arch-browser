@@ -649,6 +649,8 @@ Rules for every tier:
 
 ### Codex week queue
 
+Closed by review on November 23: the queue ended at X7 round 2 (November 20, 13:31 KST), and Z1 did not run. Seven reviews read its commits, and their fixes landed on the `work/week-fix-*` branches. Do not resume the steps below; they are kept as the record.
+
 Written on November 18 for Codex, which works alone until Claude's usage returns on November 22 at 05:00 KST. This section is the user's latest instruction; where it differs from `AGENTS.md` or from the older "Codex handoff queue" below, this section wins.
 
 How to work:
@@ -2117,7 +2119,11 @@ Run rounds in order, then start again at X1 with the next round number, until `d
 
 #### Group Z: the end
 
-- [ ] Z1. `swift build`, `./scripts/check_markdown.py`, `git diff --check main...HEAD`. Write under this step the totals: commits by group and round, all `decision:` and `blocked:` lines, and build warnings. **Commit** `Docs: Record what the week queue finished and left`. **Push**. Stop. Do not merge. Claude reviews `work/codex-week` part by part, runs the tests, and merges what holds.
+- Z1 did not run; the review replaced it (see the note at the top of this section). Ticks that the review found false or partial:
+  - A3 to A5: `arch.net.fetch` is built but refuses every request with `networkUnavailable` (X1.r1.3), and X3 removed its rate limit and current-grant check.
+  - A15, D1.11, X2: contracts, "Not built yet" markers in `docs/plugins.md`, and type comments were left for some items.
+  - X5.r1.7 to X5.r1.10 stay open for the user (`docs/bookmarks.md`, Open decisions), and X5.r1.4 and X5.r1.5 are defaults still open in `docs/plugins.md`.
+  - W1's two weak-capture warnings were never fixed, and E2 left the 37 prose-pass notes on Tests files.
 
 ### Codex handoff queue
 
@@ -2254,10 +2260,7 @@ Left for Claude, not for this queue: the review and merge of `work/plugins-step-
 
 ### Plugin continuation blockers
 
-- K7 blocked: `arch.net.fetch` has no documented JavaScript response shape, host entry grammar, or redirect policy. Defining these would invent a public API and security policy.
-- K8 blocked: The design names `settingsPage` but leaves the settings-page sandbox, `arch` bridge access, lifecycle, and navigation behavior unspecified. The existing panel host is a sidebar popover, not a Settings page.
-- K10 blocked: The design requires a two-version engine pair to copy together, but gives no two-package review and approval sequence or way to stage the installed signed package while preserving its proof.
-- K11 blocked: The manifest defines a panel file but no presentation field or value for replacing the sidebar column, and the design leaves that presentation as a future decision.
+The week queue's Group A wrote the contracts these notes asked for and built K8 (A6, A7), K11 (A12, A13), and K10 for an unpaired plugin (A9, A10). K7's fetch is built but refuses every request until the checked address is bound to the connection (`docs/plugins.md`). Still open: K10's copy of a two-engine pair, which needs a review sequence the user decides.
 
 ### Integration handoff
 
