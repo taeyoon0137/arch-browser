@@ -57,6 +57,10 @@ let package = Package(
         .executable(name: "ArchHelper", targets: ["ArchHelper"]),
         .executable(name: "arch-cli", targets: ["ArchCLI"]),
     ],
+    // Sparkle checks for and installs app updates from the project's GitHub Releases (`docs/updates.md`). Only the app target uses it, and the version is pinned.
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
+    ],
     targets: [
         .target(name: "ARCHEngine", path: "Packages/ARCHKit/Sources/ARCHEngine", resources: [.process("Resources")]),
         .target(name: "ARCHPrivateAPI", path: "Packages/ARCHKit/Sources/ARCHPrivateAPI"),
@@ -93,8 +97,8 @@ let package = Package(
         .target(name: "Hooks", dependencies: ["Events", "AI", "Plugins", "Agent", "AgentControl"], path: "Packages/ARCH/Sources/Hooks", resources: [.process("Resources")]),
         .target(name: "Preferences", dependencies: ["ARCHEngine", "Browsing", "AI", "Plugins", "Extensions", "Agent", "AgentControl", "Events", "Hooks", "Sync"], path: "Packages/ARCH/Sources/Preferences", resources: [.process("Resources")]),
         .target(name: "Import", dependencies: ["Browsing", "History"], path: "Packages/ARCH/Sources/Import", resources: [.process("Resources")], linkerSettings: [.linkedLibrary("sqlite3")]),
-        // `scripts/bundle_app.sh` copies the scripting definition into the bundle.
-        .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "Agent", "Hooks", "Sync", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge"], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"], resources: [.process("Resources")]),
+        // `scripts/bundle_app.sh` copies the scripting definition into the bundle and embeds Sparkle's framework.
+        .executableTarget(name: "Arch", dependencies: ["ARCHEngine", "Browsing", "Preferences", "History", "Import", "Plugins", "Terminal", "Agent", "Hooks", "Sync", "ARCHEngineWebKit", "ARCHEngineChromium", "CEFBridge", .product(name: "Sparkle", package: "Sparkle")], path: "Packages/ARCHApp/Sources/Arch", exclude: ["Arch.sdef"], resources: [.process("Resources")]),
         .executableTarget(name: "ArchHelper", dependencies: ["CEFBridge"], path: "Packages/ARCHApp/Sources/ArchHelper"),
         // `scripts/bundle_app.sh` copies it into Contents/Helpers as arch-cli, with arch-mcp as a link to it.
         .executableTarget(name: "ArchCLI", dependencies: ["AgentControl"], path: "Packages/ARCHApp/Sources/ArchCLI"),

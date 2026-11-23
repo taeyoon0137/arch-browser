@@ -1,5 +1,5 @@
 // Settings sections for General, Sidebar, and Appearance.
-// General controls the default browser, links from other apps, new pages, downloads, and the app's language. Sidebar controls tab archiving. Appearance controls the app's appearance.
+// General controls the default browser, links from other apps, new pages, downloads, the app's language, and update checks. Sidebar controls tab archiving. Appearance controls the app's appearance.
 import AppKit
 import ARCHEngine
 import Browsing
@@ -18,8 +18,9 @@ func formFootnote(_ text: String) -> some View {
         .frame(maxWidth: .infinity, alignment: .leading)
 }
 
-/// The default browser, whether links from other apps open in small windows, the engine and search engine for new pages, where downloads go, and the language Arch uses from its next launch.
+/// The default browser, whether links from other apps open in small windows, the engine and search engine for new pages, where downloads go, the language Arch uses from its next launch, and, with an updater, its update checks.
 struct GeneralSection: View {
+    let updates: AppUpdateControls?
     @State private var isDefaultBrowser = DefaultBrowser.isDefault
     @AppStorage(BrowserSession.opensLinksInSmallWindowKey) private var opensLinksInSmallWindow = BrowserSession.opensLinksInSmallWindowByDefault
     /// The registry keeps the default engine here. The site settings popover can change it while the window is open, and the picker then shows the change (`defaultEngine`).
@@ -87,6 +88,9 @@ struct GeneralSection: View {
                     }
                 }
             }
+            if let updates {
+                UpdatesSettings(controls: updates)
+            }
         }
         .formStyle(.grouped)
         .frame(width: sectionWidth)
@@ -126,6 +130,59 @@ struct GeneralSection: View {
         } else {
             panel.begin(completionHandler: finish)
         }
+    }
+}
+
+/// The updater's state and actions, which the app shell connects to Sparkle so that this module does not depend on it (`docs/updates.md`).
+@MainActor public final class AppUpdateControls: ObservableObject {
+    /// Whether the updater checks on its own, once a day.
+    @Published public var automaticallyChecks: Bool
+    /// False while a check or an update is in progress.
+    @Published public var canCheckNow: Bool
+    @Published public var lastCheck: Date?
+    public var setAutomaticallyChecks: (Bool) -> Void = { _ in }
+    /// Checks at once, showing what it finds, also when it finds no update.
+    public var checkNow: () -> Void = {}
+
+    public init(automaticallyChecks: Bool, canCheckNow: Bool, lastCheck: Date?) {
+        self.automaticallyChecks = automaticallyChecks
+        self.canCheckNow = canCheckNow
+        self.lastCheck = lastCheck
+    }
+}
+
+/// Settings ▸ General's updates: automatic checks, the running version with Check Now, and when the last check was.
+private struct UpdatesSettings: View {
+    @ObservedObject var controls: AppUpdateControls
+
+    var body: some View {
+        Section {
+            Toggle(localized("Check for updates automatically"), isOn: Binding(get: { controls.automaticallyChecks }, set: { controls.setAutomaticallyChecks($0) }))
+            LabeledContent(localized("Version")) {
+                HStack(spacing: 6) {
+                    Text(verbatim: Self.version)
+                    Button(localized("Check Now")) { controls.checkNow() }
+                        .disabled(!controls.canCheckNow)
+                }
+            }
+        } header: {
+            Text("Updates", bundle: .module)
+        } footer: {
+            // As Settings ▸ Plugins words its checks: the time for a check today, and the date too for an earlier one.
+            if let lastCheck = controls.lastCheck {
+                formFootnote(Calendar.current.isDateInToday(lastCheck)
+                    ? localized("Last checked at \(lastCheck.formatted(date: .omitted, time: .shortened)).")
+                    : localized("Last checked on \(lastCheck.formatted(date: .abbreviated, time: .shortened))."))
+            }
+        }
+    }
+
+    /// The short version and the build number, as "0.1.0 (202611231530)".
+    private static var version: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let short = info["CFBundleShortVersionString"] as? String ?? ""
+        let build = info["CFBundleVersion"] as? String ?? ""
+        return build.isEmpty ? short : "\(short) (\(build))"
     }
 }
 
