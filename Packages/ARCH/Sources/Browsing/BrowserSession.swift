@@ -2637,12 +2637,12 @@ extension BrowserSession {
         deletePersona(id)
     }
 
-    /// Installs in `target` each plugin and extension of `source` that another Persona can install from its package (`PluginManager.packageFolderForCopy(of:)`) and that `target` has none of by identifier, with the grant and the on or off choice it has in `source`. Its storage and secrets stay behind. Bundled plugins are in every Persona already, and those that AI wrote or that pair two engines' versions cannot be copied from their package, so they go with the source.
+    /// Installs in `target` each plugin and extension of `source` that another Persona can install from its package (`PluginManager.packageForCopy(of:)`) and that `target` has none of by identifier, with the grant and the on or off choice it has in `source`. Its storage and secrets stay behind. Bundled plugins are in every Persona already, and those that AI wrote or that pair two engines' versions cannot be copied from their package, so they go with the source.
     private func copyPlugins(from source: Persona.ID, to target: Persona.ID) async throws {
         let from = plugins(in: source), into = plugins(in: target)
         for plugin in from.plugins where !into.plugins.contains(where: { $0.manifest.id == plugin.manifest.id }) {
-            guard let folder = from.packageFolderForCopy(of: plugin.id) else { continue }
-            let package = try await into.stage(folder)
+            guard let copy = from.packageForCopy(of: plugin.id) else { continue }
+            let package = try await into.stage(copy)
             do {
                 try into.install(package, grant: plugin.grant, isEnabled: plugin.isEnabled)
             } catch {

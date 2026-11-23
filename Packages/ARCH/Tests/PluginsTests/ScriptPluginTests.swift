@@ -431,6 +431,36 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(manager.panelRequest?.nonce == request.nonce)
     }
 
+    /// Another Persona's copy reads the installed package off the main thread, so a copy whose package its Persona updates or removes after the copy began is discarded with nothing left staged, rather than staged with files that the change moved or deleted; a copy that begins afterwards stages.
+    @Test func discardsACopyWhosePackageChangedInItsPersona() async throws {
+        let source = manager()
+        defer { source.close() }
+        try await installSample(in: source)
+        let target = PluginManager(persona: UUID(), directory: folder.url, builtIns: [], secretStore: secrets)
+        defer { target.close() }
+        let changed = PluginError.invalidPackage("The plugin changed in its Persona while Arch copied it. Try again.")
+        let staged = { (try? FileManager.default.contentsOfDirectory(atPath: target.stagingDirectory.path)) ?? [] }
+
+        let update = try await source.stage(sampleFolder)
+        let copy = try #require(source.packageForCopy(of: sampleID))
+        let copying = Task { try await target.stage(copy) }
+        // The update moves the new package in before the copy's task runs.
+        try source.install(update, grant: PluginGrant(permissions: [], sites: update.manifest.sites), isEnabled: true)
+        await #expect(throws: changed) { try await copying.value }
+        #expect(staged().isEmpty)
+
+        let removed = try #require(source.packageForCopy(of: sampleID))
+        try source.remove(sampleID)
+        await #expect(throws: changed) { try await target.stage(removed) }
+        #expect(staged().isEmpty)
+
+        try await installSample(in: source)
+        let current = try #require(source.packageForCopy(of: sampleID))
+        let package = try await target.stage(current)
+        #expect(package.manifest.id == sampleID && staged().count == 1)
+        target.discard(package)
+    }
+
     /// A panel keeps to its page: a reload or a link to another document goes nowhere, while a link within the page moves there. Once its instance stops, its calls fail with `stopped` and it asks its popover to close.
     @Test func keepsAPanelOnItsPageAndEndsItWithItsInstance() async throws {
         let id = PluginID(rawValue: "org.example.page-panel")!
@@ -618,7 +648,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(manager.plugins.map(\.origin) == [.generated(composition)] && !manager.plugins[0].isEnabled)
         #expect(manager.contributions.paletteCommands(matching: "copy").isEmpty)
         // Another Persona's review would show it as a file install without its requests, so it offers no copy.
-        #expect(manager.packageFolderForCopy(of: package.manifest.id) == nil)
+        #expect(manager.packageForCopy(of: package.manifest.id) == nil)
         let relaunched = self.manager()
         #expect(relaunched.plugins.map(\.origin) == [.generated(composition)])
         try relaunched.remove(package.manifest.id)
@@ -632,7 +662,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         let installed = try #require(relaunched.plugins.first)
         #expect(relaunched.plugins.count == 1 && installed.isEnabled && installed.origin == .file(sampleFolder))
         #expect(installed.grant == PluginGrant(permissions: [], sites: installed.manifest.sites))
-        #expect(relaunched.packageFolderForCopy(of: installed.id) != nil)
+        #expect(relaunched.packageForCopy(of: installed.id) != nil)
         await run("remember", in: relaunched)
         #expect(try stored("remembered", in: relaunched) != nil)
     }

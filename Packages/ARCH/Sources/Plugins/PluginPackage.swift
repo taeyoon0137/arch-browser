@@ -264,3 +264,10 @@ public struct PluginPackage: Identifiable, Sendable {
         return files.sorted()
     }
 }
+
+/// An installed package that another Persona can stage for its own review (`PluginManager.packageForCopy(of:)`). Only a manager makes one, from its installed packages.
+public struct PluginPackageCopy: Sendable {
+    let folder: URL
+    /// Whether the package is still installed as it was when the manager made the copy: no install or removal of its identifier has begun there since. The staging Persona's manager asks after its copy has read the files, which it reads off the main thread while the installing manager can move, replace, or delete them.
+    let isCurrent: @MainActor @Sendable () -> Bool
+}
