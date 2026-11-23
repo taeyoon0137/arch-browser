@@ -3,7 +3,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// The layer over one pane that shows its tab's oldest prompt as a `PromptCard` with the dimming behind it, as the file header describes. `SplitView` puts one on each pane.
+/// The layer over one pane that shows its tab's oldest prompt as a `PromptCard` with the dimming behind it. `SplitView` puts one on each pane.
 struct PanePromptLayer: View {
     /// How far the card reaches above the page frame into the window's margin.
     static let edgeOverlap: CGFloat = 3

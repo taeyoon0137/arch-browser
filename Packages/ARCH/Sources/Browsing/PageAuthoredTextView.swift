@@ -1,7 +1,7 @@
 // A page's or server's own words in a prompt card: in a box of their own below Arch's words, as written, selectable, and scrolling past 180 points. VoiceOver reads them as a message from the site.
 import SwiftUI
 
-/// Shows a page's or server's own words in a `PromptCard`, as the file header describes.
+/// Shows a page's or server's own words in a `PromptCard`.
 struct PageAuthoredTextView: View {
     let text: PageAuthoredText
     /// The site that wrote the text, which VoiceOver names.

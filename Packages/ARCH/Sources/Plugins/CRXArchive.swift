@@ -4,7 +4,7 @@ import Foundation
 import Security
 import UniformTypeIdentifiers
 
-/// Checks a `.crx` file's header and proofs and gives the package's `.zip` archive, as the file header describes.
+/// Checks a `.crx` file's header and proofs and gives the package's `.zip` archive.
 struct CRXArchive {
     /// The SHA-256 digest of the Web Store's publisher key as DER `SubjectPublicKeyInfo`: `kPublisherKeyHash` in `components/crx_file/crx_verifier.cc` of Chromium 156.0.8078.48, the Chromium of the pinned CEF branch. A store package in that source's test data carries a proof by this key (`docs/web-store.md`, Facts).
     static let webStorePublisherKeyDigest = Data([

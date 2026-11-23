@@ -2,7 +2,7 @@
 // The card holds keyboard focus for its prompt and binds Return and Escape there. It knows nothing about the queue and reports its answer once.
 import SwiftUI
 
-/// Draws one tab's prompt as a card and reports the user's answer once, as the file header describes. `PanePromptLayer` shows it over the tab's pane.
+/// Draws one tab's prompt as a card and reports the user's answer once. `PanePromptLayer` shows it over the tab's pane.
 struct PromptCard: View {
     @ObservedObject var state: PromptState
     let width: CGFloat

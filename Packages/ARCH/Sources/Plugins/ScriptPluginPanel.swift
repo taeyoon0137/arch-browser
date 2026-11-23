@@ -5,7 +5,7 @@
 import AppKit
 import WebKit
 
-/// A script plugin's panel in a sidebar popover, as the file header describes.
+/// A script plugin's panel in a sidebar popover.
 @MainActor
 final class ScriptPluginPanel: NSViewController, PluginEndingPanel, WKNavigationDelegate {
     /// The panel's size, the width of the address pill's site settings popover by a height that leaves a page room.

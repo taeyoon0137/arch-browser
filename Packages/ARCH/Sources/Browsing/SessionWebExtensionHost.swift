@@ -8,7 +8,7 @@ import Combine
 import Extensions
 import Plugins
 
-/// The session's side of the web extension runtime, as the file header describes: it opens and reports tabs and windows for the extensions of its Personas.
+/// The session's side of the web extension runtime: it opens and reports tabs and windows for the extensions of its Personas.
 @MainActor
 final class SessionWebExtensionHost: WebExtensionHost {
     private weak var session: BrowserSession?

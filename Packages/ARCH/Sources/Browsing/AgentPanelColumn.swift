@@ -14,7 +14,7 @@ public enum AgentPanelContent: Equatable {
     case client(UUID)
 }
 
-/// The window's trailing agent panel column, as the file header describes: a client's panel, the composer, or a session.
+/// The window's trailing agent panel column: a client's panel, the composer, or a session.
 struct AgentPanelColumn: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -173,7 +173,7 @@ struct AgentsIndicator: View {
     }
 }
 
-/// The bottom bar's agents menu, as the file header describes, which marks when an agent waits for the user.
+/// The bottom bar's agents menu, which marks when an agent waits for the user.
 private struct AgentsIndicatorMenu: View {
     @ObservedObject var agents: AgentService
     /// The cards that wait, which a client's row names, since a composer or a session in the column does not give way to a client's panel.

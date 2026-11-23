@@ -5,7 +5,7 @@ import Events
 import Foundation
 import Plugins
 
-/// The session's host for the AI hook center, as the file header describes: it feeds the center the bus's events and applies the actions that hooks return.
+/// The session's host for the AI hook center: it feeds the center the bus's events and applies the actions that hooks return.
 @MainActor
 final class BrowserHooks: AIHookHost {
     /// The bus events the center hears of; the filter's empty tab kinds leave agent tabs out.

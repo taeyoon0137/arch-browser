@@ -3,7 +3,7 @@
 import AppKit
 import Combine
 
-/// One waiting prompt in `TabPromptQueue`: its content, what the user entered, and its arming, as the file header describes.
+/// One waiting prompt in `TabPromptQueue`: its content, what the user entered, and its arming.
 final class PromptState: ObservableObject, Identifiable {
     let id = UUID()
     let tabID: UUID

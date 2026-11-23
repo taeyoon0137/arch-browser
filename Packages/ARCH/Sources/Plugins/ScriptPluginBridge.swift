@@ -6,7 +6,7 @@ import AI
 import ARCHEngine
 import WebKit
 
-/// The `arch` message handler of one script plugin web view, as the file header describes.
+/// The `arch` message handler of one script plugin web view.
 @MainActor
 final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The name under which documents reach the handler, `window.webkit.messageHandlers.arch`.

@@ -26,7 +26,7 @@ enum SidebarDimming {
     static let unopened = 0.5
 }
 
-/// The sidebar of a main window, as the file header describes: the top row, the space pages, and the bottom bar, with the library beside them. `BrowserWindowView` places it.
+/// The sidebar of a main window: the top row, the space pages, and the bottom bar, with the library beside them. `BrowserWindowView` places it.
 struct SidebarView: View {
     static let defaultWidth: CGFloat = 250
     /// The top row needs about 231 points: the window buttons end 79 points in, and its four buttons, gaps, spacer, and trailing inset take 140 more inside the margins.

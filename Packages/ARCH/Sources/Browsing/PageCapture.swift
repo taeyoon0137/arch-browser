@@ -1,7 +1,7 @@
 // Writes page captures as PNG files to the captures folder, named after the page and the time, and crops viewport captures to a region.
 import AppKit
 
-/// Saves page captures as PNG files in `folder`, as the file header describes, and crops a viewport capture to a region.
+/// Saves page captures as PNG files in `folder` and crops a viewport capture to a region.
 enum PageCapture {
     /// `~/Pictures/Arch Captures`. Captures are pictures, and keeping them out of the downloads folder keeps them apart from the files the library lists.
     static var folder: URL {

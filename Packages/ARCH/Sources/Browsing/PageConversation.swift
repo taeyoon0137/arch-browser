@@ -12,7 +12,7 @@ enum QuestionSelection {
     case current
 }
 
-/// One tab's conversation with the AI module about its page, as the file header describes. The page reader and the question popover show and extend it.
+/// One tab's conversation with the AI module about its page. The page reader and the question popover show and extend it.
 @MainActor
 final class PageConversation: ObservableObject {
     /// The page text one question reads at most. The service cuts it further to the model's input limit.

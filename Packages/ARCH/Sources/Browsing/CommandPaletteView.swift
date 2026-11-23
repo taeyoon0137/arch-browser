@@ -10,7 +10,7 @@ import History
 import Plugins
 import SwiftUI
 
-/// The command palette, as the file header describes: the text field and the rows that match it, in `mode`.
+/// The command palette: the text field and the rows that match it, in `mode`.
 struct CommandPaletteView: View {
     @ObservedObject private var aiSettings = AIService.shared.settings
     @ObservedObject var session: BrowserSession

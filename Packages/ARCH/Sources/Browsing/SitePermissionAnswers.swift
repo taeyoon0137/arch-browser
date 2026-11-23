@@ -3,7 +3,7 @@ import ARCHEngine
 import Combine
 import Foundation
 
-/// Answers websites' permission requests for the session and keeps each engine profile's answers in line with its Persona's, as the file header describes.
+/// Answers websites' permission requests for the session and keeps each engine profile's answers in line with its Persona's.
 final class SitePermissionAnswers {
     /// The remembered answers, which the session keeps in its folder.
     let store: SitePermissionStore

@@ -3,7 +3,7 @@
 // Releasing Control selects the highlighted tab.
 import SwiftUI
 
-/// The ⌃Tab switcher over the window, as the file header describes.
+/// The ⌃Tab switcher over the window.
 struct TabSwitcherView: View {
     /// Observed because the tabs the switcher lists are the session's.
     @ObservedObject var session: BrowserSession

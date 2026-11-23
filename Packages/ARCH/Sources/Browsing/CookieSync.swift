@@ -3,7 +3,7 @@ import ARCHEngine
 import CryptoKit
 import Foundation
 
-/// Copies cookie changes between the cookie stores of one Persona's engines, as the file header describes; `PersonaEngines` holds one per Persona.
+/// Copies cookie changes between the cookie stores of one Persona's engines; `PersonaEngines` holds one per Persona.
 final class CookieSync {
     /// A cookie's identity in a store: its name, domain, and path.
     struct CookieKey: Hashable {

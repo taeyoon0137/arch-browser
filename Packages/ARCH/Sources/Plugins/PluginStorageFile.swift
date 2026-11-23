@@ -1,7 +1,7 @@
 // A plugin's storage in one Persona, kept in `storage.json` in the plugin's folder: a JSON object of the plugin's keys and values, and of its setting values under keys with a reserved prefix. The file is read when the storage is created and written atomically once changes settle, or while they keep coming, and at quit. Each instance of the plugin reaches it through a view of its own that stops writing when the instance stops.
 import AppKit
 
-/// A plugin's `storage.json` in one Persona, as the file header describes, with the quota that its keys and settings share.
+/// A plugin's `storage.json` in one Persona, with the quota that its keys and settings share.
 @MainActor
 final class PluginStorageFile: PluginStorage {
     /// 5 MB, counted as the UTF-8 bytes of each key plus the JSON of its value, for the plugin's keys and its settings together.

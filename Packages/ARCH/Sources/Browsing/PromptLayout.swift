@@ -1,7 +1,7 @@
 // The size of a prompt card in its pane, and the compact layout of a narrow card, which drops the glyph tile, tightens the spacing, and stacks its buttons.
 import CoreGraphics
 
-/// A prompt card's layout, regular or compact, and its size in a pane, as the file header describes.
+/// A prompt card's layout, regular or compact, and its size in a pane.
 enum PromptLayout: Equatable {
     case regular, compact
 

@@ -3,7 +3,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Holds each tab's waiting prompts in order until the user answers them, as the file header describes. The session owns one; the panes, the sidebar marks, and the tabs read it.
+/// Holds each tab's waiting prompts in order until the user answers them. The session owns one; the panes, the sidebar marks, and the tabs read it.
 @MainActor final class TabPromptQueue: ObservableObject {
     /// The prompts of each tab, oldest first. The first is the one a card shows.
     @Published private(set) var waiting: [UUID: [PromptState]] = [:]

@@ -1,7 +1,7 @@
 // The find bar floats over the page's top-right corner. Typing searches the selected tab, Return and the arrows move through matches, and Escape or its close button closes the bar.
 import SwiftUI
 
-/// The find bar over the selected tab's page, as the file header describes; `SplitView` shows it while the window model's find bar is open.
+/// The find bar over the selected tab's page; `SplitView` shows it while the window model's find bar is open.
 struct FindBarView: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @FocusState private var isFocused: Bool

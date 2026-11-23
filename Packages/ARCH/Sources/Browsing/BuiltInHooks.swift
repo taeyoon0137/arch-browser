@@ -11,7 +11,7 @@ extension AIFeature {
                                             trigger: .automatic, data: AIDataScope(kinds: [.download]))
 }
 
-/// Makes the hook registrations of the built-in Tab Names and Download Names features, as the file header describes.
+/// Makes the hook registrations of the built-in Tab Names and Download Names features.
 enum BuiltInHooks {
     /// The characters of page text the tab name hook reads and sends.
     static let tabNamePageText = 2_000

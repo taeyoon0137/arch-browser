@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// Draws a prompt card's surface in `shape`, as the file header describes.
+/// Draws a prompt card's surface in `shape`.
 struct PromptSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     @Environment(\.colorScheme) private var colorScheme

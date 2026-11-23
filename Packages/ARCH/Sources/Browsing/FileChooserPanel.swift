@@ -2,7 +2,7 @@
 import AppKit
 import ARCHEngine
 
-/// Makes the open or save panel for a page's file chooser and reads the user's choice back, as the file header describes.
+/// Makes the open or save panel for a page's file chooser and reads the user's choice back.
 enum FileChooserPanel {
     /// A panel set up for the request, with a message that names who asks (`asker(of:)`). The open panel offers only the page's accepted types when each has a file type (`allowedContentTypes`), and otherwise every file.
     static func make(for request: EngineFileChooserRequest) -> NSSavePanel {

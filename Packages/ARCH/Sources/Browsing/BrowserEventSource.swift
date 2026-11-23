@@ -34,7 +34,7 @@ extension BrowserTabCloseReason {
     }
 }
 
-/// Watches the session's tabs, windows, and downloads and posts their changes as browser events to the session's bus, as the file header describes.
+/// Watches the session's tabs, windows, and downloads and posts their changes as browser events to the session's bus.
 @MainActor
 final class BrowserEventSource {
     let bus: BrowserEventBus

@@ -24,7 +24,7 @@ struct SpaceSwipeView: NSViewRepresentable {
     }
 }
 
-/// Watches scroll events with a local monitor and reports a horizontal two-finger swipe over itself, as the file header describes.
+/// Watches scroll events with a local monitor and reports a horizontal two-finger swipe over itself.
 final class SpaceSwipeNSView: NSView {
     var isEnabled = true
     var onChange: ((CGFloat) -> Void)?

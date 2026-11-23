@@ -119,7 +119,7 @@ struct BookmarkTree: Equatable {
     }
 }
 
-/// Parses bookmark files into favorites or bookmark trees, as the file header describes.
+/// Parses bookmark files into favorites or bookmark trees.
 enum BookmarkFile {
     /// HTML bookmark files, the common export format: each bookmark is an `A` element whose `HREF` holds the address and whose text is the name. Favorites have no folders, so the file's folders are flattened.
     static func netscapeFavorites(from data: Data) -> [Favorite] {

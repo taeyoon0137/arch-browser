@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// Sends the keyboard focus back to a pane's prompt card when it moves into the pane's page, as the file header describes; `PanePromptLayer` puts it on the pane.
+/// Sends the keyboard focus back to a pane's prompt card when it moves into the pane's page; `PanePromptLayer` puts it on the pane.
 struct PromptFocusGuard: NSViewRepresentable {
     /// Whether a card shows over the pane.
     let isEngaged: Bool

@@ -7,7 +7,7 @@ import Events
 import Foundation
 import Plugins
 
-/// The `PluginContext` of one JavaScript hook instance in one Persona, as the file header describes.
+/// The `PluginContext` of one JavaScript hook instance in one Persona.
 @MainActor
 final class HookScriptContext: PluginAgentContext {
     let pluginID: PluginID

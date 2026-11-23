@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// Hosts a tab's engine view, or a docked developer tools view, in SwiftUI with the page frame's rounded corners, as the file header describes.
+/// Hosts a tab's engine view, or a docked developer tools view, in SwiftUI with the page frame's rounded corners.
 struct WebContentsHostView: NSViewRepresentable {
     let contentView: NSView?
     /// The page frame's radius, or 0 while the page fills the window in fullscreen.

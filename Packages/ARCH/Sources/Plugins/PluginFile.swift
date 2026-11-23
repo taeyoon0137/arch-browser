@@ -1,7 +1,7 @@
 // The JSON files in a Persona's plugin folder, `plugins.json` and each plugin's `storage.json`: read whole, written atomically, and kept aside when they do not read or decode.
 import Foundation
 
-/// Reads and writes the JSON files of a Persona's plugin folder, as the file header describes.
+/// Reads and writes the JSON files of a Persona's plugin folder.
 enum PluginFile {
     /// The value in the file, or nil for a missing file. A file that does not read, as for its permissions, or does not decode moves to `unreadableURL(of:)`, replacing an older one, so that the next write does not overwrite it, and reads as nil too.
     static func read<Value: Decodable>(_ type: Value.Type, at url: URL) -> Value? {

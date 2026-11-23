@@ -14,7 +14,7 @@ enum TerminalAction: Equatable {
     case operatingSystemCommand(String)
 }
 
-/// Turns a program's output bytes into `TerminalAction`s, as the file header describes.
+/// Turns a program's output bytes into `TerminalAction`s.
 struct TerminalParser {
     /// Where the parser is in the terminal's state machine.
     private enum State {

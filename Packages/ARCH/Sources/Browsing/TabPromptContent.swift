@@ -4,7 +4,7 @@ import ARCHEngine
 import Extensions
 import Foundation
 
-/// Builds the `PromptContent` of each kind of tab prompt and reads its answer, as the file header describes.
+/// Builds the `PromptContent` of each kind of tab prompt and reads its answer.
 enum TabPromptContent {
     // MARK: Page dialogs
 
