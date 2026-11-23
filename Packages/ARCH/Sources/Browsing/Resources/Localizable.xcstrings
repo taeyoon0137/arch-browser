@@ -2131,6 +2131,16 @@
         }
       }
     },
+    "In a space of another Persona, they reload in that Persona’s profile, without their pages’ sign-ins and back and forward history." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 페르소나의 스페이스로 옮기면 탭이 해당 페르소나의 프로필에서 다시 로드되며, 페이지의 로그인과 뒤로·앞으로 기록은 유지되지 않습니다."
+          }
+        }
+      }
+    },
     "Inactive · Uses %@" : {
       "localizations" : {
         "ko" : {
@@ -2331,6 +2341,16 @@
         }
       }
     },
+    "Its pinned tabs, folders, and open tabs move to the space you choose, after that space’s own, and “%@” is removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정된 탭, 폴더, 열린 탭이 선택한 스페이스의 기존 항목 뒤로 옮겨지고, “%@” 스페이스는 제거됩니다."
+          }
+        }
+      }
+    },
     "Its space and %lld favorites are removed" : {
       "localizations" : {
         "ko" : {
@@ -2387,6 +2407,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "스페이스가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Its spaces move to the Persona you choose with their names, and its favorites follow that Persona’s. Its tabs reload in that Persona’s profile, and plugins and extensions it lacks are installed there with the permissions you gave them." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스는 이름을 유지한 채 선택한 페르소나로 옮겨지고, 즐겨찾기는 해당 페르소나의 즐겨찾기 뒤에 추가됩니다. 탭은 해당 페르소나의 프로필에서 다시 로드되며, 해당 페르소나에 없는 플러그인과 확장 프로그램은 허용한 권한 그대로 설치됩니다."
           }
         }
       }
@@ -2597,6 +2627,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "읽지 않음으로 표시"
+          }
+        }
+      }
+    },
+    "Merge" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "합치기"
+          }
+        }
+      }
+    },
+    "Merge %@ into another Persona?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@를 다른 페르소나에 합치겠습니까?"
+          }
+        }
+      }
+    },
+    "Merge Persona Into…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 페르소나에 합치기…"
+          }
+        }
+      }
+    },
+    "Merge Space Into…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 스페이스에 합치기…"
+          }
+        }
+      }
+    },
+    "Merge “%@” into another space?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 스페이스를 다른 스페이스에 합치겠습니까?"
           }
         }
       }
@@ -4281,6 +4361,16 @@
         }
       }
     },
+    "The Persona could not be merged." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나를 합칠 수 없습니다."
+          }
+        }
+      }
+    },
     "The capture could not be saved." : {
       "localizations" : {
         "ko" : {
@@ -4397,6 +4487,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "웹사이트 메시지"
+          }
+        }
+      }
+    },
+    "Then the Persona is removed. Its cookies and sign-ins are not carried over: Arch deletes them and its website data from this Mac the next time it opens." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그런 다음 페르소나가 제거됩니다. 쿠키와 로그인은 옮겨지지 않으며, Arch를 다음에 열 때 이 Mac에서 웹사이트 데이터와 함께 삭제됩니다."
           }
         }
       }
@@ -4697,6 +4797,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "로그인 정보가 암호화되지 않은 상태로 전송됩니다."
+          }
+        }
+      }
+    },
+    "Your other Macs that sync with iCloud make the same change." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud로 동기화하는 다른 Mac에도 같은 변경이 적용됩니다."
           }
         }
       }

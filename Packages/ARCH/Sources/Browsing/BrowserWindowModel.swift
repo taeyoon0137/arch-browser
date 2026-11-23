@@ -343,6 +343,72 @@ public enum BrowserWindowKind {
         return (localized("Delete \(persona)?"), information)
     }
 
+    /// Merge Space Into…: a sheet on the window lists the spaces the space can merge into (`BrowserSession.spaceMergeTargets(for:)`), each as "Persona / Space" (Persona rule 7), says what moves and what is removed, and merges into the chosen space on Merge.
+    public func confirmMergeSpace(_ space: Space) {
+        let targets = session.spaceMergeTargets(for: space.id)
+        guard canShowPersonaSheet, !targets.isEmpty else { return }
+        let name = { (space: Space) in BrowserSession.displayedPlace(ofPersona: space.resolvedPersonaID, space: space, among: self.session.personas) ?? space.name }
+        let texts = Self.mergeSpaceTexts(space: name(space), isSyncing: session.isSyncing)
+        askForMergeTarget(message: texts.message, information: texts.information, targets: targets.map { ($0.id, name($0)) }) { [weak self] target in
+            self?.session.mergeSpace(space.id, into: target)
+        }
+    }
+
+    /// Merge Persona Into…: a sheet on the window lists the Personas that the Persona of `space` can merge into (`BrowserSession.personaMergeTargets(for:)`), says what moves and that its cookies and sign-ins are deleted, and merges on Merge. A failed plugin install stops the merge and shows its error.
+    public func confirmMergePersona(ofSpace space: Space) {
+        let id = space.resolvedPersonaID
+        let targets = session.personaMergeTargets(for: id)
+        guard canShowPersonaSheet, !targets.isEmpty, let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas) else { return }
+        let texts = Self.mergePersonaTexts(persona: persona, isSyncing: session.isSyncing)
+        askForMergeTarget(message: texts.message, information: texts.information, targets: targets.map { ($0.id, $0.name) }) { [weak self] target in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do { try await self.session.mergePersona(id, into: target) } catch {
+                    guard let nsWindow = self.nsWindow else { return }
+                    let alert = NSAlert()
+                    alert.messageText = localized("The Persona could not be merged.")
+                    alert.informativeText = error.localizedDescription
+                    alert.beginSheetModal(for: nsWindow, completionHandler: nil)
+                }
+            }
+        }
+    }
+
+    /// The Merge Space Into… sheet's question and explanation, for the space as "Persona / Space" names it.
+    nonisolated static func mergeSpaceTexts(space: String, isSyncing: Bool = false) -> (message: String, information: String) {
+        var information = localized("Its pinned tabs, folders, and open tabs move to the space you choose, after that space’s own, and \u{201C}\(space)\u{201D} is removed.")
+            + " " + localized("In a space of another Persona, they reload in that Persona’s profile, without their pages’ sign-ins and back and forward history.")
+        if isSyncing { information += " " + localized("Your other Macs that sync with iCloud make the same change.") }
+        return (localized("Merge \u{201C}\(space)\u{201D} into another space?"), information)
+    }
+
+    /// The Merge Persona Into… sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it.
+    nonisolated static func mergePersonaTexts(persona: String, isSyncing: Bool = false) -> (message: String, information: String) {
+        var information = localized("Its spaces move to the Persona you choose with their names, and its favorites follow that Persona’s. Its tabs reload in that Persona’s profile, and plugins and extensions it lacks are installed there with the permissions you gave them.")
+            + " " + localized("Then the Persona is removed. Its cookies and sign-ins are not carried over: Arch deletes them and its website data from this Mac the next time it opens.")
+        if isSyncing { information += " " + localized("Your other Macs that sync with iCloud make the same change.") }
+        return (localized("Merge \(persona) into another Persona?"), information)
+    }
+
+    /// Asks in a sheet on the window which of `targets` to merge into, with a pop-up button that starts at the first, and passes the chosen ID to `merge` on Merge.
+    private func askForMergeTarget(message: String, information: String, targets: [(id: UUID, name: String)], then merge: @escaping (UUID) -> Void) {
+        guard let nsWindow else { return }
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = information
+        alert.addButton(withTitle: localized("Merge"))
+        alert.addButton(withTitle: localized("Cancel"))
+        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
+        // Items added one by one keep two targets of the same name, which `addItems(withTitles:)` would join.
+        for target in targets { picker.menu?.addItem(NSMenuItem(title: target.name, action: nil, keyEquivalent: "")) }
+        alert.accessoryView = picker
+        alert.beginSheetModal(for: nsWindow) { response in
+            let index = picker.indexOfSelectedItem
+            guard response == .alertFirstButtonReturn, targets.indices.contains(index) else { return }
+            merge(targets[index].id)
+        }
+    }
+
     /// How a sheet or a card about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
     nonisolated static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: id, space: space, among: personas) else { return nil }

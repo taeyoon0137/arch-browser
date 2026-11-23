@@ -512,6 +512,7 @@ import Terminal
         spacesMenu.addItem(withTitle: localized("New Persona\u{2026}"), action: #selector(newPersona), keyEquivalent: "")
         spacesMenu.addItem(withTitle: localized("Rename Persona\u{2026}"), action: #selector(renamePersona), keyEquivalent: "")
         spacesMenu.addItem(withTitle: localized("Delete Persona\u{2026}"), action: #selector(deletePersona), keyEquivalent: "")
+        spacesMenu.addItem(withTitle: localized("Merge Persona Into\u{2026}"), action: #selector(mergePersona), keyEquivalent: "")
         mainMenu.addItem(submenu(spacesMenu, title: localized("Spaces")))
 
         // Filled each time it opens (`menuWillOpen(_:)`). Until then it holds only No Bookmarks, so Settings ▸ Shortcuts, which lists the menu bar at launch, lists none of its items.
@@ -807,6 +808,10 @@ import Terminal
         let target = frontSidebarTarget()
         target.confirmDeletePersona(ofSpace: target.currentSpace)
     }
+    @objc private func mergePersona() {
+        let target = frontSidebarTarget()
+        target.confirmMergePersona(ofSpace: target.currentSpace)
+    }
     @objc private func moveToMainWindow() {
         guard let window = session.activeWindow, window.kind == .small else { return }
         session.moveToMainWindow(window)
@@ -911,6 +916,10 @@ import Terminal
         if item.action == #selector(deletePersona) {
             guard let session, let window = session.lastMainWindow else { return false }
             return window.canShowPersonaSheet && session.canDeletePersona(window.personaID)
+        }
+        if item.action == #selector(mergePersona) {
+            guard let session, let window = session.lastMainWindow else { return false }
+            return window.canShowPersonaSheet && !session.personaMergeTargets(for: window.personaID).isEmpty
         }
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true

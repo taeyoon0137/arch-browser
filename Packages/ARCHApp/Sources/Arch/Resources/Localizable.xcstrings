@@ -571,6 +571,16 @@
         }
       }
     },
+    "Merge Persona Into…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 페르소나에 합치기…"
+          }
+        }
+      }
+    },
     "Minimize" : {
       "localizations" : {
         "ko" : {
