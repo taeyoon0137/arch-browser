@@ -390,6 +390,92 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(storage.value(forKey: "runs") == .number(1))
     }
 
+    /// Only the command run that the user started opens a panel, through its own invocation's `showPanel`: a page message's listener that runs while the command waits opens none, with no gesture, a null one, or a made-up one, and has no `arch.ui.showPanel`, and the run's `showPanel` opens none once the run has ended.
+    @Test func opensAPanelOnlyFromTheCommandRunThatTheUserStarted() async throws {
+        let id = PluginID(rawValue: "org.example.gesture")!
+        let root = folder.url.appendingPathComponent("Packages/Gesture", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let files = [
+            "plugin.json": #"{"id": "org.example.gesture", "name": "Gesture", "version": "1", "apiVersion": 1, "summary": "Opens.", "sites": ["https://example.org/*"], "background": "b.js", "contributes": {"commands": [{"id": "open", "title": "Open"}], "sidebarItems": [{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}]}}"#,
+            "b.js": #"""
+            let release = null;
+            let leaked = null;
+            arch.commands.onRun("open", async (invocation) => {
+              leaked = invocation.showPanel;
+              const released = new Promise((resolve) => { release = resolve; });
+              await arch.storage.set("waiting", true);
+              await released;
+              await invocation.showPanel("panel");
+            });
+            arch.pages.onMessage(async (message) => {
+              const post = (args) => window.webkit.messageHandlers.arch.postMessage(JSON.stringify({ call: "ui.showPanel", args }));
+              if (message.body === "try") {
+                await post(["panel"]);
+                await post(["panel", null]);
+                await post(["panel", "00000000-0000-0000-0000-000000000000"]);
+                return typeof arch.ui.showPanel;
+              }
+              if (message.body === "release") { release(); return "released"; }
+              await leaked("panel");
+              return "leaked";
+            });
+            """#,
+            "panel.html": #"<!doctype html><meta charset="utf-8">"#,
+        ]
+        for (path, text) in files {
+            try Data(text.utf8).write(to: root.appendingPathComponent(path))
+        }
+        let manager = manager()
+        defer { manager.close() }
+        let package = try await manager.stage(root)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+        func send(_ body: String) async -> String? {
+            await manager.receive(EnginePageScriptMessage(world: id.pageScriptWorld, frameURL: URL(string: "https://example.org/a"), isMainFrame: true, json: "\"\(body)\""), from: tab)
+        }
+        let run = Task { await manager.run(PluginCommandRef(plugin: id, command: "open"), PluginInvocation(tab: nil)) }
+        #expect(await eventually { storage.value(forKey: "waiting") == .bool(true) })
+        // The command waits, so before the fix any call of the plugin's then opened the panel.
+        #expect(await send("try") == #""undefined""#)
+        #expect(manager.panelRequest == nil)
+        #expect(await send("release") == #""released""#)
+        await run.value
+        let request = try #require(manager.panelRequest)
+        #expect(request.plugin == id && request.item == "panel")
+        #expect(await send("leak") == #""leaked""#)
+        #expect(manager.panelRequest?.nonce == request.nonce)
+    }
+
+    /// Another Persona's copy reads the installed package off the main thread, so a copy whose package its Persona updates or removes after the copy began is discarded with nothing left staged, rather than staged with files that the change moved or deleted; a copy that begins afterwards stages.
+    @Test func discardsACopyWhosePackageChangedInItsPersona() async throws {
+        let source = manager()
+        defer { source.close() }
+        try await installSample(in: source)
+        let target = PluginManager(persona: UUID(), directory: folder.url, builtIns: [], secretStore: secrets)
+        defer { target.close() }
+        let changed = PluginError.invalidPackage("The plugin changed in its Persona while Arch copied it. Try again.")
+        let staged = { (try? FileManager.default.contentsOfDirectory(atPath: target.stagingDirectory.path)) ?? [] }
+
+        let update = try await source.stage(sampleFolder)
+        let copy = try #require(source.packageForCopy(of: sampleID))
+        let copying = Task { try await target.stage(copy) }
+        // The update moves the new package in before the copy's task runs.
+        try source.install(update, grant: PluginGrant(permissions: [], sites: update.manifest.sites), isEnabled: true)
+        await #expect(throws: changed) { try await copying.value }
+        #expect(staged().isEmpty)
+
+        let removed = try #require(source.packageForCopy(of: sampleID))
+        try source.remove(sampleID)
+        await #expect(throws: changed) { try await target.stage(removed) }
+        #expect(staged().isEmpty)
+
+        try await installSample(in: source)
+        let current = try #require(source.packageForCopy(of: sampleID))
+        let package = try await target.stage(current)
+        #expect(package.manifest.id == sampleID && staged().count == 1)
+        target.discard(package)
+    }
+
     /// A panel stays on its page. A reload or link to another document goes nowhere.
     /// A link within the page moves there.
     /// Once its instance stops, its calls fail with `stopped`. It then asks its popover to close.
@@ -583,7 +669,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(manager.plugins.map(\.origin) == [.generated(composition)] && !manager.plugins[0].isEnabled)
         #expect(manager.contributions.paletteCommands(matching: "copy").isEmpty)
         // Another Persona's review would show it as a file install without its requests, so it offers no copy.
-        #expect(manager.packageFolderForCopy(of: package.manifest.id) == nil)
+        #expect(manager.packageForCopy(of: package.manifest.id) == nil)
         let relaunched = self.manager()
         #expect(relaunched.plugins.map(\.origin) == [.generated(composition)])
         try relaunched.remove(package.manifest.id)
@@ -597,7 +683,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         let installed = try #require(relaunched.plugins.first)
         #expect(relaunched.plugins.count == 1 && installed.isEnabled && installed.origin == .file(sampleFolder))
         #expect(installed.grant == PluginGrant(permissions: [], sites: installed.manifest.sites))
-        #expect(relaunched.packageFolderForCopy(of: installed.id) != nil)
+        #expect(relaunched.packageForCopy(of: installed.id) != nil)
         await run("remember", in: relaunched)
         #expect(try stored("remembered", in: relaunched) != nil)
     }

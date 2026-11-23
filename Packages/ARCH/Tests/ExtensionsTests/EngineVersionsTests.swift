@@ -117,6 +117,11 @@ struct EngineVersionsTests {
         #expect(throws: PluginError.self) { try target.installPair(again, grant: PluginGrant(permissions: [], sites: []), isEnabled: false) }
         again.forEach { target.discard($0.package) }
         #expect(target.plugins.count == 2)
+        // A copy of a pair whose version the source Persona removes while the copy reads it stages neither version.
+        let stale = try #require(source.pairForCopy(of: reader.id))
+        try source.remove(version)
+        await #expect(throws: PluginError.invalidPackage("The plugin changed in its Persona while Arch copied it. Try again.")) { try await target.stage(stale) }
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: target.stagingDirectory.path)) ?? []).isEmpty)
         let unpaired = try await source.installEverything(from: package("tool", name: "Tool"))
         #expect(source.pairForCopy(of: unpaired.id) == nil)
         target.close()

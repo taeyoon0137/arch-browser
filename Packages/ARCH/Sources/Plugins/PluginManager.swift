@@ -166,6 +166,8 @@ public final class PluginManager: ObservableObject {
     private let runtimes: [PluginKind: any PluginRuntime]
     /// The packages of the installed plugins.
     private var packages: [PluginID: PluginPackage]
+    /// A mark for each installed package that another Persona copies, which every install and removal of the identifier replaces, so that a copy can tell whether the package it read is still the one installed (`isCurrentPackage(_:mark:)`).
+    private var packageMarks: [PluginID: UUID] = [:]
     /// The choices `plugins.json` keeps, in the order the user made them, including those for plugins this build does not have.
     private var choices: [PluginListFile.Choice]
     /// The installs `plugins.json` keeps, in the order the user installed the plugins, including those this build or its packages cannot read.
@@ -638,13 +640,15 @@ public final class PluginManager: ObservableObject {
         try? FileManager.default.removeItem(at: package.rootURL)
     }
 
-    /// The installed package folder that another Persona can stage for its own grant review, as from a folder. None for a plugin that AI wrote, whose review there would show a file install without its requests and sources.
-    public func packageFolderForCopy(of id: PluginID) -> URL? {
+    /// The installed package that another Persona can stage for its own grant review, as from a folder (`stage(_:)` with a `PluginPackageCopy`). None for a plugin that AI wrote, whose review there would show a file install without its requests and sources.
+    public func packageForCopy(of id: PluginID) -> PluginPackageCopy? {
         guard !isClosed, let installed = plugins.first(where: { $0.id == id }),
               installed.counterpart == nil, installed.kind == .script || installed.kind == .webExtension else { return nil }
         switch installed.origin {
         case .bundled, .generated: return nil
-        case .file, .webStore: return packages[id]?.rootURL
+        case .file, .webStore:
+            guard let folder = packages[id]?.rootURL else { return nil }
+            return PluginPackageCopy(folder: folder, isCurrent: currentPackageCheck(of: id))
         }
     }
 
@@ -653,12 +657,35 @@ public final class PluginManager: ObservableObject {
         guard !isClosed, let lead = leadVersion(of: id), let counterpart = plugins.first(where: { $0.id == lead.counterpart }) else { return nil }
         let versions = [lead, counterpart].compactMap { plugin -> PluginPairCopy.Version? in
             guard let engine = plugin.pairEngine, let folder = packages[plugin.id]?.rootURL else { return nil }
-            return PluginPairCopy.Version(folder: folder, origin: plugin.origin, proof: plugin.proof, engine: engine)
+            return PluginPairCopy.Version(folder: folder, origin: plugin.origin, proof: plugin.proof, engine: engine, isCurrent: currentPackageCheck(of: plugin.id))
         }
         return versions.count == 2 ? PluginPairCopy(versions: versions) : nil
     }
 
-    /// Stages both versions of another Persona's pair for one review, as `stage(_:)` stages a package, each with its installed origin and proof, the leading version first, with the engine it is the version for. When the second cannot stage, the first goes too.
+    /// Whether the package of `id` that a copy began to read, under `mark`, is still the one installed here: no install or removal of the identifier has begun since, which would move, replace, or delete the files while the copy reads them, or give them another origin and proof than the copy carries.
+    private func currentPackageCheck(of id: PluginID) -> @MainActor @Sendable () -> Bool {
+        let mark = packageMarks[id] ?? UUID()
+        packageMarks[id] = mark
+        return { [weak self] in self?.packageMarks[id] == mark }
+    }
+
+    /// Stages a copy of another Persona's installed package for a review in this Persona, as `stage(_:)` stages a folder. The copy reads the files off the main thread while that Persona's manager can install or remove the plugin, so a package that changed there meanwhile is discarded and the stage throws `PluginError.invalidPackage`, for the user to copy it again.
+    public func stage(_ copy: PluginPackageCopy) async throws -> PluginPackage {
+        let package: PluginPackage
+        do {
+            package = try await stage(copy.folder)
+        } catch {
+            guard copy.isCurrent() else { throw Self.changedDuringCopy }
+            throw error
+        }
+        guard copy.isCurrent() else {
+            discard(package)
+            throw Self.changedDuringCopy
+        }
+        return package
+    }
+
+    /// Stages both versions of another Persona's pair for one review, as `stage(_:)` stages a package, each with its installed origin and proof, the leading version first, with the engine it is the version for. When the second cannot stage, the first goes too. As for one package's copy (`stage(_:)` with a `PluginPackageCopy`), both go and the stage throws `PluginError.invalidPackage` when that Persona installed or removed either version while they were read, which would leave a version's files, origin, and proof from different installs.
     public func stage(_ copy: PluginPairCopy) async throws -> [PluginStagedVersion] {
         let runtimes = Array(runtimes.values)
         var staged: [PluginStagedVersion] = []
@@ -669,11 +696,18 @@ public final class PluginManager: ObservableObject {
                 }
                 staged.append(PluginStagedVersion(package: package, engine: version.engine))
             }
+            guard copy.versions.allSatisfy({ $0.isCurrent() }) else { throw Self.changedDuringCopy }
         } catch {
             staged.forEach { discard($0.package) }
+            guard copy.versions.allSatisfy({ $0.isCurrent() }) else { throw Self.changedDuringCopy }
             throw error
         }
         return staged
+    }
+
+    /// The failure of a copy whose package its Persona installed again or removed while the copy read it.
+    private static var changedDuringCopy: PluginError {
+        .invalidPackage(localized("The plugin changed in its Persona while Arch copied it. Try again."))
     }
 
     /// Why the two staged versions of a pair cannot install together in this Persona: a plugin of either's identifier is installed here already, which the copy would update rather than add, or an engine that runs them does not run its version; nil otherwise.
@@ -721,6 +755,8 @@ public final class PluginManager: ObservableObject {
         let listed = (choices, installs, pairRecords)
         badges[id] = nil
         stop(id)
+        // A copy that another Persona reads from here from now on reads a package that this install moves or replaces.
+        packageMarks[id] = nil
         let move = try PackageMove(from: package.rootURL, to: Self.packageFolder(of: id, in: directory))
         let installed = package.moved(to: move.installedURL)
         let runtime = runtimes[installed.kind]
@@ -1044,6 +1080,8 @@ public final class PluginManager: ObservableObject {
         guard packages[id] != nil, let installed = plugins.first(where: { $0.id == id }) else { return }
         badges[id] = nil
         stop(id)
+        // A copy that another Persona reads from here from now on may read a package that this removal deletes.
+        packageMarks[id] = nil
         try secrets(for: id).removeAll()
         storages.removeValue(forKey: id)?.discardChanges()
         let folder = Self.folder(of: id, in: directory)
@@ -1123,15 +1161,19 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Contributions
 
-    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
+    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it, with a gesture of the run's own, which lets only this run open the plugin's panels (`ScopedPluginContext.showPanel(_:for:)`). A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
         guard let installed = enabledPlugin(command.plugin), !disabledCommands[command.plugin, default: []].contains(command.command), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
         guard grantSiteAccess(to: installed, for: invocation) else { return NSSound.beep() }
         do {
             guard let plugin = try await start(installed), let context = running[installed.id]?.context else { return }
-            context.userCommandCount += 1
-            defer { context.userCommandCount -= 1 }
-            try await plugin.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
+            // The run's own gesture lets only this run open a panel, not a listener that runs meanwhile.
+            let gesture = PluginGesture()
+            context.gestures.insert(gesture)
+            defer { context.gestures.remove(gesture) }
+            var shown = shown(invocation, to: installed.grant, of: installed.id)
+            shown.gesture = gesture
+            try await plugin.run(command.command, shown)
         } catch {
             NSSound.beep()
         }
@@ -1929,7 +1971,8 @@ struct PluginListFile: Codable {
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.
 @MainActor
 final class ScopedPluginContext: PluginPanelContext {
-    var userCommandCount = 0
+    /// The gestures of the plugin's command runs in flight, each of which lets its own run open a panel.
+    var gestures: Set<PluginGesture> = []
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
@@ -1996,8 +2039,8 @@ final class ScopedPluginContext: PluginPanelContext {
         manager?.setEnabled(isEnabled, command: id, of: pluginID)
     }
 
-    func showPanel(_ sidebarItemID: String) {
-        guard !hasEnded, userCommandCount > 0 else { return }
+    func showPanel(_ sidebarItemID: String, for gesture: PluginGesture) {
+        guard !hasEnded, gestures.contains(gesture) else { return }
         manager?.showPanel(sidebarItemID, of: pluginID)
     }
 

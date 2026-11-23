@@ -62,8 +62,8 @@ public protocol PluginContext: AnyObject {
     func setBadge(_ text: String?, onSidebarItem id: String)
     /// Enables or disables one of this plugin's own contributed commands for the current run.
     func setEnabled(_ isEnabled: Bool, command id: String)
-    /// Opens one of this plugin's own sidebar panels during a user-started command.
-    func showPanel(_ sidebarItemID: String)
+    /// Opens one of this plugin's own sidebar panels while the command run that the gesture belongs to is in flight: the gesture of the invocation that a command the user started receives (`PluginInvocation.gesture`). Any other call does nothing, as one from an event listener, a page message, a panel, or a run that has ended, also while another of the plugin's commands is in flight.
+    func showPanel(_ sidebarItemID: String, for gesture: PluginGesture)
     /// Needs `clipboard`.
     func copyToClipboard(_ text: String) throws
     /// The tabs the plugin reaches, in sidebar order, each without what the grant does not cover: its Persona's open tabs, never agent tabs. Without `tabs`, a tab shows its title and address only where the granted sites cover its page, and for `whenInvoked` only where the plugin has access in it. A plugin with `ai` gets no title or address of a tab on a site excluded from AI. Needs no permission.
@@ -104,7 +104,7 @@ public protocol PluginContext: AnyObject {
 
 extension PluginContext {
     public func setEnabled(_ isEnabled: Bool, command id: String) {}
-    public func showPanel(_ sidebarItemID: String) {}
+    public func showPanel(_ sidebarItemID: String, for gesture: PluginGesture) {}
     /// A context that offers no selected tab, such as a hook script's, which acts on its run's tabs, gives none.
     public func selectedTab() throws -> PluginTab? { nil }
     public func downloads() throws -> [PluginDownload] { throw PluginError.permissionDenied(.downloads) }
@@ -294,6 +294,8 @@ public struct PluginInvocation: Sendable {
     public var linkURL: URL?
     public var imageURL: URL?
     public var selection: String?
+    /// The user's gesture that started this run of the command, which lets the plugin open its panels while the run is in flight (`PluginContext.showPanel(_:for:)`). The manager gives each run its own as it runs the command; nil before then.
+    public internal(set) var gesture: PluginGesture?
 
     public init(tab: PluginTab?, spaceID: UUID? = nil, linkURL: URL? = nil, imageURL: URL? = nil, selection: String? = nil, source: Source = .menu, argument: String? = nil) {
         self.source = source
@@ -303,6 +305,15 @@ public struct PluginInvocation: Sendable {
         self.linkURL = linkURL
         self.imageURL = imageURL
         self.selection = selection
+    }
+}
+
+/// The user's gesture behind one run of a plugin command. Only the manager makes one, for each run, and it counts only while that run is in flight, so a listener for an event or a page message, which receives none, cannot open a panel while a command of its plugin waits.
+public struct PluginGesture: Hashable, Sendable {
+    let id: UUID
+
+    init(id: UUID = UUID()) {
+        self.id = id
     }
 }
 

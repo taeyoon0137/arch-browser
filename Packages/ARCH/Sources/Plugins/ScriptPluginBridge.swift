@@ -20,7 +20,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case panel
     }
 
-    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` or `AIError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. `ai.stream(request, onText)` asks for the reply's text with `ai.next` until the reply ends, waits for `onText` with each piece, and resolves as `ai.reply` does; when `onText` throws, it stops the request with `ai.cancel` and rejects with what `onText` threw. In the background document, the delivery function, `__archDeliver(kind, payload)`, runs the listener for a command or a page script value and returns the value's reply as JSON text, or null; a command without a listener throws `noListener`. It runs an event's listeners one after another and returns null once the last one settles, or JSON text that names the failure: `{"noListener": true}` when the script set none for the kind, and `{"error": text}` with what a listener threw, so that `ScriptPlugin` reads the failure without WebKit's exception details.
+    /// Defines `arch` in the document's world. Each call sends `{call, args}` as JSON text and resolves with the JSON reply parsed, or rejects with an error whose message names the failure: a `PluginError` or `AIError` case, or `invalidCall` for a call the handler cannot read or a value the storage cannot hold. An argument left out or `undefined` is not sent, which tells `storage.set(key)`, which removes the key, from `storage.set(key, null)`. `ai.stream(request, onText)` asks for the reply's text with `ai.next` until the reply ends, waits for `onText` with each piece, and resolves as `ai.reply` does; when `onText` throws, it stops the request with `ai.cancel` and rejects with what `onText` threw. In the background document, the delivery function, `__archDeliver(kind, payload)`, runs the listener for a command, with an invocation whose `showPanel(itemId)` alone carries the run's gesture, or for a page script value and returns the value's reply as JSON text, or null; a command without a listener throws `noListener`. It runs an event's listeners one after another and returns null once the last one settles, or JSON text that names the failure: `{"noListener": true}` when the script set none for the kind, and `{"error": text}` with what a listener threw, so that `ScriptPlugin` reads the failure without WebKit's exception details.
     var script: String {
         let permitsAgent = (context as? any PluginAgentContext)?.permitsAgentRuns == true
         let listens = role == .background
@@ -67,7 +67,10 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             if (kind === "command") {
               const listener = commandListeners.get(body.command);
               if (!listener) throw new Error("noListener");
-              await listener(body.invocation);
+              // Only this run's invocation carries its gesture, so a listener for an event or a page message that runs meanwhile cannot open a panel.
+              const { gesture, ...invocation } = body.invocation;
+              invocation.showPanel = (itemId) => call("ui.showPanel", [itemId, gesture ?? null]);
+              await listener(invocation);
               return null;
             }
             if (kind === "event") {
@@ -135,7 +138,6 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
           ui: Object.freeze({
             setBadge: (itemId, text) => call("ui.setBadge", [itemId, ...given(text)]),
             setEnabled: (commandId, flag) => call("ui.setEnabled", [commandId, flag]),
-            showPanel: (itemId) => call("ui.showPanel", [itemId]),
             notify: (title, body) => call("ui.notify", [title, body]),
             copy: (text) => call("ui.copy", [text]),
           }),
@@ -514,9 +516,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "ui.setEnabled":
             context.setEnabled(try call.bool(1), command: try call.text(0))
         case "ui.showPanel":
-            // A command reaches only the background script, so a panel's or settings page's call never comes from the user's command.
-            guard role == .background else { break }
-            context.showPanel(try call.text(0))
+            // A command reaches only the background script, so a panel's or settings page's call never comes from the user's command. A call without the gesture of a command run in flight does nothing.
+            guard role == .background, call.args.count == 2, let text = try? call.text(1), let id = UUID(uuidString: text) else { break }
+            context.showPanel(try call.text(0), for: PluginGesture(id: id))
         case "ui.notify":
             try context.notify(title: try call.text(0), body: try call.text(1))
         case "ui.copy":

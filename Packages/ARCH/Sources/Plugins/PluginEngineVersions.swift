@@ -67,6 +67,8 @@ public struct PluginPairCopy: Sendable {
         let origin: PluginOrigin
         let proof: PluginProof?
         let engine: EngineKind
+        /// Whether the version is still installed as it was when the manager made the copy (`PluginPackageCopy.isCurrent`).
+        let isCurrent: @MainActor @Sendable () -> Bool
     }
 
     /// The leading version first.
