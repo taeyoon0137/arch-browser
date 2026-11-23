@@ -87,7 +87,7 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
-/// Keeps up to 30 days and 10,000 hook run entries in hooks-activity.json.
+/// Keeps up to 30 days and 10,000 hook run entries in `hooks-activity.json`.
 @MainActor public final class HookRunLog: ObservableObject {
     public static let keptDays = 30
     public static let keptEntries = 10_000
