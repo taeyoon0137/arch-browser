@@ -1,6 +1,7 @@
 // When a pane shows its tab's prompt, and when the card may take the keyboard focus from where it is.
 import AppKit
 
+/// The rules for when a pane shows its tab's prompt card and when the card takes the keyboard focus, which `PanePromptLayer` and `PromptFocusGuard` follow.
 enum PromptPresentation {
     /// The prompt a pane shows over its tab's page: the tab's oldest, while the tab is on its window's screen and nothing covers the page, as an internal page or the preview panel does. Otherwise the prompt waits, and only the sidebar marks it.
     @MainActor static func shownPrompt(in queue: TabPromptQueue, tabID: UUID, isOnScreen: Bool, isCovered: Bool) -> PromptState? {

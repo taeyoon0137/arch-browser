@@ -31,6 +31,7 @@ public final class SitePermissionStore: ObservableObject {
 
     /// The file's layout. Version 2 keys each Persona's answers by its UUID; version 1 had one app-wide `sites` and `removed`. Answers and removed types are keyed by the permission type's raw value.
     private struct File: Codable {
+        /// One Persona's answers in the file, and the types the user removed from them.
         struct Entry: Codable {
             var sites: [String: [String: Decision]]
             var removed: [String: [String]]?

@@ -1,6 +1,7 @@
 // Who a tab's prompt comes from, as its identity row shows it: the site from the address that asks, with the tab's icon when it is the tab's own site, and where it is when it is not; a web extension's page by the extension.
 import AppKit
 
+/// Builds the `PromptIdentity` of a tab's prompt from the address that asks, as the file header describes.
 enum PromptSiteIdentity {
     @MainActor static func make(for url: URL?, in tab: Tab) -> PromptIdentity {
         make(for: url, tabURL: tab.url, favicon: tab.favicon) { tab.extensionName?($0) }

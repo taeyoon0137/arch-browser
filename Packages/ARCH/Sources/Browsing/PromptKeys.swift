@@ -1,6 +1,7 @@
 // Which buttons of a prompt Return and Escape press, and when Escape waits. The card binds them only while it has the window's focus (`PromptCard`).
 import Foundation
 
+/// Picks the buttons that Return and Escape press in a prompt, and when Escape waits, for `PromptCard` and `PromptButtonRow`.
 enum PromptKeys {
     /// Return and Enter press the default button, or the only one, but never a destructive button.
     static func returnButton(in content: PromptContent) -> PromptButton.ID? {

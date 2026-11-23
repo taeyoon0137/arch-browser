@@ -179,6 +179,7 @@ struct SidebarAppearance: ViewModifier {
     }
 }
 
+/// The environment key behind `spaceTheme`.
 private struct SpaceThemeKey: EnvironmentKey {
     static let defaultValue = SpaceTheme(tint: .blue, strength: .subtle, colorScheme: .light)
 }

@@ -12,6 +12,7 @@ enum QuestionSelection {
     case current
 }
 
+/// One tab's conversation with the AI module about its page, as the file header describes. The page reader and the question popover show and extend it.
 @MainActor
 final class PageConversation: ObservableObject {
     /// The page text one question reads at most. The service cuts it further to the model's input limit.
@@ -20,7 +21,9 @@ final class PageConversation: ObservableObject {
     /// The page committed a new document while the question was being read, so the question did not go out.
     struct PageReloaded: Error {}
 
+    /// One question and its reply in the conversation, with the reply's state as it streams.
     struct Exchange: Identifiable {
+        /// Where the reply stands, from reading the page through streaming to its end.
         enum State {
             case readingPage
             /// The question went out; no model has started on it yet.

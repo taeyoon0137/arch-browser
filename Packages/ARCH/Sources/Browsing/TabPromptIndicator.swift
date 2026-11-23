@@ -1,6 +1,7 @@
 // The sidebar's mark on a tab that waits for the user's answer to a prompt, shown on its row and its favorite's tile while the prompt waits or shows. It takes the accent color, as the marks that call the user back do, the unread dot and the Library button's count, apart from the audio badge's passive status beside it.
 import SwiftUI
 
+/// The prompt mark on a tab's row and its favorite's tile, shown while `prompts` holds a prompt for `tabID`.
 struct TabPromptIndicator: View {
     @ObservedObject var prompts: TabPromptQueue
     let tabID: UUID?

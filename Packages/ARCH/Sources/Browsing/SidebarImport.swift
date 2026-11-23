@@ -182,10 +182,12 @@ extension SidebarImport {
             }
         }
 
+        /// The layout of `imports.json`.
         private struct File: Codable {
             var profiles: [Entry]
         }
 
+        /// What the record keeps of one source profile: the Persona it went to last and what it brought to each Persona.
         struct Entry: Codable, Equatable {
             var profile: Profile
             /// The Persona the profile went to last.

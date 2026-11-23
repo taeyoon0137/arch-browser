@@ -134,6 +134,7 @@ private struct PageReaderTabView: View {
     }
 }
 
+/// The centered secondary text that fills the page reader when it has no page to read.
 private struct PageReaderPlaceholder: View {
     let text: String
 

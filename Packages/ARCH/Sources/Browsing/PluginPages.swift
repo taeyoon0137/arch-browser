@@ -5,6 +5,7 @@ import ARCHEngine
 import Combine
 import Plugins
 
+/// Joins each tab of the session to its Persona's plugins, as the file header describes: their page scripts, the values they send, and their context menu items. The session owns one.
 @MainActor
 final class PluginPages {
     private weak var session: BrowserSession?

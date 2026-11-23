@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 
+/// Sends the keyboard focus back to a pane's prompt card when it moves into the pane's page, as the file header describes; `PanePromptLayer` puts it on the pane.
 struct PromptFocusGuard: NSViewRepresentable {
     /// Whether a card shows over the pane.
     let isEngaged: Bool
@@ -23,6 +24,7 @@ struct PromptFocusGuard: NSViewRepresentable {
         if isEngaged { view.check() }
     }
 
+    /// The view that watches the window's first responder and asks for the card's focus when the page or a field over it takes the focus.
     final class GuardView: NSView {
         var isEngaged = false
         weak var pageView: NSView?

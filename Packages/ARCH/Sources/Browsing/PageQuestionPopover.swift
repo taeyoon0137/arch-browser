@@ -17,6 +17,7 @@ struct PageQuestionLayer: View {
     }
 }
 
+/// The popover's panel: the conversation so far, the question field, Ask, and Continue as Agent Task. `PageQuestionLayer` shows it.
 private struct PageQuestionPopover: View {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let assistant: PageAssistant

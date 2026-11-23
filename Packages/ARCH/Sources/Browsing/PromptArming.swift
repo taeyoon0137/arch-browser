@@ -1,6 +1,7 @@
 // The short wait before a prompt's buttons that grant something work, so that a key or click the user meant for the page cannot press them as the card shows.
 import Foundation
 
+/// Tells whether a card's buttons that grant something work yet: `delay` after the card last showed. `PromptState` keeps one per prompt.
 struct PromptArming: Equatable {
     static let delay: TimeInterval = 0.5
 

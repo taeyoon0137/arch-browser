@@ -50,6 +50,7 @@ public final class DownloadEntry: ObservableObject, Identifiable {
         state == .completed || state == .cancelled || state == .failed
     }
 
+    /// Why an action on a download's file failed, which the downloads row shows and VoiceOver announces.
     enum FileIssue: String {
         case missing = "File not found"
         case open = "Couldn’t open file"

@@ -98,6 +98,7 @@ struct TabFolderRowView: View {
     }
 }
 
+/// The agent session's status text on its folder's row, which follows the session as it changes.
 private struct SessionFolderState: View {
     @ObservedObject var owner: AgentSession
 
@@ -130,6 +131,7 @@ struct SessionFolderStepLine: View {
     }
 }
 
+/// The first waiting approval card's sentence and Review under an agent folder's row; `SessionFolderStepLine` shows it.
 private struct SessionFolderCards: View {
     @ObservedObject var approvals: AgentApprovals
     let ownerID: UUID
@@ -156,6 +158,7 @@ private struct SessionFolderCards: View {
     }
 }
 
+/// The agent session's commands in its folder's context menu: Show Session, Stop, Keep Tabs, Rename Folder, and Delete Session….
 private struct SessionFolderMenu: View {
     @ObservedObject var owner: AgentSession
     let perform: (BrowserWindowModel.AgentFolderAction) -> Void

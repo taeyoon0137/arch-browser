@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 
+/// The row that says who asks, at the top of a `PromptCard` and as the site settings popover's header.
 struct PromptIdentityRow: View {
     let identity: PromptIdentity
     let isHeader: Bool

@@ -140,6 +140,7 @@ private final class PluginPanelAnchor: NSObject, NSPopoverDelegate {
     }
 }
 
+/// Puts an `AnchorView` behind a plugin item's row and hands it to the row's `PluginPanelAnchor`, which points the panel's popover at it.
 private struct PluginPanelAnchorView: NSViewRepresentable {
     let anchor: PluginPanelAnchor
 
@@ -149,6 +150,7 @@ private struct PluginPanelAnchorView: NSViewRepresentable {
         anchor.view = view
     }
 
+    /// The empty view that a plugin panel's popover points at.
     final class AnchorView: NSView {
         // Clicks go to the row above it.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }

@@ -25,6 +25,7 @@ struct LibraryPanel: View {
     }
 }
 
+/// The library's contents beside the sidebar: the downloads list at the top and the tool rows below it.
 struct LibraryView: View {
     @ObservedObject var session: BrowserSession
 
@@ -42,6 +43,7 @@ struct LibraryView: View {
     }
 }
 
+/// One tool row at the bottom of `LibraryView`: a symbol and a title that run `action`, with the sidebar rows' hover fill.
 struct LibraryToolRow: View {
     let symbol: String
     let title: String

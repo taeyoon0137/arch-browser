@@ -14,6 +14,7 @@ public enum AgentPanelContent: Equatable {
     case client(UUID)
 }
 
+/// The window's trailing agent panel column, as the file header describes: a client's panel, the composer, or a session.
 struct AgentPanelColumn: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -49,6 +50,7 @@ struct AgentPanelColumn: View {
     }
 }
 
+/// The agent panel's frame around the composer or a session's conversation: its title row with New Agent Task and Close, and the content below.
 private struct AgentPanelFrame: View {
     @ObservedObject var agents: AgentService
     @ObservedObject var permissions: SitePermissionStore
@@ -171,6 +173,7 @@ struct AgentsIndicator: View {
     }
 }
 
+/// The bottom bar's agents menu, as the file header describes, which marks when an agent waits for the user.
 private struct AgentsIndicatorMenu: View {
     @ObservedObject var agents: AgentService
     /// The cards that wait, which a client's row names, since a composer or a session in the column does not give way to a client's panel.
@@ -227,6 +230,7 @@ struct AgentWaitingDot: ViewModifier {
         }
     }
 
+    /// Draws `AgentWaitingDot`'s dot while a session of the space waits for the user.
     private struct Mark: ViewModifier {
         @ObservedObject var agents: AgentService
         let spaceID: UUID

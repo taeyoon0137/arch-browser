@@ -10,6 +10,7 @@ import History
 import Plugins
 import SwiftUI
 
+/// The command palette, as the file header describes: the text field and the rows that match it, in `mode`.
 struct CommandPaletteView: View {
     @ObservedObject private var aiSettings = AIService.shared.settings
     @ObservedObject var session: BrowserSession
@@ -587,6 +588,7 @@ extension Animation {
     static let paletteOutDuration = 0.2
 }
 
+/// One row of the command palette: a symbol, a title, an optional second line, and dim trailing text.
 struct PaletteRow: View {
     let symbol: String
     let title: String
@@ -632,6 +634,7 @@ struct PaletteRow: View {
     }
 }
 
+/// A command palette row for an open tab: its icon and title.
 struct PaletteTabRow: View {
     @ObservedObject var tab: Tab
     var isSelected = false

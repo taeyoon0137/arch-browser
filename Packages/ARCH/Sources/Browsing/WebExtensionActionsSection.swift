@@ -9,6 +9,7 @@ import Extensions
 import Plugins
 import SwiftUI
 
+/// The site settings popover's web extensions section for `tab`, as the file header describes.
 struct WebExtensionActionsSection: View {
     let session: BrowserSession
     @ObservedObject var webExtensions: WebExtensionRuntime

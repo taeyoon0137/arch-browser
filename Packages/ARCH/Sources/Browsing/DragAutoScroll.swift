@@ -75,6 +75,7 @@ struct DragAutoScroller: NSViewRepresentable {
         view.update(point: nil, scrolls: false, visible: .zero, limit: 0)
     }
 
+    /// The view that `DragAutoScroller` places in the list: it reports the list's scrolls during a drag and scrolls the list on a display link while the pointer is in a band.
     final class ScrollerView: NSView {
         var onScroll: ((CGFloat) -> Void)?
         private(set) var point: CGPoint?

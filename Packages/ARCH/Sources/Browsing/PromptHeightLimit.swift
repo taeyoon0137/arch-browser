@@ -1,6 +1,7 @@
 // Gives its view the height of its content, up to a limit, whatever height its container offers. A taller view gets the limit, which a prompt card fills by scrolling between its identity row and its buttons. A frame with only a maximum height would take all the height its container offers, up to that maximum.
 import SwiftUI
 
+/// A layout that gives its one view its content's height, up to `maxHeight`; `PromptCard` and `PromptScrollArea` use it.
 struct PromptHeightLimit: Layout {
     let maxHeight: CGFloat
 

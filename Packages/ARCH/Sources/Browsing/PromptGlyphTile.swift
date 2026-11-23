@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 
+/// Draws a prompt's glyph beside its title in `PromptCard`: a symbol on a tile of its tint, or an app's icon.
 struct PromptGlyphTile: View {
     let glyph: PromptGlyph
     @Environment(\.colorScheme) private var colorScheme

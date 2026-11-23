@@ -33,6 +33,7 @@ struct CaptureRegionOverlay: NSViewRepresentable {
         DispatchQueue.main.async(execute: cancel)
     }
 
+    /// Dims the page and lets the user drag out the region to capture, reporting it to `onSelect`, or Escape to `onCancel`.
     final class SelectionView: NSView {
         var onSelect: ((CGRect) -> Void)?
         var onCancel: (() -> Void)?

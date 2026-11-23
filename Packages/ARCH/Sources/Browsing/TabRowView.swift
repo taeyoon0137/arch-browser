@@ -4,6 +4,7 @@ import AI
 import AppKit
 import SwiftUI
 
+/// One tab's row in a space's list in the sidebar, as the file header describes; `SpaceTabsView` places it.
 struct TabRowView: View {
     /// Observed, not only used by the actions: the split view fill, the shortcut number, and the folder items come from the session's lists, which the window model does not republish.
     @ObservedObject var session: BrowserSession
@@ -392,6 +393,7 @@ struct TabIconView: View {
     }
 }
 
+/// The New Tab row in a space's list in the sidebar, which runs `action`; `SpaceTabsView` has it open the command palette.
 struct NewTabButton: View {
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme

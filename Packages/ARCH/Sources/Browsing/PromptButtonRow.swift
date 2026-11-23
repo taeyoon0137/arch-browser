@@ -1,6 +1,7 @@
 // A prompt card's buttons: standard large push buttons at the trailing end, the default one last, with a button that does not answer the question apart at the leading edge, or stacked across the card's width with the default one on top when they do not fit on a line and always in a compact card. While the card has the window's focus, the default button is the prominent one and takes Return, and the cancel button takes Escape. A destructive button is red and takes no key. A button that grants something stays dimmed until the card arms, and until then the cancel button takes no Escape (`PromptKeys.escapeWaits`).
 import SwiftUI
 
+/// A `PromptCard`'s buttons, as the file header describes.
 struct PromptButtonRow: View {
     let buttons: [PromptButton]
     /// The button Return presses (`PromptKeys.returnButton`).

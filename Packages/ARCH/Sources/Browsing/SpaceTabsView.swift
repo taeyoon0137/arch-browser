@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 
+/// Collects each space page's visible favorites grid frame in the window, by space ID, for the drag state's favorites drop area.
 private struct FavoriteBarFramesKey: PreferenceKey {
     static let defaultValue: [UUID: CGRect] = [:]
 
@@ -54,6 +55,7 @@ private struct SidebarPluginPanelContent: View {
     }
 }
 
+/// Hosts a plugin panel's view controller in `SidebarPluginPanelContent`.
 private struct SidebarPluginPanelController: NSViewControllerRepresentable {
     let controller: NSViewController
 
@@ -694,6 +696,7 @@ private struct CollapsedWhileDragged: ViewModifier {
     }
 }
 
+/// Collects the frames of an area's tab and folder rows in the window, by row ID, which a drag uses to find its drop target.
 private struct TabRowFramesKey: PreferenceKey {
     static let defaultValue: [UUID: CGRect] = [:]
 

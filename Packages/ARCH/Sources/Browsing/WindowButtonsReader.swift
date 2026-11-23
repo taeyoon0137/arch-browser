@@ -10,6 +10,7 @@ struct WindowButtonMetrics: Equatable {
     var trailingEdge: CGFloat? = 70
 }
 
+/// Reports where the window's traffic light buttons sit to `onChange`, through a `WindowButtonsReaderView`.
 struct WindowButtonsReader: NSViewRepresentable {
     let onChange: (WindowButtonMetrics) -> Void
 
@@ -24,6 +25,7 @@ struct WindowButtonsReader: NSViewRepresentable {
     }
 }
 
+/// Measures the window's buttons as the view joins a window, as the window resizes or enters and leaves full screen, and as the buttons settle, and reports each change.
 final class WindowButtonsReaderView: NSView {
     /// Posted with the window when its buttons finish sliding with the sidebar.
     static let buttonsDidSettleNotification = Notification.Name("ARCHWindowButtonsDidSettle")

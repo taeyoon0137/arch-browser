@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 
+/// The dimming over a page while its tab's prompt shows, as the file header describes; `PanePromptLayer` puts it under the card.
 struct PromptScrim: View {
     /// The page frame's radius, or 0 while the page fills the window.
     let cornerRadius: CGFloat
@@ -33,6 +34,7 @@ private struct ScrimEvents: NSViewRepresentable {
         view.onMouseDown = onMouseDown
     }
 
+    /// Takes the clicks, scrolls, and gestures over the dimmed page, and reports a click to `onMouseDown`.
     final class EventView: NSView {
         var onMouseDown: (() -> Void)?
 

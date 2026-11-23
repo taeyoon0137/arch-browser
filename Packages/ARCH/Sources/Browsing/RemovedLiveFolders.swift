@@ -2,6 +2,7 @@
 import Foundation
 import Security
 
+/// Names and deletes what removed live folders left outside `session.json`: their files in Application Support and their Keychain items.
 enum RemovedLiveFolders {
     /// The files that kept each live folder's fetched items and read state, in the app's Application Support folder.
     static let fileNames = ["live-folders.json", "live-folders.unreadable.json"]

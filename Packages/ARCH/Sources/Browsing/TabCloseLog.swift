@@ -152,6 +152,7 @@ public final class TabCloseLogWindowController: NSWindowController {
     }
 }
 
+/// The debug window's contents: the engine start failures above the list of this launch's tab closes.
 private struct TabCloseLogView: View {
     @ObservedObject var log: TabCloseLog
     @ObservedObject var startLog: EngineStartLog

@@ -84,6 +84,7 @@ struct PageAuthoredText: Equatable {
 
 /// A line below the fields that says what follows from the answer or what went wrong.
 struct PromptNote: Equatable, Identifiable {
+    /// Whether the note informs, warns, or reports an error, which sets its symbol's color.
     enum Tone: Equatable {
         case info, warning, error
     }
@@ -96,6 +97,7 @@ struct PromptNote: Equatable, Identifiable {
 
 /// A text field the user fills in before answering.
 struct PromptField: Equatable, Identifiable {
+    /// The kind of field, which picks a plain or secure text field and the content type that password managers read.
     enum Kind: Equatable {
         case text, userName, password
     }
@@ -108,6 +110,7 @@ struct PromptField: Equatable, Identifiable {
     var initialValue: String
 }
 
+/// One button of a prompt card; the prompt's answer names it by `id`.
 struct PromptButton: Equatable, Identifiable {
     var id: String
     var title: String

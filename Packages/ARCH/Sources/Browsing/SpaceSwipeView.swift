@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 
+/// Puts a `SpaceSwipeNSView` behind part of the sidebar, which reports horizontal swipes that switch spaces or open and close the library.
 struct SpaceSwipeView: NSViewRepresentable {
     /// When disabled, no new swipe starts and scroll events pass through.
     var isEnabled = true
@@ -23,6 +24,7 @@ struct SpaceSwipeView: NSViewRepresentable {
     }
 }
 
+/// Watches scroll events with a local monitor and reports a horizontal two-finger swipe over itself, as the file header describes.
 final class SpaceSwipeNSView: NSView {
     var isEnabled = true
     var onChange: ((CGFloat) -> Void)?
