@@ -113,12 +113,11 @@ import SwiftUI
 
     /// What Import applies, from the included profiles in sheet order.
     struct Selection {
-        /// The profiles that bring favorites or spaces, each with its destination. A profile that brings only history or shortcuts goes to no Persona.
-        var rows: [(row: SidebarImport, destination: SidebarImport.Destination)] = []
+        /// The profiles that bring favorites, spaces, or history pages, each with its destination and its history pages, which go to the destination Persona. A profile that brings only shortcuts goes to no Persona.
+        var rows: [(row: SidebarImport, destination: SidebarImport.Destination, history: [HistoryEntry])] = []
         var shortcuts: [SiteSearchShortcut] = []
         /// The checked profiles' shortcuts that Arch cannot use (`SearchKeywords.skippedCount`).
         var skippedShortcutCount = 0
-        var history: [HistoryEntry] = []
         var searchEngine: SearchEngine?
         /// Why parts of the included profiles with checked items could not be read, each reason once per profile. A profile with nothing checked and a browser whose profiles cannot be read bring nothing, and the sheet showed why.
         var failures: [String] = []
@@ -129,8 +128,8 @@ import SwiftUI
         var selection = Selection()
         for (browser, profile, choice) in includedProfiles where !choice.parts.isEmpty {
             let row = profile.sidebarImport(of: choice.parts, browserName: browser.source.name)
-            if !row.favorites.isEmpty || !row.spaces.isEmpty { selection.rows.append((row, choice.destination)) }
-            if choice.parts.contains(.history), let history = try? profile.history?.get() { selection.history += history }
+            let history = choice.parts.contains(.history) ? (try? profile.history?.get()) ?? [] : []
+            if !row.favorites.isEmpty || !row.spaces.isEmpty || !history.isEmpty { selection.rows.append((row, choice.destination, history)) }
             if choice.parts.contains(.searchShortcuts), let keywords = try? profile.searchKeywords?.get() {
                 selection.shortcuts += keywords.shortcuts
                 selection.skippedShortcutCount += keywords.skippedCount
@@ -364,7 +363,7 @@ private struct ProfileRow: View {
                 }
                 .toggleStyle(.checkbox)
                 Spacer()
-                // The existing Personas, then the one the import would create. The menu applies only to a checked profile that brings favorites, spaces, or bookmark folders; history and search shortcuts go to every Persona.
+                // The existing Personas, then the one the import would create. The menu applies only to a checked profile that brings favorites, spaces, bookmark folders, or history; search shortcuts go to every Persona.
                 Picker(localized("Persona"), selection: choice.destination) {
                     ForEach(model.destinations.filter { $0 != .newPersona }, id: \.self) { Text(model.title(of: $0, for: profile)).tag($0) }
                     Divider()
@@ -373,7 +372,7 @@ private struct ProfileRow: View {
                 .labelsHidden()
                 .accessibilityLabel(localized("Persona"))
                 .fixedSize()
-                .disabled(!choice.wrappedValue.isIncluded || choice.wrappedValue.parts.isDisjoint(with: [.favorites, .spaces, .bookmarkFolders]))
+                .disabled(!choice.wrappedValue.isIncluded || choice.wrappedValue.parts.isDisjoint(with: [.favorites, .spaces, .bookmarkFolders, .history]))
             }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(ImportedProfile.Part.allCases.filter { profile.count(of: $0) != nil }, id: \.self, content: partToggle)
@@ -402,8 +401,8 @@ private struct ProfileRow: View {
             switch part {
             case .spaces: note = localized("Pinned tabs load when you open them.")
             case .bookmarkFolders: note = localized("Each bookmark becomes a pinned tab. It loads when you open it.")
-            case .history, .searchShortcuts: note = localized("Applies to every Persona.")
-            case .favorites: note = nil
+            case .searchShortcuts: note = localized("Applies to every Persona.")
+            case .favorites, .history: note = nil
             }
         }
         return Toggle(isOn: Binding {

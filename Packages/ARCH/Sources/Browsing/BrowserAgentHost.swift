@@ -174,8 +174,8 @@ import Foundation
         session.sidebarTarget().showAgentPanel(for: ownerID)
     }
 
-    public func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage] {
-        await session.history.suggestions(for: query, limit: limit).map { AgentHistoryPage(url: $0.url, title: $0.title) }
+    public func searchHistory(_ query: String, limit: Int, in persona: UUID) async -> [AgentHistoryPage] {
+        await session.history.suggestions(for: query, limit: limit, in: persona).map { AgentHistoryPage(url: $0.url, title: $0.title) }
     }
 
     /// An open tab that an agent folder holds.

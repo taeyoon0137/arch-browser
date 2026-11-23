@@ -176,7 +176,7 @@ struct AgentGrantSheetView: View {
         } else {
             sentences.append(localized("The client can read pages with your sign-ins in the \(personaName) Persona."))
         }
-        if choice.scopes.searchHistory { sentences.append(localized("It can search your browsing history, which every Persona shares.")) }
+        if choice.scopes.searchHistory { sentences.append(localized("It can search your browsing history in the \(personaName) Persona.")) }
         if choice.scopes.watchEvents { sentences.append(localized("It can follow which sites your tabs in the \(personaName) Persona visit, as they visit them.")) }
         sentences.append(localized("Pages it reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that."))
         sentences.append(localized("Steps that need you still ask in Arch."))

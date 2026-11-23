@@ -143,8 +143,12 @@ import Testing
 
     func showAgentPanel(for ownerID: UUID) { shownPanels.append(ownerID) }
 
-    func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage] {
-        Array(history.filter { $0.url.absoluteString.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query) }.prefix(limit))
+    /// The Personas whose history `searchHistory(_:limit:in:)` was asked for, in order.
+    var historySearchPersonas: [UUID] = []
+
+    func searchHistory(_ query: String, limit: Int, in persona: UUID) async -> [AgentHistoryPage] {
+        historySearchPersonas.append(persona)
+        return Array(history.filter { $0.url.absoluteString.localizedCaseInsensitiveContains(query) || $0.title.localizedCaseInsensitiveContains(query) }.prefix(limit))
     }
 
     /// Loads `url` on the next turn, as an engine answers: it asks before the address and each redirect hop, then commits the last one, which changes the tab's address and document, and reports the document once it finishes, or reports only the stop when a hop was refused or the load failed.

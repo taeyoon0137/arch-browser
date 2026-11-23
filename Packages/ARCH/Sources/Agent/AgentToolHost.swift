@@ -800,7 +800,7 @@ import Foundation
         return Outcome(result: AgentToolResult(status: .ok, text: list.text, structured: .object(structured)))
     }
 
-    /// History pages whose title or address without query and fragment contains the query, without excluded sites and pages agents do not read, at most `limit`, each address once. The store also matches queries and fragments, which agents never see, so it is asked for more.
+    /// History pages of the client's Persona whose title or address without query and fragment contains the query, without excluded sites and pages agents do not read, at most `limit`, each address once. The store also matches queries and fragments, which agents never see, so it is asked for more.
     private func searchHistory(_ arguments: [String: AgentJSON], _ client: AgentToolClient) async -> Outcome {
         guard client.scopes.searchHistory else {
             return Outcome(result: AgentToolResult(status: .refused, code: "historyScope", text: "search_history needs the history scope, which the user gives on Arch's grant sheet."))
@@ -810,7 +810,7 @@ import Foundation
         var seen: Set<String> = []
         var rows: [AgentJSON] = []
         var lines: [String] = []
-        for page in await host.searchHistory(query, limit: AgentLimits.historyResults * 5) where rows.count < limit {
+        for page in await host.searchHistory(query, limit: AgentLimits.historyResults * 5, in: client.personaID) where rows.count < limit {
             guard AgentPolicy.showsTitle(of: page.url, allowsAI: allowsAI) else { continue }
             let address = AgentAddress.reduced(page.url).absoluteString
             guard address.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil || page.title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil,

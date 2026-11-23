@@ -27,7 +27,7 @@ struct CommandPaletteView: View {
     @FocusState private var isFocused: Bool
     /// Set as the palette appears to animate its arrival as a state change.
     @State private var hasArrived = false
-    /// The pages from history for `text`, which `loadHistorySuggestions()` reads as the text changes. The palette redraws for many other changes, such as a loading page's title, and none of them queries the history store again.
+    /// The pages from the window's Persona's history for `text`, which `loadHistorySuggestions()` reads as the text changes. The palette redraws for many other changes, such as a loading page's title, and none of them queries the history store again.
     @State private var historySuggestions: [HistoryEntry] = []
     /// The row that Up and Down selected. Its identity selects a matching row on redraw. Nil, or a row that has left the list, selects the first row; typing selects it again.
     @State private var selectedRow: PaletteItem?
@@ -51,7 +51,7 @@ struct CommandPaletteView: View {
 
     /// Pages that share a title and site, such as the steps of a sign-in flow, appear once. The site is the one the row shows, so a page with `www.` and one without it count as one. Typing more cancels the read, and the result of a cancelled read is dropped, so the list always belongs to the latest text.
     private func loadHistorySuggestions() async {
-        let entries = await session.history.suggestions(for: text, limit: 15)
+        let entries = await session.history.suggestions(for: text, limit: 15, in: windowModel.personaID)
         guard !Task.isCancelled else { return }
         var seen = Set<String>()
         historySuggestions = Array(entries.filter { seen.insert("\($0.title)\u{1F}\(AddressPillView.siteName(of: $0.url))").inserted }.prefix(5))

@@ -126,13 +126,14 @@ import Testing
         model.choices[SidebarImport.Profile(source: Self.source.id, folder: "Profile 3")]?.isIncluded = false
 
         let selection = model.selection
-        // Only the first profile brings sidebar items: its space, and its bookmark folders in a space named after the browser.
-        #expect(selection.rows.map(\.row.profile.folder) == ["Default"])
+        // Only the first profile brings sidebar items: its space, and its bookmark folders in a space named after the browser. The profiles with history pages bring them to their own destinations.
+        #expect(selection.rows.map(\.row.profile.folder) == ["Default", "Profile 2", "Profile 4"])
+        #expect(selection.rows.map(\.history.count) == [0, 1, 1])
+        #expect(selection.rows.dropFirst().allSatisfy { $0.row.favorites.isEmpty && $0.row.spaces.isEmpty && $0.destination == .newPersona })
         #expect(selection.rows.first?.row.favorites.isEmpty == true)
         #expect(selection.rows.first?.row.spaces.map(\.origin) == [.space("home"), .bookmarks])
         #expect(selection.rows.first?.row.spaces.last?.name == "Test Browser")
         #expect(selection.rows.first?.destination == .persona(Persona.defaultID))
-        #expect(selection.history.map(\.url) == [entry.url, entry.url])
         #expect(selection.shortcuts.map(\.keyword) == ["d"])
         #expect(selection.skippedShortcutCount == 1)
         #expect(selection.searchEngine == nil)

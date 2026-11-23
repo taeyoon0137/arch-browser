@@ -154,6 +154,11 @@ extension SidebarImport {
             entries.first { $0.profile == profile }
         }
 
+        /// The Persona the profile went to last, which receives its history pages after `BrowserSession.addImport(_:to:record:)` applied its row.
+        public func personaID(for profile: Profile) -> Persona.ID? {
+            entry(for: profile)?.personaID
+        }
+
         /// Replaces the entry of the same profile, or adds `entry` at the end.
         mutating func update(_ entry: Entry) {
             if let index = entries.firstIndex(where: { $0.profile == entry.profile }) {

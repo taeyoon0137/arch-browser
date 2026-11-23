@@ -668,18 +668,23 @@ import Terminal
     @objc private func goBack() { session.activeWindow?.goBack() }
     @objc private func goForward() { session.activeWindow?.goForward() }
     @objc private func goHome() { session.activeWindow?.goHome() }
-    /// Asks for the range to clear in the History window's sheet, as its own Clear History… does.
-    @objc private func clearHistory() { historyWindow.showClearHistory() }
+    /// Asks for the range to clear in the History window's sheet, as its own Clear History… does, on the active window's Persona.
+    @objc private func clearHistory() { historyWindow.showClearHistory(persona: historyPersona) }
     @objc private func clearSiteData() { session.activeWindow?.confirmClearSiteData() }
 
-    @objc private func showHistory() { historyWindow.show() }
+    @objc private func showHistory() { historyWindow.show(persona: historyPersona) }
 
-    /// The History window, made on first use. Its pages open as new tabs in the sidebar target, which comes to the front.
+    /// The Persona whose history the History menu shows: the active window's, or the default one while no browser window is open, as for the Plugins menu.
+    private var historyPersona: UUID { session.activeWindow?.personaID ?? Persona.defaultID }
+
+    /// The History window, made on first use. Its pages open as new tabs of the shown Persona, in the space where a new tab of the Persona goes, selected in the sidebar target, which comes to the front.
     private lazy var historyWindow: HistoryWindowController = {
-        let history = HistoryWindowController(store: session.history)
-        history.openURL = { [weak self] url in
+        let history = HistoryWindowController(store: session.history) { [weak self] in
+            self?.session.personas.map { HistoryPersona(id: $0.id, name: $0.name) } ?? []
+        }
+        history.openURL = { [weak self] url, persona in
             guard let session = self?.session else { return }
-            session.openTab(url: url)
+            session.openTab(url: url, in: session.preferredSpace(in: persona).id)
             session.sidebarTarget().nsWindow?.makeKeyAndOrderFront(nil)
         }
         return history

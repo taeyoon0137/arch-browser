@@ -368,7 +368,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
             didFinishLoad?()
         }
         if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
-        // Record a page when it finishes loading, when its title is usually known. An agent's tab records none (Persona rule 6).
+        // Record a page when it finishes loading, when its title is usually known, in the tab's Persona. An agent's tab records none (`docs/agents.md`, agent decision 10), so an agent's pages enter no Persona's suggestions.
         if !isLoading, !isDownloadOnly, agentOwnerID == nil, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)

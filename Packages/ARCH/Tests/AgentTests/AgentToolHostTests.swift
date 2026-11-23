@@ -491,6 +491,8 @@ import Testing
         let docs = await fixture.call("search_history", ["query": "docs"])
         #expect(docs.status == .ok)
         #expect(docs.structured?["pages"] == [["title": "<untrusted source=\"page\" url=\"https://docs.example/a\">Docs A</untrusted>", "url": "https://docs.example/a"]])
+        // The search reads the grant's Persona's history only.
+        #expect(fixture.host.historySearchPersonas == [FakeHost.defaultPersona.id])
         // A query that only an address's query or fragment holds finds nothing.
         #expect(await fixture.call("search_history", ["query": "private"]).text == "No history page matches \u{201C}private\u{201D}.")
 

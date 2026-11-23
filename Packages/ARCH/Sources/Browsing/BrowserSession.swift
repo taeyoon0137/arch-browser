@@ -1,6 +1,6 @@
 // The session owns each engine application and one runtime per engine for each Persona: its profile and browser. A runtime starts when a tab first needs it, so both engines can run beside each other.
 // It also owns each Persona's plugins and sidebar state: Personas, spaces, favorites and their tabs, open tabs, folders, split views, and closed tabs.
-// App-wide stores in its folder hold history, remembered site permissions, site search, and live-folder items (`LiveFolderTabs.swift`).
+// Stores in its folder hold history, kept per Persona, and the app-wide remembered site permissions, site search, and live-folder items (`LiveFolderTabs.swift`).
 // A timer archives inactive tabs and unloads inactive pinned tabs and favorites. Memory pressure unloads tabs no window shows.
 // The session opens main windows with a sidebar and small windows for links from other apps, then tracks which becomes main or closes.
 // Each window's state and commands live in `BrowserWindowModel`. Views, menus, and scripts reach them through `activeWindow` or `sidebarTarget()`.
@@ -39,7 +39,7 @@ final class EngineRuntime {
     public private(set) var needsFullSidebarSync: Bool
     /// The folder that holds every file the session keeps: `session.json`, Chromium's profiles in `Cache/Chromium`, the plugins, the browser import's record, and the files of `history`, `sitePermissions`, and `siteSearch`. WebKit keeps its website data where the system puts it for the app.
     public let userDataDirectory: URL
-    /// The pages visited in every Persona. The tabs record their pages there, and the palette, the History window, and imports read and add pages.
+    /// The pages visited in each Persona, apart. The tabs record their pages in their own Persona, and the palette, the History window, agents, plugins, and imports read and add pages of one Persona.
     public let history: HistoryStore
     /// The remembered answers to websites' permission requests in every Persona, which Settings ▸ Websites changes.
     public let sitePermissions: SitePermissionStore
@@ -168,7 +168,8 @@ final class EngineRuntime {
         nativeMessagingHosts = NativeMessagingHostLinks(directory: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true), folders: nativeMessagingHostFolders,
                                      chromiumFolder: chromiumNativeMessagingHosts)
         store = SessionStore(directory: userDataDirectory, seal: sessionSeal)
-        history = HistoryStore(directory: userDataDirectory)
+        let history = HistoryStore(directory: userDataDirectory, legacyPersona: Persona.defaultID)
+        self.history = history
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
         permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization, agentOnlyPersonaID: Self.agentOnly(agentOnlyPersonaID))
@@ -186,6 +187,8 @@ final class EngineRuntime {
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
             let pluginDataRemoved = PluginManager.removeData(ofPersona: $0, in: userDataDirectory)
             let cookieRecordRemoved = CookieSync.removeRecord(ofPersona: $0, in: userDataDirectory)
+            // The store removes the visits on its queue and logs a failure; the Persona's pages show nowhere once it is gone.
+            history.clear(persona: $0)
             return pluginDataRemoved && cookieRecordRemoved
         }
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
@@ -699,7 +702,7 @@ final class EngineRuntime {
     }
 
     /// The space a tab of the Persona joins when no space of the Persona is given: the last main window's current space while it belongs to the Persona, else the Persona's first space. Every listed Persona has a space; for one that is gone, the first space.
-    func preferredSpace(in personaID: Persona.ID) -> Space {
+    public func preferredSpace(in personaID: Persona.ID) -> Space {
         if let space = lastMainWindow?.currentSpace, space.resolvedPersonaID == personaID { return space }
         return spaces.first { $0.resolvedPersonaID == personaID } ?? spaces[0]
     }
@@ -1063,7 +1066,8 @@ final class EngineRuntime {
             guard let self, let tab else { return completion(false) }
             self.permissionAnswers.denyWithoutAsking(request, personaID: tab.personaID, in: self.runtime(of: tab)?.context, completion: completion)
         }
-        tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
+        // A tab keeps its Persona for its whole life, so its visits go to that Persona's history.
+        tab.recordVisit = { [weak self, personaID = tab.personaID] url, title in self?.history.record(url, title: title, persona: personaID) }
         // The page fills the window that shows it. A page that no window shows leaves fullscreen; the engine is still in its callback, so that happens on the next turn of the run loop.
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
             guard let self, let tab else { return }
