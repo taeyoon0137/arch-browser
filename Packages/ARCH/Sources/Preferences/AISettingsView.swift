@@ -1,6 +1,6 @@
 // Settings ▸ AI lists connected providers, models for each registered feature and tier, excluded sites, usage, and recent requests.
 // It also shows outside agent access, grants, activity, and hooks.
-// Arch ships no model or provider account. Until the user connects one, this is the only section that mentions AI.
+// Arch ships no model or provider account. Until the user connects one, this is the only section that mentions AI, apart from New Agent Task and Show Agent Panel, which open Settings ▸ AI ▸ Providers.
 import Agent
 import AI
 import Hooks

@@ -381,7 +381,8 @@ import Foundation
             while level(of: folder.id) > maximumLevel {
                 var ancestor = folder.id
                 for _ in 0..<(level(of: folder.id) - maximumLevel - 1) {
-                    guard let parent = parents[ancestor] else { break }
+                    // Unreachable after the cycle pass; if it ever runs, detaching the folder itself ends the outer loop.
+                    guard let parent = parents[ancestor] else { ancestor = folder.id; break }
                     ancestor = parent
                 }
                 parents[ancestor] = nil

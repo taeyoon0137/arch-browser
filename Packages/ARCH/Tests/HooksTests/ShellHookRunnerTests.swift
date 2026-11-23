@@ -18,7 +18,8 @@ private func shellFixture(_ name: String) throws -> Data {
 /// Stands in for the agents' service: it records each run's tools, start, and end, and keeps each open run's handler of `arch-cli`'s calls.
 @MainActor
 final class FakeRunChannel: AgentHookRunChannel {
-    let ticket = "fixture-ticket"
+    /// Empty, as the service gives when it cannot make a ticket.
+    var ticket = "fixture-ticket"
     private(set) var tools: [UUID: [String]] = [:]
     private(set) var started: [UUID: pid_t] = [:]
     private(set) var closed: [UUID] = []
@@ -221,6 +222,18 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         let outcome = await shell.run(run)
         #expect(outcome.code == "exitStatus" && outcome.failure == "Exited with status 3: no tab to rename")
         #expect(shell.takeErrorOutput(of: run.run) == "looking for the tab\nno tab to rename\n")
+    }
+
+    @Test func aRunWhoseTicketCouldNotBeMadeDoesNotStartTheScript() async throws {
+        defer { harness.cleanUp() }
+        let script = try shellFixture("fails.sh")
+        let tab = harness.tab()
+        harness.host.show(tab)
+        channel.ticket = ""
+        let run = invocation(of: try shellHook(script), script: script, loading: tab)
+        let outcome = await runner().run(run)
+        #expect(outcome.code == "notStarted" && outcome.failure == HookShellScript.noTicketSentence)
+        #expect(channel.started[run.run] == nil && channel.closed.contains(run.run))
     }
 
     @Test func theTimeLimitEndsTheProcessGroup() async throws {

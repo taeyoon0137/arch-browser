@@ -566,6 +566,26 @@ import Testing
         #expect(!f.defaults.bool(forKey: key) && f.defaults.bool(forKey: SyncController.enabledKey))
     }
 
+    /// The guard covers a whole outgoing batch once (`docs/sync.md`, Crash-loop guard): the key is set while each of the batch's records is built and removed when the batch ends, and building a record outside a batch writes nothing.
+    @Test func theCrashLoopGuardHoldsOnceForEachOutgoingBatch() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let key = SyncController.applyingKey
+        await f.controller.setEnabled(true)
+        let engine = try #require(f.engines.last)
+        var whileBuilding: [Bool] = []
+        engine.beforeRecord = { _ in whileBuilding.append(f.defaults.bool(forKey: key)) }
+        try await engine.sendChanges()
+        #expect(!whileBuilding.isEmpty && whileBuilding.allSatisfy { $0 } && !f.defaults.bool(forKey: key))
+        f.sidebar.renameSpace("Built alone")
+        try f.sidebar.saveNow().get()
+        let pending = try #require(engine.pendingChanges.compactMap { change -> String? in
+            if case .saveRecord(let name) = change { return name } else { return nil }
+        }.first)
+        #expect(f.controller.record(toSave: pending) != nil && !f.defaults.bool(forKey: key))
+        #expect(SyncController.interruptedApplyMessage == "Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again.")
+    }
+
     @Test func confirmedDeletionSendsOnlyTheZoneAndTurnsOffOnceTheServerAccepts() async throws {
         let f = Fixture()
         defer { f.clean() }

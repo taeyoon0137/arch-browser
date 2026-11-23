@@ -42,7 +42,9 @@ public enum HookShellScript {
     /// What the trust sheet says about the commands the script runs.
     public static let pathSentence = "Commands this script runs by name come from your PATH, and each of them gets this hook's access to Arch."
     /// What the trust sheet says the script receives.
-    public static let inputSentence = "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File\u{2026}."
+    public static let inputSentence = "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File."
+    /// The failure of a run whose ticket the channel could not make.
+    static let noTicketSentence = "Arch could not make the run's ticket, so the script did not start."
     /// What Let Agent Runs Read Pages says on the trust sheet.
     public static let readsPagesSentence = "The script and every command it runs can then read the event's page through agent runs."
     static let firstLineSentence = "Its first line must be #! and the absolute path of a program, with at most one option made of the letters e, f, u, v, w, and x, as in -eu, or /usr/bin/env and one program's name."
@@ -329,7 +331,14 @@ public final class ShellHookRunner: HookScriptRunning {
         if tools.permitsAgentRuns {
             agentRun = { @MainActor fields in await tools.runAgent(fields) }
         }
-        let ticket = channel?.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun) ?? ""
+        let opened = channel?.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun)
+        // A channel gives an empty ticket only when it could not make one, so the script would start without access; the run fails and its record says why.
+        if opened?.isEmpty == true {
+            tools.end()
+            channel?.closeHookRun(invocation.run)
+            return .failed(code: "notStarted", message: HookShellScript.noTicketSentence)
+        }
+        let ticket = opened ?? ""
         state.accessEnd = { [channel] in
             tools.end()
             channel?.closeHookRun(invocation.run)

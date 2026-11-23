@@ -195,7 +195,7 @@ A sidebar item with a `panel` may set `"presentation": "sidebar"`; the default i
 - Built-in plugins run in the app process. They are trusted, reviewed with the app, and limited to `PluginContext` by convention.
 - Script plugins run their background script in a hidden `WKWebView` owned by the `Plugins` module. The code runs in a separate WebKit web content process, regardless of the tabs' engine:
   - Its documents load from `arch-plugin://<plugin id>/` through a `WKURLSchemeHandler` that serves only the installed package. The root of that origin is a document the handler writes, which runs the background script as a classic script; every other path is a package path, and other hosts and paths that name no file of the package get 404.
-  - Every response carries the content security policy `default-src 'self'`, which limits scripts, styles, and connections to the package and allows neither inline code nor `eval`. Network access goes through `arch.net.fetch`, which the host checks against the grant's hosts.
+  - Every response carries the content security policy `default-src 'self'`, which limits scripts, styles, and connections to the package and allows neither inline code nor `eval`. Network access goes only through `arch.net.fetch`, which currently refuses every request with `networkUnavailable` before any network I/O; once enabled, the host checks each request against the grant's hosts.
   - A `WKContentRuleList` blocks every load outside the plugin's scheme as a second layer.
   - Neither the policy nor the rule list covers WebRTC, whose connections would reach any host. The web view runs in Lockdown Mode (`WKWebpagePreferences.isLockdownModeEnabled`), which removes WebRTC from its documents and their frames, along with other web technologies such as JIT compilation, WebAssembly, and WebGL. Whether DNS prefetching and `preconnect` links can still reach a host outside the scheme needs verification.
   - Each of a plugin's web views uses its own `WKWebsiteDataStore.nonPersistent()`, so it shares no cookies or site storage with any Persona, any other plugin, or the plugin's other web views: a panel and the background script share neither `localStorage` nor a `BroadcastChannel`. Its lasting state goes through `arch.storage`.
@@ -701,7 +701,7 @@ public protocol PluginContext: AnyObject {
     func history(matching text: String, limit: Int) throws -> [PluginHistoryEntry]
     func downloads() throws -> [PluginDownload]
     func renameDownload(_ id: UUID, to name: String) throws -> Bool
-    /// Uses an ephemeral session without cookies. The host must be in the grant's `network`.
+    /// Currently throws `networkUnavailable` before any network I/O. Once enabled, it uses an ephemeral session without cookies, and the host must be in the grant's `network`.
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 
     // Interface.
@@ -1313,12 +1313,12 @@ Chromium's `executeJavaScript(_:inWorld:completion:)` calls the function in the 
   - Decided in X5: keep plugin fetches free of Persona cookies; signed-in site access belongs in a page script.
 - A plugin with `ai` but no bus events has a feature that the user starts, although its page script values can start requests as pages load, and its `settingChanged` listeners can start them as the user edits its settings, which is not asking for AI as running a command is. Those requests count as the user's: they use the default route until the feature has models of its own, take a provider's free slot ahead of waiting automatic requests, and do not count toward the daily limit for automatic requests. Whether such a plugin's feature should be automatic, so that it waits for a model of its own and counts toward that limit, or whether only a `settingChanged` listener's requests should count as automatic, is open.
 - A tab that a plugin opens takes the plugin's cause for its first address and load, as for its opening and selection, so the plugin hears neither its `tabOpened` nor that first `addressChanged` and `pageLoaded`, under the rule that a plugin never receives an event its own calls caused; a page script on its sites still sees the page. Whether that first load should reach the plugin, since the page's own loading follows the call, is open.
-  - Decided in X5: suppress the opening plugin's first address and load events as events caused by its own call.
+  - Default kept in X5, still open for the user: the opening plugin's first address and load events are suppressed as events caused by its own call.
 - A request that a hook listener starts without waiting for it belongs to the listener's step for the pause, but once the listener returns, the step ends while the request runs on: the scheduler no longer stops it, and it can run beside the plugin's next step. Whether a step should wait for such requests or end them is open.
 - Page script styles go in `<style>` elements, which the page sees and a strict content security policy may refuse. Constructed style sheets in `document.adoptedStyleSheets`, which the policy may not govern (needs verification), are the alternative, though a page that sets that list drops them. Whether to use them, or to fall back to them where the policy refuses an element, is open.
 - A file that a link of a web extension's popup or options page opens in a new tab, or that a `tabs.create` from its action's click opens, downloads nothing and its tab closes at once, as for any tab that a plugin opens, since Arch cannot tell the user's click there from the extension's own call. Whether such a tab should instead stay open and ask with its card, which would keep the user's file, is open.
 - A plugin's move keeps a tab pinned or open, so no plugin pins or unpins tabs, which would let one turn a pinned tab, which its close only unloads, into an open tab that its close removes, with the tab's saved page. Whether `tabs.manage` should pin and unpin tabs, or a permission of its own should, is open.
-  - Decided in X5: tab moves keep their pin status; tabs.manage does not pin or unpin.
+  - Default kept in X5, still open for the user: tab moves keep their pin status, and `tabs.manage` does not pin or unpin.
 - The 10-second hang limit, 30-second idle stop, 5 MB storage limit, limit of 10 tabs that a plugin opens within a minute, and the panel's 300 by 400 points are starting values. A manifest key for a panel's size can follow once a plugin needs one.
   - Decided in X5: keep these limits as starting values until a concrete plugin needs a change.
 

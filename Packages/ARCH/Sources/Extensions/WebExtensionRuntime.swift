@@ -2,7 +2,7 @@
 // It loads enabled extensions with the user's grants into that Persona's profiles. A paired version runs only in its assigned engine.
 // It removes extension storage from each engine, or on the next launch if an engine did not run during removal.
 // It shows popups, handles extension tab and window requests, asks about access and engine prompts, and relays native messages.
-// Before an extension that may use native messaging loads, Arch looks for native apps. Chromium excludes versions whose identifier Arch cannot prove while a linked native app accepts them (`NativeMessagingHostLinks`).
+// Before an extension that may use native messaging loads, Arch looks for native apps. The runtime stops in Chromium, which reads Arch's host-manifest links itself, each version whose identifier Arch cannot prove while a linked native app accepts it (`NativeMessagingHostLinks`).
 // The plugin list stays shared across engines; each engine runs the packages it supports.
 import AppKit
 import ARCHEngine
