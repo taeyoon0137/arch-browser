@@ -43,7 +43,7 @@ import Testing
         harness.addProcess(Self.scriptProcess, parent: 1, start: Self.scriptStart)
         // Only `arch-cli` presents a run's ticket, and another ticket of the same length binds nothing.
         await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: ticket, client: .mcp) }
-        await #expect(throws: refusal) { try await TestClient(harness.location).hello(ticket: AgentSessionTicket.make().text, client: .cli) }
+        await #expect(throws: refusal) { try await TestClient(harness.location).hello(ticket: try #require(AgentSessionTicket.make()).text, client: .cli) }
 
         let bound = try TestClient(harness.location)
         #expect(try await bound.hello(ticket: ticket, client: .cli).status == .bound)

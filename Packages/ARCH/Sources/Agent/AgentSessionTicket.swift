@@ -9,18 +9,8 @@ struct AgentSessionTicket: Sendable {
     /// What `ARCH_AGENT_TICKET` carries.
     let text: String
 
-    /// A new ticket for callers that require a nonoptional value.
-    static func make() -> AgentSessionTicket {
-        if let ticket = makeIfPossible() { return ticket }
-        var bytes = [UInt8](repeating: 0, count: 32)
-        bytes.withUnsafeMutableBytes { buffer in
-            arc4random_buf(buffer.baseAddress, buffer.count)
-        }
-        return AgentSessionTicket(bytes: bytes)
-    }
-
-    /// A new ticket from Security's random number generator, or nil if it fails.
-    static func makeIfPossible() -> AgentSessionTicket? {
+    /// A new ticket from Security's random number generator, or nil if it fails; each caller then refuses to start what the ticket was for.
+    static func make() -> AgentSessionTicket? {
         var bytes = [UInt8](repeating: 0, count: 32)
         let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         guard status == errSecSuccess else { return nil }

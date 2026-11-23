@@ -19,6 +19,8 @@ private func shellFixture(_ name: String) throws -> Data {
 @MainActor
 final class FakeRunChannel: AgentHookRunChannel {
     let ticket = "fixture-ticket"
+    /// Stands for a service that could not make the run's ticket.
+    var refusesTicket = false
     private(set) var tools: [UUID: [String]] = [:]
     private(set) var started: [UUID: pid_t] = [:]
     private(set) var closed: [UUID] = []
@@ -26,14 +28,14 @@ final class FakeRunChannel: AgentHookRunChannel {
     /// Each run's tab handles, by which the service's answer to `arch-cli agent run` names renamed tabs.
     private(set) var handles: [UUID: [UUID: String]] = [:]
 
-    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
+    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String? {
         self.tools[run] = tools
         handlers[run] = call
-        return ticket
+        return refusesTicket ? nil : ticket
     }
 
     func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
+                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String? {
         self.handles[run] = handles
         return openHookRun(run, tools: tools, call: call)
     }
@@ -209,6 +211,18 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         #expect(await shell.run(run).actions == [])
         #expect(values("zero", in: shell.takeErrorOutput(of: run.run)) == [link.path])
         if case .shell(_, _, let interpreter) = hook.script { #expect(interpreter.path != link.path) } else { Issue.record("Not a shell hook.") }
+    }
+
+    @Test func aRunWithoutATicketNeverStartsItsScript() async throws {
+        defer { harness.cleanUp() }
+        let script = try shellFixture("input.sh")
+        let tab = harness.tab()
+        harness.host.show(tab)
+        channel.refusesTicket = true
+        let run = invocation(of: try shellHook(script), script: script, loading: tab)
+        let outcome = await runner().run(run)
+        #expect(outcome.code == "notStarted")
+        #expect(channel.started[run.run] == nil)
     }
 
     @Test func aNonzeroStatusFailsTheRunWithItsLastErrorLine() async throws {

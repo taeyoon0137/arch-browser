@@ -616,7 +616,7 @@ import UserNotifications
         #expect(try await bound.hello(ticket: session.ticket?.text).status == .bound)
         #expect(try await bound.call(AgentControlMethod.grantShow) == AgentJSON.object(["protocol": 1, "version": "9.9.9", "status": "bound"]))
         // Another ticket, even one of the same length, binds nothing.
-        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: AgentSessionTicket.make().text) }
+        await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: try #require(AgentSessionTicket.make()).text) }
         #expect(harness.prompt.requests.isEmpty)
     }
 
@@ -639,11 +639,11 @@ import UserNotifications
         }
     }
 
-    @Test func ticketsCompareInConstantTime() {
-        let ticket = AgentSessionTicket.make()
+    @Test func ticketsCompareInConstantTime() throws {
+        let ticket = try #require(AgentSessionTicket.make())
         #expect(ticket.text.count == 43)
         #expect(ticket.text.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
-        #expect(ticket.text != AgentSessionTicket.make().text)
+        #expect(ticket.text != AgentSessionTicket.make()?.text)
         #expect(ticket.matches(ticket.text))
         // A difference at the first byte, at the last, a prefix, and a longer text all fail; the comparison reads every byte of the longer text whatever it finds.
         var first = Array(ticket.text.utf8)

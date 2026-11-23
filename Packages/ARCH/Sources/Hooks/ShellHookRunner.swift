@@ -329,7 +329,15 @@ public final class ShellHookRunner: HookScriptRunning {
         if tools.permitsAgentRuns {
             agentRun = { @MainActor fields in await tools.runAgent(fields) }
         }
-        let ticket = channel?.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun) ?? ""
+        var ticket = ""
+        if let channel {
+            // Without a ticket, every arch-cli call of the script would fail as not granted, so the run does not start.
+            guard let opened = channel.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun) else {
+                tools.end()
+                return .failed(code: "notStarted", message: "Arch could not make the run\u{2019}s ticket.")
+            }
+            ticket = opened
+        }
         state.accessEnd = { [channel] in
             tools.end()
             channel?.closeHookRun(invocation.run)
