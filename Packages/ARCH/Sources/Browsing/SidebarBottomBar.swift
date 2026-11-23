@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. With several Personas, a divider separates each Persona's group of symbols. Dragging a symbol moves its space among the others of its Persona; a tab dragged over another space's symbol of its Persona lights it up.
+/// The library button at the leading end, and one symbol per space in the middle with the new space button floating after them. With several Personas, a divider separates each Persona's group of symbols. Dragging a symbol moves its space among the others of its Persona; a tab or folder dragged over another space's symbol, of any Persona, lights it up (`SidebarDragState.spaceDestination(forTab:at:session:)`).
 struct SidebarBottomBar: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
