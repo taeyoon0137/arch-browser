@@ -35,6 +35,8 @@ protocol PluginPanelContext: PluginContext {
     func panelCloseTab(_ id: PluginTab.ID) throws
     func panelSelectTab(_ id: PluginTab.ID) throws
     func panelMoveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool
+    /// As `setPinned(_:tab:)`, whatever hook step runs.
+    func panelSetPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool
 }
 
 /// One run of a plugin's listener as a step of the shared hook scheduler. The scheduler counts the errors of the AI requests that belong to the step toward its pause, and stops them with the step.

@@ -59,6 +59,29 @@ extension PluginManifest {
     }
 }
 
+/// The two versions of an installed pair that another Persona can stage together (`PluginManager.pairForCopy(of:)`). Only a manager makes one, from its installed packages, whose origin and proof their installs checked.
+public struct PluginPairCopy: Sendable {
+    struct Version: Sendable {
+        let folder: URL
+        let origin: PluginOrigin
+        let proof: PluginProof?
+        let engine: EngineKind
+    }
+
+    /// The leading version first.
+    let versions: [Version]
+
+    /// The engine of each version, the leading version's first.
+    public var engines: [EngineKind] { versions.map(\.engine) }
+}
+
+/// A staged version of a pair that another Persona's review installs (`PluginManager.stage(_:)`), with the engine it is the version for.
+public struct PluginStagedVersion: Identifiable, Sendable {
+    public var id: URL { package.rootURL }
+    public let package: PluginPackage
+    public let engine: EngineKind
+}
+
 extension PluginID {
     /// The identifier of a version that joins, for `engine`, a plugin whose version has this identifier: this one followed by `.webkit` or `.chromium`. Nil when it would grow past 128 characters.
     func version(for engine: EngineKind) -> PluginID? {
