@@ -1545,6 +1545,16 @@ public final class PluginManager: ObservableObject {
         browserHost?.renameDownload(id, to: name, in: persona) ?? false
     }
 
+    /// A plugin's history search gives at most this many entries.
+    static let historyLimit = 100
+
+    /// The Persona's history pages that match the text, at most `limit`, for a plugin with the grant: for a plugin with `ai`, none on a site excluded from AI, which its code could send to a model as text, as the sites excluded when the search starts give them. Without the host, none.
+    fileprivate func history(matching text: String, limit: Int, for grant: PluginGrant) async -> [PluginHistoryEntry] {
+        guard let browserHost else { return [] }
+        let excluded = grant.permissions.contains(.ai) ? ai?.settings.excludedSites : nil
+        return await browserHost.history(matching: text, limit: limit, in: persona) { url in excluded.map { AISitePattern.allowsAI(on: url, excluding: $0) } ?? true }
+    }
+
     /// Posts a notification for an enabled plugin, at most once every ten seconds, with at most 100 characters of title and 500 of body.
     fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
         let now = Date()
@@ -1950,6 +1960,16 @@ final class ScopedPluginContext: PluginPanelContext {
         try require(.renameDownloads)
         guard let manager, manager.personaDownloads().contains(where: { $0.id == id }) else { return false }
         return manager.renameDownload(id, to: name)
+    }
+
+    /// A limit past `PluginManager.historyLimit` gives that many, and one below 1 none.
+    func history(matching text: String, limit: Int) async throws -> [PluginHistoryEntry] {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.history)
+        guard let manager else { return [] }
+        let entries = await manager.history(matching: text, limit: min(max(limit, 0), PluginManager.historyLimit), for: grant)
+        guard !hasEnded else { throw PluginError.stopped }
+        return entries
     }
 
     func notify(title: String, body: String) throws {

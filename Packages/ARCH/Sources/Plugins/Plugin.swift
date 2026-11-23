@@ -76,6 +76,8 @@ public protocol PluginContext: AnyObject {
     func downloads() throws -> [PluginDownload]
     /// Needs `downloads.rename`; returns false when the completed file cannot take the suggested name.
     func renameDownload(_ id: UUID, to name: String) throws -> Bool
+    /// Needs `history`. The pages that the plugin's Persona visited whose address or title contains the text, ignoring the spaces at either end and the case of ASCII letters, or all of them for empty text, most visited first, each with its title, visit count, and last visit in that Persona, so that nothing of other Personas' visits shows. At most `limit` entries, and never more than 100 (`PluginManager.historyLimit`). A plugin with `ai` gets none on a site excluded from AI, and still up to `limit` of the others. Throws `PluginError.stopped` once the instance stops, also while the search runs.
+    func history(matching text: String, limit: Int) async throws -> [PluginHistoryEntry]
     /// Posts a local notification under this plugin's name. Needs `notifications`.
     func notify(title: String, body: String) throws
     /// Sends one bounded HTTPS request to a host in the `network` grant, without browser cookies or credentials.
@@ -105,6 +107,8 @@ extension PluginContext {
     public func selectedTab() throws -> PluginTab? { nil }
     public func downloads() throws -> [PluginDownload] { throw PluginError.permissionDenied(.downloads) }
     public func renameDownload(_ id: UUID, to name: String) throws -> Bool { throw PluginError.permissionDenied(.renameDownloads) }
+    /// A context that searches no history, such as a hook script's, refuses it.
+    public func history(matching text: String, limit: Int) async throws -> [PluginHistoryEntry] { throw PluginError.permissionDenied(.history) }
     public func notify(title: String, body: String) throws { throw PluginError.permissionDenied(.notifications) }
     public func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw PluginError.permissionDenied(.network) }
 
@@ -162,6 +166,8 @@ public protocol PluginBrowserHost: AnyObject {
     func tabs(in persona: PersonaID) -> [PluginTab]
     func downloads(in persona: PersonaID) -> [PluginDownload]
     func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool
+    /// The Persona's history pages as `PluginContext.history(matching:limit:)` describes, at most `limit` of those whose address `isIncluded` accepts, which runs off the main actor.
+    func history(matching text: String, limit: Int, in persona: PersonaID, where isIncluded: @escaping @Sendable (URL) -> Bool) async -> [PluginHistoryEntry]
     func postNotification(pluginName: String, title: String, body: String)
     /// Sets the tab's suggested name under the AI hooks' rules (`docs/hooks.md`, hook decision 13): the name's first line, trimmed and cut to `PluginTab.maximumNameLength` characters, while the tab still shows `document`, ignoring the fragment, the user has not named it, and the user has not turned down a suggested name for that document. Nil removes a suggested name for the document. A nil `document` stands for the tab's committed address now. The change's events carry `cause`. With `applying` false, nothing changes and the answer says whether the tab would take it. False for a favorite's tab, which goes by its favorite's name, for an agent tab, and for a tab that is gone.
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
@@ -182,6 +188,7 @@ public protocol PluginBrowserHost: AnyObject {
 extension PluginBrowserHost {
     public func downloads(in persona: PersonaID) -> [PluginDownload] { [] }
     public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool { false }
+    public func history(matching text: String, limit: Int, in persona: PersonaID, where isIncluded: @escaping @Sendable (URL) -> Bool) async -> [PluginHistoryEntry] { [] }
     public func postNotification(pluginName: String, title: String, body: String) {}
 }
 
@@ -205,6 +212,28 @@ public struct PluginDownload: Identifiable, Hashable, Sendable {
     public var scriptValue: PluginValue {
         .object(["id": .string(id.uuidString), "name": .string(name), "state": .string(state),
                  "completedBytes": .number(Double(completedBytes)), "totalBytes": .number(Double(totalBytes))])
+    }
+}
+
+/// A page of a Persona's browsing history as a plugin sees it: what that Persona's visits of the page recorded.
+public struct PluginHistoryEntry: Hashable, Sendable {
+    public let url: URL
+    /// The page's title at the Persona's last visit that had one; empty without one.
+    public let title: String
+    public let lastVisit: Date
+    public let visitCount: Int
+
+    public init(url: URL, title: String, lastVisit: Date, visitCount: Int) {
+        self.url = url
+        self.title = title
+        self.lastVisit = lastVisit
+        self.visitCount = visitCount
+    }
+
+    /// The page as `arch.history.search` gives it: `{url, title, lastVisit, visitCount}`, with the last visit in ISO 8601, as events give their dates.
+    public var scriptValue: PluginValue {
+        .object(["url": .string(url.absoluteString), "title": .string(title), "lastVisit": .string(ISO8601DateFormatter().string(from: lastVisit)),
+                 "visitCount": .number(Double(visitCount))])
     }
 }
 

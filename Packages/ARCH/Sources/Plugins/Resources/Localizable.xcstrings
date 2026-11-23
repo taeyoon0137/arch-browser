@@ -531,6 +531,16 @@
         }
       }
     },
+    "Search your browsing history in this Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페르소나의 방문 기록 검색"
+          }
+        }
+      }
+    },
     "Send %@ to the AI models you connected" : {
       "localizations" : {
         "ko" : {

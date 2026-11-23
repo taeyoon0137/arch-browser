@@ -108,6 +108,11 @@ public struct AISitePattern: Codable, Hashable, Sendable {
         guard !sendableSchemes.contains(scheme) || patterns.contains(where: { $0.matches(url) }) else { return nil }
         return url.host.map(normalizedHost).flatMap { $0.isEmpty ? nil : $0 } ?? "\(scheme):"
     }
+
+    /// Whether features may send data from `url` while `patterns` are the excluded sites, as `AISettingsStore.allowsAI(on:)` answers for its own, for a check that runs off the main actor, as on the history store's queue.
+    public static func allowsAI(on url: URL, excluding patterns: [AISitePattern]) -> Bool {
+        excludedSite(of: url, in: patterns) == nil
+    }
 }
 
 // MARK: - Site switch

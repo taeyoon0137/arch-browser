@@ -274,8 +274,8 @@ public struct AgentHistoryPage: Equatable, Sendable {
     var agentPanel: AgentPanelModel? { get set }
     /// Shows the agent panel for the owner in the front main window, as when one of its cards waits.
     func showAgentPanel(for ownerID: UUID)
-    /// The pages of the browsing history, shared by every Persona, whose address or title contains `query`, most visited first.
-    func searchHistory(_ query: String, limit: Int) async -> [AgentHistoryPage]
+    /// The pages of the Persona's browsing history whose address or title contains `query`, most visited first.
+    func searchHistory(_ query: String, limit: Int, in persona: UUID) async -> [AgentHistoryPage]
     /// Adds the Agents Persona, empty and with no sign-ins, and returns its ID.
     func makeAgentsPersona() -> UUID
     /// The Persona whose profiles get no remembered permission answers and whose permission requests are denied without a card (agent decision 9), or nil for none.

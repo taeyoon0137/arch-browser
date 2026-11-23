@@ -721,12 +721,12 @@
         }
       }
     },
-    "It can search your browsing history, which every Persona shares." : {
+    "It can search your browsing history in the %@ Persona." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "모든 페르소나가 공유하는 방문 기록을 검색할 수 있습니다."
+            "value" : "%@ 페르소나의 방문 기록을 검색할 수 있습니다."
           }
         }
       }
