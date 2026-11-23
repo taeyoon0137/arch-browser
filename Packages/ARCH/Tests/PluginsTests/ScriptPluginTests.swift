@@ -375,6 +375,62 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(storage.value(forKey: "runs") == .number(1))
     }
 
+    /// Only the command run that the user started opens a panel, through its own invocation's `showPanel`: a page message's listener that runs while the command waits opens none, with no gesture, a null one, or a made-up one, and has no `arch.ui.showPanel`, and the run's `showPanel` opens none once the run has ended.
+    @Test func opensAPanelOnlyFromTheCommandRunThatTheUserStarted() async throws {
+        let id = PluginID(rawValue: "org.example.gesture")!
+        let root = folder.url.appendingPathComponent("Packages/Gesture", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let files = [
+            "plugin.json": #"{"id": "org.example.gesture", "name": "Gesture", "version": "1", "apiVersion": 1, "summary": "Opens.", "sites": ["https://example.org/*"], "background": "b.js", "contributes": {"commands": [{"id": "open", "title": "Open"}], "sidebarItems": [{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}]}}"#,
+            "b.js": #"""
+            let release = null;
+            let leaked = null;
+            arch.commands.onRun("open", async (invocation) => {
+              leaked = invocation.showPanel;
+              const released = new Promise((resolve) => { release = resolve; });
+              await arch.storage.set("waiting", true);
+              await released;
+              await invocation.showPanel("panel");
+            });
+            arch.pages.onMessage(async (message) => {
+              const post = (args) => window.webkit.messageHandlers.arch.postMessage(JSON.stringify({ call: "ui.showPanel", args }));
+              if (message.body === "try") {
+                await post(["panel"]);
+                await post(["panel", null]);
+                await post(["panel", "00000000-0000-0000-0000-000000000000"]);
+                return typeof arch.ui.showPanel;
+              }
+              if (message.body === "release") { release(); return "released"; }
+              await leaked("panel");
+              return "leaked";
+            });
+            """#,
+            "panel.html": #"<!doctype html><meta charset="utf-8">"#,
+        ]
+        for (path, text) in files {
+            try Data(text.utf8).write(to: root.appendingPathComponent(path))
+        }
+        let manager = manager()
+        defer { manager.close() }
+        let package = try await manager.stage(root)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        let storage = manager.makeContext(for: try #require(manager.plugins.first)).storage
+        func send(_ body: String) async -> String? {
+            await manager.receive(EnginePageScriptMessage(world: id.pageScriptWorld, frameURL: URL(string: "https://example.org/a"), isMainFrame: true, json: "\"\(body)\""), from: tab)
+        }
+        let run = Task { await manager.run(PluginCommandRef(plugin: id, command: "open"), PluginInvocation(tab: nil)) }
+        #expect(await eventually { storage.value(forKey: "waiting") == .bool(true) })
+        // The command waits, so before the fix any call of the plugin's then opened the panel.
+        #expect(await send("try") == #""undefined""#)
+        #expect(manager.panelRequest == nil)
+        #expect(await send("release") == #""released""#)
+        await run.value
+        let request = try #require(manager.panelRequest)
+        #expect(request.plugin == id && request.item == "panel")
+        #expect(await send("leak") == #""leaked""#)
+        #expect(manager.panelRequest?.nonce == request.nonce)
+    }
+
     /// A panel keeps to its page: a reload or a link to another document goes nowhere, while a link within the page moves there. Once its instance stops, its calls fail with `stopped` and it asks its popover to close.
     @Test func keepsAPanelOnItsPageAndEndsItWithItsInstance() async throws {
         let id = PluginID(rawValue: "org.example.page-panel")!

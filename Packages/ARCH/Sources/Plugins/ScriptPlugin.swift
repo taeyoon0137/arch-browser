@@ -320,6 +320,8 @@ private struct ScriptInvocation: Encodable {
     let linkUrl: String?
     let imageUrl: String?
     let selection: String?
+    /// The run's gesture, which the delivery function takes out of the invocation that the listener receives and keeps in the invocation's `showPanel`.
+    let gesture: String?
 
     init(_ invocation: PluginInvocation) {
         source = invocation.source.rawValue
@@ -329,6 +331,7 @@ private struct ScriptInvocation: Encodable {
         linkUrl = invocation.linkURL?.absoluteString
         imageUrl = invocation.imageURL?.absoluteString
         selection = invocation.selection
+        gesture = invocation.gesture?.id.uuidString
     }
 }
 

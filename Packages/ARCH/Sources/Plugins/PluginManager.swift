@@ -1123,15 +1123,19 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Contributions
 
-    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it. A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
+    /// Runs a command that an enabled plugin contributes, its own or, in a pair, one of its enabled other version's that its own lacks (`InstalledPlugin.commands(among:)`), starting the plugin first if it has not started. A plugin that reaches its sites `whenInvoked` first gets access in the invocation's tab (`grantSiteAccess(to:for:)`), and a command that the access cannot be given for does not run. The plugin receives the invocation as `shown(_:to:of:)` gives it, with a gesture of the run's own, which lets only this run open the plugin's panels (`ScopedPluginContext.showPanel(_:for:)`). A command that fails, that does not run for its access, or whose plugin fails to start, beeps.
     public func run(_ command: PluginCommandRef, _ invocation: PluginInvocation) async {
         guard let installed = enabledPlugin(command.plugin), !disabledCommands[command.plugin, default: []].contains(command.command), installed.commands(among: plugins).contains(where: { $0.id == command.command }) else { return }
         guard grantSiteAccess(to: installed, for: invocation) else { return NSSound.beep() }
         do {
             guard let plugin = try await start(installed), let context = running[installed.id]?.context else { return }
-            context.userCommandCount += 1
-            defer { context.userCommandCount -= 1 }
-            try await plugin.run(command.command, shown(invocation, to: installed.grant, of: installed.id))
+            // The run's own gesture lets only this run open a panel, not a listener that runs meanwhile.
+            let gesture = PluginGesture()
+            context.gestures.insert(gesture)
+            defer { context.gestures.remove(gesture) }
+            var shown = shown(invocation, to: installed.grant, of: installed.id)
+            shown.gesture = gesture
+            try await plugin.run(command.command, shown)
         } catch {
             NSSound.beep()
         }
@@ -1929,7 +1933,8 @@ struct PluginListFile: Codable {
 /// The context the manager gives each plugin instance it starts. It acts for the instance until the manager ends it, when the instance stops or its activation fails. From then on its storage and secrets only read, its actions throw `PluginError.stopped`, and its badges do nothing, so tasks the instance left running cannot act for the plugin.
 @MainActor
 final class ScopedPluginContext: PluginPanelContext {
-    var userCommandCount = 0
+    /// The gestures of the plugin's command runs in flight, each of which lets its own run open a panel.
+    var gestures: Set<PluginGesture> = []
     let pluginID: PluginID
     let personaID: PersonaID
     let grant: PluginGrant
@@ -1996,8 +2001,8 @@ final class ScopedPluginContext: PluginPanelContext {
         manager?.setEnabled(isEnabled, command: id, of: pluginID)
     }
 
-    func showPanel(_ sidebarItemID: String) {
-        guard !hasEnded, userCommandCount > 0 else { return }
+    func showPanel(_ sidebarItemID: String, for gesture: PluginGesture) {
+        guard !hasEnded, gestures.contains(gesture) else { return }
         manager?.showPanel(sidebarItemID, of: pluginID)
     }
 
