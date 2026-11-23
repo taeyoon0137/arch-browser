@@ -166,9 +166,9 @@ public enum FeedParser {
     /// Formats an XML parse error with its line number when available.
     private static func describe(_ error: (any Error)?) -> String {
         let info = (error as NSError?)?.userInfo ?? [:]
-        let message = (info["NSXMLParserErrorMessage"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "it is not well-formed XML."
+        let message = (info["NSXMLParserErrorMessage"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? localized("it is not well-formed XML.")
         guard let line = info["NSXMLParserErrorLineNumber"] as? Int else { return message }
-        return "line \(line): \(message)"
+        return localized("line \(line): \(message)")
     }
 }
 

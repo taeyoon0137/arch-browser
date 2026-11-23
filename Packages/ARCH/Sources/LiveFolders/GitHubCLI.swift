@@ -88,7 +88,7 @@ public actor GitHubCLI {
 
     /// The first `limit` results of `search`, in GitHub's order, which the built-in searches sort by the latest update, without those that GitHub answers as null with an error about them alone. Throws `LiveFolderError`: signed out at exit 4, GitHub's or `gh`'s message at exit 1, also when GitHub withheld every result, `offline` for such a failure while the Mac has no network, `rateLimited` for a `RATE_LIMITED` error, and the limits.
     public func search(_ search: GitHubSearch, limit: Int) async throws -> GitHubSearchResult {
-        guard GitHubSearch.isValidHost(search.host) else { throw LiveFolderError.gitHubFailed("\(search.host) is not a GitHub host.") }
+        guard GitHubSearch.isValidHost(search.host) else { throw LiveFolderError.gitHubFailed(localized("\(search.host) is not a GitHub host.")) }
         let body: [String: Any] = ["query": Self.query, "variables": ["q": search.query, "n": limit]]
         let input = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         let run = try await run(["api", "graphql", "--hostname", search.host, "--input", "-"], input: input)
@@ -117,7 +117,7 @@ public actor GitHubCLI {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
-            throw LiveFolderError.gitHubFailed("gh could not start: \(error.localizedDescription)")
+            throw LiveFolderError.gitHubFailed(localized("gh could not start: \(error.localizedDescription)"))
         }
         defer { try? FileManager.default.removeItem(at: directory) }
         let process: CommandLineProcess
@@ -127,7 +127,7 @@ public actor GitHubCLI {
             self.executable = nil
             throw LiveFolderError.gitHubNotInstalled
         } catch {
-            throw LiveFolderError.gitHubFailed("gh could not start: \(error.localizedDescription)")
+            throw LiveFolderError.gitHubFailed(localized("gh could not start: \(error.localizedDescription)"))
         }
         let timeLimit = timeLimit, outputLimit = outputLimit
         let deadline = Task { () -> Bool in
@@ -258,9 +258,9 @@ public actor GitHubCLI {
             throw LiveFolderError.gitHubFailed(String(message.prefix(messageLimit)))
         }
         switch run.termination {
-        case .exited(0): throw LiveFolderError.gitHubFailed("gh printed an answer Arch cannot read.")
-        case .exited(let code): throw LiveFolderError.gitHubFailed(String((run.errorLine ?? "gh exited with status \(code).").prefix(messageLimit)))
-        case .signaled(let signal): throw LiveFolderError.gitHubFailed(String((run.errorLine ?? "gh stopped on signal \(signal).").prefix(messageLimit)))
+        case .exited(0): throw LiveFolderError.gitHubFailed(localized("gh printed an answer Arch cannot read."))
+        case .exited(let code): throw LiveFolderError.gitHubFailed(String((run.errorLine ?? localized("gh exited with status \(code).")).prefix(messageLimit)))
+        case .signaled(let signal): throw LiveFolderError.gitHubFailed(String((run.errorLine ?? localized("gh stopped on signal \(signal).")).prefix(messageLimit)))
         }
     }
 
