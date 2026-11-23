@@ -313,11 +313,11 @@ import Terminal
     /// What stops when Arch quits.
     private static func quitWarning(downloads: Int, runsProgram: Bool) -> String {
         switch (downloads, runsProgram) {
-        case (0, _): return "A program is running in the terminal. It stops when Arch quits."
-        case (1, false): return "A download has not finished. It stops when Arch quits."
-        case (_, false): return "\(downloads) downloads have not finished. They stop when Arch quits."
-        case (1, true): return "A download has not finished, and a program is running in the terminal. Both stop when Arch quits."
-        case (_, true): return "\(downloads) downloads have not finished, and a program is running in the terminal. They all stop when Arch quits."
+        case (0, _): return localized("A program is running in the terminal. It stops when Arch quits.")
+        case (1, false): return localized("A download has not finished. It stops when Arch quits.")
+        case (_, false): return localized("\(downloads) downloads have not finished. They stop when Arch quits.")
+        case (1, true): return localized("A download has not finished, and a program is running in the terminal. Both stop when Arch quits.")
+        case (_, true): return localized("\(downloads) downloads have not finished, and a program is running in the terminal. They all stop when Arch quits.")
         }
     }
 
@@ -370,7 +370,7 @@ import Terminal
         appMenu.addItem(withTitle: localized("Set as Default Browser\u{2026}"), action: #selector(setAsDefaultBrowser), keyEquivalent: "")
         appMenu.addItem(.separator())
         let servicesMenu = NSMenu(title: localized("Services"))
-        appMenu.addItem(submenu(servicesMenu, title: "Services"))
+        appMenu.addItem(submenu(servicesMenu, title: localized("Services")))
         self.servicesMenu = servicesMenu
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: localized("Hide Arch"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -378,7 +378,7 @@ import Terminal
         appMenu.addItem(withTitle: localized("Show All"), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: localized("Quit Arch"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        mainMenu.addItem(submenu(appMenu, title: "Arch"))
+        mainMenu.addItem(submenu(appMenu, title: localized("Arch")))
 
         // Open Location… asks for an address before it opens anything, so it sits with the New commands and ends with an ellipsis.
         let fileMenu = NSMenu(title: localized("File"))
@@ -408,7 +408,7 @@ import Terminal
         fileMenu.addItem(withTitle: localized("Save Page As\u{2026}"), action: #selector(savePageAs), keyEquivalent: "S").keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: localized("Print\u{2026}"), action: #selector(printPage), keyEquivalent: "p")
-        mainMenu.addItem(submenu(fileMenu, title: "File"))
+        mainMenu.addItem(submenu(fileMenu, title: localized("File")))
 
         // Undo becomes Undo Close Tab while ⌘Z reopens closed tabs (`menuNeedsUpdate(_:)`).
         let editMenu = NSMenu(title: localized("Edit"))
@@ -429,7 +429,7 @@ import Terminal
         findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
         editMenu.delegate = self
         self.editMenu = editMenu
-        mainMenu.addItem(submenu(editMenu, title: "Edit"))
+        mainMenu.addItem(submenu(editMenu, title: localized("Edit")))
 
         // The panels' toggles name what they will do, as the sidebar's button does; Settings ▸ Shortcuts lists them by these launch titles. The library item keeps its `toggleDownloads` action, by which saved shortcuts know it.
         let viewMenu = NSMenu(title: localized("View"))
@@ -465,13 +465,13 @@ import Terminal
         }
         developerMenu.addItem(.separator())
         developerMenu.addItem(withTitle: localized("Show Tab Close Log"), action: #selector(showTabCloseLog), keyEquivalent: "")
-        viewMenu.addItem(submenu(developerMenu, title: "Developer"))
+        viewMenu.addItem(submenu(developerMenu, title: localized("Developer")))
         let appearanceMenu = NSMenu(title: localized("Appearance"))
-        for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
+        for (title, setting) in [(localized("System"), AppearanceSetting.system), (localized("Light"), .light), (localized("Dark"), .dark)] {
             appearanceMenu.addItem(withTitle: title, action: #selector(chooseAppearance(_:)), keyEquivalent: "").representedObject = setting.rawValue
         }
-        viewMenu.addItem(submenu(appearanceMenu, title: "Appearance"))
-        mainMenu.addItem(submenu(viewMenu, title: "View"))
+        viewMenu.addItem(submenu(appearanceMenu, title: localized("Appearance")))
+        mainMenu.addItem(submenu(viewMenu, title: localized("View")))
 
         let tabMenu = NSMenu(title: localized("Tab"))
         // Unpin Tab while the selected tab is pinned (`validateMenuItem(_:)`), as in the tab row's context menu.
@@ -499,7 +499,7 @@ import Terminal
             tabMenu.addItem(withTitle: localized("Select Tab \(number)"), action: #selector(selectTab(_:)), keyEquivalent: String(number)).tag = number
         }
         tabMenu.addItem(withTitle: localized("Select Last Tab"), action: #selector(selectLastTab), keyEquivalent: "9")
-        mainMenu.addItem(submenu(tabMenu, title: "Tab"))
+        mainMenu.addItem(submenu(tabMenu, title: localized("Tab")))
 
         let spacesMenu = NSMenu(title: localized("Spaces"))
         let newSpaceItem = spacesMenu.addItem(withTitle: localized("New Space"), action: #selector(newSpace), keyEquivalent: "n")
@@ -512,14 +512,14 @@ import Terminal
         spacesMenu.addItem(withTitle: localized("New Persona\u{2026}"), action: #selector(newPersona), keyEquivalent: "")
         spacesMenu.addItem(withTitle: localized("Rename Persona\u{2026}"), action: #selector(renamePersona), keyEquivalent: "")
         spacesMenu.addItem(withTitle: localized("Delete Persona\u{2026}"), action: #selector(deletePersona), keyEquivalent: "")
-        mainMenu.addItem(submenu(spacesMenu, title: "Spaces"))
+        mainMenu.addItem(submenu(spacesMenu, title: localized("Spaces")))
 
         // Filled each time it opens (`menuWillOpen(_:)`). Until then it holds only No Bookmarks, so Settings ▸ Shortcuts, which lists the menu bar at launch, lists none of its items.
         let bookmarksMenu = NSMenu(title: localized("Bookmarks"))
         bookmarksMenu.addItem(withTitle: localized("No Bookmarks"), action: nil, keyEquivalent: "")
         bookmarksMenu.delegate = self
         self.bookmarksMenu = bookmarksMenu
-        mainMenu.addItem(submenu(bookmarksMenu, title: "Bookmarks"))
+        mainMenu.addItem(submenu(bookmarksMenu, title: localized("Bookmarks")))
 
         // Back and Forward are targeted as Reload Page is: a focused web view answers `goBack:` and `goForward:` itself.
         let historyMenu = NSMenu(title: localized("History"))
@@ -533,7 +533,7 @@ import Terminal
         historyMenu.addItem(withTitle: localized("Clear Site Data\u{2026}"), action: #selector(clearSiteData), keyEquivalent: "")
         historyMenu.delegate = self
         self.historyMenu = historyMenu
-        mainMenu.addItem(submenu(historyMenu, title: "History"))
+        mainMenu.addItem(submenu(historyMenu, title: localized("History")))
 
         let windowMenu = NSMenu(title: localized("Window"))
         windowMenu.addItem(withTitle: localized("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
@@ -543,12 +543,12 @@ import Terminal
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: localized("Bring All to Front"), action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         self.windowMenu = windowMenu
-        mainMenu.addItem(submenu(windowMenu, title: "Window"))
+        mainMenu.addItem(submenu(windowMenu, title: localized("Window")))
 
         // AppKit puts its menu search field in the Help menu. Arch has no help of its own to add.
         let helpMenu = NSMenu(title: localized("Help"))
         self.helpMenu = helpMenu
-        mainMenu.addItem(submenu(helpMenu, title: "Help"))
+        mainMenu.addItem(submenu(helpMenu, title: localized("Help")))
         return mainMenu
     }
 
@@ -694,7 +694,7 @@ import Terminal
         let pages = activeWindow?.recentBackItems(limit: 10) ?? []
         guard !pages.isEmpty, let tabID = activeWindow?.selectedTabID, let separator = menu.items.firstIndex(where: \.isSeparatorItem) else { return }
         var index = separator + 1
-        let header = NSMenuItem.sectionHeader(title: "This Tab")
+        let header = NSMenuItem.sectionHeader(title: localized("This Tab"))
         header.tag = Self.recentPageTag
         menu.insertItem(header, at: index)
         index += 1
@@ -718,11 +718,11 @@ import Terminal
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === editMenu, let undoItem else { return }
         if (session?.undoableCloseCount ?? 0) > 0 {
-            undoItem.title = "Undo Close Tab"
+            undoItem.title = localized("Undo Close Tab")
             undoItem.target = self
             undoItem.action = #selector(reopenClosedTab)
         } else {
-            undoItem.title = "Undo"
+            undoItem.title = localized("Undo")
             undoItem.target = nil
             undoItem.action = Selector(("undo:"))
         }
@@ -757,7 +757,7 @@ import Terminal
                 let item = bookmarkItem(title: title, url: url, choice: .tab(id))
                 // A live folder's unread item shows a dot where a checkmark would.
                 if isUnread {
-                    item.onStateImage = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "Unread")?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular))
+                    item.onStateImage = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: localized("Unread"))?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular))
                     item.state = .on
                 }
                 menu.addItem(item)
@@ -857,7 +857,7 @@ import Terminal
         }
         if item.action == #selector(toggleDeveloperTools) {
             let actsOnFloatingTools = DevToolsDock.floatingDevTools(in: NSApp.keyWindow) != nil
-            item.title = actsOnFloatingTools || activeWindow?.isShowingDeveloperTools == true ? "Hide Developer Tools" : "Show Developer Tools"
+            item.title = actsOnFloatingTools || activeWindow?.isShowingDeveloperTools == true ? localized("Hide Developer Tools") : localized("Show Developer Tools")
             return actsOnFloatingTools || activeWindow?.canShowDeveloperTools == true
         }
         if item.action == #selector(sharePage) {
@@ -875,16 +875,16 @@ import Terminal
         // These commands work on the selected tab's place in its space's list. A favorite's tab is in no list. Pin Tab names what it will do, as the tab row's context menu does.
         if item.action == #selector(togglePinned) || item.action == #selector(moveTabUp) || item.action == #selector(moveTabDown)
             || item.action == #selector(nextTab) || item.action == #selector(previousTab) {
-            if item.action == #selector(togglePinned) { item.title = session?.lastMainWindow?.selectedTab?.isPinned == true ? "Unpin Tab" : "Pin Tab" }
+            if item.action == #selector(togglePinned) { item.title = session?.lastMainWindow?.selectedTab?.isPinned == true ? localized("Unpin Tab") : localized("Pin Tab") }
             return session?.lastMainWindow?.selectedTab?.spaceID != nil
         }
         // The sidebar and library toggles name what they will do, for the sidebar target, which they act on. With the sidebar hidden, the library always opens.
         if item.action == #selector(toggleSidebar) {
-            item.title = session?.lastMainWindow?.isSidebarVisible == false ? "Show Sidebar" : "Hide Sidebar"
+            item.title = session?.lastMainWindow?.isSidebarVisible == false ? localized("Show Sidebar") : localized("Hide Sidebar")
         }
         if item.action == #selector(toggleDownloads) {
             let window = session?.lastMainWindow
-            item.title = window?.isSidebarVisible == true && window?.isLibraryVisible == true ? "Hide Library" : "Show Library"
+            item.title = window?.isSidebarVisible == true && window?.isLibraryVisible == true ? localized("Hide Library") : localized("Show Library")
         }
         // The History window's search field has no next or previous match, and the find bar of the window behind it does not show.
         if item.action == #selector(findNext) || item.action == #selector(findPrevious) {
@@ -932,12 +932,12 @@ import Terminal
         // The page reader stays out of the menu until a provider can serve it, and opens only over a tab no internal page covers.
         if item.action == #selector(togglePageReader) {
             item.isHidden = !PageAssistant.isReaderAvailable
-            item.title = activeWindow?.isPageReaderVisible == true ? "Hide Page Reader" : "Show Page Reader"
+            item.title = activeWindow?.isPageReaderVisible == true ? localized("Hide Page Reader") : localized("Show Page Reader")
             return activeWindow?.canTogglePageReader == true
         }
         if item.action == #selector(toggleAgentPanel) {
             let window = activeWindow ?? session?.lastMainWindow
-            item.title = window?.agentPanel != nil ? "Hide Agent Panel" : "Show Agent Panel"
+            item.title = window?.agentPanel != nil ? localized("Hide Agent Panel") : localized("Show Agent Panel")
             item.isHidden = false
             return agents?.agentModels().isEmpty != false || window?.canToggleAgentPanel == true
         }
