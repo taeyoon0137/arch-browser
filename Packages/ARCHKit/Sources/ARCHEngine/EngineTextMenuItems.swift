@@ -83,7 +83,7 @@ public enum EngineTextMenuItems {
 
     /// Shows the dictionary's definition of the selection at the click through `NSView.showDefinition(for:at:)`, which works in any view, so both engines show the same panel for the whole selection. A page view's `quickLookWithEvent:` would look up only the word under the click on Chromium.
     private static func lookUpItem(_ selection: String, anchor: NSView, at location: NSPoint) -> NSMenuItem {
-        let item = EngineActionMenuItem("Look Up \(quoted(selection))") { [weak anchor] in
+        let item = EngineActionMenuItem(localized("Look Up \(quoted(selection))")) { [weak anchor] in
             let text = NSAttributedString(string: selection, attributes: [.font: NSFont.systemFont(ofSize: NSFont.systemFontSize)])
             anchor?.showDefinition(for: text, at: location)
         }
@@ -93,7 +93,7 @@ public enum EngineTextMenuItems {
 
     @available(macOS 14.4, *)
     private static func translateItem(_ selection: String, anchor: NSView, at location: NSPoint, replace: ((String) -> Void)?) -> NSMenuItem {
-        let item = EngineActionMenuItem("Translate \(quoted(selection))") { [weak anchor] in
+        let item = EngineActionMenuItem(localized("Translate \(quoted(selection))")) { [weak anchor] in
             guard let anchor else { return }
             EngineTranslationPopover.show(selection, at: location, in: anchor, replace: replace)
         }
@@ -103,39 +103,39 @@ public enum EngineTextMenuItems {
 
     /// Showing the panel goes to the page view, which moves to the next misspelled word as it shows it; hiding it sends `orderOut:` to the system's panel, which both engines then find hidden.
     private static func spellingAndGrammarItem(pageView: NSView, panels: Panels) -> NSMenuItem? {
-        EngineStandardActionSubmenu.item("Spelling and Grammar", EngineContextMenuItem.spellingAndGrammar, sendingTo: pageView, [
-            panels.isSpellingVisible ? .send("Hide Spelling and Grammar", #selector(NSWindow.orderOut(_:)), to: NSSpellChecker.shared.spellingPanel)
-                : .action("Show Spelling and Grammar", #selector(NSText.showGuessPanel(_:))),
-            .action("Check Document Now", #selector(NSText.checkSpelling(_:))),
+        EngineStandardActionSubmenu.item(localized("Spelling and Grammar"), EngineContextMenuItem.spellingAndGrammar, sendingTo: pageView, [
+            panels.isSpellingVisible ? .send(localized("Hide Spelling and Grammar"), #selector(NSWindow.orderOut(_:)), to: NSSpellChecker.shared.spellingPanel)
+                : .action(localized("Show Spelling and Grammar"), #selector(NSText.showGuessPanel(_:))),
+            .action(localized("Check Document Now"), #selector(NSText.checkSpelling(_:))),
             .separator,
-            .action("Check Spelling While Typing", #selector(NSTextView.toggleContinuousSpellChecking(_:))),
+            .action(localized("Check Spelling While Typing"), #selector(NSTextView.toggleContinuousSpellChecking(_:))),
         ])
     }
 
     /// Hiding the panel sends `orderOut:` to the system's panel, because the page views' action only shows it.
     private static func substitutionsItem(pageView: NSView, panels: Panels) -> NSMenuItem? {
-        EngineStandardActionSubmenu.item("Substitutions", EngineContextMenuItem.substitutions, sendingTo: pageView, [
-            panels.isSubstitutionsVisible ? .send("Hide Substitutions", #selector(NSWindow.orderOut(_:)), to: NSSpellChecker.shared.substitutionsPanel)
-                : .action("Show Substitutions", #selector(NSTextView.orderFrontSubstitutionsPanel(_:))),
+        EngineStandardActionSubmenu.item(localized("Substitutions"), EngineContextMenuItem.substitutions, sendingTo: pageView, [
+            panels.isSubstitutionsVisible ? .send(localized("Hide Substitutions"), #selector(NSWindow.orderOut(_:)), to: NSSpellChecker.shared.substitutionsPanel)
+                : .action(localized("Show Substitutions"), #selector(NSTextView.orderFrontSubstitutionsPanel(_:))),
             .separator,
-            .action("Smart Quotes", #selector(NSTextView.toggleAutomaticQuoteSubstitution(_:))),
-            .action("Smart Dashes", #selector(NSTextView.toggleAutomaticDashSubstitution(_:))),
-            .action("Text Replacement", #selector(NSTextView.toggleAutomaticTextReplacement(_:))),
+            .action(localized("Smart Quotes"), #selector(NSTextView.toggleAutomaticQuoteSubstitution(_:))),
+            .action(localized("Smart Dashes"), #selector(NSTextView.toggleAutomaticDashSubstitution(_:))),
+            .action(localized("Text Replacement"), #selector(NSTextView.toggleAutomaticTextReplacement(_:))),
         ])
     }
 
     private static func transformationsItem(pageView: NSView) -> NSMenuItem? {
-        EngineStandardActionSubmenu.item("Transformations", EngineContextMenuItem.transformations, sendingTo: pageView, [
-            .action("Make Upper Case", #selector(NSResponder.uppercaseWord(_:))),
-            .action("Make Lower Case", #selector(NSResponder.lowercaseWord(_:))),
-            .action("Capitalize", #selector(NSResponder.capitalizeWord(_:))),
+        EngineStandardActionSubmenu.item(localized("Transformations"), EngineContextMenuItem.transformations, sendingTo: pageView, [
+            .action(localized("Make Upper Case"), #selector(NSResponder.uppercaseWord(_:))),
+            .action(localized("Make Lower Case"), #selector(NSResponder.lowercaseWord(_:))),
+            .action(localized("Capitalize"), #selector(NSResponder.capitalizeWord(_:))),
         ])
     }
 
     private static func speechItem(pageView: NSView) -> NSMenuItem? {
-        EngineStandardActionSubmenu.item("Speech", EngineContextMenuItem.speech, sendingTo: pageView, [
-            .action("Start Speaking", #selector(NSTextView.startSpeaking(_:))),
-            .action("Stop Speaking", #selector(NSTextView.stopSpeaking(_:))),
+        EngineStandardActionSubmenu.item(localized("Speech"), EngineContextMenuItem.speech, sendingTo: pageView, [
+            .action(localized("Start Speaking"), #selector(NSTextView.startSpeaking(_:))),
+            .action(localized("Stop Speaking"), #selector(NSTextView.stopSpeaking(_:))),
         ])
     }
 

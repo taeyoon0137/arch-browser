@@ -1,6 +1,206 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Capitalize" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "첫 문자를 대문자로"
+          }
+        }
+      }
+    },
+    "Check Document Now" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금 문서 검사"
+          }
+        }
+      }
+    },
+    "Check Spelling While Typing" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "입력하는 동안 철자 검사"
+          }
+        }
+      }
+    },
+    "Hide Spelling and Grammar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "철자 및 문법 가리기"
+          }
+        }
+      }
+    },
+    "Hide Substitutions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대치 가리기"
+          }
+        }
+      }
+    },
+    "Look Up %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 찾아보기"
+          }
+        }
+      }
+    },
+    "Make Lower Case" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "소문자로 만들기"
+          }
+        }
+      }
+    },
+    "Make Upper Case" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대문자로 만들기"
+          }
+        }
+      }
+    },
+    "Show Spelling and Grammar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "철자 및 문법 보기"
+          }
+        }
+      }
+    },
+    "Show Substitutions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대치 보기"
+          }
+        }
+      }
+    },
+    "Smart Dashes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스마트 대시"
+          }
+        }
+      }
+    },
+    "Smart Quotes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스마트 인용"
+          }
+        }
+      }
+    },
+    "Speech" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "말하기"
+          }
+        }
+      }
+    },
+    "Spelling and Grammar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "철자 및 문법"
+          }
+        }
+      }
+    },
+    "Start Speaking" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "말하기 시작"
+          }
+        }
+      }
+    },
+    "Stop Speaking" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "말하기 중단"
+          }
+        }
+      }
+    },
+    "Substitutions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대치"
+          }
+        }
+      }
+    },
+    "Text Replacement" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "텍스트 대치"
+          }
+        }
+      }
+    },
+    "Transformations" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변형"
+          }
+        }
+      }
+    },
+    "Translate %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 번역"
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }
