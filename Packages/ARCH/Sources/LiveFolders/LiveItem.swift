@@ -125,18 +125,18 @@ public enum LiveFolderError: Error, Equatable, Sendable, LocalizedError {
     public var message: String {
         switch self {
         case .invalidAddress(let reason): return reason
-        case .notAFeed: return "This address is not an RSS or Atom feed."
-        case .unreadableFeed(let detail): return "The feed could not be read: \(detail)"
-        case .httpStatus(let status, _): return "The server answered \(status) (\(HTTPURLResponse.localizedString(forStatusCode: status)))."
-        case .tooLarge(let bytes): return "The response is larger than \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory))."
-        case .timedOut: return "The source did not answer within 30 seconds."
-        case .offline: return "The Mac is offline."
+        case .notAFeed: return localized("This address is not an RSS or Atom feed.")
+        case .unreadableFeed(let detail): return localized("The feed could not be read: \(detail)")
+        case .httpStatus(let status, _): return localized("The server answered \(status) (\(HTTPURLResponse.localizedString(forStatusCode: status))).")
+        case .tooLarge(let bytes): return localized("The response is larger than \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)).")
+        case .timedOut: return localized("The source did not answer within 30 seconds.")
+        case .offline: return localized("The Mac is offline.")
         case .network(let detail): return detail
-        case .gitHubNotInstalled: return "The GitHub CLI is not installed."
-        case .gitHubSignedOut(let host): return "The GitHub CLI is not signed in to \(host)."
+        case .gitHubNotInstalled: return localized("The GitHub CLI is not installed.")
+        case .gitHubSignedOut(let host): return localized("The GitHub CLI is not signed in to \(host).")
         case .gitHubFailed(let detail): return detail
-        case .rateLimited: return "GitHub's rate limit was reached."
-        case .privateAddressMissing: return "The feed's address is missing from the Keychain."
+        case .rateLimited: return localized("GitHub's rate limit was reached.")
+        case .privateAddressMissing: return localized("The feed's address is missing from the Keychain.")
         case .keychain(let detail): return detail
         }
     }

@@ -24,16 +24,16 @@ struct WebExtensionActionsSection: View {
         if !items.isEmpty || storeRow != nil {
             let engines = Set(webExtensions.engines.keys)
             let engineRunsExtensions = engines.contains(tab.engineKind)
-            SiteSettingsGroup("Extensions", footnote: items.isEmpty
+            SiteSettingsGroup(localized("Extensions"), footnote: items.isEmpty
                 ? storeRow.map { row in
                     guard case .installed = row else { return row.note }
                     let space = session.spaces.first { $0.id == tabSpace }
-                    let place = session.displayedPlace(ofPersona: tab.personaID, space: space) ?? space?.name ?? "this Persona"
-                    return "Manage it for \(place) in Settings ▸ Plugins."
+                    let place = session.displayedPlace(ofPersona: tab.personaID, space: space) ?? space?.name ?? localized("this Persona")
+                    return localized("Manage it for \(place) in Settings ▸ Plugins.")
                 }
                 : engineRunsExtensions
-                ? "Opens an extension\u{2019}s popup, or lets the extension act on this page."
-                : "Extensions run on \(Self.names(engines)) tabs. Switch this tab to \(Self.names(engines, joinedBy: "or")) to use them.") {
+                ? localized("Opens an extension\u{2019}s popup, or lets the extension act on this page.")
+                : localized("Extensions run on \(Self.names(engines)) tabs. Switch this tab to \(Self.names(engines, joinedBy: localized("or"))) to use them.")) {
                 let rows = VStack(alignment: .leading, spacing: 0) {
                     if let storeRow { row(for: storeRow) }
                     ForEach(items) { item in
@@ -75,7 +75,7 @@ struct WebExtensionActionsSection: View {
             })
             .disabled(session.installFromWebStore == nil)
         case .installed:
-            SiteSettingsRow(symbol: "checkmark.circle", title: storeRow.title, detail: "Installed")
+            SiteSettingsRow(symbol: "checkmark.circle", title: storeRow.title, detail: localized("Installed"))
         }
     }
 
@@ -90,7 +90,7 @@ struct WebExtensionActionsSection: View {
             if item.wantsSiteAccess || runsNote != nil {
                 VStack(alignment: .leading, spacing: 6) {
                     if item.wantsSiteAccess {
-                        Button("Allow on This Site") {
+                        Button(localized("Allow on This Site")) {
                             close()
                             webExtensions.grantSiteAccess(of: item.id, for: tab.webContents)
                         }
@@ -104,15 +104,15 @@ struct WebExtensionActionsSection: View {
                                 .fixedSize(horizontal: false, vertical: true)
                             if item.asksForVersion {
                                 let engine = tab.engineKind
-                                Text("Its developer may offer a separate version for \(engine.displayName).")
+                                Text("Its developer may offer a separate version for \(engine.displayName).", bundle: .module)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
-                                let install = Button("Install \(engine.displayName) Version\u{2026}") {
+                                let install = Button(localized("Install \(engine.displayName) Version\u{2026}")) {
                                     close()
                                     session.installEngineVersion?(tab.personaID, tabSpace, item.id, engine)
                                 }
-                                let dismiss = Button("Dismiss") { session.plugins(in: tab.personaID).dismissVersionNote(of: item.id, for: engine) }
+                                let dismiss = Button(localized("Dismiss")) { session.plugins(in: tab.personaID).dismissVersionNote(of: item.id, for: engine) }
                                 // Side by side the two take about all of the row, so a scroll bar that stays visible would cut them short.
                                 ViewThatFits(in: .horizontal) {
                                     HStack { install; dismiss }
@@ -131,7 +131,7 @@ struct WebExtensionActionsSection: View {
     }
 
     /// The engines' names in the order of `EngineKind`, such as "WebKit" or "WebKit and Chromium".
-    private static func names(_ engines: Set<EngineKind>, joinedBy conjunction: String = "and") -> String {
+    private static func names(_ engines: Set<EngineKind>, joinedBy conjunction: String = localized("and")) -> String {
         EngineKind.allCases.filter(engines.contains).map(\.displayName).joined(separator: " \(conjunction) ")
     }
 }
@@ -190,7 +190,7 @@ enum WebStorePageRow: Equatable {
 
     var title: String {
         switch self {
-        case .install: return "Install This Extension\u{2026}"
+        case .install: return localized("Install This Extension\u{2026}")
         case let .installed(name): return name
         }
     }
@@ -198,8 +198,8 @@ enum WebStorePageRow: Equatable {
     /// The group's footnote while the row is its only one.
     var note: String {
         switch self {
-        case .install: return "Opens the extension\u{2019}s review in Settings before it installs."
-        case .installed: return "Manage it for this Persona in Settings \u{25B8} Plugins."
+        case .install: return localized("Opens the extension\u{2019}s review in Settings before it installs.")
+        case .installed: return localized("Manage it for this Persona in Settings \u{25B8} Plugins.")
         }
     }
 }

@@ -3,11 +3,11 @@ import AI
 import Foundation
 
 extension AIFeature {
-    static let tabNameHook = AIFeature(id: .tabNameHook, name: "Tab Names",
-                                       summary: "Names a tab in a few words from its page\u{2019}s title, address, and first \(BuiltInHooks.tabNamePageText.formatted()) characters, unless you named the tab.",
+    static let tabNameHook = AIFeature(id: .tabNameHook, name: localized("Tab Names"),
+                                       summary: localized("Names a tab in a few words from its page\u{2019}s title, address, and first \(BuiltInHooks.tabNamePageText.formatted()) characters, unless you named the tab."),
                                        trigger: .automatic, data: AIDataScope(kinds: [.page], pageTextLimit: BuiltInHooks.tabNamePageText))
-    static let downloadNameHook = AIFeature(id: .downloadNameHook, name: "Download Names",
-                                            summary: "Gives a finished download a descriptive file name from its name, type, size, and the addresses of the file and its page, never its contents. Restore Original Name in its row undoes it.",
+    static let downloadNameHook = AIFeature(id: .downloadNameHook, name: localized("Download Names"),
+                                            summary: localized("Gives a finished download a descriptive file name from its name, type, size, and the addresses of the file and its page, never its contents. Restore Original Name in its row undoes it."),
                                             trigger: .automatic, data: AIDataScope(kinds: [.download]))
 }
 

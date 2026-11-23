@@ -8,8 +8,8 @@ public enum SyncOffReason: String, Sendable {
     /// The Settings message explaining why sync turned off.
     public var message: String {
         switch self {
-        case .accountChanged: "Sync turned off because the iCloud account changed. Turn it on to merge this Mac’s sidebar into the current account."
-        case .zoneDeleted: "Sync turned off because Arch’s iCloud data was deleted. Turn it on to upload this Mac’s sidebar again."
+        case .accountChanged: localized("Sync turned off because the iCloud account changed. Turn it on to merge this Mac’s sidebar into the current account.")
+        case .zoneDeleted: localized("Sync turned off because Arch’s iCloud data was deleted. Turn it on to upload this Mac’s sidebar again.")
         }
     }
 }

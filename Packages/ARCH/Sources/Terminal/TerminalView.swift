@@ -291,7 +291,7 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
-        for (title, action) in [("Copy", #selector(copy(_:))), ("Paste", #selector(paste(_:))), ("Select All", #selector(selectAll(_:)))] {
+        for (title, action) in [(localized("Copy"), #selector(copy(_:))), (localized("Paste"), #selector(paste(_:))), (localized("Select All"), #selector(selectAll(_:)))] {
             menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
         }
         return menu

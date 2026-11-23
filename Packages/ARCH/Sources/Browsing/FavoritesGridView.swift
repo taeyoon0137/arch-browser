@@ -104,15 +104,15 @@ struct FavoritesGridView: View {
                     FavoriteTabSavedPageItems(tab: tab, session: session)
                     SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
                 } else {
-                    Button("Use Current Page as Saved Page") {}.disabled(true)
+                    Button(localized("Use Current Page as Saved Page")) {}.disabled(true)
                 }
-                Button("Edit Favorite\u{2026}") { windowModel.promptToEditFavorite(favorite) }
-                Button("Copy Address") { Tab.copyToPasteboard(favorite.url) }
+                Button(localized("Edit Favorite\u{2026}")) { windowModel.promptToEditFavorite(favorite) }
+                Button(localized("Copy Address")) { Tab.copyToPasteboard(favorite.url) }
                 Divider()
-                Button("Close Tab") { session.closeFavorite(favorite) }
+                Button(localized("Close Tab")) { session.closeFavorite(favorite) }
                     .disabled(!session.hasTab(favorite))
                 Divider()
-                Button("Remove from Favorites") { session.removeFavorite(favorite) }
+                Button(localized("Remove from Favorites")) { session.removeFavorite(favorite) }
             }
             .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 10) { reorder(favorite, at: $0) })
             .modifier(ShiftHoverPreview { if sidebarDrag.item == nil { windowModel.previewFavorite(favorite) } })
@@ -137,9 +137,9 @@ private struct FavoriteTabSavedPageItems: View {
 
     var body: some View {
         if session.isOffSavedPage(tab) {
-            Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+            Button(localized("Go Back to Saved Page")) { session.goBackToSavedPage(tab) }
         }
-        Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }
+        Button(localized("Use Current Page as Saved Page")) { session.useCurrentPageAsSavedPage(tab) }
             .disabled(!session.canUseCurrentPageAsSavedPage(tab))
     }
 }
@@ -198,7 +198,7 @@ struct FavoriteTileView: View {
             // One element for VoiceOver, whose value says whether its page is open and whether a prompt waits.
             .accessibilityElement()
             .accessibilityLabel(favorite.title)
-            .accessibilityValue([isOpen ? "Open" : nil, prompts.hasPrompt(for: tabID) ? "Waiting for your answer" : nil].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityValue([isOpen ? localized("Open") : nil, prompts.hasPrompt(for: tabID) ? localized("Waiting for your answer") : nil].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
             .onAppear(perform: loadIcon)
             // Use Current Page as Saved Page and Edit Favorite… can move the favorite to another site.

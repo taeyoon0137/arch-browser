@@ -8,6 +8,17 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
+extension AgentAccessLevel {
+    /// The level's name in the language Arch runs in, for the interface. `title` stays English for the agent channel and `arch-cli`, which have no string catalog.
+    public var localizedTitle: String {
+        switch self {
+        case .readOnly: return localized("Read Only")
+        case .askBeforeActing: return localized("Ask Before Acting")
+        case .actInAgentTabs: return localized("Act in Agent Tabs")
+        }
+    }
+}
+
 @MainActor final class AgentGrantSheetPresenter: AgentGrantPrompting {
     private weak var host: (any AgentBrowserHost)?
     /// Each open sheet's way to close as an answer.
@@ -48,8 +59,8 @@ import UserNotifications
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
-            content.title = "A program is asking to use Arch"
-            content.body = "Open Arch to allow or deny it."
+            content.title = localized("A program is asking to use Arch")
+            content.body = localized("Open Arch to allow or deny it.")
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
@@ -71,7 +82,7 @@ struct AgentGrantSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Allow \u{201C}\(request.client.displayName)\u{201D} to use Arch?")
+            Text("Allow \u{201C}\(request.client.displayName)\u{201D} to use Arch?", bundle: .module)
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 2) {
@@ -80,43 +91,43 @@ struct AgentGrantSheetView: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 if request.client.isInterpreter {
-                    Text("\(request.client.name) runs scripts, and this access covers every script it runs.")
+                    Text("\(request.client.name) runs scripts, and this access covers every script it runs.", bundle: .module)
                 }
                 if request.client.reachedThroughShell {
                     Text(AgentClientIdentity.shellNote)
                 }
                 if request.client.isBoundToProcess {
-                    Text("This access ends when this \(request.client.name) process ends.")
+                    Text("This access ends when this \(request.client.name) process ends.", bundle: .module)
                 }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
             Form {
-                Picker("Persona", selection: $choice.persona) {
-                    Text("Agents (no sign-ins)").tag(AgentGrantChoice.PersonaChoice.agents)
+                Picker(localized("Persona"), selection: $choice.persona) {
+                    Text("Agents (no sign-ins)", bundle: .module).tag(AgentGrantChoice.PersonaChoice.agents)
                     ForEach(request.personas) { persona in
                         Text(persona.name).tag(AgentGrantChoice.PersonaChoice.existing(persona.id))
                     }
                 }
                 if spaces.isEmpty {
-                    LabeledContent("Space", value: "A new space")
+                    LabeledContent(localized("Space"), value: localized("A new space"))
                 } else {
-                    Picker("Space", selection: Binding(get: { choice.spaceID ?? spaces.first?.id }, set: { choice.spaceID = $0 })) {
+                    Picker(localized("Space"), selection: Binding(get: { choice.spaceID ?? spaces.first?.id }, set: { choice.spaceID = $0 })) {
                         ForEach(spaces) { space in Text(space.name).tag(Optional(space.id)) }
                     }
                 }
-                Picker("Access", selection: $choice.level) {
-                    ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
+                Picker(localized("Access"), selection: $choice.level) {
+                    ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.localizedTitle).tag($0) }
                 }
-                Toggle("Search history", isOn: $choice.scopes.searchHistory)
+                Toggle(localized("Search history"), isOn: $choice.scopes.searchHistory)
                 Toggle(isOn: $choice.scopes.startTasks) {
-                    labeled("Start agent tasks on your AI subscription",
-                            detail: "Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change.")
+                    labeled(localized("Start agent tasks on your AI subscription"),
+                            detail: localized("Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change."))
                 }
                 Toggle(isOn: $choice.scopes.watchEvents) {
-                    labeled("Watch browser events", detail: Self.watchSentence(persona: personaName))
+                    labeled(localized("Watch browser events"), detail: Self.watchSentence(persona: personaName))
                 }
-                Picker("Duration", selection: $choice.duration) {
+                Picker(localized("Duration"), selection: $choice.duration) {
                     ForEach(AgentGrantChoice.Duration.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
             }
@@ -126,8 +137,8 @@ struct AgentGrantSheetView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
-                AgentPointerButton(title: "Don\u{2019}t Allow", keyEquivalent: "\u{1B}", requiresPointer: false) { finish(nil) }
-                AgentPointerButton(title: choice.needsAuthentication ? "Allow\u{2026}" : "Allow", requiresPointer: true) { finish(normalized) }
+                AgentPointerButton(title: localized("Don\u{2019}t Allow"), keyEquivalent: "\u{1B}", requiresPointer: false) { finish(nil) }
+                AgentPointerButton(title: choice.needsAuthentication ? localized("Allow\u{2026}") : localized("Allow"), requiresPointer: true) { finish(normalized) }
             }
         }
         .padding(20)
@@ -148,7 +159,7 @@ struct AgentGrantSheetView: View {
 
     /// What Watch Browser Events shows the client (`docs/hooks.md`, Grants).
     static func watchSentence(persona: String) -> String {
-        "See when tabs open, load, change, and close in \(persona), with their sites. Never their titles or pages."
+        localized("See when tabs open, load, change, and close in \(persona), with their sites. Never their titles or pages.")
     }
 
     /// The choice with the space the picker shows.
@@ -161,15 +172,15 @@ struct AgentGrantSheetView: View {
     private var explanation: String {
         var sentences: [String] = []
         if choice.persona == .agents {
-            sentences.append("The client reads pages in the Agents Persona, which has no sign-ins until you sign in there.")
+            sentences.append(localized("The client reads pages in the Agents Persona, which has no sign-ins until you sign in there."))
         } else {
-            sentences.append("The client can read pages with your sign-ins in the \(personaName) Persona.")
+            sentences.append(localized("The client can read pages with your sign-ins in the \(personaName) Persona."))
         }
-        if choice.scopes.searchHistory { sentences.append("It can search your browsing history, which every Persona shares.") }
-        if choice.scopes.watchEvents { sentences.append("It can follow which sites your tabs in the \(personaName) Persona visit, as they visit them.") }
-        sentences.append("Pages it reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that.")
-        sentences.append("Steps that need you still ask in Arch.")
-        if choice.needsAuthentication { sentences.append("Allowing asks for Touch ID or your login password.") }
+        if choice.scopes.searchHistory { sentences.append(localized("It can search your browsing history, which every Persona shares.")) }
+        if choice.scopes.watchEvents { sentences.append(localized("It can follow which sites your tabs in the \(personaName) Persona visit, as they visit them.")) }
+        sentences.append(localized("Pages it reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that."))
+        sentences.append(localized("Steps that need you still ask in Arch."))
+        if choice.needsAuthentication { sentences.append(localized("Allowing asks for Touch ID or your login password.")) }
         return sentences.joined(separator: " ")
     }
 }

@@ -26,29 +26,29 @@ public enum TabCloseReason: String {
 
     var title: String {
         switch self {
-        case .user: return "User"
-        case .page: return "Page"
-        case .crash: return "Crash"
-        case .archive: return "Archive"
-        case .download: return "Download"
-        case .webExtension: return "Extension"
-        case .plugin: return "Plugin"
-        case .persona: return "Persona"
-        case .sync: return "Sync"
+        case .user: return localized("User")
+        case .page: return localized("Page")
+        case .crash: return localized("Crash")
+        case .archive: return localized("Archive")
+        case .download: return localized("Download")
+        case .webExtension: return localized("Extension")
+        case .plugin: return localized("Plugin")
+        case .persona: return localized("Persona")
+        case .sync: return localized("Sync")
         }
     }
 
     var detail: String {
         switch self {
-        case .user: return "Closed by the user"
-        case .page: return "Closed by the page"
-        case .crash: return "Closed by the page after its process quit"
-        case .archive: return "Archived after the archive delay"
-        case .download: return "Closed because it only pointed at a file"
-        case .webExtension: return "Closed by a web extension"
-        case .plugin: return "Closed by a plugin"
-        case .persona: return "Closed because its Persona was deleted"
-        case .sync: return "Removed by sidebar sync"
+        case .user: return localized("Closed by the user")
+        case .page: return localized("Closed by the page")
+        case .crash: return localized("Closed by the page after its process quit")
+        case .archive: return localized("Archived after the archive delay")
+        case .download: return localized("Closed because it only pointed at a file")
+        case .webExtension: return localized("Closed by a web extension")
+        case .plugin: return localized("Closed by a plugin")
+        case .persona: return localized("Closed because its Persona was deleted")
+        case .sync: return localized("Removed by sidebar sync")
         }
     }
 }
@@ -78,7 +78,7 @@ public struct TabCloseLogEntry: Identifiable {
     /// A tab archived at restore, before it had a page.
     init(archived record: SessionSnapshot.TabRecord) {
         reason = .archive
-        title = record.customTitle ?? (record.title.isEmpty ? record.url?.host ?? "New Tab" : record.title)
+        title = record.customTitle ?? (record.title.isEmpty ? record.url?.host ?? localized("New Tab") : record.title)
         url = record.url
         engine = record.engine
         tabCrashCount = 0
@@ -103,7 +103,7 @@ public final class TabCloseLogWindowController: NSWindowController {
     public init(log: TabCloseLog) {
         let window = NSWindow(contentViewController: NSHostingController(rootView: TabCloseLogView(log: log)))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.title = "Tab Close Log"
+        window.title = localized("Tab Close Log")
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 860, height: 420))
         super.init(window: window)
@@ -126,44 +126,44 @@ private struct TabCloseLogView: View {
     var body: some View {
         Group {
             if log.entries.isEmpty {
-                Text("No Tabs Closed")
+                Text("No Tabs Closed", bundle: .module)
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(log.entries) {
-                    TableColumn("Time") { entry in
+                    TableColumn(localized("Time")) { entry in
                         Text(entry.date.formatted(.dateTime.month(.abbreviated).day().hour().minute().second()))
                             .monospacedDigit()
                     }
                     .width(min: 110, ideal: 130)
-                    TableColumn("Reason") { entry in
+                    TableColumn(localized("Reason")) { entry in
                         Text(entry.reason.title)
                             .help(entry.reason.detail)
                     }
                     .width(min: 60, ideal: 70)
-                    TableColumn("Title") { entry in
+                    TableColumn(localized("Title")) { entry in
                         Text(entry.title)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .help(entry.title)
                     }
-                    TableColumn("Address") { entry in
+                    TableColumn(localized("Address")) { entry in
                         Text(entry.url?.absoluteString ?? "")
                             .foregroundStyle(.secondary)
                             .truncationMode(.middle)
                             .help(entry.url?.absoluteString ?? "")
                     }
-                    TableColumn("Engine") { entry in
+                    TableColumn(localized("Engine")) { entry in
                         Text(entry.engine?.displayName ?? "")
                     }
                     .width(min: 60, ideal: 70)
-                    TableColumn("Tab Crashes") { entry in
+                    TableColumn(localized("Tab Crashes")) { entry in
                         Text("\(entry.tabCrashCount)")
                             .monospacedDigit()
                     }
                     .width(min: 70, ideal: 80)
-                    TableColumn("All Crashes") { entry in
+                    TableColumn(localized("All Crashes")) { entry in
                         Text("\(entry.sessionCrashCount)")
                             .monospacedDigit()
                     }

@@ -30,13 +30,13 @@ struct CRXArchive {
     init(_ data: Data, name: String, publisherKeyDigest: Data = webStorePublisherKeyDigest) throws {
         let start = data.startIndex
         // "Cr24", the format version, and the header's length, each a 32-bit little-endian number.
-        guard data.count >= 12, data.prefix(4) == Data("Cr24".utf8) else { throw PluginError.invalidPackage("\(name) is not a .crx file.") }
+        guard data.count >= 12, data.prefix(4) == Data("Cr24".utf8) else { throw PluginError.invalidPackage(localized("\(name) is not a .crx file.")) }
         let version = Self.uint32(data, at: start + 4)
-        guard version == 3 else { throw PluginError.invalidPackage("\(name) is a .crx file of format version \(version), which Chromium no longer installs.") }
+        guard version == 3 else { throw PluginError.invalidPackage(localized("\(name) is a .crx file of format version \(version), which Chromium no longer installs.")) }
         let headerEnd = start + 12 + Int(Self.uint32(data, at: start + 8))
-        guard headerEnd <= data.endIndex else { throw PluginError.invalidPackage("\(name) is not a complete .crx file.") }
+        guard headerEnd <= data.endIndex else { throw PluginError.invalidPackage(localized("\(name) is not a complete .crx file.")) }
         // The header is a `CrxFileHeader` message: RSA proofs (field 2) and ECDSA proofs on P-256 (field 3), each with a public key (field 1) and a signature (field 2), and the signed header (field 10000), a `SignedData` message whose field 1 is the identifier as the first 16 bytes of the developer key's digest. Of a field that repeats where the message has one, the last counts, as protocol buffers read it.
-        let unreadable = PluginError.invalidPackage("The header of \(name) could not be read.")
+        let unreadable = PluginError.invalidPackage(localized("The header of \(name) could not be read."))
         let headerBytes = [UInt8](data[start + 12..<headerEnd])
         guard !Self.zipEndSignatures.contains(where: { headerBytes.firstRange(of: $0) != nil }),
               let header = Self.fields(headerBytes) else { throw unreadable }
@@ -50,7 +50,7 @@ struct CRXArchive {
         }
         guard let crxID = signedFields.last(where: { $0.number == 1 })?.value, crxID.count == 16,
               let developer = proofs.first(where: { Array(SHA256.hash(data: $0.key).prefix(16)) == crxID }) else {
-            throw PluginError.invalidPackage("\(name) has no key for its extension\u{2019}s identifier.")
+            throw PluginError.invalidPackage(localized("\(name) has no key for its extension\u{2019}s identifier."))
         }
         // Every proof signs the context, the signed header's length as a 32-bit little-endian number, the signed header, and the archive, so one digest serves them all.
         var hasher = SHA256()
@@ -60,7 +60,7 @@ struct CRXArchive {
         hasher.update(data: data[headerEnd...])
         let digest = hasher.finalize()
         guard proofs.allSatisfy({ $0.holds(for: digest) }) else {
-            throw PluginError.invalidPackage("The signature of \u{201C}\(name)\u{201D} does not match its contents.")
+            throw PluginError.invalidPackage(localized("The signature of \u{201C}\(name)\u{201D} does not match its contents."))
         }
         let letters = Array("abcdefghijklmnop")
         self.name = name

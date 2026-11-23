@@ -52,15 +52,15 @@ public enum WebStoreError: Error, Equatable, Sendable {
 extension WebStoreError: LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case let .unknownExtension(id): return "The Web Store has no extension with the identifier \u{201C}\(id)\u{201D}."
-        case let .notOffered(id, status): return "The Web Store did not offer \u{201C}\(id)\u{201D}: \(status)."
-        case let .alreadyInstalled(name, version): return "\u{201C}\(name)\u{201D} \(version) is installed, the Web Store\u{2019}s current version."
-        case .unreadableAnswer: return "The Web Store\u{2019}s answer could not be read."
-        case let .httpStatus(status): return "The Web Store answered with HTTP status \(status)."
-        case .insecurePackage: return "The Web Store offered the package at an address without HTTPS."
-        case .packageTooLarge: return "The package from the Web Store is larger than 256 MB."
-        case .damagedDownload: return "The download from the Web Store is damaged. Try again."
-        case .noEngineVersion: return "Arch cannot ask the Web Store without the version of its Chromium engine."
+        case let .unknownExtension(id): return localized("The Web Store has no extension with the identifier \u{201C}\(id)\u{201D}.")
+        case let .notOffered(id, status): return localized("The Web Store did not offer \u{201C}\(id)\u{201D}: \(status).")
+        case let .alreadyInstalled(name, version): return localized("\u{201C}\(name)\u{201D} \(version) is installed, the Web Store\u{2019}s current version.")
+        case .unreadableAnswer: return localized("The Web Store\u{2019}s answer could not be read.")
+        case let .httpStatus(status): return localized("The Web Store answered with HTTP status \(status).")
+        case .insecurePackage: return localized("The Web Store offered the package at an address without HTTPS.")
+        case .packageTooLarge: return localized("The package from the Web Store is larger than 256 MB.")
+        case .damagedDownload: return localized("The download from the Web Store is damaged. Try again.")
+        case .noEngineVersion: return localized("Arch cannot ask the Web Store without the version of its Chromium engine.")
         }
     }
 }

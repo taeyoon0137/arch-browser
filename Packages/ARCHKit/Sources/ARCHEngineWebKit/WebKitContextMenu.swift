@@ -87,7 +87,7 @@ extension WebKitWebContents {
         // WebKit offers Paste only in editable content.
         if kept.contains(where: { $0.tag == 14 }) {
             element.isEditable = true
-            let item = NSMenuItem(title: "Select All", action: #selector(WebKitWebView.selectAllFromContextMenu(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: localized("Select All"), action: #selector(WebKitWebView.selectAllFromContextMenu(_:)), keyEquivalent: "")
             item.target = webView
             item.identifier = EngineContextMenuItem.selectAll
             item.isEnabled = true

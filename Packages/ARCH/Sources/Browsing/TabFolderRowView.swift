@@ -53,7 +53,7 @@ struct TabFolderRowView: View {
                 .frame(width: 18, height: 18)
                 .accessibilityHidden(true)
             if isRenaming {
-                SidebarNameField(placeholder: "Folder Name", name: folder.name,
+                SidebarNameField(placeholder: localized("Folder Name"), name: folder.name,
                                  onRename: { windowModel.renameFolder(folder.id, to: $0) }, onEnd: { windowModel.endRenamingFolder(folder.id) })
             } else {
                 if let owner = windowModel.agentSession(of: folder) {
@@ -78,7 +78,7 @@ struct TabFolderRowView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .help(Self.failureHelp(error, nextAttempt: status.nextAttempt))
-                    .accessibilityLabel("Refresh Failed")
+                    .accessibilityLabel(localized("Refresh Failed"))
             }
             // In the close button's place on a tab row.
             if folder.live != nil, status.isRefreshing {
@@ -86,7 +86,7 @@ struct TabFolderRowView: View {
                     .controlSize(.small)
                     .scaleEffect(0.6)
                     .frame(width: 22, height: 22)
-                    .accessibilityLabel("Refreshing")
+                    .accessibilityLabel(localized("Refreshing"))
             } else {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
@@ -112,24 +112,24 @@ struct TabFolderRowView: View {
                 .disabled(windowModel.agentSession(of: folder) == nil)
             } else {
                 if folder.live != nil {
-                    Button("Refresh Now") { session.refreshLiveFolder(folder.id) }
-                    Button("Mark All as Read") { session.markAllAsRead(inLiveFolder: folder.id) }
+                    Button(localized("Refresh Now")) { session.refreshLiveFolder(folder.id) }
+                    Button(localized("Mark All as Read")) { session.markAllAsRead(inLiveFolder: folder.id) }
                         .disabled(status.unreadCount == 0)
                     if status.dismissedCount > 0 {
-                        Button("Show Dismissed Items (\(status.dismissedCount))") { withAnimation(.easeInOut(duration: 0.15)) { session.showDismissedItems(inLiveFolder: folder.id) } }
+                        Button(localized("Show Dismissed Items (\(status.dismissedCount))")) { withAnimation(.easeInOut(duration: 0.15)) { session.showDismissedItems(inLiveFolder: folder.id) } }
                     }
-                    Button("Edit Live Folder\u{2026}") { windowModel.showEditLiveFolderSheet(folder.id) }
+                    Button(localized("Edit Live Folder\u{2026}")) { windowModel.showEditLiveFolderSheet(folder.id) }
                     Divider()
                 }
                 // An agent folder's tabs are the agent's until the user keeps them, which makes the folder an ordinary one.
-                if folder.isAgentFolder { Button("Keep Tabs") { session.keepTabs(ofFolder: folder.id) } }
-                Button("Rename Folder") { windowModel.renamingFolderID = folder.id }
+                if folder.isAgentFolder { Button(localized("Keep Tabs")) { session.keepTabs(ofFolder: folder.id) } }
+                Button(localized("Rename Folder")) { windowModel.renamingFolderID = folder.id }
                 FolderNestingItems(session: session, windowModel: windowModel, folder: folder)
                 Divider()
                 if folder.live != nil {
-                    Button("Convert to Folder") { session.convertToFolder(folder.id) }
+                    Button(localized("Convert to Folder")) { session.convertToFolder(folder.id) }
                 }
-                Button("Delete Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.deleteFolder(folder.id) } }
+                Button(localized("Delete Folder")) { withAnimation(.easeInOut(duration: 0.15)) { session.deleteFolder(folder.id) } }
             }
         }
         .confirmAgentSessionDeletion($deleting) { owner in
@@ -143,16 +143,16 @@ struct TabFolderRowView: View {
     }
 
     private var accessibilityValue: String {
-        let state = folder.isCollapsed ? "Collapsed" : "Expanded"
+        let state = folder.isCollapsed ? localized("Collapsed") : localized("Expanded")
         guard folder.live != nil, status.unreadCount > 0 else { return state }
-        return "\(state), \(status.unreadCount) unread"
+        return localized("\(state), \(status.unreadCount) unread")
     }
 
     /// The warning symbol's tooltip: the failure and when the timer tries again.
     static func failureHelp(_ error: String, nextAttempt: Date?) -> String {
         guard let nextAttempt else { return error }
         let date = Calendar.current.isDateInToday(nextAttempt) ? Date.FormatStyle.DateStyle.omitted : .abbreviated
-        return "\(error)\nNext attempt: \(nextAttempt.formatted(date: date, time: .shortened))"
+        return localized("\(error)\nNext attempt: \(nextAttempt.formatted(date: date, time: .shortened))")
     }
 
     /// A click in the name field while renaming edits the name instead, and the release that ends a drag of the row leaves the folder as it was.
@@ -207,9 +207,9 @@ private struct SessionFolderCards: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 Spacer(minLength: 0)
-                Button(step.count > 1 ? "Review \(step.count)" : "Review", action: review)
+                Button(step.count > 1 ? localized("Review \(step.count)") : localized("Review"), action: review)
                     .buttonStyle(.link)
-                    .accessibilityLabel(step.count > 1 ? "Review \(step.count) requests" : "Review the request")
+                    .accessibilityLabel(step.count > 1 ? localized("Review \(step.count) requests") : localized("Review the request"))
             }
             .font(.system(size: 11))
             // Under the folder's name, past its symbol.
@@ -227,12 +227,12 @@ private struct SessionFolderMenu: View {
     let delete: () -> Void
 
     var body: some View {
-        Button("Show Session") { perform(.show) }
-        Button("Stop") { perform(.stop) }.disabled(!owner.isTurnRunning)
-        Button("Keep Tabs") { perform(.keepTabs) }
-        Button("Rename Folder", action: rename)
+        Button(localized("Show Session")) { perform(.show) }
+        Button(localized("Stop")) { perform(.stop) }.disabled(!owner.isTurnRunning)
+        Button(localized("Keep Tabs")) { perform(.keepTabs) }
+        Button(localized("Rename Folder"), action: rename)
         Divider()
-        Button("Delete Session…", role: .destructive, action: delete)
+        Button(localized("Delete Session…"), role: .destructive, action: delete)
     }
 }
 
@@ -244,13 +244,13 @@ private struct FolderNestingItems: View {
 
     var body: some View {
         let tree = session.folderTree
-        Button("New Folder Inside") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(inside: folder.id) } }
+        Button(localized("New Folder Inside")) { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(inside: folder.id) } }
             .disabled(!tree.canAddFolder(inside: folder.id))
         MoveToFolderMenu(lists: [tree.moveTargets(forFolder: folder.id)]) { target in
             withAnimation(.easeInOut(duration: 0.15)) { session.moveFolder(folder.id, into: target) }
         }
         if folder.parentID != nil {
-            Button("Move Out of Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.moveFolderOut(folder.id) } }
+            Button(localized("Move Out of Folder")) { withAnimation(.easeInOut(duration: 0.15)) { session.moveFolderOut(folder.id) } }
         }
     }
 }
@@ -263,7 +263,7 @@ struct MoveToFolderMenu: View {
     var body: some View {
         let lists = lists.filter { !$0.isEmpty }
         if !lists.isEmpty {
-            Menu("Move to Folder") {
+            Menu(localized("Move to Folder")) {
                 ForEach(lists.indices, id: \.self) { index in
                     if index > 0 { Divider() }
                     MoveTargetItems(targets: lists[index], move: move)

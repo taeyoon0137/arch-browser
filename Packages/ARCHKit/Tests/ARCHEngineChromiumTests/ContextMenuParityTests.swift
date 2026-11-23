@@ -223,7 +223,7 @@ private enum Parity {
         let items = ChromiumWebContents.engineMenuItems(misspelledWord: "mispeled", suggestions: ["misspelled", "dispelled"],
                                                         element: EngineContextMenuElement(isEditable: true), editCommands: [.cut, .copy, .paste, .selectAll],
                                                         pageView: page)
-        #expect(items.map(\.title) == ["misspelled", "dispelled", "Ignore Spelling", "Learn Spelling", "Cut", "Copy", "Paste", "Select All"])
+        #expect(items.map(\.title) == ["misspelled", "dispelled"] + ["Ignore Spelling", "Learn Spelling", "Cut", "Copy", "Paste", "Select All"].map { catalogText($0) })
         #expect(items.prefix(2).map { $0.representedObject as? String } == ["misspelled", "dispelled"])
         #expect(items[2].target === page && items[2].action == #selector(NSTextView.ignoreSpelling(_:)))
         #expect(items[3].representedObject as? String == "mispeled")

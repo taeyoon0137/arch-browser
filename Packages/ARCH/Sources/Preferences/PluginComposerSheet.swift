@@ -45,29 +45,29 @@ struct PluginComposerSheet: View {
     private var requestForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(draft.map { "Change \u{201C}\($0.manifest.name)\u{201D}" } ?? "New Feature with AI")
+                Text(draft.map { localized("Change \u{201C}\($0.manifest.name)\u{201D}") } ?? localized("New Feature with AI"))
                     .font(.headline)
                 Text(draft == nil
-                     ? "Describe what the feature should do. AI writes a plugin for it, and you review its permissions and code before any of it runs."
-                     : "Describe what to change. AI writes the plugin again, and you review it before any of it runs.")
+                     ? localized("Describe what the feature should do. AI writes a plugin for it, and you review its permissions and code before any of it runs.")
+                     : localized("Describe what to change. AI writes the plugin again, and you review it before any of it runs."))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            TextField(draft == nil ? "Feature" : "Change", text: $text, axis: .vertical)
+            TextField(draft == nil ? localized("Feature") : localized("Change"), text: $text, axis: .vertical)
                 .lineLimit(4...10)
                 .textFieldStyle(.roundedBorder)
                 .disabled(writing != nil)
             if writing != nil {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Writing the plugin\u{2026}").foregroundStyle(.secondary)
+                    Text("Writing the plugin\u{2026}", bundle: .module).foregroundStyle(.secondary)
                 }
             } else if let failure {
                 Text(AIService.shared.settings.message(for: failure))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 if Self.isFixedInSettings(failure) {
-                    Button("Open AI Settings") {
+                    Button(localized("Open AI Settings")) {
                         dismiss()
                         PreferencesWindowController.shared.showAISection()
                     }
@@ -76,16 +76,16 @@ struct PluginComposerSheet: View {
             // Back to Review goes to another step rather than ending the sheet, so it leads, as Don’t Ask Again does in the install sheet's last step.
             HStack {
                 if draft != nil {
-                    Button("Back to Review") { isReviewing = true }
+                    Button(localized("Back to Review")) { isReviewing = true }
                         .disabled(writing != nil)
                 }
                 Spacer()
-                Button(draft == nil ? "Cancel" : "Discard", role: .cancel) { dismiss() }
+                Button(draft == nil ? localized("Cancel") : localized("Discard"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 if writing != nil {
-                    Button("Stop") { writing?.cancel() }
+                    Button(localized("Stop")) { writing?.cancel() }
                 } else {
-                    Button("Write Plugin", action: write)
+                    Button(localized("Write Plugin"), action: write)
                         .keyboardShortcut(.defaultAction)
                         .disabled(request.isEmpty)
                 }

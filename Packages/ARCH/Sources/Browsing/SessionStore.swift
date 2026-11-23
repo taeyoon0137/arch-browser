@@ -158,7 +158,7 @@ struct SessionSnapshot: Codable {
         var listed: Set<UUID> = []
         var personas = (self.personas ?? []).filter { listed.insert($0.id).inserted }
         if !listed.contains(Persona.defaultID) {
-            personas.insert(Persona(id: Persona.defaultID, name: "Default"), at: 0)
+            personas.insert(Persona(id: Persona.defaultID, name: localized("Default")), at: 0)
             listed.insert(Persona.defaultID)
         }
         let firstPersonaID = personas[0].id
@@ -171,7 +171,7 @@ struct SessionSnapshot: Codable {
         // Each Persona's spaces sit together in Persona order and keep their own order. A Persona without spaces gets one, as at first launch.
         spaces = personas.flatMap { persona in
             let own = spaces.filter { $0.personaID == persona.id }
-            return own.isEmpty ? [Space(name: "Personal", personaID: persona.id)] : own
+            return own.isEmpty ? [Space(name: localized("Personal"), personaID: persona.id)] : own
         }
         // An open tab belongs to its space's Persona; a record whose space is gone does not reopen, so it stays as it is. A closed tab keeps its own Persona, or takes its space's, or the default Persona.
         let spacePersonaIDs = Dictionary(spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })

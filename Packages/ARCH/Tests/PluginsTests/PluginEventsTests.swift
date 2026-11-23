@@ -211,7 +211,7 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         ]))
         #expect(package.manifest.events == [.pageLoaded, .tabClosed])
         #expect(package.manifest.permissions == [.renameTabs])
-        #expect(PluginGrant(requestedBy: package.manifest).summaries == ["Suggest names for your tabs"])
+        #expect(PluginGrant(requestedBy: package.manifest).summaries == [catalogText("Suggest names for your tabs")])
         let refusals: [(String, PluginError)] = [
             (manifest + #", "events": ["pageClosed"], "background": "b.js"}"#, .invalidPackage("plugin.json: events lists “pageClosed”, which is not an event Arch sends.")),
             (manifest + #", "events": ["pageLoaded"]}"#, .invalidPackage("plugin.json: events need a background script.")),
@@ -419,7 +419,7 @@ private final class QuietSettingsPlugin: SettingsPlugin {
         #expect(throws: PluginError.permissionDenied(.renameTabs)) { _ = try limited.renameTab(other.id, to: "Name") }
         host.selected[persona] = other.id
         #expect(try limited.selectedTab()?.id == other.id)
-        #expect(PluginGrant(requestedBy: installed.manifest).summaries.first == "Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs")
+        #expect(PluginGrant(requestedBy: installed.manifest).summaries.first == catalogText("Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs"))
 
         context.end()
         #expect(throws: PluginError.stopped) { _ = try context.selectedTab() }

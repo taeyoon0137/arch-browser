@@ -34,9 +34,9 @@ struct LibraryView: View {
                 .frame(maxHeight: .infinity, alignment: .top)
             Divider().padding(.horizontal, 10)
             VStack(spacing: 2) {
-                LibraryToolRow(symbol: "arrow.uturn.backward", title: "Reopen Last Closed Tab", action: session.reopenLastClosedTab)
+                LibraryToolRow(symbol: "arrow.uturn.backward", title: localized("Reopen Last Closed Tab"), action: session.reopenLastClosedTab)
                     .disabled(!session.hasClosedTabs)
-                LibraryToolRow(symbol: "gearshape", title: "Settings") { session.showSettings?() }
+                LibraryToolRow(symbol: "gearshape", title: localized("Settings")) { session.showSettings?() }
             }
         }
     }
@@ -98,14 +98,14 @@ struct LibraryButton: View {
         }
     }
 
-    private var label: String { windowModel.isLibraryVisible ? "Hide Library" : "Show Library" }
+    private var label: String { windowModel.isLibraryVisible ? localized("Hide Library") : localized("Show Library") }
 
     private var accessibilityValue: String {
         if downloads.isDownloading {
             return downloads.progressDescription
         }
         let count = session.unseenDownloadIDs.count
-        return count == 0 ? "" : count == 1 ? "1 new download" : "\(count) new downloads"
+        return count == 0 ? "" : count == 1 ? localized("1 new download") : localized("\(count) new downloads")
     }
 
     var body: some View {

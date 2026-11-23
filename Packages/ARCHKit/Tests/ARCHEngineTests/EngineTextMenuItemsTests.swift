@@ -32,8 +32,8 @@ import Testing
     @Test func aSelectionOutsideAFieldGetsLookUpTranslateShareAndSpeech() {
         #expect(identifiers(EngineContextMenuElement(selectedText: " quick brown fox\n")) == selectionItems + [EngineContextMenuItem.share, EngineContextMenuItem.speech])
         let titles = items(EngineContextMenuElement(selectedText: " quick brown fox\n")).map(\.title)
-        #expect(titles.first == "Look Up “quick brown fox”")
-        if #available(macOS 14.4, *) { #expect(titles[1] == "Translate “quick brown fox”") }
+        #expect(titles.first == catalogText("Look Up %@", "“quick brown fox”"))
+        if #available(macOS 14.4, *) { #expect(titles[1] == catalogText("Translate %@", "“quick brown fox”")) }
     }
 
     @Test func aFieldGetsItsSubmenusInWebKitsOrder() {
@@ -102,15 +102,15 @@ import Testing
         func titles(_ identifier: NSUserInterfaceItemIdentifier, _ panels: EngineTextMenuItems.Panels = .init()) -> [String] {
             submenu(identifier, of: items(element, panels: panels))?.items.map { $0.isSeparatorItem ? "—" : $0.title } ?? []
         }
-        #expect(titles(EngineContextMenuItem.spellingAndGrammar) == ["Show Spelling and Grammar", "Check Document Now", "—", "Check Spelling While Typing"])
-        #expect(titles(EngineContextMenuItem.substitutions) == ["Show Substitutions", "—", "Smart Quotes", "Smart Dashes", "Text Replacement"])
-        #expect(titles(EngineContextMenuItem.transformations) == ["Make Upper Case", "Make Lower Case", "Capitalize"])
-        #expect(titles(EngineContextMenuItem.speech) == ["Start Speaking", "Stop Speaking"])
+        #expect(titles(EngineContextMenuItem.spellingAndGrammar) == [catalogText("Show Spelling and Grammar"), catalogText("Check Document Now"), "—", catalogText("Check Spelling While Typing")])
+        #expect(titles(EngineContextMenuItem.substitutions) == [catalogText("Show Substitutions"), "—", catalogText("Smart Quotes"), catalogText("Smart Dashes"), catalogText("Text Replacement")])
+        #expect(titles(EngineContextMenuItem.transformations) == [catalogText("Make Upper Case"), catalogText("Make Lower Case"), catalogText("Capitalize")])
+        #expect(titles(EngineContextMenuItem.speech) == [catalogText("Start Speaking"), catalogText("Stop Speaking")])
         let shown = EngineTextMenuItems.Panels(isSpellingVisible: true, isSubstitutionsVisible: true)
-        #expect(titles(EngineContextMenuItem.spellingAndGrammar, shown).first == "Hide Spelling and Grammar")
-        #expect(titles(EngineContextMenuItem.substitutions, shown).first == "Hide Substitutions")
+        #expect(titles(EngineContextMenuItem.spellingAndGrammar, shown).first == catalogText("Hide Spelling and Grammar"))
+        #expect(titles(EngineContextMenuItem.substitutions, shown).first == catalogText("Hide Substitutions"))
         let parents = items(element).filter { $0.submenu != nil }
-        #expect(parents.map(\.title) == ["Spelling and Grammar", "Substitutions", "Transformations", "Speech"])
+        #expect(parents.map(\.title) == [catalogText("Spelling and Grammar"), catalogText("Substitutions"), catalogText("Transformations"), catalogText("Speech")])
         #expect(parents.allSatisfy { $0.isEnabled })
     }
 

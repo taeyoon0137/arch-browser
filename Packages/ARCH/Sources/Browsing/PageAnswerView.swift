@@ -42,22 +42,22 @@ struct PageExchangeView: View {
     @ViewBuilder private var status: some View {
         switch exchange.state {
         case .readingPage:
-            progress("Reading the page\u{2026}")
+            progress(localized("Reading the page\u{2026}"))
         case .sent:
-            progress("Waiting for the model\u{2026}")
+            progress(localized("Waiting for the model\u{2026}"))
         case .waiting(.queued):
-            progress("Waiting for a free request slot\u{2026}")
+            progress(localized("Waiting for a free request slot\u{2026}"))
         case .waiting(.rateLimited(let until)):
-            progress("Waiting for the provider\u{2019}s rate limit until \(until.formatted(date: .omitted, time: .standard))\u{2026}")
+            progress(localized("Waiting for the provider\u{2019}s rate limit until \(until.formatted(date: .omitted, time: .standard))\u{2026}"))
         case .answering:
-            progress(exchange.model.map { "Answering with \(settings.title(of: $0))\u{2026}" } ?? "Answering\u{2026}")
+            progress(exchange.model.map { localized("Answering with \(settings.title(of: $0))\u{2026}") } ?? localized("Answering\u{2026}"))
         case .finished(let reason):
             note(PageReply.footer(for: exchange, finishedBecause: reason, settings: settings))
         case .stopped:
             // A reply stopped by closing the reader, as its first summary can be, is asked for again here.
             VStack(alignment: .leading, spacing: 6) {
-                note("Stopped.")
-                Button("Retry", action: retry)
+                note(localized("Stopped."))
+                Button(localized("Retry"), action: retry)
                     .controlSize(.small)
             }
         case .failed(let error):
@@ -82,7 +82,7 @@ struct PageExchangeView: View {
     /// One sentence and one action, as the AI interface shows every error. A page that could not be read offers Retry.
     private func failure(_ error: Error) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(error is AIError ? settings.message(for: error) : error is PageConversation.PageReloaded ? "The page reloaded before the question went out." : "Arch could not read this page.")
+            Text(error is AIError ? settings.message(for: error) : error is PageConversation.PageReloaded ? localized("The page reloaded before the question went out.") : localized("Arch could not read this page."))
                 .font(.system(size: 12))
                 .foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
@@ -97,20 +97,20 @@ struct PageExchangeView: View {
     private func action(for error: Error) -> (title: String, perform: () -> Void)? {
         switch error as? AIError {
         case .contextTooLong:
-            if exchange.followsEarlierQuestions, let startOver { return ("Start Over", startOver) }
-            return assistant.showAISettings.map { ("Open AI Settings", $0) }
+            if exchange.followsEarlierQuestions, let startOver { return (localized("Start Over"), startOver) }
+            return assistant.showAISettings.map { (localized("Open AI Settings"), $0) }
         case .notConfigured, .authentication, .budgetReached, .blockedByPolicy(.commandLineToolWithPageData):
-            return assistant.showAISettings.map { ("Open AI Settings", $0) }
+            return assistant.showAISettings.map { (localized("Open AI Settings"), $0) }
         case .blockedByPolicy(.siteExcluded):
             guard let pageURL else { return nil }
             // The switch helps only while the page's own site is off; data from another address, such as a page that changed while it was read, is asked for again.
-            guard !settings.allowsAI(on: pageURL) else { return ("Retry", retry) }
-            return ("Allow AI on This Site", { [settings, retry] in
+            guard !settings.allowsAI(on: pageURL) else { return (localized("Retry"), retry) }
+            return (localized("Allow AI on This Site"), { [settings, retry] in
                 settings.setAllowsAI(true, on: pageURL)
                 retry()
             })
         default:
-            return ("Retry", retry)
+            return (localized("Retry"), retry)
         }
     }
 }
@@ -137,12 +137,12 @@ struct PageAIOffNotice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Body text under the panel's semibold header, set apart from the note below by color alone.
-            Text("AI is off for \(PageAssistant.siteName(of: url)).")
+            Text("AI is off for \(PageAssistant.siteName(of: url)).", bundle: .module)
                 .font(.system(size: 13))
-            Text("Nothing from this site goes to any provider.")
+            Text("Nothing from this site goes to any provider.", bundle: .module)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-            Button("Allow AI on This Site") { settings.setAllowsAI(true, on: url) }
+            Button(localized("Allow AI on This Site")) { settings.setAllowsAI(true, on: url) }
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -158,8 +158,8 @@ struct PageAISiteRow: View {
     var body: some View {
         if let url = tab.url, PageAssistant.canRead(url), service.isAvailable(.pageReader) || service.isAvailable(.pageQuestion) {
             SiteSettingsDivider()
-            SiteSettingsRow(symbol: "sparkles", title: "Allow AI on This Site", help: "Features such as the page reader can send this site\u{2019}s pages to the models you chose for them.") {
-                Toggle("Allow AI on This Site", isOn: Binding(get: { settings.allowsAI(on: url) }, set: { settings.setAllowsAI($0, on: url) }))
+            SiteSettingsRow(symbol: "sparkles", title: localized("Allow AI on This Site"), help: localized("Features such as the page reader can send this site\u{2019}s pages to the models you chose for them.")) {
+                Toggle(localized("Allow AI on This Site"), isOn: Binding(get: { settings.allowsAI(on: url) }, set: { settings.setAllowsAI($0, on: url) }))
                     .toggleStyle(.switch)
             }
         }
@@ -189,15 +189,15 @@ enum PageReply {
 
     /// The model that answered, its tokens, and the estimated cost when the model has a price. A provider that reports no usage, such as a command-line tool covered by the user's subscription, shows only the model.
     @MainActor static func footer(for exchange: PageConversation.Exchange, finishedBecause reason: AIFinishReason, settings: AISettingsStore) -> String {
-        var parts = [exchange.model.map { "Answered by \(settings.title(of: $0))" } ?? "Answered"]
+        var parts = [exchange.model.map { localized("Answered by \(settings.title(of: $0))") } ?? localized("Answered")]
         if let usage = exchange.usage {
-            parts.append("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens")
+            parts.append(localized("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens"))
             if let model = exchange.model, let cost = settings.estimatedCost(of: usage, on: model) {
                 // A single answer often costs a fraction of a cent.
-                parts.append("about \(cost.amount.formatted(.currency(code: cost.currency).precision(.fractionLength(2...4))))")
+                parts.append(localized("about \(cost.amount.formatted(.currency(code: cost.currency).precision(.fractionLength(2...4))))"))
             }
         }
         let footer = parts.joined(separator: " \u{00B7} ")
-        return reason == .lengthLimit ? "\(footer). The reply reached the length limit." : footer
+        return reason == .lengthLimit ? localized("\(footer). The reply reached the length limit.") : footer
     }
 }

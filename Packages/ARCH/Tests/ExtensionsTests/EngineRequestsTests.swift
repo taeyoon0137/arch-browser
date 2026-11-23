@@ -165,7 +165,7 @@ struct EngineRequestsTests {
         runtime.extensions(chromium, extension: id, asks: EngineExtensionPrompt(kind: .reload(["Asker"]), tab: nil)) { answer = $0 }
         #expect(answer == false)
         #expect(host.questions.last == WebExtensionQuestion(kind: .reload, extensionName: "", message: "\u{201C}Asker\u{201D} can run on this page once it loads again."))
-        #expect(WebExtensionEnginePrompt.reloadQuestion(names: []).message == "The extension can run on this page once it loads again.")
+        #expect(WebExtensionEnginePrompt.reloadQuestion(names: []).message == catalogText("The extension can run on this page once it loads again."))
         // A question from an extension that the engine did not load is refused without asking.
         let questions = host.questions.count
         answer = nil

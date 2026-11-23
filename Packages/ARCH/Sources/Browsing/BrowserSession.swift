@@ -605,7 +605,7 @@ final class EngineRuntime {
 
     /// The name of a new space without one: "Space" with the lowest number no space in `spaces` uses, so names do not repeat after a deletion.
     nonisolated static func newSpaceName(among spaces: [Space]) -> String {
-        (1...).lazy.map { "Space \($0)" }.first { name in !spaces.contains { $0.name == name } }!
+        (1...).lazy.map { localized("Space \($0)") }.first { name in !spaces.contains { $0.name == name } }!
     }
 
     /// The tint of a new space: the next of the rotation after `spaces`.
@@ -711,7 +711,7 @@ final class EngineRuntime {
     }
 
     /// The name of the one space a new Persona starts with.
-    nonisolated static let newPersonaSpaceName = "Personal"
+    nonisolated static let newPersonaSpaceName = localized("Personal")
 
     /// Appends a Persona with one space named Personal and returns it. Its profiles and plugins start when a window of it first needs them.
     func addPersona(named name: String) -> Persona {
@@ -1890,7 +1890,7 @@ final class EngineRuntime {
 
     /// Appends a folder to a space's pinned or open list: at the top of the list, or last among the folders of `parentID`, a folder of that list in which `FolderTree.canAddFolder(inside:)` allows one.
     func makeFolder(in spaceID: UUID, pinned: Bool, inside parentID: UUID? = nil) -> TabFolder {
-        var folder = TabFolder(spaceID: spaceID, name: "New Folder", isPinned: pinned)
+        var folder = TabFolder(spaceID: spaceID, name: localized("New Folder"), isPinned: pinned)
         folder.parentID = parentID
         folders.append(folder)
         return folder
@@ -2652,7 +2652,7 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
                   entry.item.state != .completed, entry.item.state != .cancelled else { return completion(nil) }
             if entry.reserveDestination(url) { return completion(url) }
             let suggested = entry.unusedDestination(for: url.lastPathComponent, in: url.deletingLastPathComponent())
-            self.showDownloadPanel(for: entry, suggested: suggested, message: "Another download is saving to that name. Choose a different name.", completion: completion)
+            self.showDownloadPanel(for: entry, suggested: suggested, message: localized("Another download is saving to that name. Choose a different name."), completion: completion)
         }
         if let window = NSApp.keyWindow, self.window(for: window)?.kind != .small {
             panel.beginSheetModal(for: window, completionHandler: finish)

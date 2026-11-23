@@ -25,7 +25,7 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         self.model = model
         let window = NSWindow(contentViewController: NSHostingController(rootView: HistoryList(model: model)))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.title = "History"
+        window.title = localized("History")
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 640, height: 560))
         super.init(window: window)
@@ -82,15 +82,15 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         switch itemIdentifier {
         case Self.clearItem:
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.title = "Clear History\u{2026}"
-            item.label = "Clear History"
+            item.title = localized("Clear History\u{2026}")
+            item.label = localized("Clear History")
             item.isBordered = true
             item.target = self
             item.action = #selector(chooseRangeToClear)
             return item
         case Self.searchItem:
             let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
-            item.searchField.placeholderString = "Search History"
+            item.searchField.placeholderString = localized("Search History")
             item.searchField.target = self
             item.searchField.action = #selector(search(_:))
             searchToolbarItem = item
@@ -116,11 +116,11 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         let rangeButton = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26), pullsDown: false)
         rangeButton.addItems(withTitles: ranges.map(\.title))
         let alert = NSAlert()
-        alert.messageText = "Clear History"
-        alert.informativeText = "Clearing removes the pages last visited in this range from the History window and address suggestions."
+        alert.messageText = localized("Clear History")
+        alert.informativeText = localized("Clearing removes the pages last visited in this range from the History window and address suggestions.")
         alert.accessoryView = rangeButton
-        alert.addButton(withTitle: "Clear History")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Clear History"))
+        alert.addButton(withTitle: localized("Cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             self?.model.clear(ranges[rangeButton.indexOfSelectedItem])
@@ -137,10 +137,10 @@ private enum HistoryClearRange: CaseIterable {
 
     var title: String {
         switch self {
-        case .lastHour: return "The Last Hour"
-        case .today: return "Today"
-        case .todayAndYesterday: return "Today and Yesterday"
-        case .all: return "All History"
+        case .lastHour: return localized("The Last Hour")
+        case .today: return localized("Today")
+        case .todayAndYesterday: return localized("Today and Yesterday")
+        case .all: return localized("All History")
         }
     }
 
@@ -265,7 +265,7 @@ private struct HistoryList: View {
     var body: some View {
         Group {
             if model.days.isEmpty {
-                Text(model.query.isEmpty ? "No History" : "No Results")
+                Text(model.query.isEmpty ? localized("No History") : localized("No Results"))
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -282,10 +282,10 @@ private struct HistoryList: View {
                 .listStyle(.inset)
                 .contextMenu(forSelectionType: URL.self) { urls in
                     if !urls.isEmpty {
-                        Button(urls.count == 1 ? "Open in New Tab" : "Open in \(urls.count) New Tabs") { model.open(urls) }
-                        Button(urls.count == 1 ? "Copy Link" : "Copy Links") { model.copy(urls) }
+                        Button(urls.count == 1 ? localized("Open in New Tab") : localized("Open in \(urls.count) New Tabs")) { model.open(urls) }
+                        Button(urls.count == 1 ? localized("Copy Link") : localized("Copy Links")) { model.copy(urls) }
                         Divider()
-                        Button("Delete") { model.delete(urls) }
+                        Button(localized("Delete")) { model.delete(urls) }
                     }
                 } primaryAction: { urls in
                     model.open(urls)
@@ -300,8 +300,8 @@ private struct HistoryList: View {
 
     private static func title(for day: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        if calendar.isDateInToday(day) { return localized("Today") }
+        if calendar.isDateInYesterday(day) { return localized("Yesterday") }
         return day.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
     }
 }

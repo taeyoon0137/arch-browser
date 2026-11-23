@@ -126,7 +126,7 @@ private func due(_ configuration: LiveFolderConfiguration, _ state: LiveFolderSt
         #expect(GitHubSearch(kind: .assignedIssues).query == "is:issue is:open assignee:@me archived:false sort:updated-desc")
         #expect(GitHubSearch(kind: .search, text: " label:bug ").query == "label:bug sort:updated-desc")
         #expect(GitHubSearch(kind: .search, text: "label:bug sort:created-asc").query == "label:bug sort:created-asc")
-        #expect(GitHubSearch.Kind.allCases.map { GitHubSearch(kind: $0).defaultName } == ["Pull Requests", "Review Requests", "Issues", "GitHub Search"])
+        #expect(GitHubSearch.Kind.allCases.map { GitHubSearch(kind: $0).defaultName } == [catalogText("Pull Requests"), catalogText("Review Requests"), catalogText("Issues"), catalogText("GitHub Search")])
     }
 
     @Test func configurationsKeepAllowedValues() throws {

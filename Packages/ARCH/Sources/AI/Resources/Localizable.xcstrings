@@ -1,0 +1,1056 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ %@ did not finish." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@ 명령이 완료되지 않았습니다."
+          }
+        }
+      }
+    },
+    "%@ (removed)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@(제거됨)"
+          }
+        }
+      }
+    },
+    "%@ could not be checked: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 확인 실패: %2$@"
+          }
+        }
+      }
+    },
+    "%@ could not list its features: %@. Update Codex in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 기능 목록을 가져올 수 없습니다: %2$@. 터미널에서 Codex를 업데이트하세요."
+          }
+        }
+      }
+    },
+    "%@ could not start (%@)." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 시작 실패(%2$@)."
+          }
+        }
+      }
+    },
+    "%@ could not start. %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 시작 실패. %2$@"
+          }
+        }
+      }
+    },
+    "%@ could not start: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 시작 실패: %2$@"
+          }
+        }
+      }
+    },
+    "%@ could not start: %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 시작 실패: %2$@."
+          }
+        }
+      }
+    },
+    "%@ could not start: no executable at %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 시작 실패: %2$@에 실행 파일이 없습니다."
+          }
+        }
+      }
+    },
+    "%@ did not accept the API key." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 API 키를 받아들이지 않았습니다."
+          }
+        }
+      }
+    },
+    "%@ did not say whether it is signed in." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 로그인 여부를 알려주지 않았습니다."
+          }
+        }
+      }
+    },
+    "%@ does not accept `%@`. Update Codex in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 `%2$@` 설정을 지원하지 않습니다. 터미널에서 Codex를 업데이트하세요."
+          }
+        }
+      }
+    },
+    "%@ exited with status %d." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 종료됨(상태 %2$d)."
+          }
+        }
+      }
+    },
+    "%@ is at its usage limit until %@. The message starts then; Stop cancels it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 사용량 한도가 %2$@까지입니다. 메시지는 그때 시작되며, 중단을 누르면 취소됩니다."
+          }
+        }
+      }
+    },
+    "%@ is limiting requests." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 요청을 제한하고 있습니다."
+          }
+        }
+      }
+    },
+    "%@ is limiting requests. Try again after %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 요청을 제한하고 있습니다. %2$@ 이후에 다시 시도하세요."
+          }
+        }
+      }
+    },
+    "%@ is not signed in. Sign in to it in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 로그인되어 있지 않습니다. 터미널에서 로그인하세요."
+          }
+        }
+      }
+    },
+    "%@ is signed in and accepts every setting Arch uses." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 로그인되어 있으며 Arch가 사용하는 모든 설정을 지원합니다."
+          }
+        }
+      }
+    },
+    "%@ is unavailable: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 사용 불가: %2$@"
+          }
+        }
+      }
+    },
+    "%@ refuses Arch's settings: %@. Update Codex in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 Arch의 설정을 거부합니다: %2$@. 터미널에서 Codex를 업데이트하세요."
+          }
+        }
+      }
+    },
+    "%@ stopped on signal %d." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 중단됨(신호 %2$d)."
+          }
+        }
+      }
+    },
+    "A schema or tool argument is not valid JSON." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스키마 또는 도구 인수가 올바른 JSON이 아닙니다."
+          }
+        }
+      }
+    },
+    "A tool call’s arguments are not a JSON object." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 호출의 인수가 JSON 객체가 아닙니다."
+          }
+        }
+      }
+    },
+    "AI is off for %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 AI가 꺼져 있습니다."
+          }
+        }
+      }
+    },
+    "AI requests reached this month’s spending limit." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 요청이 이번 달 지출 한도에 도달했습니다."
+          }
+        }
+      }
+    },
+    "Arch's tools did not connect." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch의 도구가 연결되지 않았습니다."
+          }
+        }
+      }
+    },
+    "Assign a model to the %@ tier in Settings ▸ AI." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 ▸ AI에서 %@ 등급에 모델을 지정하세요."
+          }
+        }
+      }
+    },
+    "Choose a model for this feature in Settings ▸ AI." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 ▸ AI에서 이 기능의 모델을 선택하세요."
+          }
+        }
+      }
+    },
+    "Claude Code could not confirm its turn limit. Update Claude Code in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code에서 턴 한도를 확인할 수 없습니다. 터미널에서 Claude Code를 업데이트하세요."
+          }
+        }
+      }
+    },
+    "Claude Code ended the turn with %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code가 턴을 종료했습니다: %@."
+          }
+        }
+      }
+    },
+    "Claude Code reports its usage limit%@: %@, until %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code 사용량 한도%1$@: %2$@, %3$@까지."
+          }
+        }
+      }
+    },
+    "Claude Code reports its usage limit%@: %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code 사용량 한도%1$@: %2$@."
+          }
+        }
+      }
+    },
+    "Claude Code started with tools Arch did not ask for: %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code가 Arch에서 요청하지 않은 도구로 시작되었습니다: %@."
+          }
+        }
+      }
+    },
+    "Claude Code would run a message that starts with \"/\" as one of its own commands, so Arch does not send it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code는 \"/\"로 시작하는 메시지를 자체 명령으로 실행하므로 Arch가 보내지 않습니다."
+          }
+        }
+      }
+    },
+    "Claude Code%@ does not accept %@. Update Claude Code in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code%1$@에서 %2$@ 항목을 지원하지 않습니다. 터미널에서 Claude Code를 업데이트하세요."
+          }
+        }
+      }
+    },
+    "Codex called a tool of the server %@, which Arch did not ask for." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex가 Arch에서 요청하지 않은 서버 %@의 도구를 호출했습니다."
+          }
+        }
+      }
+    },
+    "Codex changed a file." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex가 파일을 변경했습니다."
+          }
+        }
+      }
+    },
+    "Codex could not confirm support for one-time runs. Update Codex in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex에서 일회성 실행 지원 여부를 확인할 수 없습니다. 터미널에서 Codex를 업데이트하세요."
+          }
+        }
+      }
+    },
+    "Codex does not list the feature %@, so Arch cannot confirm that its shell is off. Update Codex in the terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex 기능 목록에 %@ 항목이 없어 Arch가 셸이 꺼져 있는지 확인할 수 없습니다. 터미널에서 Codex를 업데이트하세요."
+          }
+        }
+      }
+    },
+    "Codex ended the turn with an error." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex가 오류와 함께 턴을 종료했습니다."
+          }
+        }
+      }
+    },
+    "Codex ran a command." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex가 명령을 실행했습니다."
+          }
+        }
+      }
+    },
+    "Codex searched the web." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex가 웹을 검색했습니다."
+          }
+        }
+      }
+    },
+    "Codex used %@, which Arch did not ask for." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex가 Arch에서 요청하지 않은 %@ 기능을 사용했습니다."
+          }
+        }
+      }
+    },
+    "Deep" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "심층"
+          }
+        }
+      }
+    },
+    "Enter the key again to use it with the new base URL, or save the change first." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 기본 URL에서 키를 사용하려면 키를 다시 입력하거나, 먼저 변경 사항을 저장하세요."
+          }
+        }
+      }
+    },
+    "Fast" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "빠름"
+          }
+        }
+      }
+    },
+    "Keychain error %d." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인 오류 %d."
+          }
+        }
+      }
+    },
+    "None of this feature’s models can serve it. Choose another in Settings ▸ AI." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 기능의 모델 중 사용할 수 있는 모델이 없습니다. 설정 ▸ AI에서 다른 모델을 선택하세요."
+          }
+        }
+      }
+    },
+    "Standard" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "표준"
+          }
+        }
+      }
+    },
+    "The base URL must use https, or http for a server on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기본 URL은 https를 사용해야 합니다. 이 Mac의 서버는 http도 사용할 수 있습니다."
+          }
+        }
+      }
+    },
+    "The hook took too long and was stopped." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "훅이 너무 오래 걸려 중단되었습니다."
+          }
+        }
+      }
+    },
+    "The key could not be read from the Keychain. %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인에서 키를 읽을 수 없습니다. %@"
+          }
+        }
+      }
+    },
+    "The model declined to answer." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델이 응답을 거부했습니다."
+          }
+        }
+      }
+    },
+    "The model declined to answer: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델이 응답을 거부했습니다: %@"
+          }
+        }
+      }
+    },
+    "The model list has no data." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델 목록에 데이터가 없습니다."
+          }
+        }
+      }
+    },
+    "The model made too many rounds of tool calls." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델이 도구 호출 라운드를 너무 많이 진행했습니다."
+          }
+        }
+      }
+    },
+    "The provider" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자"
+          }
+        }
+      }
+    },
+    "The provider destination changed. Review it before running this hook." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자 대상이 변경되었습니다. 이 훅을 실행하기 전에 검토하세요."
+          }
+        }
+      }
+    },
+    "The provider did not accept the API key." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자가 API 키를 받아들이지 않았습니다."
+          }
+        }
+      }
+    },
+    "The provider is unavailable: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자를 사용할 수 없습니다: %@"
+          }
+        }
+      }
+    },
+    "The provider rejected the request: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자가 요청을 거부했습니다: %@"
+          }
+        }
+      }
+    },
+    "The provider stopped responding." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자가 응답을 멈췄습니다."
+          }
+        }
+      }
+    },
+    "The provider's settings changed while the request waited." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청이 대기하는 동안 제공자 설정이 변경되었습니다."
+          }
+        }
+      }
+    },
+    "The provider’s content filter stopped the reply." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자의 콘텐츠 필터가 응답을 중단했습니다."
+          }
+        }
+      }
+    },
+    "The reply could not be read: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답을 읽을 수 없습니다: %@"
+          }
+        }
+      }
+    },
+    "The reply ended before it finished." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답이 완료되기 전에 끝났습니다."
+          }
+        }
+      }
+    },
+    "The reply ended without finishing." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답이 완료되지 않은 채 끝났습니다."
+          }
+        }
+      }
+    },
+    "The reply is not valid JSON." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답이 올바른 JSON이 아닙니다."
+          }
+        }
+      }
+    },
+    "The reply reached its length limit before it was complete." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답이 완료되기 전에 길이 한도에 도달했습니다."
+          }
+        }
+      }
+    },
+    "The request is too long for the model." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청이 모델에 비해 너무 깁니다."
+          }
+        }
+      }
+    },
+    "The request was cancelled." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청이 취소되었습니다."
+          }
+        }
+      }
+    },
+    "The run reached its tool call limit." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실행이 도구 호출 한도에 도달했습니다."
+          }
+        }
+      }
+    },
+    "The server redirected the request to another address." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 요청을 다른 주소로 리디렉션했습니다."
+          }
+        }
+      }
+    },
+    "The session folder could not be made: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 폴더를 만들 수 없습니다: %@"
+          }
+        }
+      }
+    },
+    "The session folder could not be written." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 폴더에 쓸 수 없습니다."
+          }
+        }
+      }
+    },
+    "The stream reported an error." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스트림에서 오류를 보고했습니다."
+          }
+        }
+      }
+    },
+    "The stream sent data that is not JSON." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스트림이 JSON이 아닌 데이터를 보냈습니다."
+          }
+        }
+      }
+    },
+    "The tool printed no reply." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구가 응답을 출력하지 않았습니다."
+          }
+        }
+      }
+    },
+    "The tool reported an error." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구가 오류를 보고했습니다."
+          }
+        }
+      }
+    },
+    "This AI feature is not available." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 AI 기능을 사용할 수 없습니다."
+          }
+        }
+      }
+    },
+    "This AI feature is switched off in Settings ▸ AI." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 AI 기능은 설정 ▸ AI에서 꺼져 있습니다."
+          }
+        }
+      }
+    },
+    "This command-line tool may run its own tools, so it gets no page data." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 명령줄 도구는 자체 도구를 실행할 수 있으므로 페이지 데이터를 받지 않습니다."
+          }
+        }
+      }
+    },
+    "This feature does not declare that it sends %@ data." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 기능은 %@ 데이터를 보낸다고 선언하지 않았습니다."
+          }
+        }
+      }
+    },
+    "This feature reached its daily limit of automatic requests." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 기능이 자동 요청 일일 한도에 도달했습니다."
+          }
+        }
+      }
+    },
+    "This feature uses the models chosen for it in Settings ▸ AI, so a request cannot name its own." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 기능은 설정 ▸ AI에서 선택한 모델을 사용하므로 요청에서 모델을 지정할 수 없습니다."
+          }
+        }
+      }
+    },
+    "This model cannot read %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 모델은 %@ 파일을 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "This tool cannot read %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 도구는 %@ 파일을 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "Waiting for another request to %@ to finish." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 대한 다른 요청이 끝나기를 기다리는 중입니다."
+          }
+        }
+      }
+    },
+    "an error" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오류"
+          }
+        }
+      }
+    },
+    "an unknown permission mode" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알 수 없는 권한 모드"
+          }
+        }
+      }
+    },
+    "default model" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기본 모델"
+          }
+        }
+      }
+    },
+    "download details" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 세부 정보"
+          }
+        }
+      }
+    },
+    "files" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일"
+          }
+        }
+      }
+    },
+    "it exited with an error" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오류와 함께 종료됨"
+          }
+        }
+      }
+    },
+    "its memory" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메모리"
+          }
+        }
+      }
+    },
+    "its telemetry" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원격 측정"
+          }
+        }
+      }
+    },
+    "selected text" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 텍스트"
+          }
+        }
+      }
+    },
+    "the agent type %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 유형 %@"
+          }
+        }
+      }
+    },
+    "the command /%@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "명령 /%@"
+          }
+        }
+      }
+    },
+    "the permission mode %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "권한 모드 %@"
+          }
+        }
+      }
+    },
+    "the plugin %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인 %@"
+          }
+        }
+      }
+    },
+    "the server %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 %@"
+          }
+        }
+      }
+    },
+    "the skill %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스킬 %@"
+          }
+        }
+      }
+    },
+    "the startup configuration is unavailable" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작 구성을 사용할 수 없음"
+          }
+        }
+      }
+    },
+    "the text of pages" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 텍스트"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

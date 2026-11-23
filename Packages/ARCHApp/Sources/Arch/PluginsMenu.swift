@@ -10,9 +10,9 @@ import Preferences
 @MainActor
 final class PluginsMenu: NSObject, NSMenuItemValidation {
     private let session: BrowserSession
-    private let menu = NSMenu(title: "Plugins")
+    private let menu = NSMenu(title: localized("Plugins"))
     /// The menu bar's item for the menu, hidden while the menu has no items.
-    private let menuBarItem = NSMenuItem(title: "Plugins", action: nil, keyEquivalent: "")
+    private let menuBarItem = NSMenuItem(title: localized("Plugins"), action: nil, keyEquivalent: "")
     /// The command of each item, by the identifier the item carries.
     private var commands: [String: PluginCommandRef] = [:]
     private var subscription: AnyCancellable?

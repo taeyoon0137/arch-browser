@@ -94,7 +94,7 @@ import Testing
         #expect(destination("Profile 4") == .newPersona)
         #expect(model.destinations == [.persona(Persona.defaultID), .persona(Self.work.id), .persona(other.id), .newPersona])
         let profiles = try browser.profiles.get()
-        #expect(model.title(of: .newPersona, for: profiles[3]) == "New Persona \u{201C}New\u{201D}")
+        #expect(model.title(of: .newPersona, for: profiles[3]) == catalogText("New Persona \u{201C}%@\u{201D}", "New"))
         #expect(model.title(of: .persona(Self.work.id), for: profiles[3]) == "Work")
 
         personas.send([Persona(id: Persona.defaultID, name: "Default"), other])

@@ -48,7 +48,7 @@ struct CaptureRegionOverlay: NSViewRepresentable {
         private static let hint: NSAttributedString = {
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
-            return NSAttributedString(string: "Drag across the page to capture a region. Press Escape to cancel.",
+            return NSAttributedString(string: localized("Drag across the page to capture a region. Press Escape to cancel."),
                                       attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.white, .paragraphStyle: paragraph])
         }()
 

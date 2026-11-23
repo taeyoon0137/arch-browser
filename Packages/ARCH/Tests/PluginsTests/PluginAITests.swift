@@ -275,7 +275,7 @@ private final class RecordingHost: PluginBrowserHost {
             "plugin.json": #"{"id": "org.example.ai", "name": "AI", "version": "1", "apiVersion": 1, "summary": "Asks.", "permissions": ["ai"]}"#,
         ]))
         #expect(package.manifest.permissions == [.ai])
-        #expect(PluginGrant(requestedBy: package.manifest).summaries == ["Send text to the AI models you connected"])
+        #expect(PluginGrant(requestedBy: package.manifest).summaries == [catalogText("Send text to the AI models you connected")])
         #expect(PluginError.permissionDenied(.ai).localizedDescription == "The plugin may not send text to the AI models you connected.")
     }
 
@@ -841,11 +841,11 @@ extension PluginAITests {
         #expect(installed.aiDataKinds == [.page, .selection])
         // Settings states the kinds right after the permissions and before the sites, as the install sheet does.
         let site = "Run scripts on pages from example.org"
-        #expect(installed.accessSummaries == ["Read the titles and addresses of your tabs", "Send text to the AI models you connected", sentence, site])
+        #expect(installed.accessSummaries == [catalogText("Read the titles and addresses of your tabs"), catalogText("Send text to the AI models you connected"), sentence, site])
         // Without `ai` in the grant, the kinds do not come with it.
         var withoutAI = installed
         withoutAI.grant.permissions = [.tabs]
-        #expect(withoutAI.aiDataKinds.isEmpty && withoutAI.accessSummaries == ["Read the titles and addresses of your tabs", site])
+        #expect(withoutAI.aiDataKinds.isEmpty && withoutAI.accessSummaries == [catalogText("Read the titles and addresses of your tabs"), site])
         let textOnly = try await stage(#"["ai"]"#)
         #expect(textOnly.manifest.aiDataKinds.isEmpty && textOnly.manifest.aiDataSummary == nil)
 

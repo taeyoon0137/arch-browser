@@ -203,7 +203,7 @@ struct SidebarColumn: View {
                             .contentShape(Rectangle())
                             .onTapGesture { finishLibrarySwipe(opens: false) }
                             .accessibilityElement()
-                            .accessibilityLabel("Show Sidebar")
+                            .accessibilityLabel(localized("Show Sidebar"))
                             .accessibilityAddTraits(.isButton)
                             .accessibilityAction { finishLibrarySwipe(opens: false) }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -282,17 +282,17 @@ struct SidebarTopRow: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            SidebarIconButton(symbol: "sidebar.left", label: windowModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar", shortcut: shortcut("toggleSidebar"), action: windowModel.toggleSidebar)
+            SidebarIconButton(symbol: "sidebar.left", label: windowModel.isSidebarVisible ? localized("Hide Sidebar") : localized("Show Sidebar"), shortcut: shortcut("toggleSidebar"), action: windowModel.toggleSidebar)
             Spacer()
             // The navigation buttons touch and end 4 points in, as the address pill's buttons below do, so the two rows' buttons line up.
             HStack(spacing: 0) {
-                SidebarIconButton(symbol: "chevron.left", label: "Back", shortcut: shortcut("goBack"), action: windowModel.goBack).disabled(tab?.canGoBack != true)
-                SidebarIconButton(symbol: "chevron.right", label: "Forward", shortcut: shortcut("goForward"), action: windowModel.goForward).disabled(tab?.canGoForward != true)
+                SidebarIconButton(symbol: "chevron.left", label: localized("Back"), shortcut: shortcut("goBack"), action: windowModel.goBack).disabled(tab?.canGoBack != true)
+                SidebarIconButton(symbol: "chevron.right", label: localized("Forward"), shortcut: shortcut("goForward"), action: windowModel.goForward).disabled(tab?.canGoForward != true)
                 if tab?.isLoading == true {
-                    SidebarIconButton(symbol: "xmark", label: "Stop Loading", shortcut: shortcut("stopLoading"), action: windowModel.stopLoading)
+                    SidebarIconButton(symbol: "xmark", label: localized("Stop Loading"), shortcut: shortcut("stopLoading"), action: windowModel.stopLoading)
                 } else {
                     // Disabled where Reload Page is, as under an internal page, which it does not reach.
-                    SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: shortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
+                    SidebarIconButton(symbol: "arrow.clockwise", label: localized("Reload"), shortcut: shortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
                 }
             }
         }

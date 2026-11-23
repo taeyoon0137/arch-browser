@@ -47,7 +47,7 @@ struct MessagesCodec: AIWireCodec {
             if file.mediaType.lowercased() == "application/pdf" {
                 return ["type": "document", "source": ["type": "base64", "media_type": "application/pdf", "data": file.data.base64EncodedString()]]
             }
-            guard let text = AIPartText.block(for: file) else { throw AIError.invalidRequest("This model cannot read \(file.name).") }
+            guard let text = AIPartText.block(for: file) else { throw AIError.invalidRequest(localized("This model cannot read \(file.name).")) }
             return ["type": "text", "text": text]
         case .toolCall(let call):
             return ["type": "tool_use", "id": call.id, "name": call.name, "input": try JSONSerialization.requestValue(call.arguments)]
@@ -84,7 +84,7 @@ struct MessagesCodec: AIWireCodec {
     mutating func decode(_ event: ServerSentEvent) throws -> [AIEvent] {
         guard !isStopped else { return [] }
         guard let object = try? JSONSerialization.jsonObject(with: Data(event.data.utf8)) as? [String: Any] else {
-            throw AIError.malformedReply("The stream sent data that is not JSON.")
+            throw AIError.malformedReply(localized("The stream sent data that is not JSON."))
         }
         let index = object["index"] as? Int ?? 0
         switch (object["type"] as? String) ?? event.event ?? "" {
@@ -145,7 +145,7 @@ struct MessagesCodec: AIWireCodec {
 
     mutating func finish() throws -> [AIEvent] {
         guard !isStopped else { return [] }
-        guard finishReason != nil else { throw AIError.providerUnavailable(provider, detail: "The reply ended before it finished.") }
+        guard finishReason != nil else { throw AIError.providerUnavailable(provider, detail: localized("The reply ended before it finished.")) }
         isStopped = true
         return closingEvents()
     }

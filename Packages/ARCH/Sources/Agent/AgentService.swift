@@ -332,7 +332,7 @@ import Foundation
             do {
                 try await record.value
             } catch {
-                saveProblem = "The Keychain did not record this change, so an earlier copy of agent.json would still open: \(error.localizedDescription)"
+                saveProblem = localized("The Keychain did not record this change, so an earlier copy of agent.json would still open: \(error.localizedDescription)")
             }
         }
     }
@@ -356,7 +356,7 @@ import Foundation
         let isNeeded = acceptsOutsideClients || sessionsNeedChannel || !hookCLIs.isEmpty || !shellHookRuns.isEmpty
         if isNeeded, endpoint == nil {
             guard let location = dependencies.location else {
-                channelProblem = "The home folder's path is too long for the agent socket, and so is the temporary folder's."
+                channelProblem = localized("The home folder's path is too long for the agent socket, and so is the temporary folder's.")
                 return
             }
             let endpoint = AgentEndpoint(location: location, checks: dependencies.peerChecks)
@@ -590,7 +590,7 @@ import Foundation
             return nil
         }
         if choice.needsAuthentication {
-            guard await dependencies.authenticator.authenticate(reason: "give \u{201C}\(identity.displayName)\u{201D} access to its agent tools") else {
+            guard await dependencies.authenticator.authenticate(reason: localized("give \u{201C}\(identity.displayName)\u{201D} access to its agent tools")) else {
                 decline(identity)
                 return nil
             }
@@ -689,7 +689,7 @@ import Foundation
 
     /// The panel's header for a grant: the client, its access, and its place as "Persona / Space".
     private func describeInPanel(_ grant: AgentGrant) {
-        panel.describe(AgentPanelOwner(name: grant.client.displayName, access: grant.level.title, place: place(of: grant)), for: grant.id)
+        panel.describe(AgentPanelOwner(name: grant.client.displayName, access: grant.level.localizedTitle, place: place(of: grant)), for: grant.id)
     }
 
     /// The grant's "Persona / Space", or its Persona alone while the Persona has no space.
@@ -860,10 +860,10 @@ import Foundation
             attachedIDs.contains(tab.id) && tab.canShareWithAgent(allowsAI: dependencies.allowsAI)
         }
         if let reviewed = start.reviewedDocument, !tabs.contains(where: { $0.showsSameDocument(as: reviewed) }) {
-            throw SessionError(message: "The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page.")
+            throw SessionError(message: localized("The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page."))
         }
         if let excerpt = start.readerExcerpt, !tabs.contains(where: excerpt.matches) {
-            throw SessionError(message: "The source page changed or is no longer shared. Turn off Share reader excerpt to continue.")
+            throw SessionError(message: localized("The source page changed or is no longer shared. Turn off Share reader excerpt to continue."))
         }
         tabs.compactMap(\.url).forEach { scope.add($0) }
         let session = AgentSession(title: AgentSession.title(forTask: start.task), personaID: personaID, spaceID: spaceID, origin: start.origin, mode: mode,
@@ -939,7 +939,7 @@ import Foundation
     private func describe(_ error: AIError) -> (String, AgentErrorAction?) {
         switch error {
         case .authentication(let provider):
-            if let name = dependencies.subscriptionToolName(provider) { return ("\(name) is not signed in.", .signIn(provider)) }
+            if let name = dependencies.subscriptionToolName(provider) { return (localized("\(name) is not signed in."), .signIn(provider)) }
             return (error.localizedDescription, .openAISettings)
         case .rateLimited:
             return (dependencies.providerMessage(error), .retry)
@@ -1059,7 +1059,7 @@ import Foundation
         let persona = host.personas.first { $0.id == personaID }?.name
         let space = host.spaces(in: personaID).first { $0.id == spaceID }?.name
         if let fallback, persona == nil || space == nil { return fallback }
-        return "\(persona ?? "Deleted Persona") / \(space ?? "Deleted Space")"
+        return "\(persona ?? localized("Deleted Persona")) / \(space ?? localized("Deleted Space"))"
     }
 
     public func place(of session: AgentSession) -> String {
@@ -1419,7 +1419,7 @@ import Foundation
         let now = dependencies.now()
         let card = AgentApproval(ownerID: session.id, clientName: session.title, isOutsideClient: false,
                                  kind: .shareSessionTab(choices), isSensitive: false, offers: [.deny],
-                                 action: "Choose a tab for this session to read", agentSays: call.arguments["reason"]?.stringValue,
+                                 action: localized("Choose a tab for this session to read"), agentSays: call.arguments["reason"]?.stringValue,
                                  connectionID: connectionID, createdAt: now, deadline: min(now.addingTimeInterval(sessionQuestionWindow), deadline))
         let answer = await approvals.request(card)
         guard !Task.isCancelled, isConnected(), session.callEpoch == epoch, session.takeoverGeneration == generation,
@@ -1863,8 +1863,8 @@ private final class ConnectionCall {
 
 extension AIFeature {
     /// Agent Tasks (docs/agents.md, Model choice and fallbacks): sessions the user starts, whose page data reaches the model only as tool results that Arch checks. Its route lists only models that can run a session.
-    public static let agent = AIFeature(id: .agent, name: "Agent Tasks",
-                                        summary: "Runs browser sessions on your connected model with Arch’s tools and permissions.",
+    public static let agent = AIFeature(id: .agent, name: localized("Agent Tasks"),
+                                        summary: localized("Runs browser sessions on your connected model with Arch’s tools and permissions."),
                                         trigger: .user, data: AIDataScope(kinds: [.page, .selection, .file]), requirements: [.agent])
 }
 

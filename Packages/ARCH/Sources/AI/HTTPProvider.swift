@@ -35,7 +35,7 @@ struct HTTPProvider: AIProvider {
             let (data, response) = try await session.data(for: try makeRequest(path: "models", body: nil))
             try check(response, body: data)
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            guard let entries = object?["data"] as? [[String: Any]] else { throw AIError.malformedReply("The model list has no data.") }
+            guard let entries = object?["data"] as? [[String: Any]] else { throw AIError.malformedReply(localized("The model list has no data.")) }
             return entries.compactMap { $0["id"] as? String }
         } catch {
             throw mapped(error)
@@ -107,7 +107,7 @@ struct HTTPProvider: AIProvider {
 
     func makeRequest(path: String, body: Data?) throws -> URLRequest {
         guard AIHTTPConfiguration.isAllowedBaseURL(http.baseURL) else {
-            throw AIError.invalidRequest("The base URL must use https, or http for a server on this Mac.")
+            throw AIError.invalidRequest(localized("The base URL must use https, or http for a server on this Mac."))
         }
         var request = URLRequest(url: http.baseURL.appendingPathComponent(path))
         for (name, value) in http.headers { request.setValue(value, forHTTPHeaderField: name) }
@@ -138,7 +138,7 @@ struct HTTPProvider: AIProvider {
         let provider = configuration.id
         switch response.statusCode {
         case 300..<400:
-            throw AIError.invalidRequest("The server redirected the request to another address.")
+            throw AIError.invalidRequest(localized("The server redirected the request to another address."))
         case 400:
             if info.saysInputTooLong { throw AIError.contextTooLong(provider) }
             // The `messages` format has no other field for the limit.
@@ -280,7 +280,7 @@ final class StallTimer: @unchecked Sendable {
         while true {
             let deadline = currentDeadline
             if ContinuousClock.now >= deadline {
-                throw AIError.providerUnavailable(provider, detail: "The provider stopped responding.")
+                throw AIError.providerUnavailable(provider, detail: localized("The provider stopped responding."))
             }
             try await Task.sleep(until: deadline, clock: .continuous)
         }
@@ -388,7 +388,7 @@ struct ProviderErrorInfo {
         if kind.contains("rate_limit") { return .rateLimited(provider, until: nil) }
         if saysInputTooLong { return .contextTooLong(provider) }
         if kind.contains("invalid_request") || kind.contains("not_found") { return .invalidRequest(message ?? kind) }
-        return .providerUnavailable(provider, detail: message ?? (kind.isEmpty ? "The stream reported an error." : kind))
+        return .providerUnavailable(provider, detail: message ?? (kind.isEmpty ? localized("The stream reported an error.") : kind))
     }
 }
 
@@ -398,7 +398,7 @@ extension JSONSerialization {
         do {
             return try jsonObject(with: data, options: .fragmentsAllowed)
         } catch {
-            throw AIError.invalidRequest("A schema or tool argument is not valid JSON.")
+            throw AIError.invalidRequest(localized("A schema or tool argument is not valid JSON."))
         }
     }
 
@@ -406,7 +406,7 @@ extension JSONSerialization {
     static func toolArguments(_ text: String) throws -> Data {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "{}" : text
         let data = Data(text.utf8)
-        guard (try? jsonObject(with: data)) is [String: Any] else { throw AIError.malformedReply("A tool call\u{2019}s arguments are not a JSON object.") }
+        guard (try? jsonObject(with: data)) is [String: Any] else { throw AIError.malformedReply(localized("A tool call\u{2019}s arguments are not a JSON object.")) }
         return data
     }
 }

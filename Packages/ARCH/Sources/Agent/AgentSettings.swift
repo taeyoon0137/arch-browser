@@ -169,11 +169,11 @@ public struct AgentClientIdentity: Codable, Equatable, Sendable {
     }
 
     /// What the sheet and Settings say for a client reached through a shell.
-    public static let shellNote = "Every program that runs in its shell can use this access too."
+    public static let shellNote = localized("Every program that runs in its shell can use this access too.")
 
     /// "claude in Terminal", as the sheet and Settings name the client.
     public var displayName: String {
-        host.map { "\(name) in \($0)" } ?? name
+        host.map { localized("\(name) in \($0)") } ?? name
     }
 
     /// Whether the grant ends with one process.

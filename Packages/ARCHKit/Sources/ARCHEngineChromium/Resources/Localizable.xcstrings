@@ -1,0 +1,186 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Arch runs Manifest V3 extensions only." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch는 Manifest V3 확장 프로그램만 실행합니다."
+          }
+        }
+      }
+    },
+    "Chromium did not load it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chromium에서 로드하지 않았습니다."
+          }
+        }
+      }
+    },
+    "Chromium knows the package by another identifier, as its manifest has no key." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매니페스트에 key가 없어 Chromium에서 패키지를 다른 식별자로 인식합니다."
+          }
+        }
+      }
+    },
+    "Copy" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "복사"
+          }
+        }
+      }
+    },
+    "Cut" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오려두기"
+          }
+        }
+      }
+    },
+    "Ignore Spelling" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "철자 무시"
+          }
+        }
+      }
+    },
+    "It names %@ as %@, which is not in the package." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@: %1$@ 파일이 패키지에 없습니다."
+          }
+        }
+      }
+    },
+    "Its background runs as background.scripts or background.page, which Chromium runs for Manifest V2 only; Chromium needs background.service_worker." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "백그라운드가 background.scripts 또는 background.page로 실행되는데, Chromium은 이를 Manifest V2에서만 실행합니다. Chromium에는 background.service_worker가 필요합니다."
+          }
+        }
+      }
+    },
+    "Its manifest.json is missing or is not a JSON object." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "manifest.json 파일이 없거나 JSON 객체가 아닙니다."
+          }
+        }
+      }
+    },
+    "Learn Spelling" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "철자 학습"
+          }
+        }
+      }
+    },
+    "No Guesses Found" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추측 단어 없음"
+          }
+        }
+      }
+    },
+    "Paste" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "붙여넣기"
+          }
+        }
+      }
+    },
+    "Select All" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모두 선택"
+          }
+        }
+      }
+    },
+    "a content script" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "콘텐츠 스크립트"
+          }
+        }
+      }
+    },
+    "an icon" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아이콘"
+          }
+        }
+      }
+    },
+    "the action’s icon" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "액션 아이콘"
+          }
+        }
+      }
+    },
+    "the background service worker" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "백그라운드 서비스 워커"
+          }
+        }
+      }
+    },
+    "the default locale" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기본 로케일"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

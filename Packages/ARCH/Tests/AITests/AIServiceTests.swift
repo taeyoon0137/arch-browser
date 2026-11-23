@@ -442,7 +442,7 @@ import Testing
             Issue.record("Expected providerUnavailable")
             return
         }
-        #expect(detail == "The provider's settings changed while the request waited.")
+        #expect(detail == catalogText("The provider's settings changed while the request waited."))
         #expect(await running.value.error == nil)
         #expect(log.requests.count == 1)
     }

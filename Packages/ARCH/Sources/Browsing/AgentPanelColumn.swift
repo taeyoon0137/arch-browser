@@ -60,13 +60,13 @@ private struct AgentPanelFrame: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Agent")
+                Text("Agent", bundle: .module)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if case .session = content {
-                    SidebarIconButton(symbol: "square.and.pencil", label: "New Agent Task") { windowModel.showAgentComposer() }
+                    SidebarIconButton(symbol: "square.and.pencil", label: localized("New Agent Task")) { windowModel.showAgentComposer() }
                 }
-                SidebarIconButton(symbol: "xmark", label: "Close Agent Panel", action: windowModel.hideAgentPanel)
+                SidebarIconButton(symbol: "xmark", label: localized("Close Agent Panel"), action: windowModel.hideAgentPanel)
             }
             .padding(.leading, 14)
             .padding(.trailing, 6)
@@ -88,7 +88,7 @@ private struct AgentPanelFrame: View {
                     AgentSessionPanel(service: agents, session: session, actions: actions, keepTabs: keepTabs)
                         .id(id)
                 } else {
-                    Text("This session was deleted.")
+                    Text("This session was deleted.", bundle: .module)
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -124,7 +124,7 @@ private struct ConnectedAgentRow: View {
 
     var body: some View {
         let name = grant.client.displayName
-        let access = "\(grant.level.title) \u{00B7} \(agents.place(of: grant))"
+        let access = "\(grant.level.localizedTitle) \u{00B7} \(agents.place(of: grant))"
         HStack(spacing: 8) {
             Button { windowModel.showClientPanel(grant.id) } label: {
                 HStack(spacing: 8) {
@@ -143,14 +143,14 @@ private struct ConnectedAgentRow: View {
             }
             .buttonStyle(.plain)
             .help("\(name)\n\(access)")
-            .accessibilityLabel("Show \(name)")
+            .accessibilityLabel(localized("Show \(name)"))
             .accessibilityValue(access)
             Button { agents.stopClient(grant.id) } label: {
                 Image(systemName: "xmark.circle")
             }
             .buttonStyle(.borderless)
-            .help("Disconnect \(name)")
-            .accessibilityLabel("Disconnect \(name)")
+            .help(localized("Disconnect \(name)"))
+            .accessibilityLabel(localized("Disconnect \(name)"))
         }
         .padding(.leading, 10)
         .padding(.trailing, 10)
@@ -187,16 +187,16 @@ private struct AgentsIndicatorMenu: View {
             Menu {
                 ForEach(agents.sessions.filter(\.isTurnRunning)) { session in
                     let title = "\(session.title) \u{2014} \(agents.place(of: session))"
-                    Button(session.state == .waitingForUser ? "\(title) \u{2014} Waiting for You" : title) {
+                    Button(session.state == .waitingForUser ? localized("\(title) \u{2014} Waiting for You") : title) {
                         windowModel.showAgentSession(session.id)
                     }
                 }
                 ForEach(agents.connectedGrants) { grant in
                     let waits = approvals.pending.contains { $0.ownerID == grant.id }
-                    Button(waits ? "\(grant.client.displayName) \u{2014} Waiting for You" : grant.client.displayName) { windowModel.showClientPanel(grant.id) }
+                    Button(waits ? localized("\(grant.client.displayName) \u{2014} Waiting for You") : grant.client.displayName) { windowModel.showClientPanel(grant.id) }
                 }
                 Divider()
-                Button("Stop All Agents", action: agents.stopAllAgents)
+                Button(localized("Stop All Agents"), action: agents.stopAllAgents)
             } label: {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11))
@@ -205,8 +205,8 @@ private struct AgentsIndicatorMenu: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help(approvals.pending.isEmpty ? "Agents are working" : "An agent is waiting for you")
-            .accessibilityLabel("Agents")
+            .help(approvals.pending.isEmpty ? localized("Agents are working") : localized("An agent is waiting for you"))
+            .accessibilityLabel(localized("Agents"))
         }
     }
 }
@@ -247,7 +247,7 @@ struct AgentWaitingDot: ViewModifier {
                             .allowsHitTesting(false)
                     }
                 }
-                .accessibilityValue(isWaiting ? "An agent is waiting" : "")
+                .accessibilityValue(isWaiting ? localized("An agent is waiting") : "")
         }
     }
 }

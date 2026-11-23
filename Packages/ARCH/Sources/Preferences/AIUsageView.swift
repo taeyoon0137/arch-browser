@@ -19,41 +19,41 @@ struct AIUsagePage: View {
     var body: some View {
         let totals = usage.totals(monthsAgo: monthsAgo)
         Section {
-            Picker("Month", selection: $monthsAgo) {
-                Text("This Month").tag(0)
-                Text("Last Month").tag(1)
+            Picker(localized("Month"), selection: $monthsAgo) {
+                Text("This Month", bundle: .module).tag(0)
+                Text("Last Month", bundle: .module).tag(1)
             }
             .pickerStyle(.segmented)
         }
-        Section("By Feature") {
+        Section(localized("By Feature")) {
             rows(Self.group(totals, by: { ($0.feature, $0.featureName) }))
         }
-        Section("By Model") {
+        Section(localized("By Model")) {
             rows(Self.group(totals, by: { ("\($0.provider)/\($0.model)", "\($0.providerName) \u{2014} \(aiModelTitle($0.model))") }))
         }
         Section {
-            Stepper("Automatic requests per day: \(settings.limits.automaticRequestsPerDay)", value: $settings.limits.automaticRequestsPerDay, in: 10...10_000, step: 10)
-            Toggle("Monthly spending limit", isOn: Binding(
+            Stepper(localized("Automatic requests per day: \(settings.limits.automaticRequestsPerDay)"), value: $settings.limits.automaticRequestsPerDay, in: 10...10_000, step: 10)
+            Toggle(localized("Monthly spending limit"), isOn: Binding(
                 get: { settings.limits.monthlySpendingLimit != nil },
                 set: { settings.limits.monthlySpendingLimit = $0 ? AIMoney(currency: Locale.current.currency?.identifier ?? "USD", amount: 20) : nil }))
             if let limit = settings.limits.monthlySpendingLimit {
-                TextField("Amount", value: Binding(
+                TextField(localized("Amount"), value: Binding(
                     get: { limit.amount },
                     set: { settings.limits.monthlySpendingLimit?.amount = $0 }), format: .number)
-                TextField("Currency", text: Binding(
+                TextField(localized("Currency"), text: Binding(
                     get: { limit.currency },
                     set: { settings.limits.monthlySpendingLimit?.currency = $0.uppercased() }))
             }
         } header: {
-            Text("Limits")
+            Text("Limits", bundle: .module)
         } footer: {
-            formFootnote("The daily limit applies to each feature that runs on its own. At the spending limit, every AI request stops until the next month or a higher limit. Costs are estimates from the prices entered for each model.")
+            formFootnote(localized("The daily limit applies to each feature that runs on its own. At the spending limit, every AI request stops until the next month or a higher limit. Costs are estimates from the prices entered for each model."))
         }
     }
 
     @ViewBuilder private func rows(_ rows: [Row]) -> some View {
         if rows.isEmpty {
-            Text("No requests").foregroundStyle(.secondary)
+            Text("No requests", bundle: .module).foregroundStyle(.secondary)
         }
         ForEach(rows) { row in
             LabeledContent(row.title) {
@@ -77,11 +77,11 @@ struct AIUsagePage: View {
     }
 
     private static func summary(of row: Row) -> String {
-        var parts = ["\(row.requests) \(row.requests == 1 ? "request" : "requests")"]
-        if row.errors > 0 { parts.append("\(row.errors) failed") }
-        parts.append("\(row.tokens.formatted()) tokens")
+        var parts = [row.requests == 1 ? localized("1 request") : localized("\(row.requests) requests")]
+        if row.errors > 0 { parts.append(localized("\(row.errors) failed")) }
+        parts.append(localized("\(row.tokens.formatted()) tokens"))
         // Single requests often cost a fraction of a cent.
-        parts += row.costs.sorted { $0.key < $1.key }.map { "about \($0.value.formatted(.currency(code: $0.key).precision(.fractionLength(2...4))))" }
+        parts += row.costs.sorted { $0.key < $1.key }.map { localized("about \($0.value.formatted(.currency(code: $0.key).precision(.fractionLength(2...4))))") }
         return parts.joined(separator: " \u{00B7} ")
     }
 }
@@ -95,7 +95,7 @@ struct AIActivityPage: View {
     var body: some View {
         Section {
             if service.activity.isEmpty {
-                Text("No requests since Arch started").foregroundStyle(.secondary)
+                Text("No requests since Arch started", bundle: .module).foregroundStyle(.secondary)
             }
             ForEach(service.activity.reversed()) { entry in
                 VStack(alignment: .leading, spacing: 4) {
@@ -114,7 +114,7 @@ struct AIActivityPage: View {
                     Text(details(of: entry)).font(.subheadline).foregroundStyle(.secondary)
                     // A request that records no content, as an agent hook's run at Keep Nothing, has nothing to show.
                     if !entry.content.isEmpty {
-                        Button(shownContent.contains(entry.id) ? "Hide Content" : "Show Content") {
+                        Button(shownContent.contains(entry.id) ? localized("Hide Content") : localized("Show Content")) {
                             if shownContent.contains(entry.id) { shownContent.remove(entry.id) } else { shownContent.insert(entry.id) }
                         }
                         .buttonStyle(.link)
@@ -132,28 +132,28 @@ struct AIActivityPage: View {
                 }
             }
         } header: {
-            Text("Recent Requests")
+            Text("Recent Requests", bundle: .module)
         } footer: {
-            formFootnote("Kept in memory until Arch quits. Replies are not kept.")
+            formFootnote(localized("Kept in memory until Arch quits. Replies are not kept."))
         }
     }
 
     private func details(of entry: AIActivityEntry) -> String {
-        var parts = [entry.model.map(settings.title(of:)) ?? "No model"]
-        parts += entry.parts.map { "\($0.kind) \($0.characters.formatted()) \($0.characters == 1 ? "character" : "characters")" }
+        var parts = [entry.model.map(settings.title(of:)) ?? localized("No model")]
+        parts += entry.parts.map { $0.characters == 1 ? localized("\($0.kind) 1 character") : localized("\($0.kind) \($0.characters.formatted()) characters") }
         if let usage = entry.usage {
-            parts.append("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens")
+            parts.append(localized("\((usage.inputTokens + usage.cachedInputTokens).formatted()) input and \(usage.outputTokens.formatted()) output tokens"))
         }
         return parts.joined(separator: " \u{00B7} ")
     }
 
     private static func result(of entry: AIActivityEntry) -> String {
         switch entry.result {
-        case .completed(.lengthLimit): return "Cut at the length limit"
-        case .completed: return "Answered"
-        case .cancelled: return "Cancelled"
+        case .completed(.lengthLimit): return localized("Cut at the length limit")
+        case .completed: return localized("Answered")
+        case .cancelled: return localized("Cancelled")
         // The reason shows on its own line under the row's first line.
-        case .failed: return "Failed"
+        case .failed: return localized("Failed")
         }
     }
 

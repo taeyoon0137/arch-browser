@@ -35,7 +35,7 @@ struct PageAuthoredTextView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(text.caption.map { "\($0), message from \(author)" } ?? "Message from \(author)")
+            .accessibilityLabel(text.caption.map { localized("\($0), message from \(author)") } ?? localized("Message from \(author)"))
             .accessibilityValue(Text(verbatim: text.text))
         }
     }

@@ -1,0 +1,576 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ can run on this page once it loads again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지를 다시 불러오면 %@ 확장 프로그램을 실행할 수 있습니다."
+          }
+        }
+      }
+    },
+    "%@ cannot run this extension: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 이 확장 프로그램을 실행할 수 없습니다: %2$@"
+          }
+        }
+      }
+    },
+    "%@ is missing" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 항목이 없음"
+          }
+        }
+      }
+    },
+    "%@ keeps it until you remove the extension, though access to websites can end sooner, as after an update that leaves some of the extension’s websites out." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 엔진은 확장 프로그램을 제거할 때까지 이 권한을 유지합니다. 단, 업데이트로 확장 프로그램의 일부 웹사이트가 빠지는 경우처럼 웹사이트 접근 권한은 더 일찍 끝날 수 있습니다."
+          }
+        }
+      }
+    },
+    "%@ must be a list of permissions, each a name or an object with one key" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 항목은 권한 목록이어야 하며, 각 권한은 이름이거나 키가 하나인 객체여야 함"
+          }
+        }
+      }
+    },
+    "%@ names the message “%@”, but default_locale is missing" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 항목이 참조하는 메시지 “%2$@”에 필요한 default_locale이 없음"
+          }
+        }
+      }
+    },
+    "%@ names the message “%@”, which _locales/%@/messages.json does not have" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 항목이 참조하는 메시지 “%2$@”: _locales/%3$@/messages.json에 없음"
+          }
+        }
+      }
+    },
+    "%@, set up for Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: Arch용으로 설정됨."
+          }
+        }
+      }
+    },
+    "%@, set up for another browser." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: 다른 브라우저용으로 설정됨."
+          }
+        }
+      }
+    },
+    "%@, which macOS does not start for Arch on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: 이 Mac에서 macOS가 Arch를 위해 시작하지 않습니다."
+          }
+        }
+      }
+    },
+    "1Password connects to a browser it does not list only after you allow it. When 1Password asks about Arch, allow it, or add Arch in 1Password’s settings for browsers." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1Password는 목록에 없는 브라우저와는 사용자가 허용한 후에만 연결됩니다. 1Password가 Arch에 대해 물으면 허용하거나, 1Password의 브라우저 설정에서 Arch를 추가하세요."
+          }
+        }
+      }
+    },
+    "A web extension." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 확장 프로그램입니다."
+          }
+        }
+      }
+    },
+    "Arch cannot ask the Web Store without the version of its Chromium engine." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chromium 엔진 버전을 알 수 없어 Arch가 웹 스토어에 요청할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch cannot prove that this extension is the one that %@ expects. Install it from the Web Store or from its signed .crx file." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 확장 프로그램이 %@에서 기대하는 확장 프로그램인지 Arch가 증명할 수 없습니다. 웹 스토어나 서명된 .crx 파일에서 설치하세요."
+          }
+        }
+      }
+    },
+    "Arch cannot prove that this extension is the one that %@ expects. It was installed before Arch checked signatures; install it again from its .crx file or from the Web Store." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 확장 프로그램이 %@에서 기대하는 확장 프로그램인지 Arch가 증명할 수 없습니다. Arch가 서명을 확인하기 전에 설치되었으므로 .crx 파일이나 웹 스토어에서 다시 설치하세요."
+          }
+        }
+      }
+    },
+    "Arch could not start it on %@ tabs: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 %1$@ 탭에서 시작할 수 없습니다: %2$@"
+          }
+        }
+      }
+    },
+    "Arch did not start %@, which macOS does not start for Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 %@ 앱을 시작하지 않았습니다. macOS가 Arch를 위해 이 앱을 시작하지 않습니다."
+          }
+        }
+      }
+    },
+    "Arch is among them on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에서는 Arch가 포함되어 있습니다."
+          }
+        }
+      }
+    },
+    "Arch is not among them on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에서는 Arch가 포함되어 있지 않습니다."
+          }
+        }
+      }
+    },
+    "Arch is not signed by a developer team; some native apps accept only signed browsers." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 개발자 팀으로 서명되지 않았습니다. 일부 네이티브 앱은 서명된 브라우저만 허용합니다."
+          }
+        }
+      }
+    },
+    "Arch runs from %@; some native apps accept only browsers in the Applications folder." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 %@에서 실행 중입니다. 일부 네이티브 앱은 응용 프로그램 폴더에 있는 브라우저만 허용합니다."
+          }
+        }
+      }
+    },
+    "Looking for native apps…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네이티브 앱 찾는 중…"
+          }
+        }
+      }
+    },
+    "No engine on this Mac runs web extensions." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에는 웹 확장 프로그램을 실행하는 엔진이 없습니다."
+          }
+        }
+      }
+    },
+    "No native app named %@ is set up for Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch용으로 설정된 ‘%@’ 네이티브 앱이 없습니다."
+          }
+        }
+      }
+    },
+    "No native app on this Mac accepts this extension." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에 이 확장 프로그램을 허용하는 네이티브 앱이 없습니다."
+          }
+        }
+      }
+    },
+    "On WebKit tabs, %@ answered." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebKit 탭에서 %@ 앱이 응답했습니다."
+          }
+        }
+      }
+    },
+    "On WebKit tabs, %@ ended without answering, as a native app does when it does not accept the browser." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebKit 탭에서 %@ 앱이 응답 없이 종료되었습니다. 네이티브 앱이 브라우저를 허용하지 않을 때 이렇게 동작합니다."
+          }
+        }
+      }
+    },
+    "On WebKit tabs, Arch did not start %@, which macOS does not start for Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebKit 탭에서 Arch가 %@ 앱을 시작하지 않았습니다. macOS가 Arch를 위해 이 앱을 시작하지 않습니다."
+          }
+        }
+      }
+    },
+    "Only an extension installed from the Web Store updates from it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어에서 설치한 확장 프로그램만 웹 스토어에서 업데이트됩니다."
+          }
+        }
+      }
+    },
+    "Only the %@ version gets this access." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전에만 이 권한이 주어집니다."
+          }
+        }
+      }
+    },
+    "Only the %@ version gets this access. It keeps it until you quit Arch or switch the extension off." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전에만 이 권한이 주어지며, Arch를 종료하거나 확장 프로그램을 끌 때까지 유지됩니다."
+          }
+        }
+      }
+    },
+    "Run scripts on pages from %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 페이지에서 스크립트 실행"
+          }
+        }
+      }
+    },
+    "The Web Store answered with HTTP status %lld." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어 응답: HTTP 상태 %lld."
+          }
+        }
+      }
+    },
+    "The Web Store did not offer “%@”: %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어에서 “%1$@” 확장 프로그램을 제공하지 않았습니다: %2$@."
+          }
+        }
+      }
+    },
+    "The Web Store has no extension with the identifier “%@”." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어에 식별자가 “%@”인 확장 프로그램이 없습니다."
+          }
+        }
+      }
+    },
+    "The Web Store offered the package at an address without HTTPS." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어가 HTTPS가 아닌 주소로 패키지를 제공했습니다."
+          }
+        }
+      }
+    },
+    "The Web Store’s answer could not be read." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어의 응답을 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "The download from the Web Store is damaged. Try again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어에서 다운로드한 파일이 손상되었습니다. 다시 시도하세요."
+          }
+        }
+      }
+    },
+    "The extension can run on this page once it loads again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지를 다시 불러오면 확장 프로그램을 실행할 수 있습니다."
+          }
+        }
+      }
+    },
+    "The extension gets this access on %@ tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램이 %@ 탭에서 이 권한을 받습니다."
+          }
+        }
+      }
+    },
+    "The extension keeps this access until you quit Arch or switch the extension off." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램은 Arch를 종료하거나 확장 프로그램을 끌 때까지 이 권한을 유지합니다."
+          }
+        }
+      }
+    },
+    "The host manifest of the native app %@ could not be read." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네이티브 앱 ‘%@’의 호스트 매니페스트를 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "The native app %@ does not accept this extension." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네이티브 앱 ‘%@’에서 이 확장 프로그램을 허용하지 않습니다."
+          }
+        }
+      }
+    },
+    "The native app ended without replying." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네이티브 앱이 응답 없이 종료되었습니다."
+          }
+        }
+      }
+    },
+    "The native app sent a message larger than 1 MB." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네이티브 앱이 1MB보다 큰 메시지를 보냈습니다."
+          }
+        }
+      }
+    },
+    "The package from the Web Store is larger than 256 MB." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어의 패키지가 256MB보다 큽니다."
+          }
+        }
+      }
+    },
+    "Use the extension API %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램 API %@ 사용"
+          }
+        }
+      }
+    },
+    "Web extensions need macOS 15.4 or later." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 확장 프로그램을 사용하려면 macOS 15.4 이상이 필요합니다."
+          }
+        }
+      }
+    },
+    "default_locale is %@, but _locales/%@/messages.json could not be read" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "default_locale 값 %1$@에 해당하는 _locales/%2$@/messages.json을 읽을 수 없음"
+          }
+        }
+      }
+    },
+    "iCloud Passwords starts its helper only for the browsers that macOS lists, which come with macOS updates, and for browsers with Apple’s browser passkey entitlement." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 암호는 macOS 업데이트와 함께 제공되는 macOS 목록의 브라우저와 Apple의 브라우저 패스키 권한이 있는 브라우저에서만 도우미를 시작합니다."
+          }
+        }
+      }
+    },
+    "key must be a public key as Base64 text" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "key는 Base64 텍스트로 된 공개 키여야 함"
+          }
+        }
+      }
+    },
+    "macOS kept Arch from reading another browser’s native app setup." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS가 Arch의 다른 브라우저 네이티브 앱 설정 읽기를 막았습니다."
+          }
+        }
+      }
+    },
+    "manifest.json is not valid JSON." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "manifest.json이 올바른 JSON이 아닙니다."
+          }
+        }
+      }
+    },
+    "manifest_version must be 3, as Arch runs Manifest V3 extensions only" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch는 Manifest V3 확장 프로그램만 실행하므로 manifest_version은 3이어야 함"
+          }
+        }
+      }
+    },
+    "the manifest must be a JSON object" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매니페스트는 JSON 객체여야 함"
+          }
+        }
+      }
+    },
+    "“%@” %@ is installed, the Web Store’s current version." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@” %2$@ 버전이 설치되어 있으며, 웹 스토어의 현재 버전입니다."
+          }
+        }
+      }
+    },
+    "“%@” is not the name of a native app." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”: 네이티브 앱 이름이 아닙니다."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

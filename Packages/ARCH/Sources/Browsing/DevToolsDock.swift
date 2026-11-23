@@ -14,10 +14,10 @@ public enum DevToolsSide: String, CaseIterable {
 
     public var title: String {
         switch self {
-        case .right: return "Dock to Right"
-        case .bottom: return "Dock to Bottom"
-        case .left: return "Dock to Left"
-        case .floating: return "Undock"
+        case .right: return localized("Dock to Right")
+        case .bottom: return localized("Dock to Bottom")
+        case .left: return localized("Dock to Left")
+        case .floating: return localized("Undock")
         }
     }
 }
@@ -252,7 +252,7 @@ final class DevToolsWindow: NSWindow {
 
     /// Names the tools window, including the page title when available.
     static func title(for pageTitle: String?) -> String {
-        pageTitle.map { "Developer Tools \u{2014} \($0)" } ?? "Developer Tools"
+        pageTitle.map { localized("Developer Tools \u{2014} \($0)") } ?? localized("Developer Tools")
     }
 }
 
@@ -352,7 +352,7 @@ private struct DevToolsResizeHandle: View {
     var body: some View {
         Color.clear
             .contentShape(Rectangle())
-            .accessibilityLabel("Resize Developer Tools")
+            .accessibilityLabel(localized("Resize Developer Tools"))
             .onHover { isInside in
                 guard isInside != hasPushedCursor else { return }
                 hasPushedCursor = isInside

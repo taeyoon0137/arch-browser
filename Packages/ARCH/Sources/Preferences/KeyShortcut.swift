@@ -68,7 +68,7 @@ public struct KeyShortcut {
     private static func keyName(_ key: String) -> String {
         guard let scalar = key.unicodeScalars.first?.value else { return key }
         switch scalar {
-        case 0x20: return "Space"
+        case 0x20: return localized("Space")
         case 0x09: return "\u{21E5}"
         case 0x0D: return "\u{21A9}"
         case 0x03: return "\u{2324}"

@@ -1,0 +1,4976 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@\n%@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@\n%2$@"
+          }
+        }
+      }
+    },
+    "%@\nNext attempt: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@\n다음 시도: %2$@"
+          }
+        }
+      }
+    },
+    "%@ input and %@ output tokens" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "입력 토큰 %1$@개, 출력 토큰 %2$@개"
+          }
+        }
+      }
+    },
+    "%@ of %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@/%2$@"
+          }
+        }
+      }
+    },
+    "%@ version" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전"
+          }
+        }
+      }
+    },
+    "%@ — Waiting for You" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — 응답 대기 중"
+          }
+        }
+      }
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "%@, %lld unread" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, 읽지 않음 %2$lld개"
+          }
+        }
+      }
+    },
+    "%@, and its %lld tabs close into the closed list." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, 탭 %2$lld개는 닫힌 탭 목록으로 이동합니다."
+          }
+        }
+      }
+    },
+    "%@, and its tab closes into the closed list." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, 탭은 닫힌 탭 목록으로 이동합니다."
+          }
+        }
+      }
+    },
+    "%@, extension page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, 확장 프로그램 페이지"
+          }
+        }
+      }
+    },
+    "%@, message from %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@의 메시지"
+          }
+        }
+      }
+    },
+    "%@. The reply reached the length limit." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@. 응답이 길이 제한에 도달했습니다."
+          }
+        }
+      }
+    },
+    "%lld" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld"
+          }
+        }
+      }
+    },
+    "%lld new downloads" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 다운로드 %lld개"
+          }
+        }
+      }
+    },
+    "%lld of %lld" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld/%2$lld"
+          }
+        }
+      }
+    },
+    "/" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "/"
+          }
+        }
+      }
+    },
+    "1 new download" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 다운로드 1개"
+          }
+        }
+      }
+    },
+    "A Persona has its own spaces and plugins, and its tabs keep their own cookies and website data." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나마다 스페이스와 플러그인이 따로 있으며, 페르소나의 탭은 쿠키와 웹사이트 데이터를 따로 보관합니다."
+          }
+        }
+      }
+    },
+    "AI is off for %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 AI가 꺼져 있습니다."
+          }
+        }
+      }
+    },
+    "Active · Uses %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "활성 · %@ 사용"
+          }
+        }
+      }
+    },
+    "Add" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추가"
+          }
+        }
+      }
+    },
+    "Add to Favorites" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "즐겨찾기에 추가"
+          }
+        }
+      }
+    },
+    "Add to New Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 폴더에 추가"
+          }
+        }
+      }
+    },
+    "Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소"
+          }
+        }
+      }
+    },
+    "Address:" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소:"
+          }
+        }
+      }
+    },
+    "After you click Allow, macOS asks whether Arch can send you notifications." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용을 클릭하면 macOS에서 Arch가 알림을 보내도 되는지 묻습니다."
+          }
+        }
+      }
+    },
+    "Agent" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트"
+          }
+        }
+      }
+    },
+    "Agents" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트"
+          }
+        }
+      }
+    },
+    "Agents are working" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트가 작업 중입니다"
+          }
+        }
+      }
+    },
+    "All Crashes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전체 충돌"
+          }
+        }
+      }
+    },
+    "Allow" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용"
+          }
+        }
+      }
+    },
+    "Allow %@ to %@?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@의 %2$@ 요청을 허용하겠습니까?"
+          }
+        }
+      }
+    },
+    "Allow AI on This Site" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사이트에서 AI 허용"
+          }
+        }
+      }
+    },
+    "Allow on This Site" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사이트에서 허용"
+          }
+        }
+      }
+    },
+    "Allow this extension more access?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 확장 프로그램에 더 많은 접근 권한을 허용하겠습니까?"
+          }
+        }
+      }
+    },
+    "Allow this page to download multiple files?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에서 여러 파일을 다운로드하도록 허용하겠습니까?"
+          }
+        }
+      }
+    },
+    "An agent is waiting" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트가 기다리는 중"
+          }
+        }
+      }
+    },
+    "An agent is waiting for you" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트가 응답을 기다리고 있습니다"
+          }
+        }
+      }
+    },
+    "An embedded page on “%@” says" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”의 포함된 페이지 메시지"
+          }
+        }
+      }
+    },
+    "An embedded page says" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "포함된 페이지 메시지"
+          }
+        }
+      }
+    },
+    "Another download is saving to that name. Choose a different name." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 다운로드가 그 이름으로 저장 중입니다. 다른 이름을 선택하세요."
+          }
+        }
+      }
+    },
+    "Answer" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답변"
+          }
+        }
+      }
+    },
+    "Answered" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답변 완료"
+          }
+        }
+      }
+    },
+    "Answered by %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 답변"
+          }
+        }
+      }
+    },
+    "Answering with %@…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 모델로 답변하는 중…"
+          }
+        }
+      }
+    },
+    "Answering…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답변하는 중…"
+          }
+        }
+      }
+    },
+    "Answers a question about the page or the selected text in a popover over the page." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 위 팝오버에서 페이지나 선택한 텍스트에 관한 질문에 답합니다."
+          }
+        }
+      }
+    },
+    "Approved" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "승인됨"
+          }
+        }
+      }
+    },
+    "Arch asks for Touch ID or your password next." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다음에 Arch가 Touch ID 또는 암호를 요청합니다."
+          }
+        }
+      }
+    },
+    "Arch could not read this page." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 이 페이지를 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch keeps this address in the Keychain on this Mac, and the folder does not sync." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch는 이 주소를 이 Mac의 키체인에 보관하며, 이 폴더는 동기화되지 않습니다."
+          }
+        }
+      }
+    },
+    "Arch keeps up to %lld live folders." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch는 라이브 폴더를 최대 %lld개까지 보관합니다."
+          }
+        }
+      }
+    },
+    "Arch remembers your answer for this website in every Persona. You can change it in Settings ▸ Websites." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch는 모든 페르소나에서 이 웹사이트에 대한 응답을 기억합니다. 설정 ▸ 웹사이트에서 변경할 수 있습니다."
+          }
+        }
+      }
+    },
+    "Arch remembers your answer for this website. You can change it in Settings ▸ Websites." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch는 이 웹사이트에 대한 응답을 기억합니다. 설정 ▸ 웹사이트에서 변경할 수 있습니다."
+          }
+        }
+      }
+    },
+    "Arch removes its plugins, cookies, and website data from this Mac the next time it opens." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch를 다음에 열 때 이 Mac에서 페르소나의 플러그인, 쿠키, 웹사이트 데이터를 제거합니다."
+          }
+        }
+      }
+    },
+    "Arch uses no private API yet." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch는 아직 비공개 API를 사용하지 않습니다."
+          }
+        }
+      }
+    },
+    "Archive" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보관"
+          }
+        }
+      }
+    },
+    "Archived after the archive delay" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보관 시간이 지나 보관됨"
+          }
+        }
+      }
+    },
+    "Ask" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "질문"
+          }
+        }
+      }
+    },
+    "Ask About Selection" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택 항목에 관해 질문"
+          }
+        }
+      }
+    },
+    "Ask About Selection…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택 항목에 관해 질문…"
+          }
+        }
+      }
+    },
+    "Ask About This Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에 관해 질문"
+          }
+        }
+      }
+    },
+    "Ask About This Page…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에 관해 질문…"
+          }
+        }
+      }
+    },
+    "Ask Agent About This Tab…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭에 관해 에이전트에게 요청…"
+          }
+        }
+      }
+    },
+    "Ask Agent: “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트에게 요청: “%@”"
+          }
+        }
+      }
+    },
+    "Ask a question about the selection" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택 항목에 관해 질문하기"
+          }
+        }
+      }
+    },
+    "Ask a question about this page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에 관해 질문하기"
+          }
+        }
+      }
+    },
+    "Assigned Issues" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "할당된 이슈"
+          }
+        }
+      }
+    },
+    "Automatic" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동"
+          }
+        }
+      }
+    },
+    "Available" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용 가능"
+          }
+        }
+      }
+    },
+    "Back" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "뒤로"
+          }
+        }
+      }
+    },
+    "Back to Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭으로 돌아가기"
+          }
+        }
+      }
+    },
+    "Blue" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파란색"
+          }
+        }
+      }
+    },
+    "Book" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "책"
+          }
+        }
+      }
+    },
+    "Briefcase" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서류 가방"
+          }
+        }
+      }
+    },
+    "Camera" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "카메라"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "취소"
+          }
+        }
+      }
+    },
+    "Cancelled" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "취소됨"
+          }
+        }
+      }
+    },
+    "Capture" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "캡처"
+          }
+        }
+      }
+    },
+    "Cart" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "카트"
+          }
+        }
+      }
+    },
+    "Changes requested" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변경 요청됨"
+          }
+        }
+      }
+    },
+    "Changes you made may not be saved." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변경 사항이 저장되지 않을 수 있습니다."
+          }
+        }
+      }
+    },
+    "Check Again" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 확인"
+          }
+        }
+      }
+    },
+    "Checking the GitHub CLI…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub CLI 확인 중…"
+          }
+        }
+      }
+    },
+    "Checking…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확인 중…"
+          }
+        }
+      }
+    },
+    "Checks failed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검사 실패"
+          }
+        }
+      }
+    },
+    "Checks passed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검사 통과"
+          }
+        }
+      }
+    },
+    "Checks running" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검사 진행 중"
+          }
+        }
+      }
+    },
+    "Choose" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택"
+          }
+        }
+      }
+    },
+    "Choose Files" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 선택"
+          }
+        }
+      }
+    },
+    "Choose a file for %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 전달할 파일을 선택하세요."
+          }
+        }
+      }
+    },
+    "Choose a folder for %@. The page receives every file in it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 전달할 폴더를 선택하세요. 페이지가 폴더 안의 모든 파일을 받습니다."
+          }
+        }
+      }
+    },
+    "Choose files for %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 전달할 파일을 선택하세요."
+          }
+        }
+      }
+    },
+    "Choose where %@ saves a file." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 파일을 저장할 위치를 선택하세요."
+          }
+        }
+      }
+    },
+    "Circle" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원"
+          }
+        }
+      }
+    },
+    "Clear" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지우기"
+          }
+        }
+      }
+    },
+    "Clear Home" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "홈 지우기"
+          }
+        }
+      }
+    },
+    "Clear Site Data" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이트 데이터 지우기"
+          }
+        }
+      }
+    },
+    "Clear Site Data…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이트 데이터 지우기…"
+          }
+        }
+      }
+    },
+    "Clear the data stored by this website?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 웹사이트가 저장한 데이터를 지우겠습니까?"
+          }
+        }
+      }
+    },
+    "Clipboard" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클립보드"
+          }
+        }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫기"
+          }
+        }
+      }
+    },
+    "Close Agent Panel" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 패널 닫기"
+          }
+        }
+      }
+    },
+    "Close Find Bar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "찾기 막대 닫기"
+          }
+        }
+      }
+    },
+    "Close Preview" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "미리보기 닫기"
+          }
+        }
+      }
+    },
+    "Close Question" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "질문 닫기"
+          }
+        }
+      }
+    },
+    "Close Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 닫기"
+          }
+        }
+      }
+    },
+    "Closed Issue" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫힌 이슈"
+          }
+        }
+      }
+    },
+    "Closed Pull Request" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫힌 풀 리퀘스트"
+          }
+        }
+      }
+    },
+    "Closed because it only pointed at a file" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일만 가리키고 있어 닫힘"
+          }
+        }
+      }
+    },
+    "Closed because its Persona was deleted" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나가 삭제되어 닫힘"
+          }
+        }
+      }
+    },
+    "Closed by a plugin" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인이 닫음"
+          }
+        }
+      }
+    },
+    "Closed by a web extension" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 확장 프로그램이 닫음"
+          }
+        }
+      }
+    },
+    "Closed by the page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지가 닫음"
+          }
+        }
+      }
+    },
+    "Closed by the page after its process quit" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로세스가 종료된 후 페이지가 닫음"
+          }
+        }
+      }
+    },
+    "Closed by the user" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자가 닫음"
+          }
+        }
+      }
+    },
+    "Collapsed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "접힘"
+          }
+        }
+      }
+    },
+    "Command argument" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "명령 인수"
+          }
+        }
+      }
+    },
+    "Continue as Agent Task" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 작업으로 계속"
+          }
+        }
+      }
+    },
+    "Convert to Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더로 변환"
+          }
+        }
+      }
+    },
+    "Copy" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "복사"
+          }
+        }
+      }
+    },
+    "Copy Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소 복사"
+          }
+        }
+      }
+    },
+    "Copy Image Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이미지 주소 복사"
+          }
+        }
+      }
+    },
+    "Copy Link" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "링크 복사"
+          }
+        }
+      }
+    },
+    "Couldn’t open file" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일을 열 수 없음"
+          }
+        }
+      }
+    },
+    "Couldn’t open folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더를 열 수 없음"
+          }
+        }
+      }
+    },
+    "Couldn’t restore original name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원래 이름으로 복원할 수 없음"
+          }
+        }
+      }
+    },
+    "Couldn’t show file in Finder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder에서 파일을 보여줄 수 없음"
+          }
+        }
+      }
+    },
+    "Crash" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "충돌"
+          }
+        }
+      }
+    },
+    "Create" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "생성"
+          }
+        }
+      }
+    },
+    "Cut" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오려두기"
+          }
+        }
+      }
+    },
+    "Default" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기본"
+          }
+        }
+      }
+    },
+    "Delete" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제"
+          }
+        }
+      }
+    },
+    "Delete %@?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@를 삭제하겠습니까?"
+          }
+        }
+      }
+    },
+    "Delete Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 삭제"
+          }
+        }
+      }
+    },
+    "Delete Persona…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 삭제…"
+          }
+        }
+      }
+    },
+    "Delete Session…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 삭제…"
+          }
+        }
+      }
+    },
+    "Delete Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 삭제"
+          }
+        }
+      }
+    },
+    "Delete Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 삭제"
+          }
+        }
+      }
+    },
+    "Developer Tools" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개발자 도구"
+          }
+        }
+      }
+    },
+    "Developer Tools — %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개발자 도구 — %@"
+          }
+        }
+      }
+    },
+    "Disconnect %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 연결 해제"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫기"
+          }
+        }
+      }
+    },
+    "Dock to Bottom" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아래쪽에 고정"
+          }
+        }
+      }
+    },
+    "Dock to Left" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "왼쪽에 고정"
+          }
+        }
+      }
+    },
+    "Dock to Right" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오른쪽에 고정"
+          }
+        }
+      }
+    },
+    "Don’t Allow" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용 안 함"
+          }
+        }
+      }
+    },
+    "Download" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드"
+          }
+        }
+      }
+    },
+    "Download Finished" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 완료"
+          }
+        }
+      }
+    },
+    "Download Image" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이미지 다운로드"
+          }
+        }
+      }
+    },
+    "Download Linked File" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "링크된 파일 다운로드"
+          }
+        }
+      }
+    },
+    "Download Names" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 이름"
+          }
+        }
+      }
+    },
+    "Downloading" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 중"
+          }
+        }
+      }
+    },
+    "Downloading, %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 중, %@"
+          }
+        }
+      }
+    },
+    "Downloading, less than %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 중, %@ 미만"
+          }
+        }
+      }
+    },
+    "Downloads" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드"
+          }
+        }
+      }
+    },
+    "Draft Pull Request" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "초안 풀 리퀘스트"
+          }
+        }
+      }
+    },
+    "Drag across the page to capture a region. Press Escape to cancel." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지를 드래그하여 영역을 캡처하세요. 취소하려면 Esc 키를 누르세요."
+          }
+        }
+      }
+    },
+    "Duplicate" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "복제"
+          }
+        }
+      }
+    },
+    "Edit Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소 편집"
+          }
+        }
+      }
+    },
+    "Edit Address, %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소 편집, %@"
+          }
+        }
+      }
+    },
+    "Edit Favorite" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "즐겨찾기 편집"
+          }
+        }
+      }
+    },
+    "Edit Favorite…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "즐겨찾기 편집…"
+          }
+        }
+      }
+    },
+    "Edit Live Folder in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 라이브 폴더 편집"
+          }
+        }
+      }
+    },
+    "Edit Live Folder…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "라이브 폴더 편집…"
+          }
+        }
+      }
+    },
+    "Edit Saved Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 주소 편집"
+          }
+        }
+      }
+    },
+    "Edit Saved Address…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 주소 편집…"
+          }
+        }
+      }
+    },
+    "Engine" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "엔진"
+          }
+        }
+      }
+    },
+    "Engine for New Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭의 엔진"
+          }
+        }
+      }
+    },
+    "Engine for This Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭의 엔진"
+          }
+        }
+      }
+    },
+    "Enter a GitHub host, such as github.com." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "github.com과 같은 GitHub 호스트를 입력하세요."
+          }
+        }
+      }
+    },
+    "Enter an address or search" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주소 입력 또는 검색"
+          }
+        }
+      }
+    },
+    "Every %lld Hours" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld시간마다"
+          }
+        }
+      }
+    },
+    "Every %lld Minutes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld분마다"
+          }
+        }
+      }
+    },
+    "Every Hour" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "매시간"
+          }
+        }
+      }
+    },
+    "Expanded" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "펼쳐짐"
+          }
+        }
+      }
+    },
+    "Extension" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램"
+          }
+        }
+      }
+    },
+    "Extension Access" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램 접근"
+          }
+        }
+      }
+    },
+    "Extensions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램"
+          }
+        }
+      }
+    },
+    "Extensions run on %@ tabs. Switch this tab to %@ to use them." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램은 %1$@ 탭에서 실행됩니다. 사용하려면 이 탭을 %2$@ 엔진으로 전환하세요."
+          }
+        }
+      }
+    },
+    "Failed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실패"
+          }
+        }
+      }
+    },
+    "Failed — start again from the page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실패 — 페이지에서 다시 시작하세요"
+          }
+        }
+      }
+    },
+    "Features" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기능"
+          }
+        }
+      }
+    },
+    "Features such as the page reader can send this site’s pages to the models you chose for them." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 읽기 도우미와 같은 기능이 이 사이트의 페이지를 기능별로 선택한 모델에 보낼 수 있습니다."
+          }
+        }
+      }
+    },
+    "Feed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "피드"
+          }
+        }
+      }
+    },
+    "Feed Title" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "피드 제목"
+          }
+        }
+      }
+    },
+    "Feed:" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "피드:"
+          }
+        }
+      }
+    },
+    "File not found" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일을 찾을 수 없음"
+          }
+        }
+      }
+    },
+    "Find in page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지에서 찾기"
+          }
+        }
+      }
+    },
+    "Flags" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플래그"
+          }
+        }
+      }
+    },
+    "Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더"
+          }
+        }
+      }
+    },
+    "Folder Name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 이름"
+          }
+        }
+      }
+    },
+    "Forward" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앞으로"
+          }
+        }
+      }
+    },
+    "Game Controller" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게임 컨트롤러"
+          }
+        }
+      }
+    },
+    "GitHub" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub"
+          }
+        }
+      }
+    },
+    "Gives a finished download a descriptive file name from its name, type, size, and the addresses of the file and its page, never its contents. Restore Original Name in its row undoes it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "완료된 다운로드의 이름, 유형, 크기, 파일과 페이지의 주소를 바탕으로 알아보기 쉬운 파일 이름을 붙입니다. 파일 내용은 사용하지 않습니다. 해당 행의 원래 이름 복원으로 되돌릴 수 있습니다."
+          }
+        }
+      }
+    },
+    "Go Back to %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "돌아가기: %@"
+          }
+        }
+      }
+    },
+    "Go Back to Saved Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 페이지로 돌아가기"
+          }
+        }
+      }
+    },
+    "Go Back to Saved Page returns “%@” to this address." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 페이지로 돌아가기를 사용하면 “%@” 탭이 이 주소로 돌아갑니다."
+          }
+        }
+      }
+    },
+    "Go to %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이동: %@"
+          }
+        }
+      }
+    },
+    "Graduation Cap" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "학사모"
+          }
+        }
+      }
+    },
+    "Gray" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "회색"
+          }
+        }
+      }
+    },
+    "Green" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "초록색"
+          }
+        }
+      }
+    },
+    "Has conflicts" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "충돌 있음"
+          }
+        }
+      }
+    },
+    "Heart" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "하트"
+          }
+        }
+      }
+    },
+    "Hide Library" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보관함 가리기"
+          }
+        }
+      }
+    },
+    "Hide Page Reader" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 읽기 도우미 가리기"
+          }
+        }
+      }
+    },
+    "Hide Sidebar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이드바 가리기"
+          }
+        }
+      }
+    },
+    "Host:" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호스트:"
+          }
+        }
+      }
+    },
+    "House" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "집"
+          }
+        }
+      }
+    },
+    "Icon" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아이콘"
+          }
+        }
+      }
+    },
+    "Ignore Spelling" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "철자 무시"
+          }
+        }
+      }
+    },
+    "Inactive · Uses %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "비활성 · %@ 사용"
+          }
+        }
+      }
+    },
+    "Install %@ Version…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전 설치…"
+          }
+        }
+      }
+    },
+    "Install Extension from This Page…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에서 확장 프로그램 설치…"
+          }
+        }
+      }
+    },
+    "Install This Extension…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 확장 프로그램 설치…"
+          }
+        }
+      }
+    },
+    "Install from the Web Store…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 스토어에서 설치…"
+          }
+        }
+      }
+    },
+    "Install the GitHub CLI in the built-in terminal, for example with `brew install gh`." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내장 터미널에서 GitHub CLI를 설치하세요. 예: `brew install gh`"
+          }
+        }
+      }
+    },
+    "Installed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치됨"
+          }
+        }
+      }
+    },
+    "It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud로 동기화하는 다른 Mac에서도 삭제되며, 해당 Mac에서도 쿠키와 웹사이트 데이터가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Items" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "항목"
+          }
+        }
+      }
+    },
+    "Its %lld downloads in progress stop." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "진행 중인 다운로드 %lld개가 중지됩니다."
+          }
+        }
+      }
+    },
+    "Its %lld spaces and %lld favorites are removed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %1$lld개와 즐겨찾기 %2$lld개가 제거되고"
+          }
+        }
+      }
+    },
+    "Its %lld spaces and %lld favorites are removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %1$lld개와 즐겨찾기 %2$lld개가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Its %lld spaces and 1 favorite are removed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %lld개와 즐겨찾기 1개가 제거되고"
+          }
+        }
+      }
+    },
+    "Its %lld spaces and 1 favorite are removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %lld개와 즐겨찾기 1개가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Its %lld spaces are removed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %lld개가 제거되고"
+          }
+        }
+      }
+    },
+    "Its %lld spaces are removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %lld개가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Its cookies and other website data are removed from both engines in %@, which signs you out of the website. Its open tabs load again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 이 웹사이트의 쿠키와 기타 웹사이트 데이터가 두 엔진 모두에서 제거되어 웹사이트에서 로그아웃됩니다. 열려 있는 탭은 다시 로드됩니다."
+          }
+        }
+      }
+    },
+    "Its cookies and other website data are removed from both engines, which signs you out of the website. Its open tabs load again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 웹사이트의 쿠키와 기타 웹사이트 데이터가 두 엔진 모두에서 제거되어 웹사이트에서 로그아웃됩니다. 열려 있는 탭은 다시 로드됩니다."
+          }
+        }
+      }
+    },
+    "Its developer may offer a separate version for %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개발자가 %@용 버전을 따로 제공할 수 있습니다."
+          }
+        }
+      }
+    },
+    "Its download in progress stops." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "진행 중인 다운로드가 중지됩니다."
+          }
+        }
+      }
+    },
+    "Its space and %lld favorites are removed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스와 즐겨찾기 %lld개가 제거되고"
+          }
+        }
+      }
+    },
+    "Its space and %lld favorites are removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스와 즐겨찾기 %lld개가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Its space and 1 favorite are removed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스와 즐겨찾기 1개가 제거되고"
+          }
+        }
+      }
+    },
+    "Its space and 1 favorite are removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스와 즐겨찾기 1개가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Its space is removed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스가 제거되고"
+          }
+        }
+      }
+    },
+    "Its space is removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Keep Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 유지"
+          }
+        }
+      }
+    },
+    "Keep Using %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 계속 사용"
+          }
+        }
+      }
+    },
+    "Leaf" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "나뭇잎"
+          }
+        }
+      }
+    },
+    "Learn Spelling" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "철자 학습"
+          }
+        }
+      }
+    },
+    "Leave" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "나가기"
+          }
+        }
+      }
+    },
+    "Leave Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 나가기"
+          }
+        }
+      }
+    },
+    "Leave this page?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에서 나가겠습니까?"
+          }
+        }
+      }
+    },
+    "Live Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "라이브 폴더"
+          }
+        }
+      }
+    },
+    "Location" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "위치"
+          }
+        }
+      }
+    },
+    "Log In" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인"
+          }
+        }
+      }
+    },
+    "Log In to This Proxy" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프록시에 로그인"
+          }
+        }
+      }
+    },
+    "Log In to This Website" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 웹사이트에 로그인"
+          }
+        }
+      }
+    },
+    "Low Power Mode" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저전력 모드"
+          }
+        }
+      }
+    },
+    "Low Power Mode Settings…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저전력 모드 설정…"
+          }
+        }
+      }
+    },
+    "Low Power Mode is on, so pages may animate more slowly. Click to open its settings." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저전력 모드가 켜져 있어 페이지 애니메이션이 느려질 수 있습니다. 클릭하여 설정을 여세요."
+          }
+        }
+      }
+    },
+    "MIDI Devices" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MIDI 기기"
+          }
+        }
+      }
+    },
+    "Manage it for %@ in Settings ▸ Plugins." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 ▸ 플러그인의 %@에서 관리하세요."
+          }
+        }
+      }
+    },
+    "Manage it for this Persona in Settings ▸ Plugins." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 ▸ 플러그인의 이 페르소나에서 관리하세요."
+          }
+        }
+      }
+    },
+    "Mark All as Read" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모두 읽음으로 표시"
+          }
+        }
+      }
+    },
+    "Mark as Read" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽음으로 표시"
+          }
+        }
+      }
+    },
+    "Mark as Unread" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽지 않음으로 표시"
+          }
+        }
+      }
+    },
+    "Merged Pull Request" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "병합된 풀 리퀘스트"
+          }
+        }
+      }
+    },
+    "Message from %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 메시지"
+          }
+        }
+      }
+    },
+    "Microphone" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크"
+          }
+        }
+      }
+    },
+    "Missing on this system" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 시스템에 없음"
+          }
+        }
+      }
+    },
+    "Move Left" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "왼쪽으로 이동"
+          }
+        }
+      }
+    },
+    "Move Out of Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 밖으로 이동"
+          }
+        }
+      }
+    },
+    "Move Right" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오른쪽으로 이동"
+          }
+        }
+      }
+    },
+    "Move to Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더로 이동"
+          }
+        }
+      }
+    },
+    "Move to Main Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메인 윈도우로 이동"
+          }
+        }
+      }
+    },
+    "Multiple Downloads" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "여러 파일 다운로드"
+          }
+        }
+      }
+    },
+    "My Pull Requests" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내 풀 리퀘스트"
+          }
+        }
+      }
+    },
+    "Name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름"
+          }
+        }
+      }
+    },
+    "Names a tab in a few words from its page’s title, address, and first %@ characters, unless you named the tab." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 이름을 붙인 탭이 아니면, 페이지의 제목, 주소, 처음 %@자를 바탕으로 탭에 짧은 이름을 붙입니다."
+          }
+        }
+      }
+    },
+    "New Agent Task" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 에이전트 작업"
+          }
+        }
+      }
+    },
+    "New Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 폴더"
+          }
+        }
+      }
+    },
+    "New Folder Inside" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "안에 새 폴더"
+          }
+        }
+      }
+    },
+    "New Live Folder in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 새 라이브 폴더"
+          }
+        }
+      }
+    },
+    "New Live Folder…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 라이브 폴더…"
+          }
+        }
+      }
+    },
+    "New Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 페르소나"
+          }
+        }
+      }
+    },
+    "New Persona…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 페르소나…"
+          }
+        }
+      }
+    },
+    "New Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 스페이스"
+          }
+        }
+      }
+    },
+    "New Space (%@)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 스페이스(%@)"
+          }
+        }
+      }
+    },
+    "New Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭"
+          }
+        }
+      }
+    },
+    "New Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭"
+          }
+        }
+      }
+    },
+    "Next Match" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다음 일치 항목"
+          }
+        }
+      }
+    },
+    "No Downloads" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드 없음"
+          }
+        }
+      }
+    },
+    "No Guesses Found" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추천 단어 없음"
+          }
+        }
+      }
+    },
+    "No Tabs Closed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫힌 탭 없음"
+          }
+        }
+      }
+    },
+    "No feature uses a private API yet." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아직 비공개 API를 사용하는 기능이 없습니다."
+          }
+        }
+      }
+    },
+    "No feed found at this address." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 주소에서 피드를 찾을 수 없습니다."
+          }
+        }
+      }
+    },
+    "No page shared" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유하는 페이지 없음"
+          }
+        }
+      }
+    },
+    "Not found" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "찾을 수 없음"
+          }
+        }
+      }
+    },
+    "Nothing from this site goes to any provider." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사이트의 어떤 내용도 제공자에게 보내지 않습니다."
+          }
+        }
+      }
+    },
+    "Notice" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알림"
+          }
+        }
+      }
+    },
+    "Notifications" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알림"
+          }
+        }
+      }
+    },
+    "Notifications for Arch are off in System Settings, so this website’s notifications won’t show." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시스템 설정에서 Arch의 알림이 꺼져 있어 이 웹사이트의 알림이 표시되지 않습니다."
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확인"
+          }
+        }
+      }
+    },
+    "On" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "켬"
+          }
+        }
+      }
+    },
+    "Open" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "열기"
+          }
+        }
+      }
+    },
+    "Open %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 열기"
+          }
+        }
+      }
+    },
+    "Open AI Settings" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 설정 열기"
+          }
+        }
+      }
+    },
+    "Open Image in New Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭에서 이미지 열기"
+          }
+        }
+      }
+    },
+    "Open Issue" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "열린 이슈"
+          }
+        }
+      }
+    },
+    "Open Link in New Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭에서 링크 열기"
+          }
+        }
+      }
+    },
+    "Open Pull Request" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "열린 풀 리퀘스트"
+          }
+        }
+      }
+    },
+    "Open System Settings" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시스템 설정 열기"
+          }
+        }
+      }
+    },
+    "Open Terminal" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널 열기"
+          }
+        }
+      }
+    },
+    "Open a new tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭 열기"
+          }
+        }
+      }
+    },
+    "Open a page to read it here." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "여기에서 읽을 페이지를 여세요."
+          }
+        }
+      }
+    },
+    "Open in Another App" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 앱에서 열기"
+          }
+        }
+      }
+    },
+    "Open in Split View" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "분할 보기로 열기"
+          }
+        }
+      }
+    },
+    "Open in Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭에서 열기"
+          }
+        }
+      }
+    },
+    "Open “%@”?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 앱을 열겠습니까?"
+          }
+        }
+      }
+    },
+    "Opens Low Power Mode settings" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저전력 모드 설정을 엽니다"
+          }
+        }
+      }
+    },
+    "Opens an extension’s popup, or lets the extension act on this page." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램의 팝업을 열거나 확장 프로그램이 이 페이지에서 동작하게 합니다."
+          }
+        }
+      }
+    },
+    "Opens the extension’s review in Settings before it installs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설치하기 전에 설정에서 확장 프로그램 검토를 엽니다."
+          }
+        }
+      }
+    },
+    "Orange" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주황색"
+          }
+        }
+      }
+    },
+    "Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지"
+          }
+        }
+      }
+    },
+    "Page Message" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 메시지"
+          }
+        }
+      }
+    },
+    "Page Questions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 질문"
+          }
+        }
+      }
+    },
+    "Page Reader" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 읽기 도우미"
+          }
+        }
+      }
+    },
+    "Password" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호"
+          }
+        }
+      }
+    },
+    "Paste" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "붙여넣기"
+          }
+        }
+      }
+    },
+    "Pause" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일시 정지"
+          }
+        }
+      }
+    },
+    "Paused" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일시 정지됨"
+          }
+        }
+      }
+    },
+    "Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나"
+          }
+        }
+      }
+    },
+    "Persona Name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 이름"
+          }
+        }
+      }
+    },
+    "Personal" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인"
+          }
+        }
+      }
+    },
+    "Picture in Picture" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PIP"
+          }
+        }
+      }
+    },
+    "Pin Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 고정"
+          }
+        }
+      }
+    },
+    "Pink" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "분홍색"
+          }
+        }
+      }
+    },
+    "Playing Audio" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오디오 재생 중"
+          }
+        }
+      }
+    },
+    "Plugin" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인"
+          }
+        }
+      }
+    },
+    "Preview" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "미리보기"
+          }
+        }
+      }
+    },
+    "Previous Match" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이전 일치 항목"
+          }
+        }
+      }
+    },
+    "Private APIs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "비공개 API"
+          }
+        }
+      }
+    },
+    "Private APIs are parts of macOS and the engines that are not documented for apps. Arch uses one only while its flags are on and the running system has it; otherwise the feature falls back or stays hidden." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "비공개 API는 앱용으로 문서화되지 않은 macOS와 엔진의 일부입니다. Arch는 해당 플래그가 켜져 있고 실행 중인 시스템에 그 API가 있을 때만 사용합니다. 그렇지 않으면 기능이 대체 동작을 사용하거나 숨겨집니다."
+          }
+        }
+      }
+    },
+    "Proxy" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프록시"
+          }
+        }
+      }
+    },
+    "Purple" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보라색"
+          }
+        }
+      }
+    },
+    "Reading the page…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 읽는 중…"
+          }
+        }
+      }
+    },
+    "Reason" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이유"
+          }
+        }
+      }
+    },
+    "Refresh" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로고침"
+          }
+        }
+      }
+    },
+    "Refresh Failed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로고침 실패"
+          }
+        }
+      }
+    },
+    "Refresh Now" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금 새로고침"
+          }
+        }
+      }
+    },
+    "Refreshing" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로고침 중"
+          }
+        }
+      }
+    },
+    "Reload" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새로고침"
+          }
+        }
+      }
+    },
+    "Reload Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 새로고침"
+          }
+        }
+      }
+    },
+    "Reload this page?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지를 새로고침하겠습니까?"
+          }
+        }
+      }
+    },
+    "Reload to open it again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 열려면 새로고침하세요."
+          }
+        }
+      }
+    },
+    "Remove from Favorites" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "즐겨찾기에서 제거"
+          }
+        }
+      }
+    },
+    "Remove from List" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "목록에서 제거"
+          }
+        }
+      }
+    },
+    "Remove from Split View" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "분할 보기에서 제거"
+          }
+        }
+      }
+    },
+    "Removed by sidebar sync" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이드바 동기화로 제거됨"
+          }
+        }
+      }
+    },
+    "Removes the site’s cookies and stored data from both engines and signs you out of it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "두 엔진 모두에서 사이트의 쿠키와 저장된 데이터를 제거하고 사이트에서 로그아웃합니다."
+          }
+        }
+      }
+    },
+    "Rename" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름 변경"
+          }
+        }
+      }
+    },
+    "Rename Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 이름 변경"
+          }
+        }
+      }
+    },
+    "Rename Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 이름 변경"
+          }
+        }
+      }
+    },
+    "Rename Persona…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 이름 변경…"
+          }
+        }
+      }
+    },
+    "Rename Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 이름 변경"
+          }
+        }
+      }
+    },
+    "Rename Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름 변경"
+          }
+        }
+      }
+    },
+    "Reopen Last Closed Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마지막으로 닫은 탭 다시 열기"
+          }
+        }
+      }
+    },
+    "Resize Developer Tools" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개발자 도구 크기 조절"
+          }
+        }
+      }
+    },
+    "Restore Original Name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원래 이름 복원"
+          }
+        }
+      }
+    },
+    "Resume" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "재개"
+          }
+        }
+      }
+    },
+    "Retry" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 시도"
+          }
+        }
+      }
+    },
+    "Review" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검토"
+          }
+        }
+      }
+    },
+    "Review %lld" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld개 검토"
+          }
+        }
+      }
+    },
+    "Review %lld requests" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청 %lld개 검토"
+          }
+        }
+      }
+    },
+    "Review Requests" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "리뷰 요청"
+          }
+        }
+      }
+    },
+    "Review required" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "리뷰 필요"
+          }
+        }
+      }
+    },
+    "Review the request" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청 검토"
+          }
+        }
+      }
+    },
+    "Save" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장"
+          }
+        }
+      }
+    },
+    "Screen Recording" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "화면 녹화"
+          }
+        }
+      }
+    },
+    "Search" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색"
+          }
+        }
+      }
+    },
+    "Search %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 검색"
+          }
+        }
+      }
+    },
+    "Search %@ for “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에서 “%2$@” 검색"
+          }
+        }
+      }
+    },
+    "Search for “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 검색"
+          }
+        }
+      }
+    },
+    "Search or enter address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색 또는 주소 입력"
+          }
+        }
+      }
+    },
+    "Search or enter address for a new tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭에서 검색 또는 주소 입력"
+          }
+        }
+      }
+    },
+    "Search with %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 검색"
+          }
+        }
+      }
+    },
+    "Search:" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색:"
+          }
+        }
+      }
+    },
+    "Secure connection" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보안 연결"
+          }
+        }
+      }
+    },
+    "Select All" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모두 선택"
+          }
+        }
+      }
+    },
+    "Set Current Page as Home" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 페이지를 홈으로 설정"
+          }
+        }
+      }
+    },
+    "Settings" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정"
+          }
+        }
+      }
+    },
+    "Share" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유"
+          }
+        }
+      }
+    },
+    "Shares %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 공유"
+          }
+        }
+      }
+    },
+    "Show %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 보기"
+          }
+        }
+      }
+    },
+    "Show Dismissed Items (%lld)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "닫은 항목 보기(%lld)"
+          }
+        }
+      }
+    },
+    "Show Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 보기"
+          }
+        }
+      }
+    },
+    "Show Here" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "여기에 보기"
+          }
+        }
+      }
+    },
+    "Show Library" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보관함 보기"
+          }
+        }
+      }
+    },
+    "Show Session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 보기"
+          }
+        }
+      }
+    },
+    "Show Sidebar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이드바 보기"
+          }
+        }
+      }
+    },
+    "Show in Finder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder에서 보기"
+          }
+        }
+      }
+    },
+    "Show:" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보기:"
+          }
+        }
+      }
+    },
+    "Sign in with `%@` in the built-in terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "내장 터미널에서 `%@` 명령으로 로그인하세요."
+          }
+        }
+      }
+    },
+    "Signed in to %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 로그인되어 있습니다."
+          }
+        }
+      }
+    },
+    "Site Data" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이트 데이터"
+          }
+        }
+      }
+    },
+    "Site Settings" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이트 설정"
+          }
+        }
+      }
+    },
+    "Sites you allowed to use %@ keep that access in agent tabs that run in Chromium." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 사용을 허용한 사이트는 Chromium에서 실행되는 에이전트 탭에서도 그 권한을 유지합니다."
+          }
+        }
+      }
+    },
+    "Source" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "소스"
+          }
+        }
+      }
+    },
+    "Space %lld" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 %lld"
+          }
+        }
+      }
+    },
+    "Space Name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 이름"
+          }
+        }
+      }
+    },
+    "Space Options" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 옵션"
+          }
+        }
+      }
+    },
+    "Star" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "별"
+          }
+        }
+      }
+    },
+    "Start Over" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "처음부터 다시"
+          }
+        }
+      }
+    },
+    "Status:" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "상태:"
+          }
+        }
+      }
+    },
+    "Stay" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "머무르기"
+          }
+        }
+      }
+    },
+    "Stop" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "중단"
+          }
+        }
+      }
+    },
+    "Stop All Agents" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 에이전트 중단"
+          }
+        }
+      }
+    },
+    "Stop Answering" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답변 중단"
+          }
+        }
+      }
+    },
+    "Stop Loading" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로드 중단"
+          }
+        }
+      }
+    },
+    "Stopped." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "중단되었습니다."
+          }
+        }
+      }
+    },
+    "Summarize This Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지 요약"
+          }
+        }
+      }
+    },
+    "Summarizes the page in a panel beside it and answers follow-up questions about it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 옆 패널에서 페이지를 요약하고 이어지는 질문에 답합니다."
+          }
+        }
+      }
+    },
+    "Summary" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요약"
+          }
+        }
+      }
+    },
+    "Switch to Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭으로 전환"
+          }
+        }
+      }
+    },
+    "Switching loads the page again in the other engine." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전환하면 다른 엔진에서 페이지를 다시 로드합니다."
+          }
+        }
+      }
+    },
+    "Sync" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화"
+          }
+        }
+      }
+    },
+    "Tab Close Log" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 닫기 기록"
+          }
+        }
+      }
+    },
+    "Tab Crashes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 충돌"
+          }
+        }
+      }
+    },
+    "Tab Name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름"
+          }
+        }
+      }
+    },
+    "Tab Names" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름"
+          }
+        }
+      }
+    },
+    "Tab Switcher" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 전환기"
+          }
+        }
+      }
+    },
+    "Tabs that a page opens use that page’s engine." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지가 여는 탭은 그 페이지의 엔진을 사용합니다."
+          }
+        }
+      }
+    },
+    "Teal" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "청록색"
+          }
+        }
+      }
+    },
+    "The PDF could not be saved." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PDF를 저장할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The capture could not be saved." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "캡처를 저장할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The image could not be encoded as PNG." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이미지를 PNG로 인코딩할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The page changed. Review the task before starting." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지가 변경되었습니다. 시작하기 전에 작업을 검토하세요."
+          }
+        }
+      }
+    },
+    "The page could not be captured." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지를 캡처할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The page could not be exported as PDF." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지를 PDF로 내보낼 수 없습니다."
+          }
+        }
+      }
+    },
+    "The page could not be printed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지를 프린트할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The page reader reads web pages and local files." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 읽기 도우미는 웹 페이지와 로컬 파일을 읽습니다."
+          }
+        }
+      }
+    },
+    "The page reloaded before the question went out." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "질문을 보내기 전에 페이지가 다시 로드되었습니다."
+          }
+        }
+      }
+    },
+    "The page, sharing setting, or destination changed. Review the task before starting." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지, 공유 설정 또는 대상이 변경되었습니다. 시작하기 전에 작업을 검토하세요."
+          }
+        }
+      }
+    },
+    "The proxy says" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프록시 메시지"
+          }
+        }
+      }
+    },
+    "The user name or password was incorrect." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자 이름 또는 암호가 올바르지 않습니다."
+          }
+        }
+      }
+    },
+    "The website says" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹사이트 메시지"
+          }
+        }
+      }
+    },
+    "This Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭"
+          }
+        }
+      }
+    },
+    "This copy of Arch runs without its app bundle, so it can’t show notifications." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Arch는 앱 번들 없이 실행 중이므로 알림을 표시할 수 없습니다."
+          }
+        }
+      }
+    },
+    "This is not a web address." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹 주소가 아닙니다."
+          }
+        }
+      }
+    },
+    "This page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지"
+          }
+        }
+      }
+    },
+    "This page started another download on its own. If you allow it, it can download files until it loads another page." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지가 스스로 다른 다운로드를 시작했습니다. 허용하면 다른 페이지를 로드할 때까지 파일을 다운로드할 수 있습니다."
+          }
+        }
+      }
+    },
+    "This page stopped working" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지가 작동을 멈췄습니다"
+          }
+        }
+      }
+    },
+    "This page wants to open a link in %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에서 %@의 링크를 열려고 합니다."
+          }
+        }
+      }
+    },
+    "This session was deleted." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션은 삭제되었습니다."
+          }
+        }
+      }
+    },
+    "This tab is shown in another window." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭은 다른 윈도우에 표시되어 있습니다."
+          }
+        }
+      }
+    },
+    "This tab is temporarily using %@ because its saved engine, %@, was unavailable." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 엔진(%2$@)을 사용할 수 없어 이 탭은 일시적으로 %1$@ 엔진을 사용합니다."
+          }
+        }
+      }
+    },
+    "This website wants to open a link in %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 웹사이트에서 %@의 링크를 열려고 합니다."
+          }
+        }
+      }
+    },
+    "Time" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시간"
+          }
+        }
+      }
+    },
+    "Tint" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "색조"
+          }
+        }
+      }
+    },
+    "Title" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제목"
+          }
+        }
+      }
+    },
+    "Undock" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "분리"
+          }
+        }
+      }
+    },
+    "Unload Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 언로드"
+          }
+        }
+      }
+    },
+    "Unpin Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 고정 해제"
+          }
+        }
+      }
+    },
+    "Unread" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽지 않음"
+          }
+        }
+      }
+    },
+    "Use Current Page as Saved Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 페이지를 저장된 페이지로 사용"
+          }
+        }
+      }
+    },
+    "Use private APIs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "비공개 API 사용"
+          }
+        }
+      }
+    },
+    "User" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자"
+          }
+        }
+      }
+    },
+    "User Name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자 이름"
+          }
+        }
+      }
+    },
+    "Waiting for a free request slot…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청 슬롯이 빌 때까지 기다리는 중…"
+          }
+        }
+      }
+    },
+    "Waiting for the model…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델을 기다리는 중…"
+          }
+        }
+      }
+    },
+    "Waiting for the provider’s rate limit until %@…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@까지 제공자의 요청 한도 해제를 기다리는 중…"
+          }
+        }
+      }
+    },
+    "Waiting for your answer" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답 대기 중"
+          }
+        }
+      }
+    },
+    "Warning" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "경고"
+          }
+        }
+      }
+    },
+    "Website Permission" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹사이트 권한"
+          }
+        }
+      }
+    },
+    "Websites can’t show notifications in WebKit tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebKit 탭에서는 웹사이트가 알림을 표시할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Your login information will be sent without encryption." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인 정보가 암호화되지 않은 상태로 전송됩니다."
+          }
+        }
+      }
+    },
+    "a page on “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”의 페이지"
+          }
+        }
+      }
+    },
+    "about %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "약 %@"
+          }
+        }
+      }
+    },
+    "an embedded page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "포함된 페이지"
+          }
+        }
+      }
+    },
+    "and" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "및"
+          }
+        }
+      }
+    },
+    "github.com" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "github.com"
+          }
+        }
+      }
+    },
+    "https://example.com/feed.xml" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "https://example.com/feed.xml"
+          }
+        }
+      }
+    },
+    "in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 내"
+          }
+        }
+      }
+    },
+    "is:pr is:open review-requested:@me" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "is:pr is:open review-requested:@me"
+          }
+        }
+      }
+    },
+    "local files" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로컬 파일"
+          }
+        }
+      }
+    },
+    "or" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "또는"
+          }
+        }
+      }
+    },
+    "read the clipboard" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클립보드 읽기"
+          }
+        }
+      }
+    },
+    "record the screen" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "화면 녹화"
+          }
+        }
+      }
+    },
+    "see your location" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "위치 확인"
+          }
+        }
+      }
+    },
+    "send notifications" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알림 보내기"
+          }
+        }
+      }
+    },
+    "the Persona of “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”의 페르소나"
+          }
+        }
+      }
+    },
+    "the Persona “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 페르소나"
+          }
+        }
+      }
+    },
+    "the camera" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "카메라"
+          }
+        }
+      }
+    },
+    "the microphone" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크"
+          }
+        }
+      }
+    },
+    "this Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페르소나"
+          }
+        }
+      }
+    },
+    "this page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지"
+          }
+        }
+      }
+    },
+    "this website" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 웹사이트"
+          }
+        }
+      }
+    },
+    "use MIDI devices" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MIDI 기기 사용"
+          }
+        }
+      }
+    },
+    "use the camera" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "카메라 사용"
+          }
+        }
+      }
+    },
+    "use the camera and microphone" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "카메라 및 마이크 사용"
+          }
+        }
+      }
+    },
+    "use the microphone" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마이크 사용"
+          }
+        }
+      }
+    },
+    "your location" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "위치"
+          }
+        }
+      }
+    },
+    "“%@” in “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%2$@”의 “%1$@”"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

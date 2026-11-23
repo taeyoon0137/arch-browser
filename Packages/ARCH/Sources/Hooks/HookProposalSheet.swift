@@ -26,7 +26,7 @@ public struct HookProposalReview: Sendable {
     public var script: String
 
     /// What the sheet says about the names a hook gives (`docs/hooks.md`, Hooks from outside programs).
-    public static let tabNamesSentence = "Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read."
+    public static let tabNamesSentence = localized("Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read.")
 }
 
 /// Shows the proposal sheet. `ask` returns true only for Allow, and false for Don't Allow, a sheet that closed unanswered, one that `cancelAll()` closed, and one whose asking task was cancelled.
@@ -83,8 +83,8 @@ public final class HookProposalSheetPresenter: HookProposalPrompting {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
-            content.title = "A program is asking to add a hook in Arch"
-            content.body = "Open Arch to allow or deny it."
+            content.title = localized("A program is asking to add a hook in Arch")
+            content.body = localized("Open Arch to allow or deny it.")
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
@@ -96,7 +96,7 @@ struct HookProposalSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Allow \u{201C}\(review.clientName)\u{201D} to add the hook \u{201C}\(review.name)\u{201D}?")
+            Text("Allow \u{201C}\(review.clientName)\u{201D} to add the hook \u{201C}\(review.name)\u{201D}?", bundle: .module)
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
             Text(review.clientPath)
@@ -121,7 +121,7 @@ struct HookProposalSheetView: View {
             .font(.callout)
             .fixedSize(horizontal: false, vertical: true)
             if let prompt = review.prompt {
-                Text("Agent Instructions")
+                Text("Agent Instructions", bundle: .module)
                     .font(.subheadline.weight(.semibold))
                 ScrollView {
                     Text(prompt)
@@ -134,7 +134,7 @@ struct HookProposalSheetView: View {
                 .background(Color(nsColor: .textBackgroundColor))
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor)))
             }
-            Text("Script")
+            Text("Script", bundle: .module)
                 .font(.subheadline.weight(.semibold))
             ScrollView {
                 Text(review.script)
@@ -146,14 +146,14 @@ struct HookProposalSheetView: View {
             .frame(height: 220)
             .background(Color(nsColor: .textBackgroundColor))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor)))
-            Text("Allowing asks for Touch ID or your login password. The hook pauses when this program's access ends.")
+            Text("Allowing asks for Touch ID or your login password. The hook pauses when this program's access ends.", bundle: .module)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
-                AgentApprovalButton(title: "Don\u{2019}t Allow", keyEquivalent: "\u{1B}", requiresPointer: false) { finish(false) }
-                AgentApprovalButton(title: "Allow\u{2026}", requiresPointer: true) { finish(true) }
+                AgentApprovalButton(title: localized("Don\u{2019}t Allow"), keyEquivalent: "\u{1B}", requiresPointer: false) { finish(false) }
+                AgentApprovalButton(title: localized("Allow\u{2026}"), requiresPointer: true) { finish(true) }
             }
         }
         .padding(20)
@@ -178,6 +178,25 @@ extension HookTrigger {
         case .tabSelected: return "When you select a tab"
         case .downloadFinished: return "When a download finishes"
         case .spaceSwitched(let personaChangesOnly): return personaChangesOnly ? "When you switch to another Persona" : "When you switch spaces"
+        }
+    }
+
+    /// The situation in the words of the language Arch runs in, for the proposal sheet; `situationSentence` stays English for the programs that list their hooks.
+    var localizedSituationSentence: String {
+        switch self {
+        case .tabOpened: return localized("When a new tab opens")
+        case .tabClosed(let reasons): return reasons == [.user] ? localized("When you close a tab") : localized("When a tab closes")
+        case .pageLoaded(let loads, _):
+            switch loads {
+            case .firstAfterOpen: return localized("When a new tab loads its first page")
+            case .newAddress: return localized("When a tab loads a new address")
+            case .every: return localized("When a tab loads a page")
+            }
+        case .addressChanged(let changes): return changes == .newHost ? localized("When a tab moves to another site") : localized("When a tab's address changes")
+        case .titleChanged: return localized("When a tab's title changes")
+        case .tabSelected: return localized("When you select a tab")
+        case .downloadFinished: return localized("When a download finishes")
+        case .spaceSwitched(let personaChangesOnly): return personaChangesOnly ? localized("When you switch to another Persona") : localized("When you switch spaces")
         }
     }
 }

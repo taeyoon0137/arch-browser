@@ -34,7 +34,7 @@ struct TabRowView: View {
                 .frame(width: 18, height: 18)
                 .opacity(isDimmed ? SidebarDimming.unopened : 1)
             if windowModel.renamingTabID == tab.id {
-                SidebarNameField(placeholder: "Tab Name", name: tab.shownTitle,
+                SidebarNameField(placeholder: localized("Tab Name"), name: tab.shownTitle,
                                  onRename: { windowModel.renameTab(tab.id, to: $0) }, onEnd: { windowModel.endRenaming(tab.id) })
             } else {
                 Text(tab.shownTitle)
@@ -53,15 +53,15 @@ struct TabRowView: View {
             if showsHover {
                 HStack(spacing: 2) {
                     if tab.isOffSavedSite, let saved = tab.savedPage {
-                        TabRowButton(symbol: "arrow.uturn.backward", label: "Go Back to Saved Page", help: "Go Back to \(saved.url.absoluteString)") { session.goBackToSavedPage(tab) }
+                        TabRowButton(symbol: "arrow.uturn.backward", label: localized("Go Back to Saved Page"), help: localized("Go Back to \(saved.url.absoluteString)")) { session.goBackToSavedPage(tab) }
                     }
                     if tab.liveItemID != nil {
                         // Closing an item's tab dismisses the item (live folder rule 4).
-                        TabRowButton(symbol: "xmark", label: "Dismiss", help: "Dismiss") { session.requestCloseTab(tab) }
+                        TabRowButton(symbol: "xmark", label: localized("Dismiss"), help: localized("Dismiss")) { session.requestCloseTab(tab) }
                     } else if !tab.isPinned {
-                        TabRowButton(symbol: "xmark", label: "Close Tab", help: "Close Tab") { session.requestCloseTab(tab) }
+                        TabRowButton(symbol: "xmark", label: localized("Close Tab"), help: localized("Close Tab")) { session.requestCloseTab(tab) }
                     } else if tab.isLoaded {
-                        TabRowButton(symbol: "minus", label: "Unload Tab", help: "Unload Tab") { session.requestCloseTab(tab) }
+                        TabRowButton(symbol: "minus", label: localized("Unload Tab"), help: localized("Unload Tab")) { session.requestCloseTab(tab) }
                     }
                 }
             } else if commandKey.showsShortcuts, let number = windowModel.shortcutNumber(for: tab) {
@@ -102,51 +102,51 @@ struct TabRowView: View {
     static func details(of item: GitHubItem) -> [String] {
         var lines = [item.detail]
         switch item.reviewDecision {
-        case .approved?: lines.append("Approved")
-        case .changesRequested?: lines.append("Changes requested")
-        case .reviewRequired?: lines.append("Review required")
+        case .approved?: lines.append(localized("Approved"))
+        case .changesRequested?: lines.append(localized("Changes requested"))
+        case .reviewRequired?: lines.append(localized("Review required"))
         case nil: break
         }
         switch item.checks {
-        case .success?: lines.append("Checks passed")
-        case .failure?, .error?: lines.append("Checks failed")
-        case .pending?, .expected?: lines.append("Checks running")
+        case .success?: lines.append(localized("Checks passed"))
+        case .failure?, .error?: lines.append(localized("Checks failed"))
+        case .pending?, .expected?: lines.append(localized("Checks running"))
         case nil: break
         }
-        if item.mergeable == .conflicting { lines.append("Has conflicts") }
+        if item.mergeable == .conflicting { lines.append(localized("Has conflicts")) }
         return lines
     }
 
     /// The menu of a tab that is no live folder item's.
     @ViewBuilder private var menuItems: some View {
-        Button("Rename Tab") {
+        Button(localized("Rename Tab")) {
             windowModel.selectTab(tab.id)
             windowModel.renamingTabID = tab.id
         }
-        Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") { session.togglePinned(tab) }
-        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
-        Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
+        Button(tab.isPinned ? localized("Unpin Tab") : localized("Pin Tab")) { session.togglePinned(tab) }
+        Button(localized("Add to Favorites")) { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
+        Button(localized("Open in Split View")) { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
         Divider()
         // A pinned tab's saved page (bookmark rules 2 and 3). Go Back shows only while the tab is off it.
         if tab.isPinned {
             if session.isOffSavedPage(tab) {
-                Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+                Button(localized("Go Back to Saved Page")) { session.goBackToSavedPage(tab) }
             }
-            Button("Use Current Page as Saved Page") { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
-            Button("Edit Saved Address\u{2026}") { windowModel.promptToEditSavedAddress(of: tab) }
+            Button(localized("Use Current Page as Saved Page")) { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
+            Button(localized("Edit Saved Address\u{2026}")) { windowModel.promptToEditSavedAddress(of: tab) }
         }
         SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
-        Button("Copy Address") { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
-        Button("Duplicate") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
-        Button("Picture in Picture") { windowModel.togglePictureInPicture(tab) }
+        Button(localized("Copy Address")) { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
+        Button(localized("Duplicate")) { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
+        Button(localized("Picture in Picture")) { windowModel.togglePictureInPicture(tab) }
             .disabled(!windowModel.canTogglePictureInPicture(tab))
         Divider()
         TabFolderItems(session: session, windowModel: windowModel, tab: tab)
         Divider()
         // Closing a pinned tab unloads it; Delete Tab takes it out of the sidebar into the closed list (bookmark rule 4).
-        Button("Close Tab") { session.requestCloseTab(tab) }
+        Button(localized("Close Tab")) { session.requestCloseTab(tab) }
         if tab.isPinned {
-            Button("Delete Tab") { session.requestDeleteTab(tab) }
+            Button(localized("Delete Tab")) { session.requestDeleteTab(tab) }
         }
         PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
     }
@@ -160,7 +160,7 @@ struct SidebarAgentMenuItem: View {
 
     var body: some View {
         if let context = windowModel.sidebarAgentDraft(for: tab, settings: settings) {
-            Button("Ask Agent About This Tab…") { windowModel.askAgentAboutSidebarTab(tab, reviewed: context, settings: settings) }
+            Button(localized("Ask Agent About This Tab…")) { windowModel.askAgentAboutSidebarTab(tab, reviewed: context, settings: settings) }
         }
     }
 }
@@ -172,20 +172,20 @@ private struct LiveItemTabItems: View {
     @ObservedObject var tab: Tab
 
     var body: some View {
-        Button(tab.isUnread ? "Mark as Read" : "Mark as Unread") { session.setRead(tab.isUnread, ofItemTab: tab) }
-        Button("Dismiss") { session.requestCloseTab(tab) }
+        Button(tab.isUnread ? localized("Mark as Read") : localized("Mark as Unread")) { session.setRead(tab.isUnread, ofItemTab: tab) }
+        Button(localized("Dismiss")) { session.requestCloseTab(tab) }
         Divider()
-        Button("Rename Tab") {
+        Button(localized("Rename Tab")) {
             windowModel.selectTab(tab.id)
             windowModel.renamingTabID = tab.id
         }
-        Button("Copy Address") { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
+        Button(localized("Copy Address")) { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
         if session.isOffSavedPage(tab) {
-            Button("Go Back to Saved Page") { session.goBackToSavedPage(tab) }
+            Button(localized("Go Back to Saved Page")) { session.goBackToSavedPage(tab) }
         }
         Divider()
-        Button("Open in Split View") { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
-        Button("Add to Favorites") { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
+        Button(localized("Open in Split View")) { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
+        Button(localized("Add to Favorites")) { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
         let tree = session.folderTree
         MoveToFolderMenu(lists: [tree.moveTargets(forTab: tab, pinned: true), tree.moveTargets(forTab: tab, pinned: false)]) { folderID in
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folderID) }
@@ -202,13 +202,13 @@ private struct TabFolderItems: View {
 
     var body: some View {
         let tree = session.folderTree
-        Button("Add to New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
+        Button(localized("Add to New Folder")) { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addToNewFolder(tab) } }
             .disabled(!tree.canAddFolder(inside: tab.folderID))
         MoveToFolderMenu(lists: [tree.moveTargets(forTab: tab, pinned: true), tree.moveTargets(forTab: tab, pinned: false)]) { folderID in
             withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toFolder: folderID) }
         }
         if tab.folderID != nil {
-            Button("Move Out of Folder") { withAnimation(.easeInOut(duration: 0.15)) { session.moveOutOfFolder(tab) } }
+            Button(localized("Move Out of Folder")) { withAnimation(.easeInOut(duration: 0.15)) { session.moveOutOfFolder(tab) } }
         }
     }
 }
@@ -283,7 +283,7 @@ struct TabAudioBadge: View {
         Image(systemName: "speaker.wave.2.fill")
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
-            .accessibilityLabel("Playing Audio")
+            .accessibilityLabel(localized("Playing Audio"))
     }
 }
 
@@ -294,7 +294,7 @@ struct TabUnreadDot: View {
             .fill(Color.accentColor)
             .frame(width: 6, height: 6)
             .frame(width: 22, height: 22)
-            .accessibilityLabel("Unread")
+            .accessibilityLabel(localized("Unread"))
     }
 }
 
@@ -439,12 +439,12 @@ struct TabIconView: View {
     /// The symbol, color, and spoken name of a GitHub item's state (`docs/bookmarks.md`, Items as tabs).
     static func symbol(for item: GitHubItem) -> (name: String, color: Color, label: String) {
         switch (item.kind, item.state) {
-        case (.pullRequest, .open): return ("arrow.triangle.pull", .green, "Open Pull Request")
-        case (.pullRequest, .draft): return ("arrow.triangle.pull", .gray, "Draft Pull Request")
-        case (.pullRequest, .merged): return ("arrow.triangle.merge", .purple, "Merged Pull Request")
-        case (.pullRequest, .closed): return ("xmark.circle", .red, "Closed Pull Request")
-        case (.issue, .closed), (.issue, .merged): return ("checkmark.circle", .purple, "Closed Issue")
-        case (.issue, .open), (.issue, .draft): return ("circle.circle", .green, "Open Issue")
+        case (.pullRequest, .open): return ("arrow.triangle.pull", .green, localized("Open Pull Request"))
+        case (.pullRequest, .draft): return ("arrow.triangle.pull", .gray, localized("Draft Pull Request"))
+        case (.pullRequest, .merged): return ("arrow.triangle.merge", .purple, localized("Merged Pull Request"))
+        case (.pullRequest, .closed): return ("xmark.circle", .red, localized("Closed Pull Request"))
+        case (.issue, .closed), (.issue, .merged): return ("checkmark.circle", .purple, localized("Closed Issue"))
+        case (.issue, .open), (.issue, .draft): return ("circle.circle", .green, localized("Open Issue"))
         }
     }
 }
@@ -461,7 +461,7 @@ struct NewTabButton: View {
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
                     .accessibilityHidden(true)
-                Text("New Tab")
+                Text("New Tab", bundle: .module)
                     .font(.system(size: 14))
                 Spacer(minLength: 0)
             }

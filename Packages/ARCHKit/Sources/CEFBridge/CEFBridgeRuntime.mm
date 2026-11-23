@@ -233,7 +233,11 @@ NSString *CanonicalCacheDirectory(NSString *path) {
     }
 }
 
-+ (BOOL)initializeWithFrameworkPath:(NSString *)frameworkPath helperPath:(NSString *)helperPath cachePath:(NSString *)cachePath {
++ (BOOL)initializeWithFrameworkPath:(NSString *)frameworkPath
+                         helperPath:(NSString *)helperPath
+                          cachePath:(NSString *)cachePath
+                 acceptLanguageList:(NSString *)acceptLanguageList
+                             locale:(NSString *)locale {
     if (gInitialized) {
         return YES;
     }
@@ -258,6 +262,9 @@ NSString *CanonicalCacheDirectory(NSString *path) {
     if (helperPath.length > 0) {
         CefString(&settings.browser_subprocess_path) = helperPath.UTF8String;
     }
+    // The profiles' contexts set no list of their own, so every Persona's pages send this one (`docs/localization.md`).
+    CefString(&settings.accept_language_list) = acceptLanguageList.UTF8String;
+    CefString(&settings.locale) = locale.UTF8String;
     CefRefPtr<BridgeApp> app(new BridgeApp);
     if (!CefInitialize(mainArgs, settings, app.get(), nullptr)) {
         return NO;

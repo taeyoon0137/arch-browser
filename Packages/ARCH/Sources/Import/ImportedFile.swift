@@ -58,17 +58,17 @@ enum ImportError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .unrecognizedFormat(let url):
-            return "\u{201C}\(url.lastPathComponent)\u{201D} is not a bookmarks file or a History database that Arch can read."
+            return localized("\u{201C}\(url.lastPathComponent)\u{201D} is not a bookmarks file or a History database that Arch can read.")
         case .unreadableHistory(let url):
-            return "\u{201C}\(url.lastPathComponent)\u{201D} could not be read as a History database."
+            return localized("\u{201C}\(url.lastPathComponent)\u{201D} could not be read as a History database.")
         case .unreadableFile(let url):
-            return "\u{201C}\(url.lastPathComponent)\u{201D} could not be read."
+            return localized("\u{201C}\(url.lastPathComponent)\u{201D} could not be read.")
         case .blockedByPrivacy(let url):
-            return "macOS privacy protection keeps Arch from reading \u{201C}\(url.lastPathComponent)\u{201D}."
+            return localized("macOS privacy protection keeps Arch from reading \u{201C}\(url.lastPathComponent)\u{201D}.")
         case .notPermitted(let url):
-            return "Arch does not have permission to read \u{201C}\(url.lastPathComponent)\u{201D}."
+            return localized("Arch does not have permission to read \u{201C}\(url.lastPathComponent)\u{201D}.")
         case .encryptedBookmarks:
-            return "The bookmarks are encrypted with the browser\u{2019}s own key."
+            return localized("The bookmarks are encrypted with the browser\u{2019}s own key.")
         }
     }
 }

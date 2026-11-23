@@ -760,13 +760,13 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         let session = try service.startSession(.init(task: "Check the notes.", personaID: persona, spaceID: space.id,
                                                      attachedTabIDs: [], mode: .readOnly, model: nil, effort: nil))
         try await waitUntil { !session.isTurnRunning }
-        #expect(session.statusText == "Turn failed")
+        #expect(session.statusText == catalogText("Turn failed"))
         #expect(session.state.name == "failed")
         #expect(session.model == nil)
         #expect(session.items.contains { if case .error(_, .openAISettings) = $0.kind { true } else { false } })
         try session.send("Now continue.")
         try await waitUntil { !session.isTurnRunning }
-        #expect(session.statusText == "Done")
+        #expect(session.statusText == catalogText("Done"))
         #expect(session.model == model)
     }
 

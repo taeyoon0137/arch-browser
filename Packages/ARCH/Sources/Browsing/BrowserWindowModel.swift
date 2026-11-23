@@ -281,7 +281,7 @@ public enum BrowserWindowKind {
 
     /// Asks for a name in a sheet on the window, then adds a Persona with that name and shows its space. Create stays disabled until the field holds a name.
     public func promptForNewPersona() {
-        askForPersonaName(title: "New Persona", message: "A Persona has its own spaces and plugins, and its tabs keep their own cookies and website data.", name: "", button: "Create") { [weak self] name in
+        askForPersonaName(title: localized("New Persona"), message: localized("A Persona has its own spaces and plugins, and its tabs keep their own cookies and website data."), name: "", button: localized("Create")) { [weak self] name in
             guard let self else { return }
             let persona = self.session.addPersona(named: name)
             if let space = self.session.spaces(in: persona.id).first { self.switchToSpace(space.id) }
@@ -291,7 +291,7 @@ public enum BrowserWindowKind {
     /// Asks for the Persona's new name in a sheet on the window. Rename stays disabled while the field holds no name.
     public func promptToRenamePersona(_ id: Persona.ID) {
         guard let persona = session.persona(withID: id) else { return }
-        askForPersonaName(title: "Rename Persona", message: nil, name: persona.name, button: "Rename") { [weak self] name in
+        askForPersonaName(title: localized("Rename Persona"), message: nil, name: persona.name, button: localized("Rename")) { [weak self] name in
             self?.session.renamePersona(id, to: name)
         }
     }
@@ -306,8 +306,8 @@ public enum BrowserWindowKind {
         let alert = NSAlert()
         alert.messageText = texts.message
         alert.informativeText = texts.information
-        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Delete")).hasDestructiveAction = true
+        alert.addButton(withTitle: localized("Cancel"))
         alert.beginSheetModal(for: nsWindow) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.session.deletePersona(id) }
         }
@@ -315,20 +315,38 @@ public enum BrowserWindowKind {
 
     /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes. The explanation leaves out what the Persona has none of, and names one space, tab, or download without a number, as the Quit sheet names one download; every Persona has a space.
     nonisolated static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int, isSyncing: Bool = false) -> (message: String, information: String) {
-        let spaces = spaceCount == 1 ? "Its space" : "Its \(spaceCount) spaces"
-        let favorites = favoriteCount == 0 ? "" : favoriteCount == 1 ? " and 1 favorite" : " and \(favoriteCount) favorites"
-        let removed = spaces + favorites + (spaceCount == 1 && favoriteCount == 0 ? " is removed" : " are removed")
-        let closed = tabCount == 0 ? "" : tabCount == 1 ? ", and its tab closes into the closed list" : ", and its \(tabCount) tabs close into the closed list"
-        let downloads = downloadCount == 0 ? "" : downloadCount == 1 ? " Its download in progress stops." : " Its \(downloadCount) downloads in progress stop."
-        var information = "\(removed)\(closed).\(downloads) Arch removes its plugins, cookies, and website data from this Mac the next time it opens."
-        if isSyncing { information += " It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too." }
-        return ("Delete \(persona)?", information)
+        // Each sentence is whole in the string catalog, so that a translation can order its parts.
+        let removed: String
+        if tabCount == 0 {
+            removed = switch (spaceCount == 1, favoriteCount) {
+            case (true, 0): localized("Its space is removed.")
+            case (true, 1): localized("Its space and 1 favorite are removed.")
+            case (true, _): localized("Its space and \(favoriteCount) favorites are removed.")
+            case (false, 0): localized("Its \(spaceCount) spaces are removed.")
+            case (false, 1): localized("Its \(spaceCount) spaces and 1 favorite are removed.")
+            case (false, _): localized("Its \(spaceCount) spaces and \(favoriteCount) favorites are removed.")
+            }
+        } else {
+            let spaces = switch (spaceCount == 1, favoriteCount) {
+            case (true, 0): localized("Its space is removed")
+            case (true, 1): localized("Its space and 1 favorite are removed")
+            case (true, _): localized("Its space and \(favoriteCount) favorites are removed")
+            case (false, 0): localized("Its \(spaceCount) spaces are removed")
+            case (false, 1): localized("Its \(spaceCount) spaces and 1 favorite are removed")
+            case (false, _): localized("Its \(spaceCount) spaces and \(favoriteCount) favorites are removed")
+            }
+            removed = tabCount == 1 ? localized("\(spaces), and its tab closes into the closed list.") : localized("\(spaces), and its \(tabCount) tabs close into the closed list.")
+        }
+        let downloads = downloadCount == 0 ? "" : downloadCount == 1 ? " " + localized("Its download in progress stops.") : " " + localized("Its \(downloadCount) downloads in progress stop.")
+        var information = removed + downloads + " " + localized("Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
+        if isSyncing { information += " " + localized("It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too.") }
+        return (localized("Delete \(persona)?"), information)
     }
 
     /// How a sheet or a card about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
     nonisolated static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: id, space: space, among: personas) else { return nil }
-        return space == nil ? "the Persona \u{201C}\(place)\u{201D}" : "the Persona of \u{201C}\(place)\u{201D}"
+        return space == nil ? localized("the Persona \u{201C}\(place)\u{201D}") : localized("the Persona of \u{201C}\(place)\u{201D}")
     }
 
     /// Asks for a Persona's name in a sheet with a text field on the window, which starts with `name`, and passes the name without surrounding spaces to `use` unless the user cancels. The sheet's `button` stays disabled while the field is empty or holds only spaces, so that Return cannot close the sheet without a name.
@@ -338,9 +356,9 @@ public enum BrowserWindowKind {
         alert.messageText = title
         if let message { alert.informativeText = message }
         let confirm = alert.addButton(withTitle: button)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Cancel"))
         let field = NSTextField(string: name)
-        field.placeholderString = "Persona Name"
+        field.placeholderString = localized("Persona Name")
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
@@ -436,14 +454,14 @@ public enum BrowserWindowKind {
     func promptToEditSavedAddress(of tab: Tab) {
         guard tab.isPinned, tab.liveItemID == nil else { return }
         let address = (tab.savedPage?.url ?? tab.url)?.absoluteString ?? ""
-        askForText(title: "Edit Saved Address", message: "Go Back to Saved Page returns \u{201C}\(tab.shownTitle)\u{201D} to this address.", fields: [("Address", address)], button: "Save") { [weak tab] texts in
+        askForText(title: localized("Edit Saved Address"), message: localized("Go Back to Saved Page returns \u{201C}\(tab.shownTitle)\u{201D} to this address."), fields: [(localized("Address"), address)], button: localized("Save")) { [weak tab] texts in
             if tab?.setSavedAddress(fromInput: texts[0]) != true { NSSound.beep() }
         }
     }
 
     /// Edit Favorite…: asks for a favorite's name and address in a sheet on the window, prefilled with them. An empty name keeps the old one; an address that is no address, or another favorite's, beeps and changes nothing.
     func promptToEditFavorite(_ favorite: Favorite) {
-        askForText(title: "Edit Favorite", message: nil, fields: [("Name", favorite.title), ("Address", favorite.url.absoluteString)], button: "Save") { [weak self] texts in
+        askForText(title: localized("Edit Favorite"), message: nil, fields: [(localized("Name"), favorite.title), (localized("Address"), favorite.url.absoluteString)], button: localized("Save")) { [weak self] texts in
             if self?.session.editFavorite(favorite.id, name: texts[0], address: texts[1]) != true { NSSound.beep() }
         }
     }
@@ -461,7 +479,7 @@ public enum BrowserWindowKind {
         alert.messageText = title
         if let message { alert.informativeText = message }
         alert.addButton(withTitle: button)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Cancel"))
         let textFields = fields.map { field in
             let textField = NSTextField(string: field.value)
             textField.setAccessibilityLabel(field.label)
@@ -841,7 +859,7 @@ public enum BrowserWindowKind {
 
     /// The context for `space` and its Persona among `personas`, named "Persona / Space", with `selectedTab` unless an internal page or the preview covers its page.
     static func agentComposerContext(in space: Space, personas: [Persona], selectedTab: AgentTabInfo?, isPageCovered: Bool, text: String) -> AgentComposerContext {
-        let persona = personas.first { $0.id == space.resolvedPersonaID }?.name ?? "Default"
+        let persona = personas.first { $0.id == space.resolvedPersonaID }?.name ?? localized("Default")
         return AgentComposerContext(personaID: space.resolvedPersonaID, spaceID: space.id, place: "\(persona) / \(space.name)", tab: isPageCovered ? nil : selectedTab, text: text)
     }
 
@@ -868,7 +886,7 @@ public enum BrowserWindowKind {
         // A page the user did not see while the menu showed is never attached, as with askAgent.
         if document.documentID != original.documentID || document.url != original.url {
             context.tab = nil
-            context.problem = "The page changed. Review the task before starting."
+            context.problem = localized("The page changed. Review the task before starting.")
         }
         showAgentPanel(.composer(context))
     }
@@ -888,7 +906,7 @@ public enum BrowserWindowKind {
         let context = agentComposerContext(text: offer.task)
         guard offer.matches(context, allowsAI: settings.allowsAI(on:)) else {
             context.tab = nil
-            context.problem = "The page, sharing setting, or destination changed. Review the task before starting."
+            context.problem = localized("The page, sharing setting, or destination changed. Review the task before starting.")
             showAgentPanel(.composer(context))
             return
         }
@@ -1337,7 +1355,7 @@ public enum BrowserWindowKind {
 
     /// Prints the selected page through the system print panel, a sheet on the window. Both engines render the page as PDF first, so the panel and its preview work the same on either.
     public func printPage() {
-        renderSelectedPageAsPDF(failureMessage: "The page could not be printed.") { tab, document, window in
+        renderSelectedPageAsPDF(failureMessage: localized("The page could not be printed.")) { tab, document, window in
             guard let operation = document.printOperation(for: NSPrintInfo.shared, scalingMode: .pageScaleDownToFit, autoRotate: true) else { return }
             operation.jobTitle = tab.shownTitle
             operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
@@ -1346,7 +1364,7 @@ public enum BrowserWindowKind {
 
     /// Saves the selected page as a PDF file where the user chooses in a save panel on the window.
     public func exportPageAsPDF() {
-        renderSelectedPageAsPDF(failureMessage: "The page could not be exported as PDF.") { [weak self] tab, document, window in
+        renderSelectedPageAsPDF(failureMessage: localized("The page could not be exported as PDF.")) { [weak self] tab, document, window in
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.pdf]
             // A slash would name a folder, and a colon shows as a slash in the Finder.
@@ -1354,7 +1372,7 @@ public enum BrowserWindowKind {
             panel.beginSheetModal(for: window) { response in
                 guard response == .OK, let url = panel.url else { return }
                 if !document.write(to: url) {
-                    self?.showNotice("The PDF could not be saved.", detail: url.path, detailIsPath: true, for: tab)
+                    self?.showNotice(localized("The PDF could not be saved."), detail: url.path, detailIsPath: true, for: tab)
                 }
             }
         }
@@ -1421,7 +1439,7 @@ public enum BrowserWindowKind {
 
     /// Writes a capture to the captures folder and shows the file in the Finder. Encoding a long page takes a moment, so it runs off the main thread. A capture that failed or could not be written shows a notice card on its tab, if the tab is still open.
     private func saveCapture(_ image: NSImage?, of tab: Tab) {
-        guard let image else { return showCaptureFailure("The page could not be captured.", for: tab) }
+        guard let image else { return showCaptureFailure(localized("The page could not be captured."), for: tab) }
         let title = tab.shownTitle
         let date = Date()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -1429,7 +1447,7 @@ public enum BrowserWindowKind {
             DispatchQueue.main.async {
                 switch result {
                 case .success(let file): NSWorkspace.shared.activateFileViewerSelecting([file])
-                case .failure(let error): self?.showCaptureFailure("The capture could not be saved.", detail: error.localizedDescription, for: tab)
+                case .failure(let error): self?.showCaptureFailure(localized("The capture could not be saved."), detail: error.localizedDescription, for: tab)
                 }
             }
         }

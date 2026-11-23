@@ -71,22 +71,22 @@ public enum AgentApprovalAnswer: Equatable, Sendable {
     /// The button's title.
     public func title(site: String?) -> String {
         switch self {
-        case .allowOnce: return "Allow Once"
-        case .allowOnPage: return "Allow on This Page"
-        case .allowOnSite: return "Allow on \(site ?? "This Site") for This Session"
-        case .allowDownloadsFromSite: return "Allow Downloads from This Site for This Session"
-        case .allowOnTab: return "Allow for This Tab"
-        case .deny: return "Deny"
-        case .denyAndStop: return "Deny and Stop"
-        case .reply: return "Reply\u{2026}"
-        case .takeOver: return "Take Over"
-        case .answer: return "Answer"
-        case .done: return "Done"
-        case .cancel: return "Cancel"
-        case .tab: return "Share"
-        case .timedOut: return "Not answered"
-        case .withdrawn: return "The page moved on"
-        case .ended: return "Ended"
+        case .allowOnce: return localized("Allow Once")
+        case .allowOnPage: return localized("Allow on This Page")
+        case .allowOnSite: return site.map { localized("Allow on \($0) for This Session") } ?? localized("Allow on This Site for This Session")
+        case .allowDownloadsFromSite: return localized("Allow Downloads from This Site for This Session")
+        case .allowOnTab: return localized("Allow for This Tab")
+        case .deny: return localized("Deny")
+        case .denyAndStop: return localized("Deny and Stop")
+        case .reply: return localized("Reply\u{2026}")
+        case .takeOver: return localized("Take Over")
+        case .answer: return localized("Answer")
+        case .done: return localized("Done")
+        case .cancel: return localized("Cancel")
+        case .tab: return localized("Share")
+        case .timedOut: return localized("Not answered")
+        case .withdrawn: return localized("The page moved on")
+        case .ended: return localized("Ended")
         }
     }
 }
@@ -268,7 +268,7 @@ public struct AgentApproval: Identifiable {
         guard let approval = cards[id], isPending(id) else { return false }
         if approval.needsAuthentication(for: answer) {
             // The sentence's page names stand in quotes whose closing quote inside is doubled (`AgentToolHost.actionSentence`), so a name cannot end the quote and add words of its own.
-            guard await authenticator.authenticate(reason: "allow \(approval.clientName) to \(approval.action.prefix(1).lowercased() + approval.action.dropFirst())") else { return false }
+            guard await authenticator.authenticate(reason: localized("allow \(approval.clientName) to \(approval.action.prefix(1).lowercased() + approval.action.dropFirst())")) else { return false }
             guard isPending(id) else { return false }
         }
         finish(id, answer, window: window)

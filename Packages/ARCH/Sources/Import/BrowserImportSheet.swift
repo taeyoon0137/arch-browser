@@ -96,7 +96,7 @@ import SwiftUI
     func title(of destination: SidebarImport.Destination, for profile: ImportedProfile) -> String {
         switch destination {
         case .persona(let id): return personas.first { $0.id == id }?.name ?? ""
-        case .newPersona: return "New Persona \u{201C}\(profile.name)\u{201D}"
+        case .newPersona: return localized("New Persona \u{201C}\(profile.name)\u{201D}")
         }
     }
 
@@ -199,11 +199,11 @@ struct BrowserImportSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Import from Browser")
+            Text("Import from Browser", bundle: .module)
                 .font(.headline)
             if let browsers = model.browsers {
                 if browsers.isEmpty {
-                    Text("No other browsers were found on this Mac.")
+                    Text("No other browsers were found on this Mac.", bundle: .module)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -217,7 +217,7 @@ struct BrowserImportSheet: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Looking for browsers\u{2026}")
+                    Text("Looking for browsers\u{2026}", bundle: .module)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -232,22 +232,22 @@ struct BrowserImportSheet: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 if model.engineChoices.count == 1, let choice = model.engineChoices.first {
-                    Toggle("Use \(choice.engine.title) as the search engine, as in \(choice.browsers.formatted(.list(type: .and)))", isOn: Binding {
+                    Toggle(localized("Use \(choice.engine.title) as the search engine, as in \(choice.browsers.formatted(.list(type: .and)))"), isOn: Binding {
                         model.chosenEngine == choice.engine
                     } set: { isOn in
                         model.chosenEngine = isOn ? choice.engine : nil
                     })
                     .toggleStyle(.checkbox)
                 } else {
-                    Picker("Search engine", selection: $model.chosenEngine) {
-                        Text("Keep \(SearchEngine.current.title)").tag(SearchEngine?.none)
+                    Picker(localized("Search engine"), selection: $model.chosenEngine) {
+                        Text("Keep \(SearchEngine.current.title)", bundle: .module).tag(SearchEngine?.none)
                         ForEach(model.engineChoices, id: \.engine) { choice in
-                            Text("Use \(choice.engine.title), as in \(choice.browsers.formatted(.list(type: .and)))").tag(Optional(choice.engine))
+                            Text("Use \(choice.engine.title), as in \(choice.browsers.formatted(.list(type: .and)))", bundle: .module).tag(Optional(choice.engine))
                         }
                     }
                     .pickerStyle(.radioGroup)
                     .labelsHidden()
-                    .accessibilityLabel("Search engine")
+                    .accessibilityLabel(localized("Search engine"))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -255,7 +255,7 @@ struct BrowserImportSheet: View {
         } label: {
             // A symbol in the app icons' box, so that its name starts where the browsers' names do.
             Label {
-                Text("Search Engine")
+                Text("Search Engine", bundle: .module)
                     .font(.headline)
             } icon: {
                 Image(systemName: "magnifyingglass")
@@ -269,15 +269,15 @@ struct BrowserImportSheet: View {
     @ViewBuilder private var buttons: some View {
         HStack {
             if model.browsers?.isEmpty == true {
-                Button("Choose Exported File\u{2026}", action: actions.chooseExportedFile)
+                Button(localized("Choose Exported File\u{2026}"), action: actions.chooseExportedFile)
                 Spacer()
-                Button("Close", action: actions.cancel)
+                Button(localized("Close"), action: actions.cancel)
                     .keyboardShortcut(.defaultAction)
             } else {
                 Spacer()
-                Button("Cancel", role: .cancel, action: actions.cancel)
+                Button(localized("Cancel"), role: .cancel, action: actions.cancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Import", action: actions.importSelection)
+                Button(localized("Import"), action: actions.importSelection)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!model.canImport)
             }
@@ -305,7 +305,7 @@ private struct BrowserSection: View {
                     }
                 case .success(let profiles):
                     if profiles.isEmpty {
-                        Text("No bookmarks, history, or search shortcuts were found.")
+                        Text("No bookmarks, history, or search shortcuts were found.", bundle: .module)
                             .foregroundStyle(.secondary)
                     }
                     ForEach(profiles) { ProfileRow(model: model, browser: browser, profile: $0) }
@@ -337,11 +337,11 @@ private struct BrowserSection: View {
     /// Names the setting that lets Arch read the browser's files, with a way to it and the file import as the other way. After the user went to the setting, the sheet reads the browser again on returning; when the files are still blocked, the grant may apply only after Arch reopens.
     private var privacyNotice: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Arch needs \(browser.source.privacySetting.name) to read \(browser.source.name)\u{2019}s bookmarks and history."
-                 + (model.askedBrowserIDs.contains(browser.id) ? " If you turned it on, quit and reopen Arch." : ""))
+            Text(localized("Arch needs \(browser.source.privacySetting.name) to read \(browser.source.name)\u{2019}s bookmarks and history.")
+                 + (model.askedBrowserIDs.contains(browser.id) ? " " + localized("If you turned it on, quit and reopen Arch.") : ""))
             HStack {
-                Button("Open System Settings") { actions.openPrivacySetting(browser) }
-                Button("Choose Exported File\u{2026}", action: actions.chooseExportedFile)
+                Button(localized("Open System Settings")) { actions.openPrivacySetting(browser) }
+                Button(localized("Choose Exported File\u{2026}"), action: actions.chooseExportedFile)
             }
         }
     }
@@ -365,13 +365,13 @@ private struct ProfileRow: View {
                 .toggleStyle(.checkbox)
                 Spacer()
                 // The existing Personas, then the one the import would create. The menu applies only to a checked profile that brings favorites, spaces, or bookmark folders; history and search shortcuts go to every Persona.
-                Picker("Persona", selection: choice.destination) {
+                Picker(localized("Persona"), selection: choice.destination) {
                     ForEach(model.destinations.filter { $0 != .newPersona }, id: \.self) { Text(model.title(of: $0, for: profile)).tag($0) }
                     Divider()
                     Text(model.title(of: .newPersona, for: profile)).tag(SidebarImport.Destination.newPersona)
                 }
                 .labelsHidden()
-                .accessibilityLabel("Persona")
+                .accessibilityLabel(localized("Persona"))
                 .fixedSize()
                 .disabled(!choice.wrappedValue.isIncluded || choice.wrappedValue.parts.isDisjoint(with: [.favorites, .spaces, .bookmarkFolders]))
             }
@@ -400,9 +400,9 @@ private struct ProfileRow: View {
             note = error.localizedDescription
         } else {
             switch part {
-            case .spaces: note = "Pinned tabs load when you open them."
-            case .bookmarkFolders: note = "Each bookmark becomes a pinned tab. It loads when you open it."
-            case .history, .searchShortcuts: note = "Applies to every Persona."
+            case .spaces: note = localized("Pinned tabs load when you open them.")
+            case .bookmarkFolders: note = localized("Each bookmark becomes a pinned tab. It loads when you open it.")
+            case .history, .searchShortcuts: note = localized("Applies to every Persona.")
             case .favorites: note = nil
             }
         }
@@ -426,11 +426,11 @@ private struct ProfileRow: View {
 
     private static func name(of part: ImportedProfile.Part) -> String {
         switch part {
-        case .favorites: return "Favorites"
-        case .spaces: return "Spaces"
-        case .bookmarkFolders: return "Bookmark Folders"
-        case .history: return "History"
-        case .searchShortcuts: return "Search Shortcuts"
+        case .favorites: return localized("Favorites")
+        case .spaces: return localized("Spaces")
+        case .bookmarkFolders: return localized("Bookmark Folders")
+        case .history: return localized("History")
+        case .searchShortcuts: return localized("Search Shortcuts")
         }
     }
 
@@ -438,9 +438,9 @@ private struct ProfileRow: View {
     private static func title(of part: ImportedProfile.Part, count: Int, pinnedTabCount: Int) -> String {
         switch part {
         case .favorites, .searchShortcuts: return "\(name(of: part)) (\(count.formatted()))"
-        case .spaces: return "Spaces (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, "pinned tab", "pinned tabs"))"
-        case .bookmarkFolders: return "Bookmark Folders (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, "bookmark", "bookmarks"))"
-        case .history: return "History (\(ImportSummary.count(count, "page", "pages")))"
+        case .spaces: return localized("Spaces (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, { localized("\($0) pinned tab") }, { localized("\($0) pinned tabs") }))")
+        case .bookmarkFolders: return localized("Bookmark Folders (\(count.formatted())) with \(ImportSummary.count(pinnedTabCount, { localized("\($0) bookmark") }, { localized("\($0) bookmarks") }))")
+        case .history: return localized("History (\(ImportSummary.count(count, { localized("\($0) page") }, { localized("\($0) pages") })))")
         }
     }
 }

@@ -382,9 +382,9 @@ enum ChromiumExtensionError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .refused(reason): return reason.isEmpty ? "Chromium did not load it." : reason
-        case .otherIdentifier: return "Chromium knows the package by another identifier, as its manifest has no key."
-        case .notLoaded: return "Chromium did not load it."
+        case let .refused(reason): return reason.isEmpty ? localized("Chromium did not load it.") : reason
+        case .otherIdentifier: return localized("Chromium knows the package by another identifier, as its manifest has no key.")
+        case .notLoaded: return localized("Chromium did not load it.")
         }
     }
 }

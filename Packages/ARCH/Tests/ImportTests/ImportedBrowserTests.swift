@@ -85,7 +85,7 @@ import Testing
         let work = profiles[1]
         #expect(try work.favorites?.get().map(\.url) == [Self.url("a.example")])
         #expect(work.spaces == nil)
-        #expect(try work.bookmarkFolders?.get().map(\.name) == ["Work", "Other Bookmarks"])
+        #expect(try work.bookmarkFolders?.get().map(\.name) == ["Work", catalogText("Other Bookmarks")])
         #expect(work.pinnedTabCount(of: .bookmarkFolders) == 2)
         #expect(try work.count(of: .history)?.get() == 1)
         #expect(try work.searchKeywords?.get().shortcuts.map(\.keyword) == ["d"])
@@ -94,7 +94,7 @@ import Testing
         #expect(row.favorites.map(\.url) == [Self.url("a.example")])
         #expect(row.spaces.map(\.origin) == [.bookmarks])
         #expect(row.spaces.map(\.name) == ["Test Browser"])
-        #expect(row.spaces.first?.folders.map(\.name) == ["Work", "Other Bookmarks"])
+        #expect(row.spaces.first?.folders.map(\.name) == ["Work", catalogText("Other Bookmarks")])
         #expect(work.sidebarImport(of: [.history, .searchShortcuts], browserName: "Test Browser").spaces.isEmpty)
 
         #expect(try profiles[2].spaces?.get().map(\.name) == ["Elsewhere"])
@@ -149,7 +149,7 @@ import Testing
         #expect(profiles.map(\.isFirst) == [true])
         #expect(profiles.map(\.id) == [SidebarImport.Profile(source: "test.webkit", folder: "Default")])
         #expect(try profiles[0].favorites?.get().map(\.url) == [Self.url("a.example")])
-        #expect(try profiles[0].bookmarkFolders?.get().map(\.name) == ["Bookmarks \u{25B8} Trips"])
+        #expect(try profiles[0].bookmarkFolders?.get().map(\.name) == [catalogText("Bookmarks") + " \u{25B8} Trips"])
         #expect(try profiles[0].count(of: .history)?.get() == 1)
         #expect(profiles[0].searchKeywords == nil)
         #expect(browser.defaultEngine == nil)

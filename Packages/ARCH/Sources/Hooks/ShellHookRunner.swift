@@ -40,16 +40,16 @@ public enum HookShellScript {
     /// The script's whole environment.
     public static let environmentNames = ["PATH", "HOME", "LANG", "TMPDIR", "ARCH_HOOK_ID", "ARCH_HOOK_EVENT", "ARCH_HOOK_TICKET"]
     /// What the trust sheet says about the commands the script runs.
-    public static let pathSentence = "Commands this script runs by name come from your PATH, and each of them gets this hook's access to Arch."
+    public static let pathSentence = localized("Commands this script runs by name come from your PATH, and each of them gets this hook's access to Arch.")
     /// What the trust sheet says the script receives.
-    public static let inputSentence = "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File."
+    public static let inputSentence = localized("The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File.")
     /// The failure of a run whose ticket the channel could not make.
-    static let noTicketSentence = "Arch could not make the run's ticket, so the script did not start."
+    static let noTicketSentence = localized("Arch could not make the run's ticket, so the script did not start.")
     /// What Let Agent Runs Read Pages says on the trust sheet.
-    public static let readsPagesSentence = "The script and every command it runs can then read the event's page through agent runs."
-    static let firstLineSentence = "Its first line must be #! and the absolute path of a program, with at most one option made of the letters e, f, u, v, w, and x, as in -eu, or /usr/bin/env and one program's name."
-    static let hiddenCharacterSentence = "The script holds a control or formatting character other than tab and line feed, such as a carriage return or a text direction mark, which Arch cannot show as the interpreter reads it."
-    static let changedSentence = "Its interpreter changed."
+    public static let readsPagesSentence = localized("The script and every command it runs can then read the event's page through agent runs.")
+    static let firstLineSentence = localized("Its first line must be #! and the absolute path of a program, with at most one option made of the letters e, f, u, v, w, and x, as in -eu, or /usr/bin/env and one program's name.")
+    static let hiddenCharacterSentence = localized("The script holds a control or formatting character other than tab and line feed, such as a carriage return or a text direction mark, which Arch cannot show as the interpreter reads it.")
+    static let changedSentence = localized("Its interpreter changed.")
     /// The letters a first line's option may hold. Across shells, awk, Python, Perl, and Ruby they stop at errors, trace, warn, or name the program's file, and none makes the interpreter read its program from standard input, which carries the event, as `-s`, `-i`, or `-` would.
     static let optionLetters: Set<Character> = ["e", "f", "u", "v", "w", "x"]
 
@@ -69,8 +69,8 @@ public enum HookShellScript {
 
     /// Why Arch would not trust or run the bytes, or nil: at most 1 MB of UTF-8 text without hidden characters whose first line names its interpreter.
     public static func problem(in script: Data) -> String? {
-        guard script.count <= maximumSize else { return "The script is larger than 1 MB." }
-        guard let text = String(data: script, encoding: .utf8) else { return "The script is not UTF-8 text." }
+        guard script.count <= maximumSize else { return localized("The script is larger than 1 MB.") }
+        guard let text = String(data: script, encoding: .utf8) else { return localized("The script is not UTF-8 text.") }
         if text.unicodeScalars.contains(where: isHidden) { return hiddenCharacterSentence }
         return interpreterLine(of: script) == nil ? firstLineSentence : nil
     }
@@ -104,10 +104,10 @@ public enum HookShellScript {
     /// Reads a file for the trust sheet: a regular file, or a link to one, of at most 1 MB that `problem(in:)` accepts.
     public static func read(fileAt url: URL) throws -> Data {
         var status = stat()
-        guard stat(url.path, &status) == 0 else { throw HookShellScriptProblem("Arch cannot read \(url.path).") }
-        guard status.st_mode & S_IFMT == S_IFREG else { throw HookShellScriptProblem("\(url.path) is not a regular file.") }
-        guard status.st_size <= maximumSize else { throw HookShellScriptProblem("The script is larger than 1 MB.") }
-        guard let data = FileManager.default.contents(atPath: url.path) else { throw HookShellScriptProblem("Arch cannot read \(url.path).") }
+        guard stat(url.path, &status) == 0 else { throw HookShellScriptProblem(localized("Arch cannot read \(url.path).")) }
+        guard status.st_mode & S_IFMT == S_IFREG else { throw HookShellScriptProblem(localized("\(url.path) is not a regular file.")) }
+        guard status.st_size <= maximumSize else { throw HookShellScriptProblem(localized("The script is larger than 1 MB.")) }
+        guard let data = FileManager.default.contents(atPath: url.path) else { throw HookShellScriptProblem(localized("Arch cannot read \(url.path).")) }
         if let problem = problem(in: data) { throw HookShellScriptProblem(problem) }
         return data
     }
@@ -123,7 +123,7 @@ public enum HookShellScript {
     }
 
     /// What a run that could not read the login shell's PATH fails with, and what the trust sheet says then.
-    public static let loginPathSentence = "Arch could not read the PATH of your login shell, which this script runs with."
+    public static let loginPathSentence = localized("Arch could not read the PATH of your login shell, which this script runs with.")
 
     /// The first line's interpreter as an absolute path with links resolved, with its SHA-256: a `/usr/bin/env` program is looked up in `searchPath`, the PATH the script gets.
     public static func resolve(_ line: InterpreterLine, searchPath: String) -> Result<HookInterpreterResolution, HookShellScriptProblem> {
@@ -134,12 +134,12 @@ public enum HookShellScript {
         case .env(let program):
             let folders = searchPath.split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
             guard let found = folders.lazy.map({ ($0 as NSString).appendingPathComponent(program) }).first(where: isProgram) else {
-                return .failure(HookShellScriptProblem("Arch cannot find \(program) in the PATH this script gets."))
+                return .failure(HookShellScriptProblem(localized("Arch cannot find \(program) in the PATH this script gets.")))
             }
             named = found
         }
-        guard isProgram(named), let resolved = realPath(of: named), isProgram(resolved) else { return .failure(HookShellScriptProblem("\(named) is not a program Arch can run.")) }
-        guard let digest = digest(ofFileAt: resolved) else { return .failure(HookShellScriptProblem("Arch cannot read \(resolved).")) }
+        guard isProgram(named), let resolved = realPath(of: named), isProgram(resolved) else { return .failure(HookShellScriptProblem(localized("\(named) is not a program Arch can run."))) }
+        guard let digest = digest(ofFileAt: resolved) else { return .failure(HookShellScriptProblem(localized("Arch cannot read \(resolved)."))) }
         let folders = [(named as NSString).deletingLastPathComponent, (resolved as NSString).deletingLastPathComponent]
         var writable: [String] = []
         for folder in folders where access(folder, W_OK) == 0 && !writable.contains(folder) { writable.append(folder) }
@@ -300,7 +300,7 @@ public final class ShellHookRunner: HookScriptRunning {
 
     /// Checks the interpreter, starts the script with a bounded environment and ticket, and returns its outcome.
     public func run(_ invocation: HookInvocation) async -> HookRunOutcome {
-        guard case .shell(_, _, let recorded) = invocation.hook.script else { return .failed(code: "invalidScript", message: "This hook's script is not a shell script.") }
+        guard case .shell(_, _, let recorded) = invocation.hook.script else { return .failed(code: "invalidScript", message: localized("This hook's script is not a shell script.")) }
         if let problem = HookShellScript.problem(in: invocation.script) { return .failed(code: "invalidScript", message: problem) }
         let state = Running()
         running[invocation.run] = state
@@ -323,7 +323,7 @@ public final class ShellHookRunner: HookScriptRunning {
         }
 
         let folder = temporaryFolder.appendingPathComponent("Arch-Hook-\(invocation.run.uuidString)", isDirectory: true)
-        guard mkdir(folder.path, 0o700) == 0 else { return .failed(code: "notStarted", message: "Arch could not make the run's folder: \(String(cString: strerror(errno))).") }
+        guard mkdir(folder.path, 0o700) == 0 else { return .failed(code: "notStarted", message: localized("Arch could not make the run's folder: \(String(cString: strerror(errno))).")) }
         defer { try? FileManager.default.removeItem(at: folder) }
         state.folder = folder
         let tools = ShellHookRunTools(invocation: invocation, host: host, allowsAI: allowsAI, runAgent: runAgent)
@@ -352,7 +352,7 @@ public final class ShellHookRunner: HookScriptRunning {
             process = try CommandLineProcess(executable: URL(fileURLWithPath: recorded.path), arguments: line.arguments + ["/dev/fd/3"], environment: environment, directory: folder,
                                              input: Self.input(of: invocation, handles: tools.handles), script: script, argumentZero: named)
         } catch {
-            return .failed(code: "notStarted", message: "Arch could not start \(recorded.path): \(error.localizedDescription)")
+            return .failed(code: "notStarted", message: localized("Arch could not start \(recorded.path): \(error.localizedDescription)"))
         }
         // Before any message of the script's `arch-cli` can arrive, which the main actor delivers after this.
         channel?.hookRun(invocation.run, didStart: process.id)
@@ -376,9 +376,9 @@ public final class ShellHookRunner: HookScriptRunning {
             return .completed(actions: tools.actions, agent: tools.agentUse)
         case .exited(let status):
             let line = errorText.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.last { !$0.isEmpty }
-            return .failed(code: "exitStatus", message: "Exited with status \(status)" + (line.map { ": \($0)" } ?? "."))
+            return .failed(code: "exitStatus", message: line.map { localized("Exited with status \(status): \($0)") } ?? localized("Exited with status \(status)."))
         case .signaled(let signal):
-            return .failed(code: "signal", message: "Ended by signal \(signal).")
+            return .failed(code: "signal", message: localized("Ended by signal \(signal)."))
         }
     }
 

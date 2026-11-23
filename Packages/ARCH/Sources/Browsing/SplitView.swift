@@ -205,10 +205,10 @@ private struct ShownElsewherePaneView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Text("This tab is shown in another window.")
+            Text("This tab is shown in another window.", bundle: .module)
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
-            Button("Show Here") { windowModel.selectTab(tab.id) }
+            Button(localized("Show Here")) { windowModel.selectTab(tab.id) }
                 .controlSize(.large)
                 .padding(.top, 6)
         }
@@ -266,8 +266,8 @@ private struct PaneCloseButton: View {
         .buttonStyle(.plain)
         .foregroundStyle(isHovering ? .primary : .secondary)
         .onHover { isHovering = $0 }
-        .help("Remove from Split View")
-        .accessibilityLabel("Remove from Split View")
+        .help(localized("Remove from Split View"))
+        .accessibilityLabel(localized("Remove from Split View"))
     }
 }
 

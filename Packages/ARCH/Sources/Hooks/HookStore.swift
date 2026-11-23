@@ -53,7 +53,7 @@ public enum HookStoreError: LocalizedError {
     case notReady
 
     public var errorDescription: String? {
-        "Arch has not read its hooks yet, so it cannot change them."
+        localized("Arch has not read its hooks yet, so it cannot change them.")
     }
 }
 
@@ -190,7 +190,7 @@ public final class HookStore {
     private static func placeholder(for stored: AgentJSON) -> Hook {
         let id = stored["id"]?.stringValue.flatMap(UUID.init(uuidString:)) ?? UUID()
         let created = (try? stored["created"]?.decode(as: Date.self)) ?? Date()
-        return Hook(id: id, name: stored["name"]?.stringValue ?? "Hook from a newer Arch", trigger: .tabOpened, state: .paused(.needsNewerArch), created: created)
+        return Hook(id: id, name: stored["name"]?.stringValue ?? localized("Hook from a newer Arch"), trigger: .tabOpened, state: .paused(.needsNewerArch), created: created)
     }
 
     /// Whether the store writes this hook back as it read it, since this build cannot read it.

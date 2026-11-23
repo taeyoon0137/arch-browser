@@ -22,7 +22,7 @@ final class DownloadNotifier: NSObject, UNUserNotificationCenterDelegate {
         guard let center, let path = entry.targetPath else { return }
         let isInBackground = !NSApp.isActive
         let content = UNMutableNotificationContent()
-        content.title = "Download Finished"
+        content.title = localized("Download Finished")
         content.body = path.lastPathComponent
         content.userInfo = [Self.pathKey: path.path]
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

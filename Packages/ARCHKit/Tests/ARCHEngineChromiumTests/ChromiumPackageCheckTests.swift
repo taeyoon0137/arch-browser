@@ -36,25 +36,25 @@ import Testing
 
     @Test func refusesABackgroundThatChromiumRunsForManifestV2Only() throws {
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "background": {"scripts": ["background.js"]}}"#, "background.js": ""])
-            == "Its background runs as background.scripts or background.page, which Chromium runs for Manifest V2 only; Chromium needs background.service_worker.")
+            == catalogText("Its background runs as background.scripts or background.page, which Chromium runs for Manifest V2 only; Chromium needs background.service_worker."))
         // A package for both engines names both, and Chromium runs its service worker.
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "background": {"scripts": ["b.js"], "service_worker": "b.js"}}"#, "b.js": ""]) == nil)
     }
 
     @Test func refusesFilesThatThePackageLacks() throws {
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "background": {"service_worker": "missing.js"}}"#])
-            == "It names missing.js as the background service worker, which is not in the package.")
+            == catalogText("It names %@ as %@, which is not in the package.", "missing.js", catalogText("the background service worker")))
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "content_scripts": [{"matches": ["<all_urls>"], "js": ["../outside.js"]}]}"#])
-            == "It names ../outside.js as a content script, which is not in the package.")
+            == catalogText("It names %@ as %@, which is not in the package.", "../outside.js", catalogText("a content script")))
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "action": {"default_icon": {"16": "icon.png"}}}"#])
-            == "It names icon.png as the action\u{2019}s icon, which is not in the package.")
+            == catalogText("It names %@ as %@, which is not in the package.", "icon.png", catalogText("the action\u{2019}s icon")))
         #expect(try refusal(["manifest.json": #"{"manifest_version": 3, "name": "S", "version": "1", "default_locale": "en"}"#])
-            == "It names _locales/en/messages.json as the default locale, which is not in the package.")
+            == catalogText("It names %@ as %@, which is not in the package.", "_locales/en/messages.json", catalogText("the default locale")))
     }
 
     @Test func refusesManifestsThatDoNotRead() throws {
-        #expect(try refusal(["manifest.json": "["]) == "Its manifest.json is missing or is not a JSON object.")
-        #expect(try refusal(["manifest.json": #"{"manifest_version": 2, "name": "S", "version": "1"}"#]) == "Arch runs Manifest V3 extensions only.")
+        #expect(try refusal(["manifest.json": "["]) == catalogText("Its manifest.json is missing or is not a JSON object."))
+        #expect(try refusal(["manifest.json": #"{"manifest_version": 2, "name": "S", "version": "1"}"#]) == catalogText("Arch runs Manifest V3 extensions only."))
     }
 
     @Test func readsTheHostsThatTheManifestAsksFor() throws {

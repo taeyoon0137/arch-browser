@@ -65,7 +65,7 @@ public final class HookScriptRunner: HookScriptRunning {
             if let reason = instance.endReason { return reason.outcome }
             // The background document did not load; the instance is of no use.
             end(instance, as: .failed(error.localizedDescription))
-            return .failed(code: "loadFailed", message: "The script did not load: \(error.localizedDescription)")
+            return .failed(code: "loadFailed", message: localized("The script did not load: \(error.localizedDescription)"))
         }
         if let reason = instance.endReason { return reason.outcome }
         instance.context.begin(invocation)
@@ -248,7 +248,7 @@ public final class HookScriptRunner: HookScriptRunning {
     /// A failed run: a script that set no listener for the kind, a listener that threw or rejected, with what it threw, or another error of the delivery, with its description.
     static func outcome(of error: any Error, kind: BrowserEventKind) -> HookRunOutcome {
         switch error as? PluginError {
-        case .noListener?: return .failed(code: "noListener", message: "The script set no listener for \(kind.rawValue) with arch.events.on.")
+        case .noListener?: return .failed(code: "noListener", message: localized("The script set no listener for \(kind.rawValue) with arch.events.on."))
         case .listenerFailed(let message)?: return .failed(code: "scriptError", message: message)
         default: return .failed(code: "scriptError", message: error.localizedDescription)
         }

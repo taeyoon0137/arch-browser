@@ -8,8 +8,8 @@ import SwiftUI
 
 extension AIFeature {
     /// Sends what the user types under Features ▸ Test Prompt, so a provider and its fallbacks can be tried before any browsing feature uses them.
-    static let testPrompt = AIFeature(id: AIFeatureID(rawValue: "testPrompt"), name: "Test Prompt",
-                                      summary: "Sends the prompt above and shows the reply, to try a provider and its fallbacks.",
+    static let testPrompt = AIFeature(id: AIFeatureID(rawValue: "testPrompt"), name: localized("Test Prompt"),
+                                      summary: localized("Sends the prompt above and shows the reply, to try a provider and its fallbacks."),
                                       trigger: .user, data: .textOnly)
 }
 
@@ -23,6 +23,18 @@ struct AISettingsView: View {
         case activity = "Activity"
         case agents = "Agents"
         case agentHooks = "Hooks"
+
+        var title: String {
+            switch self {
+            case .providers: return localized("Providers")
+            case .features: return localized("Features")
+            case .sites: return localized("Sites")
+            case .usage: return localized("Usage")
+            case .activity: return localized("Activity")
+            case .agents: return localized("Agents")
+            case .agentHooks: return localized("Hooks")
+            }
+        }
     }
 
     final class Navigation: ObservableObject {
@@ -41,18 +53,18 @@ struct AISettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Page", selection: $navigation.page) {
-                ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || (hooks != nil && agents != nil)) }, id: \.self) { Text($0.rawValue) }
+            Picker(localized("Page"), selection: $navigation.page) {
+                ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || (hooks != nil && agents != nil)) }, id: \.self) { Text($0.title) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .accessibilityLabel("Page")
+            .accessibilityLabel(localized("Page"))
             .padding(.horizontal, 20)
             .padding(.top, 16)
             Form {
                 if settings.replacedUnreadableFile {
                     Section {
-                        Text("ai.json could not be read, so Arch renamed it ai.json.unreadable and started with new AI settings.")
+                        Text("ai.json could not be read, so Arch renamed it ai.json.unreadable and started with new AI settings.", bundle: .module)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -94,20 +106,20 @@ private struct AIFeaturesPage: View {
         Section {
             AIRoutePickers(settings: settings, feature: .defaultRoute, emptyChoice: nil)
         } header: {
-            Text("Default Model")
+            Text("Default Model", bundle: .module)
         } footer: {
-            formFootnote("Features you start, such as a question about a page, use these models unless they have their own. Features that run on their own never do.")
+            formFootnote(localized("Features you start, such as a question about a page, use these models unless they have their own. Features that run on their own never do."))
         }
         ForEach(service.features.filter { $0.routing == .stored }) { feature in
             Section {
-                Toggle("Use \(feature.name)", isOn: Binding(
+                Toggle(localized("Use \(feature.name)"), isOn: Binding(
                     get: { settings.route(for: feature.id).isEnabled },
                     set: { isOn in
                         var route = settings.route(for: feature.id)
                         route.isEnabled = isOn
                         settings.setRoute(route, for: feature.id)
                     }))
-                AIRoutePickers(settings: settings, feature: feature.id, emptyChoice: feature.trigger == .user ? "Same as Default Model" : "None")
+                AIRoutePickers(settings: settings, feature: feature.id, emptyChoice: feature.trigger == .user ? localized("Same as Default Model") : localized("None"))
                 if feature.id == AIFeature.testPrompt.id {
                     AITestPromptRows(service: service, settings: settings, task: $testPromptTask)
                 } else if let error = lastError(of: feature) {
@@ -115,15 +127,15 @@ private struct AIFeaturesPage: View {
                 }
                 if hooks.pausedFeatures.contains(feature.id) {
                     HStack {
-                        Text("Paused after \(AIHookCenter.failuresBeforePause) failed requests in a row.").foregroundStyle(.secondary)
+                        Text("Paused after \(AIHookCenter.failuresBeforePause) failed requests in a row.", bundle: .module).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Resume") { hooks.resume(feature.id) }
+                        Button(localized("Resume")) { hooks.resume(feature.id) }
                     }
                 }
             } header: {
                 Text(feature.name)
             } footer: {
-                formFootnote("\(feature.summary) \(Self.sentence(for: feature))")
+                formFootnote(localized("\(feature.summary) \(Self.sentence(for: feature))"))
             }
         }
         AIModelTierSections(settings: settings)
@@ -139,8 +151,8 @@ private struct AIFeaturesPage: View {
     /// What the feature sends, in words.
     private static func sentence(for feature: AIFeature) -> String {
         let kinds = AIDataKind.allCases.filter(feature.data.kinds.contains).map(\.sentenceName)
-        let sends = kinds.isEmpty ? "It sends text only." : "It sends \(ListFormatter.localizedString(byJoining: kinds)) with its requests."
-        return feature.trigger == .automatic ? "\(sends) It runs on its own." : sends
+        let sends = kinds.isEmpty ? localized("It sends text only.") : localized("It sends \(ListFormatter.localizedString(byJoining: kinds)) with its requests.")
+        return feature.trigger == .automatic ? localized("\(sends) It runs on its own.") : sends
     }
 }
 
@@ -155,15 +167,15 @@ private struct AIRoutePickers: View {
         let route = settings.route(for: feature)
         let options = settings.providers.flatMap { provider in provider.models.map { AIModelRef(provider: provider.id, model: $0.name) } }
         if options.isEmpty {
-            Text("Add a provider with a model under Providers first.").foregroundStyle(.secondary)
+            Text("Add a provider with a model under Providers first.", bundle: .module).foregroundStyle(.secondary)
         } else {
             ForEach(0..<min(route.models.count + 1, AIRoute.maximumModels), id: \.self) { slot in
                 let current = route.models[safe: slot]
                 // A model that has left its provider stays listed until the user picks another.
                 let choices = current.map { options.contains($0) ? options : options + [$0] } ?? options
-                Picker(slot == 0 ? "Model" : "Fallback \(slot)", selection: binding(slot)) {
+                Picker(slot == 0 ? localized("Model") : localized("Fallback \(slot)"), selection: binding(slot)) {
                     if slot > 0 || emptyChoice != nil {
-                        Text(slot == 0 ? emptyChoice ?? "None" : "None").tag(AIModelRef?.none)
+                        Text(slot == 0 ? emptyChoice ?? localized("None") : localized("None")).tag(AIModelRef?.none)
                     }
                     ForEach(choices, id: \.self) { ref in
                         Text(settings.title(of: ref)).tag(Optional(ref))
@@ -206,14 +218,14 @@ private struct AITestPromptRows: View {
     @Binding var task: Task<Void, Never>?
 
     var body: some View {
-        TextField("Prompt", text: $prompt, axis: .vertical)
+        TextField(localized("Prompt"), text: $prompt, axis: .vertical)
             .lineLimit(1...4)
         HStack {
             Spacer()
             if task != nil {
-                Button("Stop") { task?.cancel() }
+                Button(localized("Stop")) { task?.cancel() }
             } else {
-                Button("Send", action: send)
+                Button(localized("Send"), action: send)
                     .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !service.isAvailable(AIFeature.testPrompt.id))
             }
         }
@@ -237,26 +249,27 @@ private struct AITestPromptRows: View {
                 for try await event in service.stream(request) {
                     switch event {
                     case .waiting(.queued):
-                        status = "Waiting for a free request slot\u{2026}"
+                        status = localized("Waiting for a free request slot\u{2026}")
                     case .waiting(.rateLimited(let until)):
-                        status = "Waiting for the provider\u{2019}s rate limit until \(until.formatted(date: .omitted, time: .standard))\u{2026}"
+                        status = localized("Waiting for the provider\u{2019}s rate limit until \(until.formatted(date: .omitted, time: .standard))\u{2026}")
                     case .started(let ref):
                         model = ref
-                        status = "Answering: \(settings.title(of: ref))"
+                        status = localized("Answering: \(settings.title(of: ref))")
                     case .text(let text):
                         reply += text
                     case .usage(let usage):
-                        tokens = " \u{00B7} \(usage.inputTokens + usage.cachedInputTokens) input and \(usage.outputTokens) output tokens"
+                        tokens = localized(" \u{00B7} \(usage.inputTokens + usage.cachedInputTokens) input and \(usage.outputTokens) output tokens")
                     case .finished(let reason):
-                        let cut = reason == .lengthLimit ? " The reply reached the length limit." : ""
-                        status = "Answered by \(model.map(settings.title(of:)) ?? "the model")\(tokens).\(cut)"
+                        let cut = reason == .lengthLimit ? localized(" The reply reached the length limit.") : ""
+                        let answerer = model.map(settings.title(of:)) ?? localized("the model")
+                        status = localized("Answered by \(answerer)\(tokens).\(cut)")
                     case .toolCall:
                         break
                     }
                 }
-                if Task.isCancelled { status = "Stopped." }
+                if Task.isCancelled { status = localized("Stopped.") }
             } catch AIError.cancelled {
-                status = "Stopped."
+                status = localized("Stopped.")
             } catch {
                 status = settings.message(for: error)
                 isError = true
@@ -275,12 +288,12 @@ private struct AIModelTierSections: View {
     var body: some View {
         ForEach(AIModelTier.allCases, id: \.self) { tier in
             Section {
-                AIRoutePickers(settings: settings, feature: .tier(tier), emptyChoice: "None")
+                AIRoutePickers(settings: settings, feature: .tier(tier), emptyChoice: localized("None"))
             } header: {
-                Text("\(tier.title) Tier")
+                Text("\(tier.title) Tier", bundle: .module)
             } footer: {
                 formFootnote(tier == AIModelTier.allCases.first
-                             ? "\(Self.purpose(of: tier)) A request that names a tier, such as an agent hook\u{2019}s, uses its model and fallbacks; the features above use the models chosen for them. A tier without a model fails and never uses another tier or the default model."
+                             ? localized("\(Self.purpose(of: tier)) A request that names a tier, such as an agent hook\u{2019}s, uses its model and fallbacks; the features above use the models chosen for them. A tier without a model fails and never uses another tier or the default model.")
                              : Self.purpose(of: tier))
             }
         }
@@ -288,9 +301,9 @@ private struct AIModelTierSections: View {
 
     private static func purpose(of tier: AIModelTier) -> String {
         switch tier {
-        case .fast: return "For small, frequent tasks, where a quick, inexpensive model serves best."
-        case .standard: return "For everyday tasks that need more care than a quick, inexpensive model gives."
-        case .deep: return "For hard tasks that need the most capable model, at a higher cost and with slower replies."
+        case .fast: return localized("For small, frequent tasks, where a quick, inexpensive model serves best.")
+        case .standard: return localized("For everyday tasks that need more care than a quick, inexpensive model gives.")
+        case .deep: return localized("For hard tasks that need the most capable model, at a higher cost and with slower replies.")
         }
     }
 }
@@ -314,20 +327,20 @@ private struct AISitesPage: View {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.borderless)
-                    .help("Allow AI on this site")
-                    .accessibilityLabel("Allow AI on this site")
+                    .help(localized("Allow AI on this site"))
+                    .accessibilityLabel(localized("Allow AI on this site"))
                 }
             }
             HStack {
-                TextField("Site", text: $newSite, prompt: Text("example.org"))
+                TextField(localized("Site"), text: $newSite, prompt: Text(verbatim: "example.org"))
                     .onSubmit(add)
-                Button("Add", action: add)
+                Button(localized("Add"), action: add)
                     .disabled(AISitePattern(parsing: newSite) == nil)
             }
         } header: {
-            Text("AI Is Off on These Sites")
+            Text("AI Is Off on These Sites", bundle: .module)
         } footer: {
-            formFootnote("Nothing from these sites goes to any provider. A site includes its subdomains. Internal pages such as flags:// are always excluded.")
+            formFootnote(localized("Nothing from these sites goes to any provider. A site includes its subdomains. Internal pages such as flags:// are always excluded."))
         }
     }
 
@@ -339,8 +352,8 @@ private struct AISitesPage: View {
 
     private static func title(of site: AISitePattern) -> String {
         switch site {
-        case .fileScheme: return "Local files (file:)"
-        case .localNetwork: return "Local network and this Mac"
+        case .fileScheme: return localized("Local files (file:)")
+        case .localNetwork: return localized("Local network and this Mac")
         default: return site.value
         }
     }

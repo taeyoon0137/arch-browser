@@ -59,7 +59,7 @@ import Testing
         let profile = ChromiumProfile(folder: folder.url.appendingPathComponent("Default"), name: "Default", isLastUsed: true)
         let (barItems, folders) = try #require(try profile.bookmarks()).split()
         #expect(barItems.map(\.sourceID) == ["a", "k"])
-        #expect(folders.map(\.name) == ["Work", "Trips", "Other Bookmarks", "Other Bookmarks"])
+        #expect(folders.map(\.name) == ["Work", "Trips", catalogText("Other Bookmarks"), catalogText("Other Bookmarks")])
         #expect(folders.map(\.sourceID) == ["work", "trips", "other", "account-other"])
         #expect(folders.map { $0.items.map(\.sourceID) } == [["b"], ["t"], ["d"], ["l"]])
     }

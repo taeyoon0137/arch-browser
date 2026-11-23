@@ -351,7 +351,7 @@ private final class ListedPlugin: BuiltInPlugin {
         let everySite = [try MatchPattern("<all_urls>")]
         #expect(PluginGrant(permissions: [], sites: everySite, siteAccess: .whenInvoked).summaries == ["Run scripts on pages from every website", sentence])
         #expect(PluginGrant(permissions: [], sites: everySite).summaries == ["Run scripts on pages from every website"])
-        #expect(PluginGrant(permissions: [.clipboard], sites: [], siteAccess: .whenInvoked).summaries == ["Write text to the clipboard"])
+        #expect(PluginGrant(permissions: [.clipboard], sites: [], siteAccess: .whenInvoked).summaries == [catalogText("Write text to the clipboard")])
         #expect(PluginGrant(permissions: [], sites: everySite, siteAccess: .whenInvoked).confirmationReason(for: "A") == nil)
         #expect(PluginGrant(permissions: [.nativeMessaging], sites: everySite, siteAccess: .whenInvoked).confirmationReason(for: "A")
             == "let \u{201C}A\u{201D} exchange messages with apps on this Mac")

@@ -101,7 +101,7 @@ enum ClaudeCodeAgent {
         let help = try await AIAgentCommand.run(executable, ["--help"], environment: environment)
         let missing = missingFlags(inHelp: help.output)
         if !missing.isEmpty {
-            throw AIAgentToolError(detail: "Claude Code\(version.map { " \($0)" } ?? "") does not accept \(missing.joined(separator: ", ")). Update Claude Code in the terminal.")
+            throw AIAgentToolError(detail: localized("Claude Code\(version.map { " \($0)" } ?? "") does not accept \(missing.joined(separator: ", ")). Update Claude Code in the terminal."))
         }
         // The option is hidden from help. With no value, its parser reports a missing argument before it can start a model.
         let limit = try await AIAgentCommand.run(executable, ["--max-turns"], environment: environment)
@@ -166,32 +166,32 @@ struct ClaudeCodeStartCheck {
             let arch = servers.filter { $0["name"] as? String == ClaudeCodeAgent.serverName }
             if arch.count != 1 || arch.first?["status"] as? String != "connected" { disconnected = true }
         }
-        extra += servers.compactMap { $0["name"] as? String }.filter { session == nil || $0 != ClaudeCodeAgent.serverName }.map { "the server \($0)" }
+        extra += servers.compactMap { $0["name"] as? String }.filter { session == nil || $0 != ClaudeCodeAgent.serverName }.map { localized("the server \($0)") }
 
         // Skills, commands, plugins, and agent types.
         let skills = session?.skills
         let allowedSkills = skills.map { skills in Set(skills.names.map { "\(skills.plugin):\($0)" }) } ?? []
         let listedSkills = event["skills"] as? [String] ?? []
-        extra += listedSkills.filter { !allowedSkills.contains($0) }.map { "the skill \($0)" }
+        extra += listedSkills.filter { !allowedSkills.contains($0) }.map { localized("the skill \($0)") }
         let allowedCommands = skills == nil ? Set<String>() : Set(listedSkills).union(Self.reviewedCommands)
-        extra += (event["slash_commands"] as? [String] ?? []).filter { !allowedCommands.contains($0) }.map { "the command /\($0)" }
+        extra += (event["slash_commands"] as? [String] ?? []).filter { !allowedCommands.contains($0) }.map { localized("the command /\($0)") }
         for plugin in event["plugins"] as? [[String: Any]] ?? [] {
             let name = plugin["name"] as? String ?? "?"
             let path = plugin["path"] as? String
             let isReviewed = path == "builtin" && plugin["source"] as? String == "\(name)@builtin" && Self.reviewedPlugins.contains(name)
             let isSessionSkills = skills.map { name == $0.plugin && path.map(Self.resolved) == Self.resolved($0.folder.path) } ?? false
-            if !isReviewed && !isSessionSkills { extra.append("the plugin \(name)") }
+            if !isReviewed && !isSessionSkills { extra.append(localized("the plugin \(name)")) }
         }
-        extra += (event["agents"] as? [String] ?? []).filter { !Self.reviewedAgentTypes.contains($0) }.map { "the agent type \($0)" }
+        extra += (event["agents"] as? [String] ?? []).filter { !Self.reviewedAgentTypes.contains($0) }.map { localized("the agent type \($0)") }
 
         // Settings that must hold.
-        if let mode = event["permissionMode"] as? String, mode != "dontAsk" { extra.append("the permission mode \(mode)") }
-        if event["permissionMode"] == nil { extra.append("an unknown permission mode") }
-        if Self.hasMemory(event["memory_paths"]) { extra.append("its memory") }
-        if event["analytics_disabled"] as? Bool != true { extra.append("its telemetry") }
+        if let mode = event["permissionMode"] as? String, mode != "dontAsk" { extra.append(localized("the permission mode \(mode)")) }
+        if event["permissionMode"] == nil { extra.append(localized("an unknown permission mode")) }
+        if Self.hasMemory(event["memory_paths"]) { extra.append(localized("its memory")) }
+        if event["analytics_disabled"] as? Bool != true { extra.append(localized("its telemetry")) }
 
-        if !extra.isEmpty { return "Claude Code started with tools Arch did not ask for: \(extra.joined(separator: ", "))." }
-        if disconnected { return "Arch's tools did not connect." }
+        if !extra.isEmpty { return localized("Claude Code started with tools Arch did not ask for: \(extra.joined(separator: ", ")).") }
+        if disconnected { return localized("Arch's tools did not connect.") }
         return nil
     }
 
@@ -308,7 +308,7 @@ struct ClaudeCodeStreamDecoder {
         if subtype == "error_max_turns" {
             events.append(.turnEnded(.turnLimit))
         } else if object["is_error"] as? Bool == true || subtype != "success" {
-            let detail = (object["result"] as? String) ?? (object["errors"] as? [String])?.joined(separator: " ") ?? "Claude Code ended the turn with \(subtype ?? "an error")."
+            let detail = (object["result"] as? String) ?? (object["errors"] as? [String])?.joined(separator: " ") ?? localized("Claude Code ended the turn with \(subtype ?? localized("an error")).")
             events.append(.turnFailed(error(of: object, detail: detail)))
         } else {
             events.append(.turnEnded(reason == "aborted_streaming" ? .stopped : .completed))
@@ -339,8 +339,8 @@ struct ClaudeCodeStreamDecoder {
     static func rateLimitNotice(_ info: [String: Any]) -> String? {
         guard let status = info["status"] as? String, status != "allowed" else { return nil }
         let kind = (info["rateLimitType"] as? String).map { " (\($0.replacingOccurrences(of: "_", with: " ")))" } ?? ""
-        guard let reset = info["resetsAt"] as? Double else { return "Claude Code reports its usage limit\(kind): \(status)." }
+        guard let reset = info["resetsAt"] as? Double else { return localized("Claude Code reports its usage limit\(kind): \(status).") }
         let date = Date(timeIntervalSince1970: reset).formatted(date: .abbreviated, time: .shortened)
-        return "Claude Code reports its usage limit\(kind): \(status), until \(date)."
+        return localized("Claude Code reports its usage limit\(kind): \(status), until \(date).")
     }
 }

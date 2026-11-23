@@ -25,7 +25,7 @@ struct AddressPillView: View {
     /// The internal page's address, the page's site, the name of the extension whose page it is, or the placeholder with no tab open.
     private func host(extensionName: String?) -> String {
         if let page = windowModel.internalPage { return page.address }
-        guard let url else { return "Search or enter address" }
+        guard let url else { return localized("Search or enter address") }
         return extensionName ?? Self.siteName(of: url)
     }
 
@@ -36,7 +36,7 @@ struct AddressPillView: View {
 
     /// What VoiceOver reads for the site of an extension's page.
     static func accessibilityLabel(ofExtensionPage name: String) -> String {
-        "\(name), extension page"
+        localized("\(name), extension page")
     }
 
     /// The page's site as the address pill and the small window show it: its host without `www.`, a local file's name, or the whole address of a page without a host, such as `about:blank`.
@@ -80,15 +80,15 @@ struct AddressPillView: View {
             }
             .buttonStyle(.plain)
             .help(windowModel.internalPage?.address ?? url?.absoluteString ?? "")
-            .accessibilityLabel(pageLabel.isEmpty ? "Edit Address" : "Edit Address, \(pageLabel)")
+            .accessibilityLabel(pageLabel.isEmpty ? localized("Edit Address") : localized("Edit Address, \(pageLabel)"))
             if let tab, !windowModel.isSelectedPageCovered {
                 TemporaryEngineLabel(tab: tab)
             }
             LowPowerModeIndicator()
-            SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
+            SidebarIconButton(symbol: "square.and.arrow.up", label: localized("Share"), action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))
-            SidebarIconButton(symbol: "slider.horizontal.3", label: "Site Settings") { isShowingSiteSettings.toggle() }
+            SidebarIconButton(symbol: "slider.horizontal.3", label: localized("Site Settings")) { isShowingSiteSettings.toggle() }
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.siteSettingsButtonView))
                 .padding(.trailing, 4)
                 // The popover has its own background, so it draws in the window's appearance, not the one the sidebar may take for a strong tint, which a popover on the button itself would inherit.
@@ -115,7 +115,7 @@ struct TemporaryEngineLabel: View {
 
     static func explanation(for tab: Tab) -> String? {
         guard tab.isLoaded, tab.engineKind != tab.preferredEngine else { return nil }
-        return "This tab is temporarily using \(tab.engineKind.displayName) because its saved engine, \(tab.preferredEngine.displayName), was unavailable."
+        return localized("This tab is temporarily using \(tab.engineKind.displayName) because its saved engine, \(tab.preferredEngine.displayName), was unavailable.")
     }
 
     var body: some View {
@@ -217,18 +217,18 @@ struct SiteSettingsView: View {
                     WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)
                 }
                 // The card that the row opens says what goes, so this sentence is only the row's help.
-                SiteSettingsGroup("Site Data") {
-                    SiteSettingsRow(symbol: "trash", title: "Clear Site Data\u{2026}", help: "Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it.", role: .destructive, action: {
+                SiteSettingsGroup(localized("Site Data")) {
+                    SiteSettingsRow(symbol: "trash", title: localized("Clear Site Data\u{2026}"), help: localized("Removes the site\u{2019}s cookies and stored data from both engines and signs you out of it."), role: .destructive, action: {
                         close()
                         windowModel.confirmClearSiteData()
                     })
                     .disabled(!windowModel.canClearSiteData)
                 }
             }
-            SiteSettingsGroup("New Tabs", footnote: "Tabs that a page opens use that page\u{2019}s engine.") {
+            SiteSettingsGroup(localized("New Tabs"), footnote: localized("Tabs that a page opens use that page\u{2019}s engine.")) {
                 // The group's title says which tabs. “Engine for New Tabs” would leave the picker no room, so only VoiceOver reads it.
-                SiteSettingsRow(symbol: "plus.square.on.square", title: "Engine") {
-                    Picker("Engine for New Tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
+                SiteSettingsRow(symbol: "plus.square.on.square", title: localized("Engine")) {
+                    Picker(localized("Engine for New Tabs"), selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
                         ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
                     }
                     .pickerStyle(.segmented)
@@ -249,21 +249,21 @@ struct TabEngineSection: View {
 
     /// What switching does, or why the tab uses a temporary engine. WebKit gives the app no public way to let a page show notifications: a page's request is refused without asking the app, so Arch cannot tell whether a page asked, and a WebKit tab's note always says so.
     private var note: String {
-        let switching = TemporaryEngineLabel.explanation(for: tab) ?? "Switching loads the page again in the other engine."
-        return tab.engineKind == .webKit ? switching + " Websites can\u{2019}t show notifications in WebKit tabs." : switching
+        let switching = TemporaryEngineLabel.explanation(for: tab) ?? localized("Switching loads the page again in the other engine.")
+        return tab.engineKind == .webKit ? switching + " " + localized("Websites can\u{2019}t show notifications in WebKit tabs.") : switching
     }
 
     var body: some View {
-        SiteSettingsGroup("This Tab", footnote: note) {
-            SiteSettingsRow(symbol: "gearshape.2", title: "Engine") {
-                Picker("Engine for This Tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
+        SiteSettingsGroup(localized("This Tab"), footnote: note) {
+            SiteSettingsRow(symbol: "gearshape.2", title: localized("Engine")) {
+                Picker(localized("Engine for This Tab"), selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
                     ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)
             }
             if tab.preferredEngine != tab.engineKind {
                 SiteSettingsDivider()
-                SiteSettingsRow(symbol: "checkmark.circle", title: "Keep Using \(tab.engineKind.displayName)", action: {
+                SiteSettingsRow(symbol: "checkmark.circle", title: localized("Keep Using \(tab.engineKind.displayName)"), action: {
                     session.switchEngine(of: tab, to: tab.engineKind)
                 })
             }

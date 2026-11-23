@@ -84,13 +84,13 @@ public struct PluginManifest: Hashable, Sendable {
     public var aiDataSummary: String? {
         let listed = AIDataKind.allCases.filter(aiDataKinds.contains).map(\.sentenceName)
         guard !listed.isEmpty else { return nil }
-        return "Send \(ListFormatter.localizedString(byJoining: listed)) to the AI models you connected"
+        return localized("Send \(ListFormatter.localizedString(byJoining: listed)) to the AI models you connected")
     }
 
     /// The extension permissions as the sentence that the install sheet and Settings show, or nil without any.
     public var extensionPermissionsSummary: String? {
         guard !extensionPermissions.isEmpty else { return nil }
-        return "Use the extension APIs " + ListFormatter.localizedString(byJoining: extensionPermissions)
+        return localized("Use the extension APIs \(ListFormatter.localizedString(byJoining: extensionPermissions))")
     }
 }
 
@@ -163,16 +163,16 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     /// What the permission lets a plugin do, as a sentence that Settings shows.
     public var summary: String {
         switch self {
-        case .tabs: return "Read the titles and addresses of your tabs"
-        case .renameTabs: return "Suggest names for your tabs"
-        case .manageTabs: return "Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs"
-        case .clipboard: return "Write text to the clipboard"
-        case .nativeMessaging: return "Exchange messages with apps on this Mac"
-        case .ai: return "Send text to the AI models you connected"
-        case .downloads: return "Read the names, states, and sizes of your downloads"
-        case .renameDownloads: return "Rename completed downloads in this Persona"
-        case .notifications: return "Show notifications under the plugin's name"
-        case .network: return "Send requests to the listed hosts"
+        case .tabs: return localized("Read the titles and addresses of your tabs")
+        case .renameTabs: return localized("Suggest names for your tabs")
+        case .manageTabs: return localized("Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs")
+        case .clipboard: return localized("Write text to the clipboard")
+        case .nativeMessaging: return localized("Exchange messages with apps on this Mac")
+        case .ai: return localized("Send text to the AI models you connected")
+        case .downloads: return localized("Read the names, states, and sizes of your downloads")
+        case .renameDownloads: return localized("Rename completed downloads in this Persona")
+        case .notifications: return localized("Show notifications under the plugin's name")
+        case .network: return localized("Send requests to the listed hosts")
         }
     }
 }
@@ -188,7 +188,7 @@ public enum SiteAccess: String, Hashable, Sendable {
     public var summary: String? {
         switch self {
         case .listedSites: return nil
-        case .whenInvoked: return "Only in a tab where you use one of its commands, until the tab leaves the website"
+        case .whenInvoked: return localized("Only in a tab where you use one of its commands, until the tab leaves the website")
         }
     }
 }
@@ -252,7 +252,7 @@ public struct PluginGrant: Hashable, Sendable {
         PluginPermission.allCases.filter(permissions.contains).map { $0 == .network ? networkSummary : $0.summary } + sites.map(\.accessSummary) + siteAccessSummaries
     }
 
-    public var networkSummary: String { "Send requests to \(network.map(\.description).joined(separator: ", "))" }
+    public var networkSummary: String { localized("Send requests to \(network.map(\.description).joined(separator: ", "))") }
 
     /// The sentence of the site access after the sites' sentences, for `whenInvoked` with sites.
     public var siteAccessSummaries: [String] {
@@ -261,10 +261,10 @@ public struct PluginGrant: Hashable, Sendable {
 
     /// The reason that Touch ID or the login password states before Arch gives the grant to `pluginName`, at install and when a web extension asks while it runs, or nil when the grant needs no confirmation: access to every website and to native apps need it. A grant of every website with `whenInvoked` reaches a page only after the user runs one of the plugin's commands on it, so it needs none.
     public func confirmationReason(for pluginName: String) -> String? {
-        let access = [siteAccess == .listedSites && sites.contains(where: \.coversEverySite) ? "run scripts on every website" : nil,
-                      permissions.contains(.nativeMessaging) ? "exchange messages with apps on this Mac" : nil].compactMap { $0 }
+        let access = [siteAccess == .listedSites && sites.contains(where: \.coversEverySite) ? localized("run scripts on every website") : nil,
+                      permissions.contains(.nativeMessaging) ? localized("exchange messages with apps on this Mac") : nil].compactMap { $0 }
         guard !access.isEmpty else { return nil }
-        return "let \u{201C}\(pluginName)\u{201D} \(access.joined(separator: " and "))"
+        return localized("let \u{201C}\(pluginName)\u{201D} \(access.joined(separator: localized(" and ")))")
     }
 }
 

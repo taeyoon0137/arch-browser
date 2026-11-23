@@ -476,34 +476,34 @@ extension PluginError: LocalizedError {
     /// A user-facing explanation of the plugin failure.
     public var errorDescription: String? {
         switch self {
-        case let .permissionDenied(permission): return "The plugin may not \(permission.summary.prefix(1).lowercased() + permission.summary.dropFirst())."
-        case .stopped: return "The plugin has stopped."
-        case .noPage: return "The command needs a page."
+        case let .permissionDenied(permission): return localized("The plugin may not \(permission.summary.prefix(1).lowercased() + permission.summary.dropFirst()).")
+        case .stopped: return localized("The plugin has stopped.")
+        case .noPage: return localized("The command needs a page.")
         case let .invalidMatchPattern(text): return "“\(text)” is not a site pattern."
         case let .invalidShortcut(text): return "“\(text)” is not a shortcut."
-        case let .reservedKey(key): return "The storage key “\(key)” belongs to the plugin\u{2019}s settings."
-        case .quotaExceeded: return "The plugin has no room left for the value."
+        case let .reservedKey(key): return localized("The storage key “\(key)” belongs to the plugin\u{2019}s settings.")
+        case .quotaExceeded: return localized("The plugin has no room left for the value.")
         case let .invalidPackage(reason): return reason
         case let .unsupportedAPIVersion(version): return "The plugin needs a newer version of Arch, with plugin API version \(version)."
-        case .timedOut: return "The plugin did not answer in time."
+        case .timedOut: return localized("The plugin did not answer in time.")
         case let .invalidVersions(reason): return reason
-        case .closed: return "The plugin\u{2019}s Persona was deleted."
-        case .notGranted: return "The tab or space is not one this plugin or hook may reach."
-        case .noListener: return "The plugin\u{2019}s script set no listener for the event."
+        case .closed: return localized("The plugin\u{2019}s Persona was deleted.")
+        case .notGranted: return localized("The tab or space is not one this plugin or hook may reach.")
+        case .noListener: return localized("The plugin\u{2019}s script set no listener for the event.")
         case let .listenerFailed(message): return message
-        case .siteNotGranted: return "The page is not on a website this plugin may reach."
+        case .siteNotGranted: return localized("The page is not on a website this plugin may reach.")
         case let .invalidPageScript(reason): return reason
         case let .pageScriptFailed(message): return message
-        case .pageRunUnavailable: return "Arch cannot reach this tab\u{2019}s page for the plugin without your gesture now."
-        case let .invalidAddress(text): return "\u{201C}\(text)\u{201D} is not the address of a web page."
-        case .tooManyTabs: return "The plugin opened as many tabs within a minute as it may."
-        case .hostRefused: return "The plugin may not reach this network host."
-        case .networkUnavailable: return "The plugin's network request could not reach its host."
-        case .redirectRefused: return "The network redirect is outside the plugin's grant."
-        case .rateLimited: return "The plugin has made as many requests within a minute as it may."
-        case .responseTooLarge: return "The network response is too large."
-        case .invalidResponse: return "The network response is not UTF-8 text."
-        case .invalidRequest: return "The network request has an unsupported method, header, or body."
+        case .pageRunUnavailable: return localized("Arch cannot reach this tab\u{2019}s page for the plugin without your gesture now.")
+        case let .invalidAddress(text): return localized("\u{201C}\(text)\u{201D} is not the address of a web page.")
+        case .tooManyTabs: return localized("The plugin opened as many tabs within a minute as it may.")
+        case .hostRefused: return localized("The plugin may not reach this network host.")
+        case .networkUnavailable: return localized("The plugin's network request could not reach its host.")
+        case .redirectRefused: return localized("The network redirect is outside the plugin's grant.")
+        case .rateLimited: return localized("The plugin has made as many requests within a minute as it may.")
+        case .responseTooLarge: return localized("The network response is too large.")
+        case .invalidResponse: return localized("The network response is not UTF-8 text.")
+        case .invalidRequest: return localized("The network request has an unsupported method, header, or body.")
         }
     }
 }

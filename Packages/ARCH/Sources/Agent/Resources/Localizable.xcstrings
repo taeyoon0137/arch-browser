@@ -1,0 +1,2156 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@의 %1$@"
+          }
+        }
+      }
+    },
+    "%@ input and %@ output tokens" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "입력 토큰 %1$@개, 출력 토큰 %2$@개"
+          }
+        }
+      }
+    },
+    "%@ is not signed in." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 로그인되어 있지 않습니다."
+          }
+        }
+      }
+    },
+    "%@ runs scripts, and this access covers every script it runs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 앱은 스크립트를 실행하며, 이 접근 권한은 이 앱이 실행하는 모든 스크립트에 적용됩니다."
+          }
+        }
+      }
+    },
+    "%@ — %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ — %2$@"
+          }
+        }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "%@: the page changed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: 페이지가 변경됨"
+          }
+        }
+      }
+    },
+    "%@: timed out" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: 시간 초과"
+          }
+        }
+      }
+    },
+    "%@: you said no" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@: 거부함"
+          }
+        }
+      }
+    },
+    "%lld more requests wait after this one." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 요청 다음에 %lld개의 요청이 대기 중입니다."
+          }
+        }
+      }
+    },
+    "1 more request waits after this one." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 요청 다음에 1개의 요청이 대기 중입니다."
+          }
+        }
+      }
+    },
+    "A new space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 스페이스"
+          }
+        }
+      }
+    },
+    "A note for the agent (optional)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트에게 전할 메모(선택 사항)"
+          }
+        }
+      }
+    },
+    "A program is asking to use Arch" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로그램이 Arch 사용을 요청하고 있습니다"
+          }
+        }
+      }
+    },
+    "Access" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "접근 권한"
+          }
+        }
+      }
+    },
+    "Act in Agent Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 탭에서 작업"
+          }
+        }
+      }
+    },
+    "Agent" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트"
+          }
+        }
+      }
+    },
+    "Agent Tasks" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 작업"
+          }
+        }
+      }
+    },
+    "Agent Tasks is turned off" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 작업이 꺼져 있음"
+          }
+        }
+      }
+    },
+    "Agents (no sign-ins)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트(로그인 없음)"
+          }
+        }
+      }
+    },
+    "Allow" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용"
+          }
+        }
+      }
+    },
+    "Allow Downloads from This Site for This Session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션 동안 이 사이트에서 다운로드 허용"
+          }
+        }
+      }
+    },
+    "Allow Once" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한 번 허용"
+          }
+        }
+      }
+    },
+    "Allow for This Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭에서 허용"
+          }
+        }
+      }
+    },
+    "Allow for This Tab lets %@ rename this tab again without asking. A name you give the tab yourself always stays." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "‘이 탭에서 허용’을 선택하면 %@에서 묻지 않고 이 탭의 이름을 다시 변경할 수 있습니다. 직접 지정한 탭 이름은 항상 유지됩니다."
+          }
+        }
+      }
+    },
+    "Allow on %@ for This Session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션 동안 %@에서 허용"
+          }
+        }
+      }
+    },
+    "Allow on This Page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에서 허용"
+          }
+        }
+      }
+    },
+    "Allow on This Site for This Session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션 동안 이 사이트에서 허용"
+          }
+        }
+      }
+    },
+    "Allow “%@” to use Arch?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”에서 Arch를 사용하도록 허용하겠습니까?"
+          }
+        }
+      }
+    },
+    "Allowing asks for Touch ID or your login password." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용하려면 Touch ID 또는 로그인 암호가 필요합니다."
+          }
+        }
+      }
+    },
+    "Allow…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용…"
+          }
+        }
+      }
+    },
+    "An agent is waiting for you in Arch" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch에서 에이전트가 기다리고 있습니다"
+          }
+        }
+      }
+    },
+    "Another program tried to use this session’s access." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 프로그램이 이 세션의 접근 권한을 사용하려고 했습니다."
+          }
+        }
+      }
+    },
+    "Answer" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답변"
+          }
+        }
+      }
+    },
+    "Arch has no key from the Keychain to protect these settings." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch에 이 설정을 보호할 키체인 키가 없습니다."
+          }
+        }
+      }
+    },
+    "Arch’s terminal" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch 터미널"
+          }
+        }
+      }
+    },
+    "Ask Before Acting" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작업 전에 묻기"
+          }
+        }
+      }
+    },
+    "Asked you a question" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "질문함"
+          }
+        }
+      }
+    },
+    "Asked you to share a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 공유를 요청함"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "취소"
+          }
+        }
+      }
+    },
+    "Choose a model…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델 선택…"
+          }
+        }
+      }
+    },
+    "Choose a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 선택"
+          }
+        }
+      }
+    },
+    "Choose a tab for this session to read" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션에서 읽을 탭 선택"
+          }
+        }
+      }
+    },
+    "Choose an API-key model with tool calling, or sign in to Claude Code or Codex in Arch’s terminal." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 호출을 지원하는 API 키 모델을 선택하거나, Arch 터미널에서 Claude Code 또는 Codex에 로그인하세요."
+          }
+        }
+      }
+    },
+    "Close Agent Panel" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 패널 닫기"
+          }
+        }
+      }
+    },
+    "Close a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 닫기"
+          }
+        }
+      }
+    },
+    "Closed a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭을 닫음"
+          }
+        }
+      }
+    },
+    "Codex adds your own instructions from %@ to Arch’s sessions. Arch’s rules apply whatever the model was told." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex는 %@에 있는 사용자 지침을 Arch 세션에 추가합니다. 모델이 받은 지침과 관계없이 Arch의 규칙이 적용됩니다."
+          }
+        }
+      }
+    },
+    "Connect an agent model in Settings ▸ AI" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 ▸ AI에서 에이전트 모델 연결"
+          }
+        }
+      }
+    },
+    "Delete Session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 삭제"
+          }
+        }
+      }
+    },
+    "Delete Session?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션을 삭제하겠습니까?"
+          }
+        }
+      }
+    },
+    "Delete Session…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 삭제…"
+          }
+        }
+      }
+    },
+    "Deleted Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제된 페르소나"
+          }
+        }
+      }
+    },
+    "Deleted Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제된 스페이스"
+          }
+        }
+      }
+    },
+    "Deny" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "거부"
+          }
+        }
+      }
+    },
+    "Deny and Stop" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "거부 및 중단"
+          }
+        }
+      }
+    },
+    "Didn’t work" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실패함"
+          }
+        }
+      }
+    },
+    "Disconnect this client and deny its waiting requests. Its access stays." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 클라이언트의 연결을 끊고 대기 중인 요청을 거부합니다. 접근 권한은 유지됩니다."
+          }
+        }
+      }
+    },
+    "Do the step in the tab, then choose Done." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭에서 단계를 진행한 다음 완료를 선택하세요."
+          }
+        }
+      }
+    },
+    "Done" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "완료"
+          }
+        }
+      }
+    },
+    "Don’t Allow" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용 안 함"
+          }
+        }
+      }
+    },
+    "Don’t Attach This Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭 첨부 안 함"
+          }
+        }
+      }
+    },
+    "Don’t Share" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유 안 함"
+          }
+        }
+      }
+    },
+    "Duration" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기간"
+          }
+        }
+      }
+    },
+    "Effort" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "노력 수준"
+          }
+        }
+      }
+    },
+    "Ended" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "종료됨"
+          }
+        }
+      }
+    },
+    "Every program that runs in its shell can use this access too." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 셸에서 실행되는 모든 프로그램도 이 접근 권한을 사용할 수 있습니다."
+          }
+        }
+      }
+    },
+    "Failed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실패"
+          }
+        }
+      }
+    },
+    "For 24 Hours" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "24시간 동안"
+          }
+        }
+      }
+    },
+    "Hand Back" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "돌려주기"
+          }
+        }
+      }
+    },
+    "Included in your subscription" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "구독에 포함됨"
+          }
+        }
+      }
+    },
+    "It can follow which sites your tabs in the %@ Persona visit, as they visit them." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 페르소나의 탭이 방문하는 사이트를 방문할 때마다 확인할 수 있습니다."
+          }
+        }
+      }
+    },
+    "It can search your browsing history, which every Persona shares." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 페르소나가 공유하는 방문 기록을 검색할 수 있습니다."
+          }
+        }
+      }
+    },
+    "Keep Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 유지"
+          }
+        }
+      }
+    },
+    "Keychain error %d." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인 오류 %d."
+          }
+        }
+      }
+    },
+    "Listed the agent tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 탭 목록을 확인함"
+          }
+        }
+      }
+    },
+    "Listed the spaces" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스 목록을 확인함"
+          }
+        }
+      }
+    },
+    "Listed the tabs you shared" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유한 탭 목록을 확인함"
+          }
+        }
+      }
+    },
+    "Message the agent" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트에게 메시지 보내기"
+          }
+        }
+      }
+    },
+    "Mode" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모드"
+          }
+        }
+      }
+    },
+    "Model" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델"
+          }
+        }
+      }
+    },
+    "No eligible tabs to share in this Persona." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페르소나에 공유할 수 있는 탭이 없습니다."
+          }
+        }
+      }
+    },
+    "No shared tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유한 탭 없음."
+          }
+        }
+      }
+    },
+    "Not allowed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용되지 않음"
+          }
+        }
+      }
+    },
+    "Not answered" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답 없음"
+          }
+        }
+      }
+    },
+    "Open AI Settings" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 설정 열기"
+          }
+        }
+      }
+    },
+    "Open Arch to allow or deny it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용하거나 거부하려면 Arch를 여세요."
+          }
+        }
+      }
+    },
+    "Open Features" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기능 열기"
+          }
+        }
+      }
+    },
+    "Open Providers" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제공자 열기"
+          }
+        }
+      }
+    },
+    "Open a page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 열기"
+          }
+        }
+      }
+    },
+    "Open a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 열기"
+          }
+        }
+      }
+    },
+    "Opened a page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지를 엶"
+          }
+        }
+      }
+    },
+    "Opened a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭을 엶"
+          }
+        }
+      }
+    },
+    "Options" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "옵션"
+          }
+        }
+      }
+    },
+    "Pages it reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽는 페이지에 클라이언트를 겨냥한 텍스트가 있을 수 있습니다. 클라이언트가 Mac에서 명령을 실행할 수 있다면 페이지가 명령 실행을 유도할 수 있으며, Arch는 이를 막을 수 없습니다."
+          }
+        }
+      }
+    },
+    "Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나"
+          }
+        }
+      }
+    },
+    "Preview excerpt" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "발췌 미리 보기"
+          }
+        }
+      }
+    },
+    "Queue a message" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메시지 대기열에 추가"
+          }
+        }
+      }
+    },
+    "Queued" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대기 중"
+          }
+        }
+      }
+    },
+    "Raise this session to %@?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션을 %@ 수준으로 올리겠습니까?"
+          }
+        }
+      }
+    },
+    "Raise to %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 수준으로 올리기"
+          }
+        }
+      }
+    },
+    "Read Only" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽기 전용"
+          }
+        }
+      }
+    },
+    "Read the guide" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가이드를 읽음"
+          }
+        }
+      }
+    },
+    "Read the guide’s %@ topic" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가이드의 %@ 주제를 읽음"
+          }
+        }
+      }
+    },
+    "Read the page outline" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 개요를 읽음"
+          }
+        }
+      }
+    },
+    "Read the page text" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 텍스트를 읽음"
+          }
+        }
+      }
+    },
+    "Read the session’s details" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 세부 정보를 읽음"
+          }
+        }
+      }
+    },
+    "Reader answer" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽기 도우미 답변"
+          }
+        }
+      }
+    },
+    "Ready for your next message" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다음 메시지를 기다리는 중"
+          }
+        }
+      }
+    },
+    "Reattach Reviewed Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검토한 탭 다시 첨부"
+          }
+        }
+      }
+    },
+    "Remove" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제거"
+          }
+        }
+      }
+    },
+    "Reply…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답장…"
+          }
+        }
+      }
+    },
+    "Requested %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 요청함"
+          }
+        }
+      }
+    },
+    "Requested by" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요청한 곳"
+          }
+        }
+      }
+    },
+    "Retry" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 시도"
+          }
+        }
+      }
+    },
+    "Review tab address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검토할 탭 주소"
+          }
+        }
+      }
+    },
+    "Review tab: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검토할 탭: %@"
+          }
+        }
+      }
+    },
+    "Runs browser sessions on your connected model with Arch’s tools and permissions." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결한 모델로 Arch의 도구와 권한을 사용해 브라우저 세션을 실행합니다."
+          }
+        }
+      }
+    },
+    "Search history" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록 검색"
+          }
+        }
+      }
+    },
+    "See when tabs open, load, change, and close in %@, with their sites. Never their titles or pages." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 탭이 열리고, 불러오고, 변경되고, 닫히는 시점과 해당 사이트를 확인합니다. 제목이나 페이지는 확인하지 않습니다."
+          }
+        }
+      }
+    },
+    "Selected text" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 텍스트"
+          }
+        }
+      }
+    },
+    "Send" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보내기"
+          }
+        }
+      }
+    },
+    "Send Reply" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답장 보내기"
+          }
+        }
+      }
+    },
+    "Session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션"
+          }
+        }
+      }
+    },
+    "Session actions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 동작"
+          }
+        }
+      }
+    },
+    "Session details" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 세부 정보"
+          }
+        }
+      }
+    },
+    "Share" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유"
+          }
+        }
+      }
+    },
+    "Share Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 공유"
+          }
+        }
+      }
+    },
+    "Share reader excerpt" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽기 도우미 발췌 공유"
+          }
+        }
+      }
+    },
+    "Shared Tabs (%lld)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유한 탭(%lld)"
+          }
+        }
+      }
+    },
+    "Shared with this session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션과 공유됨"
+          }
+        }
+      }
+    },
+    "Show %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 보기"
+          }
+        }
+      }
+    },
+    "Show Larger" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "크게 보기"
+          }
+        }
+      }
+    },
+    "Show Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 보기"
+          }
+        }
+      }
+    },
+    "Show the tab this step used" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 단계에서 사용한 탭 보기"
+          }
+        }
+      }
+    },
+    "Show this tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭 보기"
+          }
+        }
+      }
+    },
+    "Shows the capture larger" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "캡처를 크게 표시합니다"
+          }
+        }
+      }
+    },
+    "Sign In" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인"
+          }
+        }
+      }
+    },
+    "Sites the agent works on: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트가 작업하는 사이트: %@"
+          }
+        }
+      }
+    },
+    "Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스"
+          }
+        }
+      }
+    },
+    "Start" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작"
+          }
+        }
+      }
+    },
+    "Start agent tasks on your AI subscription" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 구독으로 에이전트 작업 시작"
+          }
+        }
+      }
+    },
+    "Starting" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작하는 중"
+          }
+        }
+      }
+    },
+    "Steps that need you still ask in Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자가 필요한 단계는 여전히 Arch에서 묻습니다."
+          }
+        }
+      }
+    },
+    "Stop" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "중단"
+          }
+        }
+      }
+    },
+    "Stop Sharing" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유 중단"
+          }
+        }
+      }
+    },
+    "Stopped" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "중단됨"
+          }
+        }
+      }
+    },
+    "Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭"
+          }
+        }
+      }
+    },
+    "Tab %lld · %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 %1$lld · %2$@"
+          }
+        }
+      }
+    },
+    "Tab to share" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유할 탭"
+          }
+        }
+      }
+    },
+    "Take Over" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 제어"
+          }
+        }
+      }
+    },
+    "Tell the agent what to do instead" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대신 할 일을 에이전트에게 알려주세요"
+          }
+        }
+      }
+    },
+    "The Keychain did not record this change, so an earlier copy of agent.json would still open: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인에 이 변경 사항이 기록되지 않아 이전 agent.json 사본이 계속 열릴 수 있습니다: %@"
+          }
+        }
+      }
+    },
+    "The agent has no sites to work on yet." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트가 작업할 사이트가 아직 없습니다."
+          }
+        }
+      }
+    },
+    "The agent says:" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트의 말:"
+          }
+        }
+      }
+    },
+    "The agent then acts in its agent tabs on sites in scope without asking. Sensitive steps still ask." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그러면 에이전트가 범위 내 사이트의 에이전트 탭에서 묻지 않고 작업합니다. 민감한 단계는 여전히 묻습니다."
+          }
+        }
+      }
+    },
+    "The agent then asks before each action instead of being refused." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그러면 에이전트가 거부되는 대신 각 동작 전에 묻습니다."
+          }
+        }
+      }
+    },
+    "The agent wants to open %@ — %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트가 %1$@ 주소를 열려고 합니다 — %2$@."
+          }
+        }
+      }
+    },
+    "The attached page changed or is no longer available. Remove the attachment or reopen the composer for the current page." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "첨부한 페이지가 변경되었거나 더 이상 사용할 수 없습니다. 첨부를 제거하거나 현재 페이지에서 작성기를 다시 여세요."
+          }
+        }
+      }
+    },
+    "The client can read pages with your sign-ins in the %@ Persona." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클라이언트가 %@ 페르소나에서 로그인된 상태로 페이지를 읽을 수 있습니다."
+          }
+        }
+      }
+    },
+    "The client reads pages in the Agents Persona, which has no sign-ins until you sign in there." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클라이언트는 에이전트 페르소나에서 페이지를 읽으며, 이 페르소나에서 직접 로그인하기 전까지는 로그인 정보가 없습니다."
+          }
+        }
+      }
+    },
+    "The home folder's path is too long for the agent socket, and so is the temporary folder's." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "홈 폴더와 임시 폴더의 경로가 에이전트 소켓에 비해 너무 깁니다."
+          }
+        }
+      }
+    },
+    "The page changed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지가 변경됨"
+          }
+        }
+      }
+    },
+    "The page moved on" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지가 이동함"
+          }
+        }
+      }
+    },
+    "The page, with the element marked" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "요소가 표시된 페이지"
+          }
+        }
+      }
+    },
+    "The reply reached the output limit." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "응답이 출력 한도에 도달했습니다."
+          }
+        }
+      }
+    },
+    "The reviewed page changed or is no longer available." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검토한 페이지가 변경되었거나 더 이상 사용할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The selected model is no longer available. Choose another model in Options to continue." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 모델을 더 이상 사용할 수 없습니다. 계속하려면 옵션에서 다른 모델을 선택하세요."
+          }
+        }
+      }
+    },
+    "The source page changed or is no longer shared. Turn off Share reader excerpt to continue." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원본 페이지가 변경되었거나 더 이상 공유되지 않습니다. 계속하려면 ‘읽기 도우미 발췌 공유’를 끄세요."
+          }
+        }
+      }
+    },
+    "The steps of this client show here, with what Arch asks you." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 클라이언트의 단계와 Arch의 질문이 여기에 표시됩니다."
+          }
+        }
+      }
+    },
+    "The tool's limit of model requests for one message ended the turn." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메시지 하나에 대한 도구의 모델 요청 한도에 도달해 턴이 종료되었습니다."
+          }
+        }
+      }
+    },
+    "Thinking" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "생각"
+          }
+        }
+      }
+    },
+    "This access ends when this %@ process ends." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 %@ 프로세스가 끝나면 이 접근 권한도 끝납니다."
+          }
+        }
+      }
+    },
+    "This deletes “%@” and closes its remaining agent tabs. Tabs you kept stay open." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 세션을 삭제하고 남은 에이전트 탭을 닫습니다. 유지한 탭은 계속 열려 있습니다."
+          }
+        }
+      }
+    },
+    "This page contains text addressed to AI agents." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 페이지에 AI 에이전트를 대상으로 한 텍스트가 있습니다."
+          }
+        }
+      }
+    },
+    "This tab changed or is no longer available." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 탭이 변경되었거나 더 이상 사용할 수 없습니다."
+          }
+        }
+      }
+    },
+    "This task has ended" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 작업이 종료됨"
+          }
+        }
+      }
+    },
+    "This task needs attention" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 작업에 확인이 필요함"
+          }
+        }
+      }
+    },
+    "Timed out" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시간 초과"
+          }
+        }
+      }
+    },
+    "Tool’s default" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 기본값"
+          }
+        }
+      }
+    },
+    "Turn failed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "턴 실패"
+          }
+        }
+      }
+    },
+    "Turn on Agent Tasks in Settings ▸ AI ▸ Features to continue." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계속하려면 설정 ▸ AI ▸ 기능에서 에이전트 작업을 켜세요."
+          }
+        }
+      }
+    },
+    "Unavailable tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용할 수 없는 탭"
+          }
+        }
+      }
+    },
+    "Unrecognized tool" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알 수 없는 도구"
+          }
+        }
+      }
+    },
+    "Until Arch Quits" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch를 종료할 때까지"
+          }
+        }
+      }
+    },
+    "Until I Revoke It" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 해제할 때까지"
+          }
+        }
+      }
+    },
+    "Up to %lld agent runs a day, which Settings ▸ AI ▸ Agents can change." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "하루 최대 %lld회 에이전트 실행. 설정 ▸ AI ▸ 에이전트에서 변경할 수 있습니다."
+          }
+        }
+      }
+    },
+    "Use the Agents Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 페르소나 사용"
+          }
+        }
+      }
+    },
+    "Waiting for you" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자를 기다리는 중"
+          }
+        }
+      }
+    },
+    "Waiting for your decision" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "결정을 기다리는 중"
+          }
+        }
+      }
+    },
+    "Watch browser events" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "브라우저 이벤트 확인"
+          }
+        }
+      }
+    },
+    "What should the agent do?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트가 무엇을 할까요?"
+          }
+        }
+      }
+    },
+    "Why Arch asks" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 묻는 이유"
+          }
+        }
+      }
+    },
+    "Working" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작업 중"
+          }
+        }
+      }
+    },
+    "Working on your task" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작업을 진행하는 중"
+          }
+        }
+      }
+    },
+    "You are in control" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 제어 중"
+          }
+        }
+      }
+    },
+    "You declined" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "거부함"
+          }
+        }
+      }
+    },
+    "You have control" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 제어 중"
+          }
+        }
+      }
+    },
+    "You took over. The agent waits until you hand the session back." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "직접 제어하고 있습니다. 세션을 돌려줄 때까지 에이전트가 기다립니다."
+          }
+        }
+      }
+    },
+    "You: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "나: %@"
+          }
+        }
+      }
+    },
+    "Your answer" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "답변"
+          }
+        }
+      }
+    },
+    "a site you did not name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지정하지 않은 사이트"
+          }
+        }
+      }
+    },
+    "about %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "약 %@"
+          }
+        }
+      }
+    },
+    "allow %@ to %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에 다음 작업 허용: %2$@"
+          }
+        }
+      }
+    },
+    "an address no page showed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "어떤 페이지에도 표시되지 않은 주소"
+          }
+        }
+      }
+    },
+    "failed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실패함"
+          }
+        }
+      }
+    },
+    "give “%@” access to its agent tools" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”에 에이전트 도구 접근 권한 부여"
+          }
+        }
+      }
+    },
+    "not available in this session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션에서 사용할 수 없음"
+          }
+        }
+      }
+    },
+    "on a site you did not name" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지정하지 않은 사이트"
+          }
+        }
+      }
+    },
+    "reached the call limit" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호출 한도에 도달함"
+          }
+        }
+      }
+    },
+    "refused" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "거부됨"
+          }
+        }
+      }
+    },
+    "refused by an Arch rule" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch 규칙에 따라 거부됨"
+          }
+        }
+      }
+    },
+    "stopped with the turn" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "턴과 함께 중단됨"
+          }
+        }
+      }
+    },
+    "the page changed" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지가 변경됨"
+          }
+        }
+      }
+    },
+    "the tab is gone" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭이 사라짐"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

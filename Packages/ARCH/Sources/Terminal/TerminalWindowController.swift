@@ -29,7 +29,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         scrollView.autohidesScrollers = true
         scrollView.backgroundColor = .textBackgroundColor
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 460), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Terminal"
+        window.title = localized("Terminal")
         window.contentView = scrollView
         window.contentMinSize = NSSize(width: 320, height: 160)
         window.isReleasedWhenClosed = false
@@ -87,7 +87,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         scrollView.documentView = view
         view.updateLayout()
         window?.makeFirstResponder(view)
-        window?.title = "Terminal"
+        window?.title = localized("Terminal")
         let terminal: PseudoTerminal
         do {
             terminal = try PseudoTerminal(size: screen.size)
@@ -99,7 +99,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
         terminal.onOutput = { [weak self, weak view] data in
             screen.feed(data)
             view?.screenDidChange()
-            self?.window?.title = screen.title.isEmpty ? "Terminal" : screen.title
+            self?.window?.title = screen.title.isEmpty ? localized("Terminal") : screen.title
             self?.scheduleTyping()
         }
         // The window keeps the last output readable, such as a sign-in code.
@@ -120,7 +120,7 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
     /// A program that runs in front, such as a tool in the middle of a sign-in, ends with the window, so the user confirms first.
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard terminal?.hasRunningProgram == true, !closesWithRunningProgram else { return true }
-        let alert = Self.runningProgramAlert(message: "Close the terminal?", action: "Close")
+        let alert = Self.runningProgramAlert(message: localized("Close the terminal?"), action: localized("Close"))
         alert.beginSheetModal(for: sender) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             self?.closesWithRunningProgram = true
@@ -152,9 +152,9 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
     private static func runningProgramAlert(message: String, action: String) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = message
-        alert.informativeText = "The program running in the terminal will stop."
+        alert.informativeText = localized("The program running in the terminal will stop.")
         alert.addButton(withTitle: action)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Cancel"))
         return alert
     }
 }

@@ -150,7 +150,7 @@ struct UnavailableWebExtensionRuntimeTests {
         let runtime = WebExtensionRuntime(persona: UUID(), host: RecordingHost(), nativeMessagingHosts: folder.url)
         let manager = PluginManager.withWebExtensions(runtime, in: folder)
         let installed = try await manager.installEverything(from: sampleExtensionFolder)
-        #expect(installed.unavailability == "Web extensions need macOS 15.4 or later.")
+        #expect(installed.unavailability == catalogText("Web extensions need macOS 15.4 or later."))
         #expect(manager.contributions.paletteCommands(matching: installed.manifest.name).isEmpty)
         try await WebKitProfile.run { profile in
             #expect(runtime.actions(for: profile.makeTab()).isEmpty)

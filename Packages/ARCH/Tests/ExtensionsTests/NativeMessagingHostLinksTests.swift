@@ -615,11 +615,11 @@ struct ProofGateTests {
         // Staging looks for native apps first.
         let staged = try await launch.manager.stage(unproven.package)
         #expect(links.hasLooked && linkExists)
-        #expect(staged.engineNotes == ["Runs on WebKit and Chromium tabs."])
-        #expect(launch.manager.engineNotes(of: staged) == ["Runs on WebKit tabs.", gateSentence()])
+        #expect(staged.engineNotes == [catalogText("Runs on %@ tabs.", ListFormatter.localizedString(byJoining: ["WebKit", "Chromium"]), module: "Plugins")])
+        #expect(launch.manager.engineNotes(of: staged) == [catalogText("Runs on %@ tabs.", "WebKit", module: "Plugins"), gateSentence()])
         launch.manager.discard(staged)
         let proven = try await launch.manager.stage(signed("Signed").file)
-        #expect(launch.manager.engineNotes(of: proven) == ["Runs on WebKit and Chromium tabs."])
+        #expect(launch.manager.engineNotes(of: proven) == [catalogText("Runs on %@ tabs.", ListFormatter.localizedString(byJoining: ["WebKit", "Chromium"]), module: "Plugins")])
         launch.manager.discard(proven)
         launch.manager.close()
     }

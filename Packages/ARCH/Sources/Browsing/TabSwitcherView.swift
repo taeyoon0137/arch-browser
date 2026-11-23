@@ -44,7 +44,7 @@ struct TabSwitcherView: View {
         // The switcher follows the keyboard only; Control-clicks go on to the page as context clicks.
         .allowsHitTesting(false)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Tab Switcher")
+        .accessibilityLabel(localized("Tab Switcher"))
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 withAnimation(.easeOut(duration: 0.12)) { isShown = true }
