@@ -619,18 +619,19 @@ import Terminal
     @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
     @objc private func newAgentTask() {
-        guard agents?.agentModels().isEmpty == false else {
-            PreferencesWindowController.shared.showAgentModelSettings(.providers)
-            return
-        }
+        guard agents?.agentModels().isEmpty == false else { return showAgentModelSetup() }
         (session.activeWindow ?? frontSidebarTarget()).showAgentComposer()
     }
+    /// An open panel hides, and a draft shows, also once no model is connected.
     @objc private func toggleAgentPanel() {
-        guard agents?.agentModels().isEmpty == false else {
-            PreferencesWindowController.shared.showAgentModelSettings(.providers)
-            return
-        }
-        (session.activeWindow ?? frontSidebarTarget()).toggleAgentPanel()
+        let window = session.activeWindow ?? frontSidebarTarget()
+        guard window.canToggleAgentPanel else { return showAgentModelSetup() }
+        window.toggleAgentPanel()
+    }
+    /// Leads to the setting that makes an agent model available, as the composer's own setup does: Features while Agent Tasks is off, Providers otherwise.
+    private func showAgentModelSetup() {
+        let isEnabled = AIService.shared.settings.route(for: .agent).isEnabled
+        PreferencesWindowController.shared.showAgentModelSettings(isEnabled ? .providers : .features)
     }
     /// The agents' service pauses the agent hooks too (`AgentService.didStopAll`).
     @objc private func stopAllAgents() {
