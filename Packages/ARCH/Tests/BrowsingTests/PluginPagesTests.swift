@@ -1,4 +1,7 @@
-// Plugins' page scripts in the session's tabs (`docs/plugins.md`, Page scripts): a tab where a `whenInvoked` plugin has access takes the plugin's scripts after its Persona's, except while its web contents shares its script list with another tab's, as on WebKit a page that it opens does, and a web contents that the tab gets afterwards takes none of them.
+// Tests plugins' page scripts in the session's tabs (`docs/plugins.md`, Page scripts).
+// A tab where a `whenInvoked` plugin has access takes the plugin's scripts after its Persona's scripts.
+// It omits them while its web contents shares its script list with another tab's, as on WebKit when it opens a page.
+// A web contents that the tab gets afterward takes none of the plugin's scripts.
 import ARCHEngine
 import Foundation
 import Plugins
@@ -48,7 +51,8 @@ private final class TabAccessPlugin: BuiltInPlugin {
         #expect(accessWorlds(of: page) == [world])
         #expect(page.pageScripts == TabUnloading.pageScripts(withPluginScripts: plugins.pageScripts(forTab: tab.id)))
 
-        // A page that the tab opens shares its list, so the list leaves out the access's scripts, which the opened page's documents would run too.
+        // A page that the tab opens shares its list.
+        // The list leaves out the access's scripts, which the opened page's documents would also run.
         let opened = PageDouble(url: URL(string: "https://example.org/opened"))
         opened.listOwner = page
         tab.webContents(page, didCreateNewWebContents: opened, targetURL: opened.url, disposition: .newBackgroundTab)
@@ -61,7 +65,8 @@ private final class TabAccessPlugin: BuiltInPlugin {
         #expect(session.closeTab(openedTab))
         #expect(accessWorlds(of: page) == [world])
 
-        // A web contents that the tab gets afterwards ends the access, so a later change to the tabs gives it none of its scripts.
+        // A web contents that the tab gets afterward ends the access.
+        // A later change to the tabs gives it none of the access's scripts.
         let replacement = PageDouble(url: URL(string: "https://example.org/x"))
         tab.webContents(page, didCreateReplacement: replacement)
         #expect(tab.webContents === replacement)

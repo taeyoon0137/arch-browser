@@ -1,4 +1,17 @@
-// The session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions and Personas): a tab that a plugin opens goes to the preferred or the named space of its Persona in its engine, and its opening, selection, and first load carry the plugin's cause; a selection goes to the window of the tab's Persona that shows it, else the front main window on its space, else the front main window of its Persona, and never to a window of another Persona; a tab that a plugin opens downloads no file that its address points at, and its pages' downloads ask until the user acts in it; a plugin's close posts the `plugin` reason with its cause and keeps ⌘Z to the user's own closes; a plugin's move keeps a tab pinned or open and in its Persona, takes it out of its split view to another space, where a window that selects the tab follows it with the plugin's cause, and leaves a live folder's item tabs in their folder; a plugin's pin and unpin follow Pin Tab and Unpin Tab and leave favorites' and live folders' tabs as they are; an open names a space of another Persona as not granted and a deleted Persona as closed; and a selection of the tab that a window has selected already leaves the window's internal page and palette.
+// Tests the session's side of plugins' tab calls (`SessionPluginBrowserHost`, `docs/plugins.md`, Permissions and Personas).
+// A tab that a plugin opens goes to the preferred or named space of its Persona in its engine.
+// Its opening, selection, and first load carry the plugin's cause.
+// A selection goes to the window of the tab's Persona that shows it.
+// Otherwise, it goes to the front main window on its space, or the front main window of its Persona if no window shows the space.
+// It never goes to another Persona's window.
+// A tab that a plugin opens downloads no file at its address. Its pages ask to download until the user acts in it.
+// A plugin's close posts the `plugin` reason with its cause. It keeps ⌘Z to the user's own closes.
+// A plugin's move keeps a tab pinned or open and in its Persona.
+// Moving to another space takes it out of its split view. A window that selects the tab follows it with the plugin's cause.
+// A move leaves a live folder's item tabs in their folder.
+// A plugin's pin and unpin follow Pin Tab and Unpin Tab. They leave favorites' and live folders' tabs unchanged.
+// An open reports another Persona's space as not granted and a deleted Persona as closed.
+// Selecting the window's selected tab leaves its internal page and palette open.
 import ARCHEngine
 import Events
 import Foundation
@@ -20,7 +33,12 @@ import Testing
         try check(session, session.pluginBrowserHost)
     }
 
-    /// A tab that a plugin opens goes where a new tab of its Persona goes, the last main window's space while that is the Persona's, else the Persona's first space, or to the space the options name, in their engine, and is selected in a window of its Persona only. Its opening, its selection with the space switch it brings, and its first load carry the plugin's cause, and its next load none; so do a close and the selection that it moves to another tab.
+    /// A tab that a plugin opens goes where a new tab of its Persona goes, or to the space the options name, in their engine.
+    /// The default is the last main window's space if it belongs to the Persona, or the Persona's first space otherwise.
+    /// Only a window of its Persona selects it.
+    /// Its opening, selection and resulting space switch, and first load carry the plugin's cause.
+    /// Its next load carries no cause.
+    /// A close and the selection it moves to another tab also carry the plugin's cause.
     @Test func aPluginsTabOpensInItsPersonasSpaceWithItsCause() throws {
         try withSession { session, host in
             let home = try #require(session.spaces.first)
@@ -46,7 +64,8 @@ import Testing
 
             let behind = try host.openTab(address, PluginOpenTabOptions(spaceID: side.id, select: false), in: home.resolvedPersonaID, cause: cause)
             #expect(session.tabs.first { $0.id == behind }?.spaceID == side.id && homeWindow.selectedTabID == opened.id)
-            // The front main window is the home Persona's, so the work Persona's tab opens in its first space, in the window on it.
+            // The front main window belongs to the home Persona.
+            // The work Persona's tab opens in its first space, in the window on that space.
             let workTab = try host.openTab(address, PluginOpenTabOptions(), in: work.id, cause: cause)
             #expect(session.tabs.first { $0.id == workTab }?.spaceID == research.id && workWindow.selectedTabID == workTab)
             #expect(homeWindow.selectedTabID == opened.id && homeWindow.currentSpaceID == home.id)
@@ -63,7 +82,12 @@ import Testing
         }
     }
 
-    /// A selection goes to the window of the tab's Persona that shows it, else to the front main window on its space, else to the front main window of its Persona, which then shows the tab's space; a favorite's tab of another Persona goes to that Persona's window, so the front window keeps its Persona / Space, and without a window of the Persona nothing changes.
+    /// A selection goes to the window of the tab's Persona that shows it.
+    /// Otherwise, it goes to the front main window on its space, or the front main window of its Persona if no window shows the space.
+    /// That window then shows the tab's space.
+    /// A favorite's tab of another Persona goes to that Persona's window.
+    /// The front window keeps its Persona / Space.
+    /// Nothing changes without a window of the Persona.
     @Test func aPluginsSelectionStaysInAWindowOfTheTabsPersona() throws {
         try withSession { session, host in
             let home = try #require(session.spaces.first)
@@ -81,7 +105,8 @@ import Testing
             behindWindow.selectTab(shownBehind.id)
             let frontSelection = frontWindow.selectedTabID
 
-            // The window that shows the tab keeps it, and the front window on its space does not take it.
+            // The window that shows the tab keeps it.
+            // The front window on its space does not take it.
             host.selectTab(shownBehind.id, cause: cause)
             #expect(frontWindow.selectedTabID == frontSelection && behindWindow.selectedTabID == shownBehind.id)
             host.selectTab(inHome.id, cause: cause)
@@ -90,7 +115,7 @@ import Testing
             host.selectTab(inSide.id, cause: cause)
             #expect(frontWindow.selectedTabID == inSide.id && frontWindow.currentSpaceID == side.id && behindWindow.currentSpaceID == home.id)
 
-            // A favorite's tab of the work Persona goes to the work window, though the front window is in front.
+            // A favorite's tab of the work Persona goes to the work window, even while another window is in front.
             let favorite = Favorite(url: URL(string: "https://example.org/favorite")!, title: "Favorite", personaID: work.id)
             session.addFavorites([favorite], in: work.id)
             let favoriteTab = session.openTab(for: favorite)
@@ -104,7 +129,9 @@ import Testing
         }
     }
 
-    /// A plugin's tab whose address turns out to be a file downloads nothing, as a restored tab does not fetch its file again, while the user's own tab downloads it; the plugin's tab's pages ask before their first download.
+    /// A plugin's tab downloads nothing if its address turns out to be a file, just as a restored tab does not fetch its file again.
+    /// The user's own tab downloads the file.
+    /// Pages in the plugin's tab ask before their first download.
     @Test func aTabThatAPluginOpensDownloadsNothingWithoutTheUser() throws {
         try withSession { session, host in
             let space = try #require(session.spaces.first)
@@ -119,7 +146,11 @@ import Testing
         }
     }
 
-    /// A plugin's close of an open tab joins the closed list and posts `tabClosed` with the reason `plugin` and its cause, and ⌘Z then reopens none of the user's earlier closes, so it never reopens the plugin's tab in place of the user's; Reopen Last Closed Tab still does. A pinned tab that it unloads leaves the closed list and ⌘Z as they were.
+    /// A plugin's close of an open tab adds it to the closed list.
+    /// It posts `tabClosed` with the reason `plugin` and its cause.
+    /// ⌘Z then reopens none of the user's earlier closes, so it never reopens the plugin's tab in place of the user's.
+    /// Reopen Last Closed Tab still reopens the plugin's tab.
+    /// Unloading a pinned tab leaves the closed list and ⌘Z unchanged.
     @Test func aPluginsCloseKeepsUndoCloseToTheUsersCloses() throws {
         try withSession { session, host in
             let space = try #require(session.spaces.first)
@@ -143,7 +174,9 @@ import Testing
         }
     }
 
-    /// An open in a space of another Persona is not granted, and one for a Persona that is gone is closed, whether or not it names a space, and neither opens a tab.
+    /// An open in another Persona's space reports not granted.
+    /// An open for a missing Persona reports closed, whether or not it names a space.
+    /// Neither opens a tab.
     @Test func anOpenTellsAForeignSpaceFromAPersonaThatIsGone() throws {
         try withSession { session, host in
             let home = try #require(session.spaces.first)
@@ -163,7 +196,12 @@ import Testing
         }
     }
 
-    /// A plugin's move puts a tab next to another of its list, in that tab's space and folder, or last in a space's list, and keeps it pinned or open; a move to another space takes the tab out of its split view, whose other panes stay together, and has the window that selects the tab follow it there, with the space switch carrying the plugin's cause. A favorite's tab neither moves nor takes a tab next to it, nor does a tab of the other list, and a space of another Persona is not granted.
+    /// A plugin's move puts a tab next to another in its list, in that tab's space and folder, or last in a space's list.
+    /// The tab stays pinned or open.
+    /// A move to another space takes the tab out of its split view. The other panes stay together.
+    /// The window that selects the tab follows it there. The space switch carries the plugin's cause.
+    /// A favorite's tab neither moves nor takes a tab next to it. Neither does a tab in the other list.
+    /// A space of another Persona is not granted.
     @Test func aPluginsMoveKeepsTheTabsListAndPersona() throws {
         try withSession { session, host in
             let home = try #require(session.spaces.first)
@@ -185,13 +223,15 @@ import Testing
             #expect(open(in: home) == [third.id, first.id, second.id])
             #expect(try host.moveTab(third.id, to: .end(ofSpace: nil), cause: cause))
             #expect(open(in: home) == [first.id, second.id, third.id])
-            // The tab stays open beside a pinned tab, and a pinned tab stays pinned in another space.
+            // The tab stays open beside a pinned tab.
+            // A pinned tab stays pinned in another space.
             #expect(try !host.moveTab(first.id, to: .after(pinned.id), cause: cause))
             #expect(try host.moveTab(pinned.id, to: .end(ofSpace: side.id), cause: cause))
             #expect(pinned.isPinned && pinned.spaceID == side.id && session.tabsOutsideFolders(in: side.id, pinned: true).map(\.id) == [pinned.id])
             #expect(events.isEmpty)
 
-            // The window that selects the tab follows it to the space it moves to, out of its split view, and a move next to a tab in a folder takes its folder.
+            // The window that selects the tab follows it to its new space, out of its split view.
+            // A move next to a tab in a folder takes that folder.
             window.selectTab(first.id)
             session.setSplitView([first.id, second.id, third.id], ofSpace: home.id)
             let folder = session.makeFolder(in: side.id, pinned: false)
@@ -219,7 +259,11 @@ import Testing
         }
     }
 
-    /// A plugin pins and unpins a space's tab as Pin Tab and Unpin Tab do: pinning saves the page the tab shows and takes it out of its folder, unpinning forgets the saved page, so that the plugin's close then removes the tab rather than unloading it; a tab already as asked stays, and a favorite's tab and a live folder's item tab keep their state.
+    /// A plugin pins and unpins a space's tab as Pin Tab and Unpin Tab do.
+    /// Pinning saves the page the tab shows. It takes the tab out of its folder.
+    /// Unpinning forgets the saved page, so the plugin's close then removes the tab rather than unloading it.
+    /// A tab already in the requested state stays unchanged.
+    /// A favorite's tab and a live folder's item tab keep their state.
     @Test func aPluginPinsAndUnpinsAsTheUserDoes() throws {
         try withSession { session, host in
             let space = try #require(session.spaces.first)
@@ -245,7 +289,8 @@ import Testing
         }
     }
 
-    /// A plugin's selection of the tab that the window has selected already leaves the internal page and the palette that the user has open there, while one of another tab selects it as any selection does.
+    /// A plugin's selection of the window's selected tab leaves the user's internal page and palette open.
+    /// Selecting another tab selects it as usual.
     @Test func selectingTheSelectedTabLeavesTheWindowAsItIs() throws {
         try withSession { session, host in
             let space = try #require(session.spaces.first)

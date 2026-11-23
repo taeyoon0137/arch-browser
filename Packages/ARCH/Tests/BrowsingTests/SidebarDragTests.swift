@@ -33,7 +33,7 @@ import Testing
             drag.begin(.tab(UUID()), frame: CGRect(x: 11, y: 300, width: 218, height: 36), grabbedAt: CGPoint(x: 120, y: 310), owner: owner)
             drag.settle(into: CGRect(x: 11, y: y, width: 218, height: 36), within: list, ownedBy: owner)
         }
-        // A slot above the visible list takes the row to its top edge, where it fades out, and one below it to its bottom edge.
+        // A slot above the visible list takes the row to its top edge, where it fades out. A slot below the list takes the row to its bottom edge.
         release(into: -60, within: list)
         #expect(drag.isSettling && drag.isFadingOut && drag.frame == CGRect(x: 11, y: 40, width: 218, height: 36))
         drag.end(ownedBy: owner)
@@ -41,7 +41,7 @@ import Testing
         release(into: 560, within: list)
         #expect(drag.isFadingOut && drag.frame.minY == 504)
         drag.end(ownedBy: owner)
-        // A slot whose middle shows, partly under the edge, takes the row, which does not fade.
+        // A slot whose middle shows takes the row, even partly under the edge. The row does not fade.
         release(into: 30, within: list)
         #expect(!drag.isFadingOut && drag.frame.minY == 30)
         drag.end(ownedBy: owner)
@@ -100,7 +100,7 @@ import Testing
         #expect(drag.favoriteDestination(for: tab, in: space, at: point, session: session) == space.id)
         #expect(drag.favoriteDestination(for: tab, in: otherSpace, at: point, session: session) == nil)
         #expect(drag.favoriteDestination(for: tab, in: space, at: .zero, session: session) == nil)
-        // A page that is a favorite already is no destination.
+        // A page that is already a favorite cannot be a destination.
         session.addFavorite(tab)
         #expect(drag.favoriteDestination(for: tab, in: space, at: point, session: session) == nil)
         drag.end(ownedBy: owner)
@@ -173,7 +173,7 @@ import Testing
         #expect(session.folderTree.rows(in: space.id, pinned: true).isEmpty)
         session.moveTabToListEnd(tab.id, pinned: true)
         #expect(tab.isPinned && tab.savedPage?.url == tab.url && tab.webContents === contents)
-        // Another Persona's tab is no target.
+        // Another Persona's tab cannot be a target.
         session.moveTab(tab.id, to: foreign)
         #expect(tab.spaceID == space.id && tab.personaID == space.resolvedPersonaID && !foreign.isPinned)
         session.moveTabToListEnd(tab.id, pinned: false)

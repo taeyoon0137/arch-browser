@@ -1,4 +1,4 @@
-// The browser event source on fake web contents: a new tab but no restored tabs, an agent folder's tab as `agent` with its owner, a name from code under the suggested name rules with its cause, also when it comes while a WebKit navigation waits to commit, the hook host's tabs by their committed addresses, closes with each reason, `isRestore` and `isFirstLoadAfterOpen`, address changes with the previous address, only for addresses the tab commits, title changes from the input that supplies the shown name but none when it stays, a hook's name kept and no title change for an address the tab leaves before it commits, a document's address and the end of an earlier name at its commit, selections and space switches with a Persona change but none while windows are restored, a finished download, and `Tab.pendingCause` on the next address change and load, dropped by a load that ends without one.
+// The browser event source uses fake web contents. It reports a new tab but no restored tabs. It reports an agent folder's tab as `agent` with its owner. A name from code follows the suggested name rules and carries its cause, even while a WebKit navigation waits to commit. The hook host's tabs use their committed addresses. The source reports closes with each reason, `isRestore`, and `isFirstLoadAfterOpen`. Address changes include the previous address and report only addresses the tab commits. Title changes come from the input that supplies the shown name. An unchanged name posts no title change. An address the tab leaves before committing keeps the hook's name and posts no title change. A commit reports the document's address and ends an earlier name. The source reports selections and space switches with a Persona change, but none while restoring windows. It reports a finished download. `Tab.pendingCause` applies to the next address change and load. A load that ends without one drops it.
 import AppKit
 import ARCHEngine
 import Combine
@@ -54,7 +54,7 @@ import Testing
         #expect(BrowserEventSource.kind(of: imported) == .pinned)
     }
 
-    /// An agent folder's tab posts as `agent` with its folder's owner, which only a filter that names the kind receives, and as the user's once it leaves the folder.
+    /// An agent folder's tab posts as `agent` with its folder's owner. Only a filter that names the kind receives it. Once the tab leaves the folder, it posts as the user's.
     @Test func anAgentFoldersTabPostsAsAnAgentTabUntilItLeavesTheFolder() {
         let agentFolder = UUID()
         let owner = UUID()
@@ -142,7 +142,7 @@ import Testing
         #expect(changes == ["https://example.org/a > https://example.org/b", "https://example.org/b > https://example.org/b#part"])
     }
 
-    /// The rule that plugins and hook scripts rename tabs under (`SessionPluginBrowserHost`), whose title change carries the caller's cause.
+    /// Plugins and hook scripts rename tabs under this rule (`SessionPluginBrowserHost`). The title change carries the caller's cause.
     @Test func aNameFromCodeFollowsTheSuggestedNameRulesAndNamesItsCause() {
         let (tab, _) = makeTab(space: space)
         source.follow(tabs: [tab], postingNewTabs: false)
@@ -162,7 +162,7 @@ import Testing
         #expect(!BrowserHooks.suggest("Other", for: URL(string: "https://example.org/b")!, to: tab, applying: true))
         #expect(BrowserHooks.suggest(nil, for: document, to: tab, applying: true))
         #expect(tab.suggestedTitle == nil)
-        // A name the user turned down stays turned down, and the user's own name wins.
+        // A name the user turned down stays turned down. The user's own name wins.
         let refusal = SuggestedTitle(title: nil, url: document)
         tab.suggestedTitle = refusal
         #expect(!BrowserHooks.suggest("Again", for: document, to: tab, applying: true))
@@ -173,7 +173,7 @@ import Testing
         #expect(!BrowserHooks.suggest(nil, for: document, to: tab, applying: true))
     }
 
-    /// A name from code that comes while a WebKit navigation waits to commit posts its title change once the address settles, still with the cause of the code that gave it, so a hook does not run again for its own rename.
+    /// A name from code may arrive while a WebKit navigation waits to commit. It posts its title change once the address settles. It keeps the cause of the code that gave it, so a hook does not run again for its own rename.
     @Test func aNameFromCodeWhileTheAddressWaitsPostsWithItsCauseOnceTheAddressSettles() {
         let named = URL(string: "https://example.org/pricing")!
         let (tab, page) = makeTab(named.absoluteString, space: space, engine: .webKit)
@@ -184,7 +184,7 @@ import Testing
             tab.webContentsDidChangeURL(page)
             #expect(bus.withCause(cause) { BrowserHooks.suggest("Plans", for: named, to: tab, applying: true) })
             #expect(recorder.events.isEmpty)
-            // The navigation becomes a download, and the tab shows its committed address again.
+            // The navigation becomes a download. The tab shows its committed address again.
             page.isLoading = false
             page.url = named
             tab.webContentsDidChangeURL(page)
@@ -196,7 +196,7 @@ import Testing
         #expect(recorder.events.count == 2 && recorder.events.last?.cause == nil)
     }
 
-    /// The hook registry's tabs give each run tab its document and site checks, so they name the address the tab committed, not one a WebKit navigation shows before it commits.
+    /// The hook registry's tabs give each run tab its document and site checks. They therefore name the tab's committed address, not one a WebKit navigation shows before committing.
     @Test func theHookHostDescribesATabByItsCommittedAddress() {
         let (tab, page) = makeTab("https://example.org/a", space: space, engine: .webKit)
         page.isLoading = true
@@ -224,7 +224,7 @@ import Testing
         tab.webContentsDidChangeTitle(page)
         page.url = URL(string: "https://example.com/")
         tab.webContentsDidChangeURL(page)
-        // A hook names the tab, and the user turns the name down.
+        // A hook names the tab. The user turns the name down.
         tab.suggestedTitle = SuggestedTitle(title: "Hook 2", url: URL(string: "https://example.com/")!)
         tab.suggestedTitle = SuggestedTitle(title: nil, url: URL(string: "https://example.com/")!)
         #expect(recorder.events.map(Self.describe) == [
@@ -239,7 +239,7 @@ import Testing
     @Test func anAddressThatChangesWhileThePageLoadsPostsOnceItCommits() {
         let (tab, page) = makeTab(space: space, engine: .webKit)
         source.follow(tabs: [tab], postingNewTabs: false)
-        // WebKit reports a navigation's address before it commits, and the earlier address once the navigation becomes a download.
+        // WebKit reports a navigation's address before it commits. It reports the earlier address once the navigation becomes a download.
         load(tab, page) {
             page.url = URL(string: "https://example.org/file.dmg")
             tab.webContentsDidChangeURL(page)
@@ -274,7 +274,7 @@ import Testing
         // A page without a title shows its host.
         let (untitled, untitledPage) = makeTab(space: space, engine: .webKit)
         source.follow(tabs: [tab, untitled], postingNewTabs: false)
-        // WebKit reports a navigation's address before it commits, and the earlier address once the navigation becomes a download or the user stops it.
+        // WebKit reports a navigation's address before it commits. It reports the earlier address once the navigation becomes a download or the user stops it.
         for target in ["https://example.org/pricing.pdf", "https://example.net/"] {
             load(tab, page) {
                 page.url = URL(string: target)
@@ -293,7 +293,7 @@ import Testing
         }
         #expect(recorder.events.isEmpty)
         #expect(tab.suggestedTitle == SuggestedTitle(title: "Plans", url: named) && tab.displayTitle == "Plans" && tab.committedURL == named)
-        // A navigation that commits drops the name once its document loads, and the page's title that came before then posts after the address, with it.
+        // A navigation that commits drops the name once its document loads. The page's earlier title then posts with the address, after it.
         load(tab, page) {
             page.url = URL(string: "https://example.net/")
             tab.webContentsDidChangeURL(page)
@@ -307,7 +307,7 @@ import Testing
         #expect(tab.suggestedTitle == nil && tab.displayTitle == "Example")
     }
 
-    /// A document that commits while its load runs counts from the commit, as Chromium reports it before the address: its address posts then with the new document, and a hook's name for the earlier document goes, long before the load ends.
+    /// A document that commits while its load runs counts from the commit. Chromium reports the commit before the address. The address then posts with the new document. A hook's name for the earlier document goes long before the load ends.
     @Test func aDocumentThatCommitsDuringItsLoadPostsItsAddressAndDropsTheEarlierName() {
         let named = URL(string: "https://example.org/a")!
         let (tab, page) = makeTab(named.absoluteString, space: space)
@@ -343,7 +343,7 @@ import Testing
             window.currentSpaceID = space
         }
         window.currentSpaceID = secondSpace
-        // A window that closed is no longer followed.
+        // The source stops following a window when it closes.
         source.follow(windows: [])
         window.selectedTabID = tab.id
         #expect(recorder.payloads == [
@@ -528,7 +528,7 @@ final class EventTestDownload: EngineDownloadItem {
     func remove() {}
 }
 
-/// A page whose address, title, and engine the test sets; the tab reads them when the test reports a change.
+/// A page whose address, title, and engine the test sets. The tab reads them when the test reports a change.
 final class EventTestPage: EngineWebContents {
     var engineKind: EngineKind
     var url: URL?

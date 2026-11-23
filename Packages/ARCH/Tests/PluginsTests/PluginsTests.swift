@@ -1,4 +1,8 @@
-// Plugin identifiers, match patterns, the grant an update's review offers and the grants the user confirms, shortcuts, the contribution index, values and storage, page scripts with their styles in a WebKit page, and the manager: which plugins it registers and keeps switched on or off, also for the run while `plugins.json` cannot be written, when it starts and stops their code, what an invocation and a page script value carry, where each plugin's storage, settings, and secrets live, and the built-in Page Address plugin.
+// Tests plugin identifiers, match patterns, the grant an update's review offers, and the grants the user confirms.
+// Also tests shortcuts, the contribution index, values and storage, and page scripts with their styles in a WebKit page.
+// Manager tests cover which plugins it registers and keeps on or off, including for the run while it cannot write `plugins.json`.
+// They cover when it starts and stops plugin code, what invocations and page script values carry, and where each plugin's storage, settings, and secrets live.
+// Tests also cover the built-in Page Address plugin.
 import AppKit
 import ARCHEngine
 import Foundation
@@ -102,11 +106,13 @@ import WebKit
         let manifest = PluginManifest(id: id, name: "Update", version: "1", summary: "", permissions: [.tabs], sites: Array(sites[0...1]), contributions: PluginContributions())
         let installed = InstalledPlugin(manifest: manifest, grant: PluginGrant(permissions: [.tabs], sites: [sites[0]]), isEnabled: true)
         let update = PluginManifest(id: id, name: "Update", version: "2", summary: "", permissions: [.tabs, .clipboard], sites: sites, contributions: PluginContributions())
-        // The site the user left out stays out, and the site the installed version did not ask for starts on.
+        // The site the user left out stays out.
+        // The site the installed version did not ask for starts on.
         #expect(PluginGrant(updating: installed, to: update) == PluginGrant(permissions: [.tabs, .clipboard], sites: [sites[0], sites[2]]))
     }
 
-    /// A permission or host that the user revoked stays revoked in the update's review, while one the installed version did not ask for starts on.
+    /// A permission or host that the user revoked stays revoked in the update's review.
+    /// One the installed version did not ask for starts on.
     @Test func offersAnUpdateWithoutWhatTheUserRevoked() throws {
         let id = PluginID(rawValue: "org.example.update")!
         let hosts = ["api.example.com", "cdn.example.com", "new.example.com"].compactMap(PluginNetworkHost.init)
@@ -148,7 +154,9 @@ import WebKit
         #expect(try !MatchPattern("https://example.com/*").coversEverySite && !MatchPattern("https://*.example.com/*").coversEverySite)
     }
 
-    /// Settings states more than three sites in one sentence by the broadest, counting a site that another pattern's subdomains take in once, while each permission keeps its sentence.
+    /// Settings summarizes more than three sites in one sentence by the broadest sites.
+    /// It counts a site covered by another pattern's subdomains once.
+    /// Each permission keeps its own sentence.
     @Test func briefsAGrantByItsBroadestSite() throws {
         func brief(_ sites: [String], permissions: Set<PluginPermission> = [], apis: [String] = []) throws -> [String]? {
             let patterns = try sites.map(MatchPattern.init)
@@ -331,7 +339,8 @@ import WebKit
 
     @Test func writesWhileChangesKeepComing() async throws {
         let storage = PluginStorageFile(fileURL: fileURL, saveDelay: 0.3, longestSaveDelay: 0.5)
-        // Each change comes before the one before it settles, so only the longest delay writes the file.
+        // Each change arrives before the previous one settles.
+        // Only the longest delay writes the file.
         for count in 0..<12 {
             try storage.setValue(.number(Double(count)), forKey: "count")
             try await Task.sleep(for: .milliseconds(100))
@@ -388,7 +397,8 @@ import WebKit
         try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: fileURL.path)
         let storage = PluginStorageFile(fileURL: fileURL)
         #expect(storage.allKeys().isEmpty)
-        // The first change writes a new file and leaves the old one as it was.
+        // The first change writes a new file.
+        // It leaves the old file unchanged.
         try storage.setValue(.number(2), forKey: "a")
         storage.saveChanges()
         let copyURL = folder.url.appendingPathComponent("storage.unreadable.json")
@@ -606,7 +616,8 @@ import WebKit
         await manager.run(ref, PluginInvocation(tab: nil))
         manager.setEnabled(false, for: ref.plugin)
         await manager.run(ref, PluginInvocation(tab: nil))
-        // The deactivation waits for the activation, which has ended, on the main actor.
+        // The activation has ended.
+        // The deactivation waits for it on the main actor.
         await Task.yield()
         #expect(Recorder.deactivations == 1)
         #expect(Recorder.invocations.count == 1)
@@ -622,11 +633,13 @@ import WebKit
         await manager.run(ref, PluginInvocation(tab: nil))
         try context(for: RecordingPlugin.self, in: manager).storage.setValue(.bool(true), forKey: "a")
         manager.close()
-        // The deactivation waits for the activation, which has ended, on the main actor.
+        // The activation has ended.
+        // The deactivation waits for it on the main actor.
         await Task.yield()
         #expect(Recorder.deactivations == 1)
         #expect(manager.plugins.isEmpty && manager.contributions.paletteCommands(matching: "record").isEmpty)
-        // What the instance left running cannot act, and nothing starts the plugin again.
+        // What the instance left running cannot act.
+        // Nothing starts the plugin again.
         #expect(throws: PluginError.stopped) { try Recorder.contexts[0].storage.setValue(.number(1), forKey: "key") }
         await manager.run(ref, PluginInvocation(tab: nil))
         #expect(Recorder.activations.count == 1)
@@ -670,7 +683,8 @@ import WebKit
         #expect(throws: PluginError.stopped) { try old.storage.setValue(.number(1), forKey: "key") }
         await #expect(throws: PluginError.stopped) { try await old.secrets.setSecret("token", forKey: "key") }
         #expect(old.storage.allKeys().isEmpty && secrets.items.isEmpty)
-        // The new instance acts, within its grant, and the old one still reads.
+        // The new instance acts within its grant.
+        // The old instance still reads.
         current.setBadge("2", onSidebarItem: "panel")
         try current.storage.setValue(.number(2), forKey: "key")
         #expect(throws: PluginError.permissionDenied(.clipboard)) { try current.copyToClipboard("text") }
@@ -688,7 +702,8 @@ import WebKit
         try manager.setValue(.number(7), of: settings["number"]!, for: id)
         try manager.setValue(.string("two"), of: settings["choice"]!, for: id)
         #expect(["toggle", "number", "choice"].map(context.setting) == [.bool(false), .number(7), .string("two")])
-        // A value that no longer suits the field reads as the default, and nil restores it.
+        // A value that no longer suits the field reads as the default.
+        // Nil restores the default.
         try manager.setValue(.number(11), of: settings["number"]!, for: id)
         try manager.setValue(.string("gone"), of: settings["choice"]!, for: id)
         try manager.setValue(nil, of: settings["toggle"]!, for: id)
@@ -716,7 +731,9 @@ import WebKit
             try await secrets.setSecret("token", forKey: "key\(index)")
         }
         await #expect(throws: PluginError.quotaExceeded) { try await secrets.setSecret("token", forKey: "one more") }
-        // A secret of another Persona does not count, a key the plugin keeps takes a new value, and a deleted one makes room.
+        // Another Persona's secret does not count.
+        // A key the plugin keeps takes a new value.
+        // Deleting a key makes room.
         try await self.manager([SettingsPlugin.self]).setSecret("token", of: try #require(SettingsPlugin.manifest.contributions.settings.first { $0.kind == .secret }), for: SettingsPlugin.manifest.id)
         try await secrets.setSecret("new", forKey: "key0")
         try await secrets.setSecret(nil, forKey: "key1")
@@ -842,7 +859,8 @@ import WebKit
             ("https://example.org/other", false),
             ("http://example.org/docs/a", false),
         ]
-        // On Chromium, the guard of a document-end script runs after the page's scripts, which may have replaced built-ins and added properties to prototypes.
+        // On Chromium, a document-end script's guard runs after the page's scripts.
+        // Those scripts may have replaced built-ins and added properties to prototypes.
         let pageChanges = """
         Array.prototype.some = function () { return true; };
         String.prototype.slice = function () { return "https"; };
@@ -878,7 +896,8 @@ import WebKit
 
     @Test func leavesOutSourcesThatAreNotFunctionBodiesOnTheirOwn() throws {
         let sites = [try MatchPattern("https://example.org/*")]
-        // Each closes brackets of the function it would run in; the first two would then run on every page.
+        // Each closes brackets of the function it would run in.
+        // The first two would then run on every page.
         for source in ["})(channel); }, (channel) => { ran = channel; ((arch) => {", "})(channel); }, ran = 1, (channel) => { ((arch) => {", "}"] {
             #expect(PluginPageScript(matches: sites, source: source).engineScript(world: world, sites: sites) == nil, "\(source)")
         }
@@ -887,7 +906,16 @@ import WebKit
         }
     }
 
-    /// A script's styles go into the document in `<style>` elements, in their order, so that a later sheet wins over an earlier one, with their text as given, and before its source runs: a document-start script's at the start of the document's root element, before the page's own styles, which then win, also when a command runs it at once in a loaded document, and a document-end script's at the root's end, after them. A document without a root element yet, as Chromium's helper may run a document-start script in one, gets them at the root's start once the root appears, after the source has run, also when the root comes with the page's styles, as the parser may add them before the observer hears of the root. Their text never runs as script, in the page's world or in the script's, also where it would close the JSON string that carries it, and a script that runs once in a document adds them once.
+    /// A script's styles enter the document as `<style>` elements with their text unchanged, before its source runs.
+    /// They keep their order, so a later sheet wins over an earlier one.
+    /// A document-start script adds them at the start of the document's root element, before the page's own styles, which then win.
+    /// This also applies when a command runs it at once in a loaded document.
+    /// A document-end script adds them at the root's end, after the page's styles.
+    /// Chromium's helper may run a document-start script before the document has a root element.
+    /// In that case, the styles enter at the root's start once it appears, after the source has run.
+    /// This also applies when the root arrives with the page's styles, which the parser may add before the observer learns of the root.
+    /// Style text never runs as script in the page's world or the script's world, even where it would close the JSON string that carries it.
+    /// A script that runs once in a document adds its styles once.
     @Test func addsItsStylesToTheDocument() async throws {
         let sites = [try MatchPattern("https://example.org/*")]
         let styles = ["p { color: rgb(0, 128, 0); margin-left: 3px; }",
@@ -899,7 +927,8 @@ import WebKit
         const paragraph = getComputedStyle(document.querySelector("p"));
         return [paragraph.color, paragraph.marginLeft, String(globalThis.stylesAtRun), typeof globalThis.ran, ...Array.from(document.querySelectorAll("style"), (style) => style.textContent)];
         """
-        /// What `state` returns where the paragraph has `color`, the source counted `atRun` style elements, and the document has `sheets`: the second sheet's margin, from the plugin's later sheet, and no `ran` in the script's world.
+        /// What `state` returns when the paragraph has `color`, the source counted `atRun` style elements, and the document has `sheets`.
+        /// Includes the second sheet's margin from the plugin's later sheet and no `ran` in the script's world.
         func shown(_ color: String, _ atRun: String, _ sheets: [String]) -> [String] {
             [color, "7px", atRun, "undefined"] + sheets
         }
@@ -936,7 +965,8 @@ import WebKit
         #expect(try await webView.callAsyncJavaScript(state, arguments: [:], in: nil, contentWorld: contentWorld) as? [String] == shown("rgb(0, 0, 255)", "0", styles + [pageStyle]))
     }
 
-    /// A script that its guard stops adds no styles: one whose excludes cover the document, whose matches do not, whose granted sites do not, or, as a `whenInvoked` access's, whose host is another.
+    /// A script that its guard stops adds no styles.
+    /// Its excludes may cover the document, its matches or granted sites may not, or its host may differ, as with `whenInvoked` access.
     @Test func addsNoStylesWhereItsGuardStopsIt() async throws {
         let sites = [try MatchPattern("https://example.org/*")]
         let other = [try MatchPattern("https://example.com/*")]
@@ -957,7 +987,9 @@ import WebKit
         #expect(try await webView.callAsyncJavaScript(run, arguments: [:], in: nil, contentWorld: .world(name: "PluginPageScriptTests")) as? [String] == ["undefined", "rgb(0, 0, 255)", pageStyle])
     }
 
-    /// A web view without a window over a store that keeps nothing, with `userScript`, that has loaded a page at `address` with `pageStyle` in its head and a paragraph, from which no request leaves the test.
+    /// A web view without a window uses a store that keeps nothing and includes `userScript`.
+    /// It has loaded a page at `address` with `pageStyle` in its head and a paragraph.
+    /// No request leaves the test.
     private func loadedWebView(at address: URL, userScript: WKUserScript? = nil) async throws -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -1009,7 +1041,8 @@ private func installed(_ id: String, name: String, contributions: PluginContribu
     return InstalledPlugin(manifest: manifest, grant: PluginGrant(requestedBy: manifest), isEnabled: isEnabled)
 }
 
-/// Secrets in memory by service and account, so that tests never touch the Keychain. The scoped secrets call it on their own queue, which records whether a read ran on the main thread.
+/// Stores secrets in memory by service and account, so tests never touch the Keychain.
+/// The scoped secrets call it on their own queue. It records whether a read ran on the main thread.
 final class MemorySecretStore: PluginSecretStore, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [String: String] = [:]
@@ -1063,7 +1096,9 @@ final class TemporaryFolder {
     }
 }
 
-/// What the test plugins saw: the context of each activation, each deactivation, the invocation of each run, and each page script value. Only `PluginManagerTests` uses it, because Swift Testing runs suites in parallel and `.serialized` orders the tests of one suite only.
+/// Records what test plugins saw: the context of each activation, each deactivation, each run's invocation, and each page script value.
+/// Only `PluginManagerTests` uses it. Swift Testing runs suites in parallel.
+/// `.serialized` orders only the tests within one suite.
 @MainActor
 private enum Recorder {
     static var contexts: [any PluginContext] = []
@@ -1173,7 +1208,9 @@ private final class CountingPlugin: RecordingPlugin {
     }
 }
 
-/// Two page scripts on example.org, which its grant covers: one for every page at document start in the main frame, one for `/docs/` at document end in every frame.
+/// Two page scripts on example.org, which the grant covers.
+/// One runs on every page at document start in the main frame.
+/// One runs on `/docs/` at document end in every frame.
 private func pageScriptManifest(_ id: String) -> PluginManifest {
     PluginManifest(id: PluginID(rawValue: id)!, name: id, version: "1", summary: "", sites: [try! MatchPattern("https://example.org/*")],
                    contributions: PluginContributions(pageScripts: [

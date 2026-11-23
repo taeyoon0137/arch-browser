@@ -1,11 +1,22 @@
-// Site access modes (`docs/plugins.md`, Permissions; Page scripts): a manifest's `siteAccess`, the grant that keeps it in `plugins.json` where builds before it cannot read it, the review's first offer, the sentences and the confirmation for it, and a `whenInvoked` plugin reaching a tab's pages only after one of its commands ran there, on the host of that page, while the tab still showed the document the command ran on: its page scripts run in that page at once, again at a later command, and once in a document, and in the tab's later documents on the host, its page calls, page script values, and the tab's title and address in calls and events reach it there, and the access ends when the tab commits a document of another host, at the address change that reports it, gets another page, whose scripts leave out the access at once, or closes, or the plugin is switched off or updated.
+// Tests site access modes (`docs/plugins.md`, Permissions; Page scripts).
+// A manifest declares `siteAccess`. The grant keeps it in `plugins.json` where earlier builds cannot read it.
+// Tests cover the review's first offer, its sentences, and its confirmation.
+// A `whenInvoked` plugin reaches a tab's pages only after one of its commands runs there while the tab still shows the command's document.
+// Access covers that page's host. Its page scripts run in that page at once and again at a later command, but only once per document.
+// They also run in the tab's later documents on that host.
+// The plugin can use page calls, receive page script values, and read the tab's title and address in calls and events there.
+// Access ends at the address change that reports a committed document on another host.
+// Access also ends when the tab gets another page or closes, or the plugin turns off or updates.
+// A replacement page's scripts leave out the access at once.
 import ARCHEngine
 import Events
 import Foundation
 import Testing
 @testable import Plugins
 
-/// Reaches example.org and its subdomains only where the user runs its command, whose invocation it keeps in its storage, as it keeps the tab's address in the pages' loads it hears of, and answers its page script's values.
+/// Reaches example.org and its subdomains only where the user runs its command.
+/// Stores the command's invocation. Stores the tab's address from page-load events it receives.
+/// Answers its page script's values.
 @MainActor
 private final class InvokedPlugin: BuiltInPlugin {
     static let id = PluginID(rawValue: "org.example.invoked")!
@@ -111,7 +122,8 @@ private final class ListedPlugin: BuiltInPlugin {
         let tab = host.show("https://a.example.org/x")
         let sameHost = host.show("https://a.example.org/y")
         await invoke(manager, on: tab)
-        // The plugin sees the tab it ran on, and its page script ran in the page at once.
+        // The plugin sees the tab it ran on.
+        // Its page script ran in the page at once.
         #expect(context.storage.value(forKey: "invokedAt") == .string("https://a.example.org/x"))
         #expect(host.pages[tab.id]?.worlds == [world] && runs(in: host.pages[tab.id]) == 1)
         #expect(manager.tabPageScripts.keys.sorted() == [tab.id] && manager.tabPageScripts[tab.id]?.map(\.world) == [world])
@@ -126,12 +138,15 @@ private final class ListedPlugin: BuiltInPlugin {
         #expect(await manager.receive(message(from: "https://a.example.org/x"), from: sameHost) == nil)
         // A frame of another host in the tab is outside the access, although the granted sites cover it.
         #expect(await manager.receive(message(from: "https://b.example.org/frame"), from: tab) == nil)
-        // Running a command again in the same document leaves the access as it is, and the scripts run once in a document.
+        // Running a command again in the same document leaves the access unchanged.
+        // The scripts run once in a document.
         await invoke(manager, on: tab)
         #expect(runs(in: host.pages[tab.id]) == 1)
     }
 
-    /// The access is for the document the user ran the command on: a command whose tab shows another document by the time it runs, as one that a page loads while its context menu is open, gives no access and does not run, nor does one on a host that no match pattern can name.
+    /// Access applies to the document where the user ran the command.
+    /// A command does not run or grant access if its tab shows another document by then, such as one loaded while its context menu was open.
+    /// The same applies to a command on a host that no match pattern can name.
     @Test func aCommandRunsOnlyWithAccessToTheDocumentItRanOn() async throws {
         let manager = manager()
         defer { manager.close() }
@@ -153,13 +168,16 @@ private final class ListedPlugin: BuiltInPlugin {
         let unnamed = host.show("https://a_b.example.org/x")
         await invoke(manager, on: unnamed)
         #expect(manager.tabPageScripts.isEmpty && runs(in: host.pages[unnamed.id]) == nil && context.storage.value(forKey: "invokedAt") == nil)
-        // A page outside the granted sites gives no access, and the command runs there without its address.
+        // A page outside the granted sites gives no access.
+        // The command runs there without its address.
         let outside = host.show("https://other.example/")
         await invoke(manager, on: outside)
         #expect(manager.tabPageScripts.isEmpty && context.storage.value(forKey: "invokedAt") == .string("none"))
     }
 
-    /// A later command in the tab runs the scripts at once again, so a document that did not run them, as one that began while WebKit's flags switched plugins' page runs off, runs them then; each runs once in a document, whether the command or the tab's list ran it first.
+    /// A later command in the tab runs the scripts at once again.
+    /// This lets a document run them if it did not before, such as one that began while WebKit's flags switched plugins' page runs off.
+    /// Each script runs once in a document, whether the command or the tab's list ran it first.
     @Test func aLaterCommandRunsTheScriptsInADocumentThatDidNotRunThem() async throws {
         let manager = manager()
         defer { manager.close() }
@@ -197,7 +215,8 @@ private final class ListedPlugin: BuiltInPlugin {
         let context = try context(in: manager)
         let tab = host.show("https://a.example.org/x")
         await invoke(manager, on: tab)
-        // Another host that the granted sites cover ends the access, which coming back does not restore.
+        // Another host that the granted sites cover ends the access.
+        // Returning does not restore it.
         for address in ["https://b.example.org/", "https://a.example.org/x"] {
             host.tabs[0].url = URL(string: address)
             host.tabs[0].documentURL = URL(string: address)
@@ -206,7 +225,8 @@ private final class ListedPlugin: BuiltInPlugin {
         }
         await invoke(manager, on: host.tabs[0])
         #expect(manager.tabPageScripts[tab.id] != nil)
-        // A new page, as after unloading or a change of engine, takes none of the access's scripts, also before a check ends the access.
+        // A new page, such as after unloading or an engine change, takes none of the access's scripts.
+        // This holds even before a check ends the access.
         host.pages[tab.id] = ScriptedPage("https://a.example.org/x")
         #expect(manager.tabPageScripts[tab.id] != nil && manager.accessPageScripts(forTab: tab.id).isEmpty)
         #expect(manager.pageScripts(forTab: tab.id) == manager.contributions.pageScripts)
@@ -238,7 +258,9 @@ private final class ListedPlugin: BuiltInPlugin {
         #expect(await eventually { manager.tabPageScripts.isEmpty })
     }
 
-    /// A tab posts `addressChanged` before it takes the new committed address, so the manager checks the event's: a document of another host ends the access at that event, and the tab's events never give it back, as when the tab returns to the host through the back-forward cache.
+    /// A tab posts `addressChanged` before it takes the new committed address, so the manager checks the event's address.
+    /// A document on another host ends the access at that event.
+    /// The tab's events never restore access, even when it returns to the host through the back-forward cache.
     @Test func anAddressChangeToAnotherHostEndsTheAccessAtThatEvent() async throws {
         let manager = manager()
         defer { manager.close() }
@@ -271,7 +293,8 @@ private final class ListedPlugin: BuiltInPlugin {
         #expect(await eventually { context.storage.value(forKey: "loadedAt") == .string("https://a.example.org/x") })
     }
 
-    /// An update ends the access, also one that keeps `plugin.json` and the page scripts, since it can change the rest of the plugin's code.
+    /// An update ends access even if it keeps `plugin.json` and the page scripts.
+    /// It can change the rest of the plugin's code.
     @Test func anUpdateEndsTheAccessAlsoWhenItKeepsTheManifest() async throws {
         let manager = manager()
         defer { manager.close() }
@@ -334,7 +357,9 @@ private final class ListedPlugin: BuiltInPlugin {
         #expect(PluginGrant(updating: installed, to: narrow).siteAccess == .whenInvoked)
         #expect(PluginGrant(updating: InstalledPlugin(kind: .script, manifest: narrow, grant: listedGrant, isEnabled: true), to: asking).siteAccess == .whenInvoked)
 
-        // The switch shows for a script plugin with sites and commands, and without commands only where it starts on, so the user can switch it off; never for a manifest that asks for `whenInvoked`, nor for a web extension.
+        // The switch shows for a script plugin with sites and commands.
+        // Without commands, it shows only when it starts on, so the user can switch it off.
+        // It never shows for a manifest that asks for `whenInvoked` or for a web extension.
         #expect(listedGrant.offersSiteAccessSwitch(for: narrow, kind: .script) && !listedGrant.offersSiteAccessSwitch(for: narrow, kind: .webExtension))
         var narrowWithoutCommands = narrow
         narrowWithoutCommands.contributions = PluginContributions()

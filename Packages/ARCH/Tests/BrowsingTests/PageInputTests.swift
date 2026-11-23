@@ -1,10 +1,10 @@
-// Which clicks and keys are the user's acts in a page (`NSView.takesClick(at:)` and `takesActivation(by:)`, `PageDownloadGate`): a click that reaches the page, not one that a view above it takes, as a prompt card or its dimming does, and Return, Enter, or Space while the page has the window's keys. The window is never ordered in.
+// User actions in a page (`NSView.takesClick(at:)` and `takesActivation(by:)`, `PageDownloadGate`): a click must reach the page. A view above it, such as a prompt card or its dimming, can take the click instead. Return, Enter, or Space counts while the page has the window's keys. The test never orders the window in.
 import AppKit
 import Testing
 @testable import Browsing
 
 @MainActor @Suite struct PageInputTests {
-    /// A window that is never ordered in, whose content holds a page and, over the page's top half, a card.
+    /// A window holds a page with a card over its top half. The test never orders the window in.
     private func makeWindow() -> (window: NSWindow, page: NSView, card: NSView) {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
@@ -23,7 +23,7 @@ import Testing
                                       characters: " ", charactersIgnoringModifiers: " ", isARepeat: isARepeat, keyCode: keyCode))
     }
 
-    /// A click on the card over the page, such as its Don't Allow, reaches the card and not the page, while a click beside the card reaches the page.
+    /// A click on the card over the page, such as its Don't Allow, reaches only the card. A click beside the card reaches the page.
     @Test func aClickReachesThePageOnlyWhereNoViewAboveItTakesIt() {
         let (window, page, card) = makeWindow()
         defer { window.close() }
@@ -32,7 +32,7 @@ import Testing
         #expect(card.takesClick(at: NSPoint(x: 200, y: 250)))
     }
 
-    /// Return, Enter, and Space activate the page that has the keys, unless held down or pressed with Command, Control, or Option; another key does not, and neither does a key while the card has the keys.
+    /// Return, Enter, and Space activate the page that has the keys. Holding them down or pressing them with Command, Control, or Option does not. No other key activates the page. No key activates it while the card has the keys.
     @Test func activationKeysActInThePageThatHasTheKeys() throws {
         let (window, page, card) = makeWindow()
         defer { window.close() }
