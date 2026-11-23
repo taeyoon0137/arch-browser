@@ -95,6 +95,7 @@ public struct AgentActivityEntry: Codable, Identifiable, Equatable, Sendable {
     /// At most this many entries stay, oldest dropped first, so that each save and the launch read stay small.
     nonisolated public static let keptEntries = 10_000
 
+    /// The contents of the activity log's file.
     private struct File: Codable {
         var version = 1
         var entries: [AgentActivityEntry]

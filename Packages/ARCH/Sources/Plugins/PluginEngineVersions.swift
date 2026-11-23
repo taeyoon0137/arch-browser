@@ -61,6 +61,7 @@ extension PluginManifest {
 
 /// The two versions of an installed pair that another Persona can stage together (`PluginManager.pairForCopy(of:)`). Only a manager makes one, from its installed packages, whose origin and proof their installs checked.
 public struct PluginPairCopy: Sendable {
+    /// One installed version of the pair: its package folder, with the origin, proof, and engine that its install recorded.
     struct Version: Sendable {
         let folder: URL
         let origin: PluginOrigin

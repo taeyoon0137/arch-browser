@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 
+/// Hosts a tab's engine view, or a docked developer tools view, in SwiftUI with the page frame's rounded corners, as the file header describes.
 struct WebContentsHostView: NSViewRepresentable {
     let contentView: NSView?
     /// The page frame's radius, or 0 while the page fills the window in fullscreen.
@@ -36,6 +37,7 @@ struct WebContentsHostView: NSViewRepresentable {
         container.subviews.forEach { $0.removeFromSuperview() }
     }
 
+    /// The container that keeps the engine view at its size, reports clicks on it to `onClick`, and hides it from VoiceOver while a card covers it.
     final class ContainerView: NSView {
         var onClick: (() -> Void)? {
             didSet { updateClickMonitor() }

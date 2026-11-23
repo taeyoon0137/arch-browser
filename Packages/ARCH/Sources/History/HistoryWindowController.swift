@@ -315,6 +315,7 @@ private final class HistoryModel: ObservableObject {
     }
 }
 
+/// The History window's content: the Persona picker when there is more than one Persona, and the visits that match the search, by day.
 private struct HistoryList: View {
     @ObservedObject var model: HistoryModel
 
@@ -378,6 +379,7 @@ private struct HistoryList: View {
     }
 }
 
+/// One visit in the History window: its title or host, its address, and the time of its last visit.
 private struct HistoryRow: View {
     let entry: HistoryEntry
 

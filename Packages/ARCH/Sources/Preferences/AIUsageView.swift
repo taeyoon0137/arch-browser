@@ -2,11 +2,13 @@
 import AI
 import SwiftUI
 
+/// Settings ▸ AI ▸ Usage: a month's requests, errors, tokens, and costs by feature and by model.
 struct AIUsagePage: View {
     @ObservedObject var usage: AIUsageStore
     @ObservedObject var settings: AISettingsStore
     @State private var monthsAgo = 0
 
+    /// One feature's or model's totals for the month.
     private struct Row: Identifiable {
         var id: String
         var title: String

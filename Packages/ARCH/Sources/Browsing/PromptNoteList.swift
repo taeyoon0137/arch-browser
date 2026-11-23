@@ -1,6 +1,7 @@
 // The notes below a prompt card's fields, each a symbol and a sentence that VoiceOver reads as one. An error's sentence is red, or the primary color with Increase Contrast; its symbol says it is an error either way.
 import SwiftUI
 
+/// The notes below a `PromptCard`'s fields, as the file header describes.
 struct PromptNoteList: View {
     let notes: [PromptNote]
     @Environment(\.colorSchemeContrast) private var contrast

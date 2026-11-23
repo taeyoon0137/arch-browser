@@ -20,6 +20,7 @@ struct AgentGrantHandles {
 
 /// A tab's latest snapshot: the page it read, by address and by the tab's count of pages (`AgentTabActivity.pages`), its refs with their fingerprints and, for links, their full addresses, and its lines, which the next snapshot's diff compares.
 struct AgentSnapshotRecord {
+    /// One ref of the snapshot: the element's fingerprint and, for a link, its full address.
     struct Ref: Equatable {
         var fingerprint: String
         var href: URL?
@@ -79,6 +80,7 @@ struct AgentSnapshotRecord {
     }
 }
 
+/// Gives IDs short handles with a prefix, such as `t1` for a tab, and finds the ID of a handle, for the handles that tool calls name.
 struct AgentHandleTable {
     let prefix: String
     private var next = 1
@@ -128,6 +130,7 @@ struct AgentHeldHop {
 
 /// Something that happened in one of the client's agent tabs since its previous call.
 struct AgentEvent: Equatable {
+    /// What happened.
     enum Kind: Equatable {
         case report(AgentTabReport)
         /// Rule P16 stopped a navigation, redirect hop, or popup at this address.
@@ -163,6 +166,7 @@ struct AgentTabActivity: Equatable {
     var isGone = false
 }
 
+/// What the tool host keeps for one grant or in-app session during the launch: handles, events, call counts, snapshots, and the user's allowances.
 @MainActor final class AgentGrantState {
     var handles = AgentGrantHandles()
     private(set) var events: [AgentEvent] = []

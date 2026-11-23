@@ -5,6 +5,7 @@ import AI
 import LocalAuthentication
 import SwiftUI
 
+/// Settings ▸ AI ▸ Providers: the connected providers, each with Edit…, and the Add Provider menu.
 struct AIProvidersPage: View {
     @ObservedObject var service: AIService
     @ObservedObject var settings: AISettingsStore
@@ -443,6 +444,7 @@ func rowBinding<Row: Identifiable>(_ rows: Binding<[Row]>, id: Row.ID, field: Wr
         })
 }
 
+/// A provider's concurrent request and per-minute limits, in the HTTP API sheet and the command-line editor.
 struct AIProviderLimitsSection: View {
     @Binding var limits: AIProviderLimits
 

@@ -142,6 +142,7 @@ struct SiteControlAnchor: NSViewRepresentable {
         view.windowModel = windowModel
     }
 
+    /// The empty view that registers itself in the window model, at `button`, as it joins a window, so that the share picker and extensions' popups point at it.
     final class AnchorView: NSView {
         private let button: ReferenceWritableKeyPath<BrowserWindowModel, NSView?>
 

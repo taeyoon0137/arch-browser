@@ -21,6 +21,7 @@ struct ChromiumManifest {
     }
 }
 
+/// Checks a package for the problems that keep Chromium from running it, before `ChromiumExtensions` loads it.
 enum ChromiumPackageCheck {
     /// Throws with why Chromium cannot run the package in the folder at `root`.
     static func check(_ root: URL) throws {
@@ -69,6 +70,7 @@ enum ChromiumPackageCheck {
     }
 }
 
+/// A problem that `ChromiumPackageCheck` found, in a sentence for the user.
 struct ChromiumPackageError: LocalizedError {
     let message: String
 

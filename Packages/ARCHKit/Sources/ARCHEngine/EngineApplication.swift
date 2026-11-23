@@ -1,5 +1,6 @@
 import Foundation
 
+/// Hears of events in an engine's whole process. `BrowserSession` counts renderer process crashes through it.
 public protocol EngineApplicationDelegate: AnyObject {
     func application(_ application: any EngineApplication, didReceiveRendererProcessCrash count: Int)
 }

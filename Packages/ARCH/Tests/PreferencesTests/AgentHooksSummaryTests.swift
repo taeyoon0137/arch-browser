@@ -1,4 +1,9 @@
-// The texts of Settings ▸ AI ▸ Hooks: a hook's situation, its places as Persona rule 7 names them, with one Persona and with two, its sites, and its pause, a script hook draft turned back into its trigger and filter, its tab kinds with the last one kept on, Edit… and Duplicate on a script file changed outside Arch, and Show Session's kept runs for a last run with their transcript.
+// Tests the text in Settings ▸ AI ▸ Hooks for a hook's situation, sites, and pause.
+// Tests place names under Persona rule 7 with one Persona and with two.
+// Tests restoring a script hook draft's trigger and filter.
+// Tests tab kinds with the last one kept on.
+// Tests Edit… and Duplicate for a script file changed outside Arch.
+// Tests Show Session's kept runs and transcript for the last run.
 @testable import Agent
 import AI
 import Events
@@ -27,7 +32,7 @@ import Testing
         try draft.configureAgent(in: &hook)
         #expect(hook.agent?.model == draft.agentModel)
         #expect(hook.grant.agent?.tools.isEmpty == true && hook.agent?.tabAccess == .title)
-        // The agent runs' daily count agrees with the hook's.
+        // The agent runs' daily count matches the hook's.
         #expect(hook.grant.agent?.runsPerDay == hook.timing.runsPerDay)
         draft.agentRenamesTabs = true
         draft.readsPageText = true
@@ -68,7 +73,8 @@ import Testing
         #expect(hook.grant.agent?.minimumRecord == .activity && hook.grant.agent?.maximumRecord == .activity)
         #expect(hook.agent?.limits == hook.grant.agent?.limits && hook.agent?.limits.rounds == 1)
         #expect(hook.timing.runsPerDay == 11 && hook.grant.agent?.runsPerDay == 11)
-        // The hook's timeout starts before its script and the agent run, so it leaves the run its whole limit.
+        // The hook's timeout starts before its script and the agent run.
+        // It leaves the run its full time limit.
         #expect(hook.timing.timeout == .seconds(15))
         #expect(bytes == Data(AgentHookTemplate.script(for: .tabClosed).utf8))
         draft.editGeneratedScript()
@@ -77,7 +83,8 @@ import Testing
         draft.readsTabs = true
         let custom = try draft.makeHook()
         #expect(custom.script == Data(draft.script.utf8) && custom.hook.grant.permissions == [.tabs, .agent])
-        // Agent runs off leave the edited script without the agent, and restoring Arch's script, which runs one, turns them back on.
+        // Turning agent runs off leaves the edited script without the agent.
+        // Restoring Arch's script turns agent runs back on because that script runs an agent.
         draft.enablesAgent = false
         let off = try draft.makeHook().hook
         #expect(!off.grant.permissions.contains(.agent) && off.grant.agent == nil && off.agent == nil)
@@ -102,7 +109,8 @@ import Testing
         }
     }
 
-    /// A hand-written script hook with agent runs opens in the guided editor, which still lets the user turn the runs off.
+    /// A handwritten script hook with agent runs opens in the guided editor.
+    /// The editor still lets the user turn the runs off.
     @Test func aHandWrittenAgentScriptHookCanTurnItsAgentRunsOff() throws {
         var hook = Hook(name: "Mine", trigger: .tabOpened, script: .javaScript(digest: "", generated: false))
         let grant = AgentRunGrant(tools: ["rename_tab"], maximumRecord: .none)
@@ -114,14 +122,16 @@ import Testing
         let saved = try draft.makeHook().hook
         #expect(saved.grant.permissions == [.tabsRename] && saved.grant.agent == nil && saved.agent == nil)
         #expect(ScriptHookDraft.label(of: .spaceDeleted) == "Its Persona is deleted" && !ScriptHookDraft.offeredCloseReasons.contains(.hook))
-        // Plugins close tabs, so When offers their closes.
+        // When offers tab closes by plugins because plugins can close tabs.
         #expect(ScriptHookDraft.offeredCloseReasons.contains(.plugin) && ScriptHookDraft.label(of: .plugin) == "A plugin closes it")
     }
 
     @Test func aRowNamesTheSituationThePlacesAndTheSites() {
         let filter = BrowserEventFilter(scope: .places([.persona(persona), .space(work), .space(UUID())]), sites: [AISitePattern("example.org")])
         let hook = Hook(name: "Names", trigger: .pageLoaded(loads: .firstAfterOpen, includesRestoredTabs: false), filter: filter)
-        // With one Persona nothing names it (Persona rule 7), so its place covers every place; a second Persona names both.
+        // With one Persona, nothing names it (Persona rule 7).
+        // Its place therefore covers every place.
+        // Adding a second Persona names both.
         #expect(HookSummary.lines(for: hook, places: places, lastRun: nil)
                 == ["When a new tab loads its first page · Everywhere, Work, Deleted Space · Only example.org"])
         let twoPersonas = places + [HookPersonaPlaces(id: UUID(), name: "Work", spaces: [HookSpace(id: UUID(), name: "Research")])]
@@ -140,7 +150,9 @@ import Testing
         #expect(draft.trigger == hook.trigger)
         #expect(draft.filter == filter)
         #expect(draft.renamesTabs && !draft.readsTabs)
-        // Where lists no Persona while there is one, so its place opens as Everywhere, which covers the same; a save keeps the Persona, so a Persona added later stays out.
+        // Where lists no Persona when there is only one.
+        // Its place opens as Everywhere because both cover the same places.
+        // Saving keeps the Persona, so a Persona added later stays out.
         let personaWide = Hook(name: "Persona", trigger: .tabOpened, filter: BrowserEventFilter(scope: .places([.persona(persona)])))
         let personaDraft = ScriptHookDraft(editing: personaWide, script: "", places: places, reviewing: false)
         #expect(personaDraft.isEverywhere && personaDraft.filter.scope == .places([.persona(persona)]))
@@ -169,7 +181,8 @@ import Testing
         #expect(draft.tabKinds.isEmpty)
     }
 
-    /// A command-line provider's review shows what its digest stands for, so that a proxy another program added shows, without secret values.
+    /// A command-line provider's review shows what its digest represents.
+    /// This reveals a proxy another program added without showing secret values.
     @Test func aProvidersReviewShowsItsInvocationWithoutSecrets() {
         let tool = AICommandLineConfiguration(executable: URL(fileURLWithPath: "/opt/homebrew/bin/claude"), arguments: ["-p"],
                                               environment: ["HTTPS_PROXY": "http://proxy.example:8080", "API_TOKEN": "abc123"])
@@ -186,11 +199,12 @@ import Testing
         let review = try HookScriptActions.draft(editing: hook, file: changed, places: places, reviewing: false)
         #expect(review.isReview && review.script == "changed")
         #expect(try !HookScriptActions.draft(editing: hook, file: checked, places: places, reviewing: false).isReview)
-        // A missing file or one that is not text opens no editor whose empty script a save would record.
+        // A missing file or a non-text file opens no editor.
+        // This prevents saving an empty script.
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.draft(editing: hook, file: nil, places: places, reviewing: true) }
         let binary = HookScriptFile(contents: Data([0xFF, 0xFE, 0xFD]), matchesDigest: false)
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.draft(editing: hook, file: binary, places: places, reviewing: true) }
-        // A copy of an outside program's hook would be the user's, without the caps of its origin.
+        // A copy of an outside program's hook would belong to the user without its origin's limits.
         var outside = hook
         outside.origin = .outsideClient(.signed(identifier: "com.example.client", team: "TEAM"), name: "Codex")
         #expect(throws: HookScriptActions.Refusal.self) { try HookScriptActions.copy(of: outside, file: checked) }
@@ -222,11 +236,14 @@ import Testing
         #expect(moved.needsTrust && edited.needsTrust && replaced.needsTrust)
         // The hook records the other file, which Update from File… then reads.
         if case .shell(let source, _, _) = try moved.makeHook().hook.script { #expect(source == "/Users/fixture/other.sh") } else { Issue.record("Not a shell hook.") }
-        // Review trusts again in full, and a copy changed outside Arch is no copy to mark changed lines against.
+        // Review requires full trust again.
+        // A copy changed outside Arch cannot serve as a reference for marking changed lines.
         #expect(draft(of: hook, reviewing: true).needsTrust && draft(of: hook, reviewing: true).trustedCopy == script)
         #expect(draft(of: hook, reviewing: true, matchesDigest: false).trustedCopy == nil)
 
-        // A shell hook stored with agent runs opens in the hand-written editor, stays a shell hook, and gets titles only until Let Agent Runs Read Pages.
+        // A shell hook stored with agent runs opens in the handwritten editor.
+        // It stays a shell hook.
+        // It gets titles only until Let Agent Runs Read Pages.
         var agentHook = hook
         agentHook.grant.permissions.insert(.agent)
         agentHook.grant.agent = AgentRunGrant(tools: ["rename_tab"], tabAccess: .title, maximumRecord: .activity)
@@ -243,7 +260,10 @@ import Testing
         #expect(pages.grant.agent?.tabAccess == .page && pages.grant.agent?.tools == ["read_text", "rename_tab", "snapshot"])
     }
 
-    /// Show Session lists the agent runs a hook run kept, oldest first, and shows what Arch sent, each tool call with its result, and the agent's replies, each message indented under its label, with page text quoted so that a page cannot write a label.
+    /// Show Session lists the agent runs a hook run kept, oldest first.
+    /// It shows what Arch sent, each tool call with its result, and the agent's replies.
+    /// It indents each message under its label.
+    /// It quotes page text so a page cannot write a label.
     @Test func showSessionShowsTheAgentRunsALastRunKeptInOrder() {
         let run = UUID()
         let feature = AIFeatureID.agentHook(UUID())

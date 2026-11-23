@@ -1,4 +1,12 @@
-// Script plugins: reading and staging packages from folders, archives, and the files AI writes, a name without spaces at either end or named by the identifier when empty, the packages Arch refuses, page scripts' style files, sidebar items that show a panel, the scheme handler, the sample plugin in `Fixtures/Sample` installed, run in its sandboxed web view, stopped when idle or hung, updated, removed, and listed again at launch, a panel's page with its own `arch`, which keeps the instance while it shows, keeps to its page, and ends with its instance, an install and an update that `plugins.json` cannot record undone, with the installs this build cannot read kept, nothing installed once the manager closes, and a plugin that AI wrote installed with its origin.
+// Tests reading and staging script plugin packages from folders, archives, and files AI writes.
+// Names have no spaces at either end. An empty name uses the identifier.
+// Tests cover packages Arch refuses, page scripts' style files, sidebar items that show a panel, and the scheme handler.
+// The sample plugin in `Fixtures/Sample` installs and runs in its sandboxed web view.
+// It stops when idle or hung. Tests update and remove it. It appears in the list again at launch.
+// A panel's page has its own `arch`. The panel keeps the instance running while it shows.
+// The panel stays on its page. It ends with its instance.
+// An install or update rolls back if `plugins.json` cannot record it. Installs this build cannot read stay intact.
+// Nothing installs after the manager closes. A plugin that AI wrote installs with its origin.
 import ARCHEngine
 import Foundation
 import Testing
@@ -116,7 +124,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(try staging.allSatisfy { try FileManager.default.contentsOfDirectory(atPath: $0).isEmpty })
     }
 
-    /// A sidebar item shows one of the package's HTML files in a panel, which needs no background script, or runs a command, but not both.
+    /// A sidebar item either shows one of the package's HTML files in a panel or runs a command.
+    /// It cannot do both. The panel needs no background script.
     @Test func readsSidebarItemsThatShowAPanel() async throws {
         let manifest = #"{"id": "org.example.panel", "name": "Panel", "version": "1", "apiVersion": 1, "summary": "Shows.", "contributes": {"sidebarItems": [ITEM]}}"#
         let item = #"{"id": "panel", "title": "Panel", "symbol": "sidebar.right", "panel": "panel.html"}"#
@@ -138,7 +147,9 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         }
     }
 
-    /// A page script entry's `css` files become one page script with their text, before the scripts of its `js`, with the entry's patterns and timing; an entry lists `js`, `css`, or both.
+    /// A page script entry's `css` files become one page script with their text.
+    /// It runs before the entry's `js` scripts, with the entry's patterns and timing.
+    /// An entry lists `js`, `css`, or both.
     @Test func readsThePageScriptsStyleFiles() async throws {
         let manifest = #"{"id": "org.example.styles", "name": "Styles", "version": "1", "apiVersion": 1, "summary": "Styles.", "contributes": {"pageScripts": [ENTRIES]}}"#
         let entries = #"{"matches": ["https://example.org/*"], "excludes": ["https://example.org/private/*"], "js": ["a.js"], "css": ["a.css", "styles/b.css"], "runAt": "documentStart", "allFrames": true}, {"matches": ["https://example.org/docs/*"], "css": ["a.css"]}"#
@@ -278,7 +289,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
 
     @Test func runsCommandsInTheBackgroundScript() async throws {
         let manager = manager()
-        // Closing drops the storage write that the commands left waiting, which would bring back the deleted temporary folder.
+        // Closing drops the storage write that the commands left waiting.
+        // That write would restore the deleted temporary folder.
         defer { manager.close() }
         try await installSample(in: manager)
         await run("remember", in: manager, PluginInvocation(tab: tab, linkURL: URL(string: "https://example.org/link")))
@@ -313,7 +325,9 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         ]))
     }
 
-    /// A command that the plugin disables stays hidden only for the run: once the instance stops, here at its idle limit, the command comes back, so a plugin without events can start again.
+    /// A command that the plugin disables stays hidden only for the run.
+    /// The command returns when the instance stops, here at its idle limit.
+    /// This lets a plugin without events start again.
     @Test func showsDisabledCommandsAgainOnceTheInstanceStops() async throws {
         let root = folder.url.appendingPathComponent("Packages/Hide", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -334,7 +348,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(await eventually { manager.contributions.paletteCommands(matching: "Hide").count == 1 })
     }
 
-    /// A panel shows its page with the bridge's calls but not the background script's listeners, and keeps the instance from its idle stop while it shows.
+    /// A panel shows its page with the bridge's calls but not the background script's listeners.
+    /// It prevents the instance's idle stop while it shows.
     @Test func showsAPanelAndKeepsTheInstanceWhileItShows() async throws {
         let id = PluginID(rawValue: "org.example.panel")!
         let root = folder.url.appendingPathComponent("Packages/Panel", isDirectory: true)
@@ -375,7 +390,9 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(storage.value(forKey: "runs") == .number(1))
     }
 
-    /// A panel keeps to its page: a reload or a link to another document goes nowhere, while a link within the page moves there. Once its instance stops, its calls fail with `stopped` and it asks its popover to close.
+    /// A panel stays on its page. A reload or link to another document goes nowhere.
+    /// A link within the page moves there.
+    /// Once its instance stops, its calls fail with `stopped`. It then asks its popover to close.
     @Test func keepsAPanelOnItsPageAndEndsItWithItsInstance() async throws {
         let id = PluginID(rawValue: "org.example.page-panel")!
         let root = folder.url.appendingPathComponent("Packages/PagePanel", isDirectory: true)
@@ -440,7 +457,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         defer { manager.close() }
         try await installSample(in: manager)
         await run("remember", in: manager)
-        // Once the idle stop waits, it comes due while the main actor is busy, so it waits in the actor's queue as the next command arrives.
+        // The waiting idle stop comes due while the main actor is busy.
+        // It waits in the actor's queue as the next command arrives.
         try await Task.sleep(for: .milliseconds(50))
         blockMainActor(for: 0.4)
         await run("remember", in: manager)
@@ -453,7 +471,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         let manager = manager(ScriptPluginLimits(hang: 2, idle: 30))
         try await installSample(in: manager)
         await run("wait", in: manager)
-        // The hung start is gone, and the next command starts the background script again.
+        // The hung start is gone.
+        // The next command starts the background script again.
         await run("remember", in: manager)
         let remembered = try #require(try stored("remembered", in: manager)?.fields)
         #expect(remembered["runs"] == .number(1))
@@ -504,7 +523,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         try FileManager.default.createDirectory(at: listURL, withIntermediateDirectories: false)
         #expect(throws: (any Error).self) { try manager.install(updatePackage, grant: PluginGrant(permissions: [], sites: []), isEnabled: true) }
         #expect(throws: (any Error).self) { try manager.install(newPackage, grant: PluginGrant(requestedBy: newPackage.manifest), isEnabled: true) }
-        // Each staged package is back in `Staging/`, and the previous package in its place.
+        // Each staged package is back in `Staging/`.
+        // The previous package is back in its place.
         #expect(updatePackage.text(of: "plugin.json")?.contains(#""version": "2.0""#) == true)
         #expect(newPackage.text(of: "background.js") == writtenFiles["background.js"])
         let pluginFolder = personaFolder.appendingPathComponent(sampleID.rawValue, isDirectory: true)
@@ -512,7 +532,8 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         #expect(try FileManager.default.contentsOfDirectory(atPath: pluginFolder.path) == ["package"])
         #expect(!FileManager.default.fileExists(atPath: personaFolder.appendingPathComponent(newPackage.manifest.id.rawValue).path))
         #expect(summary(of: manager) == listed && manager.listWriteFailure == nil)
-        // The file, which the failed writes left as it was, lists the same plugins at the next launch.
+        // The failed writes left the file unchanged.
+        // It lists the same plugins at the next launch.
         try FileManager.default.removeItem(at: listURL)
         try FileManager.default.moveItem(at: savedList, to: listURL)
         let relaunched = self.manager()

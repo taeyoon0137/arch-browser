@@ -173,6 +173,7 @@ public final class AIHookScheduler: ObservableObject {
 
     // MARK: Chains
 
+    /// What a chain is for: the kind of event and the ID of what it is about.
     private struct ChainKey: Hashable {
         var kind: String
         var subject: UUID

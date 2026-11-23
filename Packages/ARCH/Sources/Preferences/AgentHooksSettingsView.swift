@@ -11,6 +11,7 @@ import Events
 import Hooks
 import SwiftUI
 
+/// Settings ▸ AI ▸ Hooks: the switches for hooks and shell scripts, and the list of hooks with their last runs.
 struct AgentHooksPage: View {
     @ObservedObject var registry: HookRegistry
     /// The agents' runner, whose kept runs Show Session shows.
@@ -27,6 +28,7 @@ struct AgentHooksPage: View {
     @State private var deletingSession: UUID?
     @State private var message: String?
 
+    /// A paused hook's provider destinations that Review asks the user to allow.
     private struct ProviderReview {
         let hook: UUID
         let providers: [HookKnownProvider]
@@ -313,6 +315,7 @@ struct TabNamesWarning: View {
 
 /// What Edit…, Review, and Duplicate make of a hook and its script file. A file changed outside Arch opens only for review, with its notice, and no copy takes it, so bytes that another program wrote run only once the user has read and saved them (hook decision 8).
 enum HookScriptActions {
+    /// Why a hook's script cannot open for editing or copying, as a sentence for the page.
     struct Refusal: LocalizedError {
         let sentence: String
         var errorDescription: String? { sentence }

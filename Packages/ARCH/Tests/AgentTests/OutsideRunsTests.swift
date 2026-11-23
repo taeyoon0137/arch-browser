@@ -1,4 +1,30 @@
-// Outside clients' agent runs and renames (`docs/hooks.md`, arch-cli agent run and rename; Tools): `AgentRunGrant.forClient(_:)` from the client's grant; a run on the client's agent tabs and the tabs shared with it under `agentRun`, renaming its own agent tab, refusing a shared tab's rename with `wouldAsk` until the user allowed the tab on P19's card, logging each tool call under the grant with its tab's site and the run's ID, a dry run's rename as previewed, and counting toward the grant's runs a day but not its 2,000 calls; `rename_tab` from the client under P19, refusing a tab that is no longer the client's, a site excluded from AI, and a tab loading another address, and asking once on P19's card, without Touch ID, before it renames a tab the user shared, in one group with the tab's other cards of its page, and not for a name the user's own name keeps out, a card that the tab's next document or its close withdraws, checking the tab again after Allow for This Tab: another fragment keeps its page, a load of another address is `stale`, a site excluded meanwhile P16, a tab moved into another agent folder P17, which ends the allowance, a tab moved into the client's own folder renames, and a cancelled call renames nothing; and `agent/run`, which needs Start Agent Tasks and a tab, binds each tab's committed address, so that a tab loading another address joins no run and a run left with no tab is `stale`, renames a shared tab the user allowed, and names renamed tabs by the client's handles.
+// Tests outside clients' agent runs and renames (`docs/hooks.md`, arch-cli agent run and rename; Tools).
+// `AgentRunGrant.forClient(_:)` uses the client's grant.
+// A run uses the client's agent tabs and tabs shared with it under `agentRun`.
+// It renames its own agent tab.
+// It refuses a shared tab's rename with `wouldAsk` until the user allows the tab on P19's card.
+// It logs each tool call under the grant with the tab's site and the run's ID.
+// It logs a dry run's rename as previewed.
+// It counts toward the grant's runs a day but not its 2,000 calls.
+// The client's `rename_tab` follows P19.
+// It refuses a tab that is no longer the client's, a site excluded from AI, and a tab loading another address.
+// Before renaming a tab the user shared, it asks once on P19's card without Touch ID.
+// The card groups with the other cards for the tab's page.
+// It does not ask for a name that the user's own name keeps out.
+// The tab's next document or its close withdraws the card.
+// The call checks the tab again after Allow for This Tab.
+// Another fragment keeps the page.
+// Loading another address returns `stale`.
+// Excluding the site meanwhile returns P16.
+// Moving the tab into another agent folder returns P17 and ends the allowance.
+// Moving the tab into the client's own folder allows the rename.
+// A canceled call renames nothing.
+// `agent/run` needs Start Agent Tasks and a tab.
+// It binds each tab's committed address.
+// A tab loading another address therefore joins no run.
+// A run left with no tab is `stale`.
+// It renames a shared tab the user allowed.
+// It names renamed tabs by the client's handles.
 import AgentControl
 import AI
 import ARCHEngine
@@ -8,13 +34,16 @@ import Testing
 
 /// The suggested names the fake host gives, by tab.
 @MainActor private var suggestedNames: [UUID: String?] = [:]
-/// The committed address of a tab whose shown address still loads, by tab; any other tab has committed the address it shows.
+/// The committed address of a tab whose shown address still loads, by tab.
+/// Any other tab has committed the address it shows.
 @MainActor private var committedAddresses: [UUID: URL] = [:]
-/// The tabs the user named, or whose suggested name the user turned down, which take no suggested name.
+/// Tabs the user named or whose suggested name the user turned down.
+/// These tabs take no suggested name.
 @MainActor private var userNamedTabs: Set<UUID> = []
 
 extension FakeHost: AgentTabNaming {
-    /// As `BrowserHooks.suggest(_:for:to:applying:)` gives names: for the committed document, whose fragment only names a place in it.
+    /// Gives names to the committed document, as `BrowserHooks.suggest(_:for:to:applying:)` does.
+    /// Its fragment only names a place in it.
     func suggestName(_ name: String?, forTab id: UUID, showing document: URL, byGrant grant: UUID, applying: Bool) -> Bool {
         guard !userNamedTabs.contains(id), tabs.contains(where: { $0.id == id }), AgentRunner.sameDocument(committedAddress(ofTab: id), document) else { return false }
         if applying { suggestedNames[id] = name }
@@ -88,7 +117,9 @@ extension FakeHost: AgentTabNaming {
         #expect(entries.map(\.tool) == ["rename_tab", "rename_tab"])
         #expect(entries.map(\.decision) == [.auto, .refused])
         #expect(entries.map(\.rule) == [nil, AgentPolicy.wouldAskCode])
-        // Each call names its tab's site, as the client's own calls do, and the run, whose calls the client's 2,000 calls a day do not count.
+        // Each call names its tab's site, as the client's own calls do.
+        // It also names the run.
+        // The run's calls do not count toward the client's 2,000 calls a day.
         #expect(entries.map(\.site) == ["docs.example", "mail.example"])
         #expect(entries.allSatisfy { $0.runID == runID })
         #expect(activity.callsToday(of: grant, at: Date()) == 0)
@@ -100,7 +131,7 @@ extension FakeHost: AgentTabNaming {
         dry.tabs = [own.id]
         _ = await runner.run(dry, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in true }
         #expect(activity.entries.last?.outcome == "previewed")
-        // A hook's feature, or a tab outside the client's, is refused before any model.
+        // Arch refuses a hook's feature or a tab outside the client's before reaching any model.
         let requests = client.requests.count
         var wrong = request
         wrong.feature = .agentHook(UUID())
@@ -148,7 +179,8 @@ extension FakeHost: AgentTabNaming {
         #expect(try await client.callTool("rename_tab", ["tab": .string(handle), "name": "Docs"]).code == AgentRule.p17.rawValue)
     }
 
-    /// Shares the user's tab with the client through `request_tab`, answering its card with Share, and returns the client's handle for it.
+    /// Shares the user's tab with the client through `request_tab` by answering its card with Share.
+    /// Returns the client's handle for the tab.
     private func share(_ tab: AgentTabInfo, _ service: AgentService, _ client: TestClient, _ harness: Harness) async throws -> String {
         harness.host.tabs.append(tab)
         harness.host.userTabIDs.insert(tab.id)
@@ -159,7 +191,7 @@ extension FakeHost: AgentTabNaming {
         return try #require(try await request.value.structured?["tab"]?.stringValue)
     }
 
-    /// The card a `rename_tab` call of the client opens.
+    /// The card the client's `rename_tab` call opens.
     private func renameCard(_ handle: String, _ name: String, _ service: AgentService, _ client: TestClient) async throws -> (AgentApproval, Task<AgentToolResult, any Error>) {
         let call = Task { try await client.callTool("rename_tab", ["tab": .string(handle), "name": .string(name)]) }
         try await waitUntil { !service.approvals.pending.isEmpty }
@@ -176,13 +208,16 @@ extension FakeHost: AgentTabNaming {
         let handle = try await share(userTab, service, client, harness)
         let prompts = harness.authenticator.count
 
-        // The card is P19's own, not sensitive, with the tab's title and site, and the name as its exact text.
+        // The card belongs to P19.
+        // It is not sensitive.
+        // It shows the tab's title and site, with the name as its exact text.
         var (card, call) = try await renameCard(handle, "Mail", service, client)
         #expect(card.kind == .renameSharedTab && card.rules == [.p19] && !card.isSensitive && !card.needsAuthentication(for: .allowOnTab))
         #expect(card.offers == [.allowOnTab, .deny, .denyAndStop, .reply("")] && AgentApprovalAnswer.allowOnTab.title(site: card.site) == catalogText("Allow for This Tab"))
         #expect(card.action == "Rename your tab \u{201C}Inbox (3)\u{201D} on mail.example" && card.exactText == "Mail")
         #expect(card.tabID == userTab.id && card.tabHandle == handle && card.site == "mail.example")
-        // The panel shows it in one group with the client's other cards of the tab's page, here from the client's second connection.
+        // The panel groups it with the client's other cards for the tab's page.
+        // Here, those cards come from the client's second connection.
         let second = try TestClient(harness.location)
         _ = try await second.hello()
         let approval = Task { try await second.callTool("request_approval", ["summary": "Archive the inbox", "kind": "other", "tab": .string(handle)]) }
@@ -194,13 +229,15 @@ extension FakeHost: AgentTabNaming {
         #expect(try await call.value.status == .denied)
         #expect(suggestedNames[userTab.id] == nil)
 
-        // The tab's next document withdraws the card, and the name, which was for the page it left, is not given.
+        // The tab's next document withdraws the card.
+        // The name does not apply because it was for the page the tab left.
         (card, call) = try await renameCard(handle, "Mail", service, client)
         harness.host.userDocumentDidEnd?(userTab.id, userTab.documentID)
         #expect(try await call.value.status == .stale)
         #expect(suggestedNames[userTab.id] == nil)
 
-        // Allow for This Tab names the tab without Touch ID, and the client's later renames of the tab ask nothing.
+        // Allow for This Tab names the tab without Touch ID.
+        // The client's later renames of the tab ask nothing.
         (card, call) = try await renameCard(handle, "Mail", service, client)
         #expect(await service.approvals.answer(card.id, with: .allowOnTab))
         let named = try await call.value
@@ -238,7 +275,8 @@ extension FakeHost: AgentTabNaming {
         }
         func index(of tab: AgentTabInfo) throws -> Int { try #require(harness.host.tabs.firstIndex { $0.id == tab.id }) }
 
-        // Another fragment of the page, which a site that routes by fragment sets while the card waits, keeps the name's page.
+        // A site that routes by fragment sets another fragment while the card waits.
+        // This keeps the page the name belongs to.
         let routed = userTab("https://mail.example/inbox")
         let routedHandle = try await share(routed, service, client, harness)
         var (card, call) = try await renameCard(routedHandle, "Mail", service, client)
@@ -246,7 +284,8 @@ extension FakeHost: AgentTabNaming {
         #expect(await service.approvals.answer(card.id, with: .allowOnTab))
         #expect(try await call.value.status == .ok && suggestedNames[routed.id] == .some("Mail"))
 
-        // A load of another address while the card waits leaves the name, which is for the page the tab leaves, ungiven.
+        // Loading another address while the card waits keeps the name from applying.
+        // The name belongs to the page the tab leaves.
         let loading = userTab("https://mail.example/drafts")
         var handle = try await share(loading, service, client, harness)
         (card, call) = try await renameCard(handle, "Drafts", service, client)
@@ -279,7 +318,8 @@ extension FakeHost: AgentTabNaming {
         #expect(await service.approvals.answer(card.id, with: .allowOnTab))
         #expect(try await call.value.status == .ok && suggestedNames[adopted.id] == .some("Starred"))
 
-        // A tab that moves into an agent folder ends its allowance: once the user shares it again, its next rename asks again.
+        // Moving a tab into an agent folder ends its allowance.
+        // Once the user shares it again, its next rename asks again.
         harness.host.tabs[try index(of: routed)].agentOwnerID = UUID()
         #expect(try await client.callTool("rename_tab", ["tab": .string(routedHandle), "name": "Mail"]).code == AgentRule.p17.rawValue)
         harness.host.tabs[try index(of: routed)].agentOwnerID = nil
@@ -313,7 +353,10 @@ extension FakeHost: AgentTabNaming {
         #expect(suggestedNames[stopped.id] == nil)
     }
 
-    /// Gives the service a runner over a scripted model that renames `t1` to "Named" in each run's first request and finishes in its second, and returns the model.
+    /// Gives the service a runner over a scripted model.
+    /// The model renames `t1` to "Named" in each run's first request.
+    /// It finishes in the second request.
+    /// Returns the model.
     private func scriptedRuns(_ service: AgentService, _ harness: Harness) -> ScriptedClient {
         let model = ScriptedClient { index in
             index.isMultiple(of: 2) ? [.event(.toolCall(AIToolCall(id: "r\(index)", name: "rename_tab", arguments: Data(#"{"tab":"t1","name":"Named"}"#.utf8)))), .event(.finished(.toolUse))]
@@ -334,7 +377,8 @@ extension FakeHost: AgentTabNaming {
         let grant = try #require(service.grants.first)
         let userTab = AgentTabInfo(id: UUID(), spaceID: grant.spaceID, title: "Inbox", url: URL(string: "https://mail.example/inbox"), isLoading: false, engine: .webKit)
         let shared = try await share(userTab, service, client, harness)
-        // Before the user allows the tab on P19's card, the run's rename would ask, which a run cannot.
+        // Before the user allows the tab on P19's card, the run's rename would ask.
+        // A run cannot ask.
         let refused = try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": [.string(shared)]])
         #expect(refused["status"] == "completed" && refused["actions"] == [])
         #expect(suggestedNames[userTab.id] == nil)
@@ -358,7 +402,9 @@ extension FakeHost: AgentTabNaming {
         let grant = try #require(service.grants.first)
         let tab = try #require(harness.host.tabs.first { $0.agentOwnerID == grant.id })
         let index = try #require(harness.host.tabs.firstIndex { $0.id == tab.id })
-        // While the tab loads another address, the run binds the page it committed, which the tab is leaving, so the tab joins no run, and a run with no other tab is `stale`, as `rename_tab` is, not refused for an excluded site.
+        // While the tab loads another address, the run binds the committed page that the tab is leaving.
+        // The tab therefore joins no run.
+        // A run with no other tab is `stale`, as `rename_tab` is, not refused for an excluded site.
         harness.host.tabs[index].url = URL(string: "https://docs.example/next")
         committedAddresses[tab.id] = URL(string: "https://docs.example/start")
         let loading = try await client.call(AgentControlMethod.agentRun, params: ["prompt": "Name it", "tabs": [.string(own)]])

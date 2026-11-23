@@ -1,4 +1,4 @@
-// Scrolling a list while a drag holds the pointer near its ends (`DragAutoScroll.swift`): the bands and the eased step, a drag that starts in a band, the stop at each end, the steps on whole pixels, and the scroller moving an AppKit scroll view and a SwiftUI one, whose rows' frames follow, frame by frame, and reporting each scroll under the drag. Placement after a scroll is in `SidebarTabSlotTests`; the display link, the gesture, and the feel are app checks.
+// Scrolling a list while a drag holds the pointer near its ends (`DragAutoScroll.swift`): tests cover the bands, the eased step, and a drag that starts in a band. They check the stop at each end and steps on whole pixels. The scroller moves AppKit and SwiftUI scroll views. The rows' frames follow each frame. The scroller reports each scroll under the drag. `SidebarTabSlotTests` covers placement after a scroll. App checks cover the display link, the gesture, and the feel.
 import AppKit
 import SwiftUI
 import Testing
@@ -17,7 +17,7 @@ import Testing
         // Between the bands, on their inner edges, and outside the list, nothing scrolls.
         for y: CGFloat in [72, 290, 508, 30, 540, 600] { #expect(step(y) == 0) }
         #expect(DragAutoScroll.step(at: CGPoint(x: 250, y: 50), in: list) == 0)
-        // At the edge the step is 12 points; halfway into a band, a quarter of that.
+        // At the edge, the step is 12 points. Halfway into a band, it is a quarter of that.
         #expect(step(40) == -12)
         #expect(step(56) == -3 && step(524) == 3)
         #expect(abs(step(539) - 12 * (31.0 / 32) * (31.0 / 32)) < 1e-9)
@@ -28,10 +28,10 @@ import Testing
     }
 
     @Test func theStepFollowsTheFramesIntervalAndAShortListSplitsItsBands() {
-        // Per sixtieth of a second, so a 120 Hz display scrolls as fast with half steps.
+        // The step applies per sixtieth of a second. A 120 Hz display therefore scrolls as fast with half steps.
         #expect(step(40, over: 1.0 / 120) == -6)
         #expect(step(40, over: 1.0 / 30) == -24)
-        // A list of 40 points has bands of 20, and its middle scrolls neither way.
+        // A list of 40 points has bands of 20. Its middle scrolls neither way.
         let short = CGRect(x: 0, y: 0, width: 240, height: 40)
         #expect(step(10, in: short) == -3 && step(20, in: short) == 0 && step(30, in: short) == 3)
         #expect(step(0, in: CGRect(x: 0, y: 0, width: 240, height: 0)) == 0)
@@ -41,7 +41,7 @@ import Testing
         func arms(from start: CGFloat, at y: CGFloat) -> Bool {
             DragAutoScroll.arms(from: CGPoint(x: 120, y: start), at: CGPoint(x: 120, y: y), in: list)
         }
-        // A row grabbed 10 points above the list's bottom moves within the band without scrolling, until it is 8 points nearer the edge or out of the band.
+        // A row grabbed 10 points above the list's bottom moves within the band without scrolling. This lasts until it moves 8 points nearer the edge or leaves the band.
         #expect(!arms(from: 530, at: 526) && !arms(from: 530, at: 537) && !arms(from: 530, at: 509))
         #expect(arms(from: 530, at: 538) && arms(from: 530, at: 508) && arms(from: 530, at: 300))
         // The same at the top, where the pointer also leaves the band past the list's edge.
@@ -57,7 +57,7 @@ import Testing
         #expect(DragAutoScroll.distance(12, from: 300, limit: 300) == 0)
         #expect(DragAutoScroll.distance(-12, from: 5, limit: 300) == -5)
         #expect(DragAutoScroll.distance(-12, from: 0, limit: 300) == 0)
-        // A list scrolled past its limit, as into the height a dragged folder's hidden rows keep, scrolls up but no further down.
+        // A list can scroll past its limit into the height kept by a dragged folder's hidden rows. It then scrolls up but no farther down.
         #expect(DragAutoScroll.distance(12, from: 320, limit: 300) == 0)
         #expect(DragAutoScroll.distance(-12, from: 320, limit: 300) == -12)
         // Content shorter than the list does not scroll.
@@ -65,7 +65,7 @@ import Testing
     }
 
     @Test func stepsUnderAPixelAddUpAndTheListStopsOnWholePixels() throws {
-        // At 2 pixels a point, 0.1875 points a frame scrolls half a point every two or three frames, carrying the rest.
+        // At 2 pixels a point, 0.1875 points a frame scrolls half a point every two or three frames. It carries the rest.
         var offset: CGFloat = 100, carried: CGFloat = 0, offsets: [CGFloat] = []
         for _ in 0..<8 {
             let next = try #require(DragAutoScroll.scroll(from: offset, by: 0.1875, carrying: carried, limit: 300, scale: 2))
@@ -73,7 +73,7 @@ import Testing
             offsets.append(offset)
         }
         #expect(offsets == [100, 100, 100.5, 100.5, 100.5, 101, 101, 101.5] && carried == 0)
-        // From an offset off the grid, the list scrolls up onto it, and the last frame reaches the top.
+        // From an offset off the grid, the list scrolls up onto it. The last frame reaches the top.
         offset = 10.25
         offsets = []
         while let next = DragAutoScroll.scroll(from: offset, by: -3, carrying: carried, limit: 300, scale: 2), offsets.count < 10 {
@@ -81,13 +81,13 @@ import Testing
             offsets.append(offset)
         }
         #expect(offsets == [7.5, 4.5, 1.5, 0])
-        // An end off the grid is reached exactly, once the carried part reaches it.
+        // The carried part reaches an end off the grid exactly.
         let first = try #require(DragAutoScroll.scroll(from: 100, by: 0.125, carrying: 0, limit: 100.25, scale: 2))
         #expect(first == (100, 0.125))
         let last = try #require(DragAutoScroll.scroll(from: 100, by: 0.125, carrying: 0.125, limit: 100.25, scale: 2))
         #expect(last == (100.25, 0))
         #expect(DragAutoScroll.scroll(from: 100.25, by: 0.125, carrying: 0, limit: 100.25, scale: 2) == nil)
-        // A step toward the other end drops what was carried; a step that stays on a pixel moves nothing.
+        // A step toward the other end drops what it carried. A step that stays on a pixel moves nothing.
         let turned = try #require(DragAutoScroll.scroll(from: 100, by: -0.125, carrying: 0.375, limit: 300, scale: 2))
         #expect(turned == (100, -0.125))
         // At 1 pixel a point, whole steps stay whole.
@@ -141,21 +141,21 @@ import Testing
         scrollView.documentView?.addSubview(scroller)
         var reported: [CGFloat] = []
         scroller.onScroll = { reported.append($0) }
-        // Without a drag, a scroll goes unreported.
+        // Without a drag, the scroller reports no scroll.
         clip.scroll(to: NSPoint(x: 0, y: 10))
         #expect(reported.isEmpty)
-        // During a drag, another input's scroll, such as a mouse's wheel, is reported, also before the drag arms the bands.
+        // During a drag, the scroller reports another input's scroll, such as a mouse's wheel. This also applies before the drag arms the bands.
         scroller.update(point: CGPoint(x: 120, y: 150), scrolls: false, visible: visible, limit: 30)
         clip.scroll(to: NSPoint(x: 0, y: 25))
         clip.scroll(to: NSPoint(x: 0, y: 5))
         #expect(reported == [15, -20])
-        // With a limit past the document's end, a clip view that keeps its bounds in the document stops the list at 30. The reports add up to the distance the list moved, and the scroll the clip view refuses ends the scrolling.
+        // With a limit past the document's end, a clip view that keeps its bounds in the document stops the list at 30. The reports add up to the distance the list moved. A scroll that the clip view refuses ends the scrolling.
         reported = []
         scroller.update(point: CGPoint(x: 120, y: 299), scrolls: true, visible: visible, limit: 60)
         var frames = 0
         while scroller.advance(over: 1.0 / 60) != nil, frames < 100 { frames += 1 }
         #expect(frames < 100 && clip.bounds.minY == 30 && reported.reduce(0, +) == 25)
-        // After the drag, scrolls go unreported again.
+        // After the drag, the scroller stops reporting scrolls again.
         scroller.update(point: nil, scrolls: false, visible: visible, limit: 30)
         clip.scroll(to: NSPoint(x: 0, y: 0))
         #expect(reported.reduce(0, +) == 25)
@@ -170,7 +170,7 @@ import Testing
         let scroller = try #require(descendants(of: host).compactMap { $0 as? DragAutoScroller.ScrollerView }.first)
 
         #expect(scroller.advance(over: 1.0 / 60) == 3)
-        // The scroll is reported before the rows report their new frames.
+        // The scroller reports the scroll before the rows report their new frames.
         #expect(model.distances == [3] && model.firstRowTopAtEachScroll == [0])
         host.layoutSubtreeIfNeeded()
         // Each row is 3 points higher in the scroll view.
@@ -192,14 +192,14 @@ import Testing
         #expect(frames == 153 && model.distances.reduce(0, +) == ScrollFixture.limit)
         host.layoutSubtreeIfNeeded()
         #expect(await waitUntil { model.frames[19]?.maxY == 300 })
-        // After the layout, SwiftUI keeps the list at its end, so nothing scrolls it back and the scroller stays stopped.
+        // After the layout, SwiftUI keeps the list at its end. Nothing scrolls it back. The scroller stays stopped.
         host.layoutSubtreeIfNeeded()
         #expect(scroller.advance(over: 1.0 / 60) == nil)
         #expect(model.distances.reduce(0, +) == ScrollFixture.limit && model.frames[19]?.maxY == 300)
     }
 }
 
-/// Twenty rows of 36 points, 2 apart, in a scroll view 300 points tall, with the scroller in their content as a space's list has it.
+/// Twenty rows of 36 points, 2 apart, in a scroll view 300 points tall. Their content holds the scroller as a space's list does.
 private struct ScrollFixture: View {
     static let visible = CGRect(x: 0, y: 0, width: 200, height: 300)
     static let limit: CGFloat = 20 * 36 + 19 * 2 - 300
@@ -232,7 +232,7 @@ private struct ScrollFixture: View {
 @MainActor private final class FixtureFrames {
     var frames: [Int: CGRect] = [:]
     var distances: [CGFloat] = []
-    /// The first row's top as reported when each scroll is.
+    /// The first row's reported top when the scroller reports each scroll.
     var firstRowTopAtEachScroll: [CGFloat?] = []
 }
 
@@ -248,7 +248,7 @@ private final class FlippedDocument: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// A clip view whose scrolls stay within its document, unlike `NSClipView.scroll(to:)`, which also goes past it, as SwiftUI's does.
+/// A clip view keeps scrolls within its document, as SwiftUI's does. `NSClipView.scroll(to:)` also goes past the document.
 private final class ConstrainedClip: NSClipView {
     override func scroll(to newOrigin: NSPoint) {
         super.scroll(to: constrainBoundsRect(NSRect(origin: newOrigin, size: bounds.size)).origin)

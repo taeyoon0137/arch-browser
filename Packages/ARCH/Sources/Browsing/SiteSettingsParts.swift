@@ -92,6 +92,7 @@ struct SiteSettingsDivider: View {
 /// - A button row is the button, which VoiceOver names by the label. Under the pointer it takes the sidebar rows' hover fill, inset from the box's edges (`SiteSettingsMetrics.hoverInset`); disabled, it dims as the sidebar's rows do and takes no fill. A destructive one looks like the others: a row whose label ends in "…" only opens what asks, whose own button is the destructive one, as the Clear Site Data card's Clear.
 /// - A row without either only says something, with at most a word at its trailing edge. Its tooltip is its help, or its label, which a long name cuts short.
 struct SiteSettingsRow<Icon: View, Accessory: View>: View {
+    /// What the row ends with: nothing to press, a control that carries the label, or a button with its role and action.
     private enum Kind {
         case text, control
         case button(ButtonRole?, () -> Void)

@@ -1,4 +1,4 @@
-// When a page's downloads wait for the user: the first goes through, and so does one after a click in the page or one that an address Arch loads for the user starts; the others ask once, and the answer decides them all and the page's later ones. An Allow ends with the document, and the gate starts over at a document the user asked for or one on another site, but not at one the page loads on its own on its site. A tab that a plugin opened has no first download on any site until the user clicks in it or loads an address there.
+// A page's first download goes through. So does one after a click in the page or one started by an address Arch loads for the user. The other downloads ask once. The answer decides them all and the page's later downloads. An Allow ends with the document. The gate resets at a document the user requested or one on another site. It does not reset when the page loads a document on its own site without the user. A tab that a plugin opened has no first download on any site until the user clicks in it or loads an address there.
 import Testing
 @testable import Browsing
 
@@ -65,7 +65,7 @@ import Testing
         #expect(gate.admit { _ in } == .ask)
     }
 
-    /// A page that downloads a file and then reloads itself, or changes its address on its site, without a click gets no new first download, and a refusal holds through its reloads.
+    /// A page gets no new first download if it downloads a file, then reloads itself or changes its address on its site without a click. A refusal holds through its reloads.
     @Test func aPageThatReloadsItselfKeepsItsDownloadsAndRefusal() {
         var gate = PageDownloadGate()
         gate.documentDidCommit(site: "files.example")
@@ -102,7 +102,7 @@ import Testing
         #expect(gate.admit { _ in } == .ask)
     }
 
-    /// An address that the user loads in the tab and that turns out to be a file downloads even after a refusal, once.
+    /// An address the user loads in the tab may point to a file. That file downloads once, even after a refusal.
     @Test func aDownloadThatTheUserLoadsGoesOnAfterARefusal() {
         var gate = PageDownloadGate()
         gate.documentDidCommit(site: "files.example")
@@ -114,7 +114,7 @@ import Testing
         #expect(gate.admit { _ in } == .deny)
     }
 
-    /// A load the user started that commits a document leaves no pass, so the page's own downloads there count as usual: a click before its first download lets no second one through.
+    /// A load the user started leaves no pass once it commits a document. The page's downloads then count as usual. A click before its first download lets no second one through.
     @Test func aUserLoadThatCommitsADocumentLeavesNoPass() {
         var gate = PageDownloadGate()
         gate.userDidNavigate()
@@ -124,7 +124,7 @@ import Testing
         #expect(gate.admit { _ in } == .ask)
     }
 
-    /// A tab that a plugin opened asks before each download of its pages, its first included, on every site it moves to on its own, until the user clicks in it or loads an address there.
+    /// A tab that a plugin opened asks before each page download, including the first. This applies on every site it moves to on its own until the user clicks in it or loads an address there.
     @Test func aTabThatAPluginOpenedHasNoFirstDownloadUntilTheUserActs() {
         var gate = PageDownloadGate()
         gate.holdUntilUserActs()

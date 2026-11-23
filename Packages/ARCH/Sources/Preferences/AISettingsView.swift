@@ -15,6 +15,7 @@ extension AIFeature {
 
 /// The AI section has more to show than the others, so it keeps one height and its pages scroll.
 struct AISettingsView: View {
+    /// The pages of Settings ▸ AI, in the order of its page picker.
     enum Page: String, CaseIterable {
         case providers = "Providers"
         case features = "Features"
@@ -37,6 +38,7 @@ struct AISettingsView: View {
         }
     }
 
+    /// The AI section's shown page, which the Settings window keeps so that the app can open the section at a given page.
     final class Navigation: ObservableObject {
         @Published var page = Page.providers
     }

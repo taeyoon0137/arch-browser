@@ -22,6 +22,7 @@ public enum EngineCapability: String, CaseIterable, Codable, Sendable {
     case extensions
 }
 
+/// The folders an engine keeps its user data and its cache in, which the app passes to `makeApplication(configuration:)` and `removeStoredData(forStorage:configuration:completion:)`.
 public struct EngineApplicationConfiguration: Sendable {
     public var userDataDirectory: URL
     public var cacheDirectory: URL
@@ -32,6 +33,7 @@ public struct EngineApplicationConfiguration: Sendable {
     }
 }
 
+/// A web engine that Arch can run, WebKit or Chromium, as `EngineRegistry` holds it: what it can do and how to start its `EngineApplication`.
 public protocol Engine: AnyObject {
     var kind: EngineKind { get }
     var capabilities: Set<EngineCapability> { get }

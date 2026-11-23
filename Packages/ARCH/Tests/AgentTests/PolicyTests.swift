@@ -1,4 +1,11 @@
-// The policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules): every rule P1 to P18 in every mode for in-app sessions and outside clients, P7's file choosers and file inputs, the allowances that cover the mode's cards and never a sensitive one, Enter or Space by `press` on any element but a text field or select as a click on it, P5's sites as registrable domains, the scope rule for written addresses and redirect hops, and the word lists the rules and the page script read.
+// Tests the policy as a table (docs/agents.md, Modes; Site scope and navigation; Rules).
+// Tests every rule P1 to P18 in every mode for in-app sessions and outside clients.
+// Tests P7's file choosers and file inputs.
+// Allowances cover the mode's cards, never sensitive cards.
+// Enter or Space by `press` counts as a click on any element except a text field or select.
+// P5 counts sites as registrable domains.
+// Tests the scope rule for written addresses and redirect hops.
+// Tests the word lists the rules and the page script read.
 import AgentControl
 import Foundation
 import Testing
@@ -47,7 +54,9 @@ import Testing
         .interaction(AgentInteraction(tool: "type", siteInScope: inScope, element: element, text: "hello", submits: submits, pageHost: "shop.example"))
     }
 
-    /// One row per rule: the step that triggers it and the decision in Read Only, Ask Before Acting, and Act in Agent Tabs, for an in-app session and then for an outside client.
+    /// Each rule has one row with the step that triggers it.
+    /// The row gives the decision in Read Only, Ask Before Acting, and Act in Agent Tabs.
+    /// It covers an in-app session first, then an outside client.
     static let table: [(rule: AgentRule, step: AgentPolicyStep, inApp: [Expected], outside: [Expected])] = [
         (.p1, type(into: field(.hidden, name: "Password")), [.refused(.p1), .refused(.p1), .refused(.p1)], [.refused(.p1), .refused(.p1), .refused(.p1)]),
         (.p2, type(into: field(.personal, name: "Email")), [.readOnly, .asksSensitive([.p2]), .asksSensitive([.p2])], [.readOnly, .asksSensitive([.p2]), .asksSensitive([.p2])]),
@@ -87,16 +96,22 @@ import Testing
         }
         #expect(AgentPolicy.mayLoad(URL(string: "about:blank")!, allowsAI: { _ in true }) == .allowed)
         #expect(AgentPolicy.mayRead(URL(string: "about:blank")!, allowsAI: { _ in true }) != .allowed)
-        // Every rule has a row here or above, and P19, which renames, its own test.
+        // Every rule has a row here or above.
+        // P19, which renames, has its own test.
         #expect(Set(Self.table.map(\.rule)).union([.p16, .p19]) == Set(AgentRule.allCases))
     }
 
     static let fileInput = AgentElementFacts(tag: "input", role: "button", name: "Receipt", inputType: "file", isFileInput: true)
 
-    /// P7's rows: a page's file chooser asks on a card that is not sensitive, in every mode and for both client kinds, whatever started it; a click on a file input in an agent tab, or Enter or Space on it, runs as the mode decides for any click, since its chooser asks; in a tab the user shared, whose chooser would be the user's own, such a click is refused; and `type`, which would name a file, is refused in every mode.
+    /// P7's rows: a page's file chooser asks on a card that is not sensitive.
+    /// This holds in every mode and for both client kinds, whatever started it.
+    /// A click, Enter, or Space on a file input in an agent tab follows the mode's click policy because its chooser asks.
+    /// A tab the user shared refuses such a click because its chooser would be the user's own.
+    /// Every mode refuses `type`, which would name a file.
     @Test func fileChoosersAskAndFileInputsClickAsTheModeDecides() {
         let typing = AgentPolicyStep.interaction(AgentInteraction(tool: "type", element: Self.fileInput, text: "/etc/hosts", pageHost: "shop.example"))
-        // An outside program's agent run asks nothing: its cards are refusals (rule P19), so the rows hold for the clients that ask.
+        // An outside program's agent run asks nothing.
+        // Its cards are refusals (rule P19), so the rows hold for clients that ask.
         for client in [AgentClientKind.inApp, .outside] {
             for mode in Self.modes {
                 #expect(AgentPolicy.decide(.fileChooser, client: client, mode: mode, allowances: AgentAllowances(page: true, site: true, downloads: true)) == .ask(AgentAsk(rules: [.p7], isSensitive: false)), "\(client) \(mode)")
@@ -124,7 +139,11 @@ import Testing
         for entry in AgentPolicy.table { #expect(!entry.trigger.isEmpty && !entry.sentence.isEmpty) }
     }
 
-    /// Rule P19 (`docs/hooks.md`, Tools): sessions and outside clients rename their own agent tabs freely, a shared tab after asking once, and no other tab; a run never asks, so every card becomes `wouldAsk`, while refusals stand.
+    /// Rule P19 lets sessions and outside clients rename their own agent tabs freely (`docs/hooks.md`, Tools).
+    /// They rename a shared tab after asking once.
+    /// They rename no other tab.
+    /// A run never asks, so every card becomes `wouldAsk`.
+    /// Refusals stand.
     @Test func renamingFollowsP19AndARunNeverAsks() {
         for client in [AgentClientKind.inApp, .outside, .run] {
             #expect(AgentPolicy.renameDecision(client: client, tab: .agentTab, allowedOnce: false) == .allow)
@@ -133,7 +152,8 @@ import Testing
         }
         #expect(AgentPolicy.renameDecision(client: .outside, tab: .shared(acting: false), allowedOnce: false) == .ask(AgentAsk(rules: [.p19], isSensitive: false)))
         #expect(AgentPolicy.renameDecision(client: .run, tab: .shared(acting: true), allowedOnce: false) == .refuse(nil, AgentPolicy.wouldAskSentence))
-        // P19's card is not sensitive, so its Allow asks for no Touch ID, also for an outside client.
+        // P19's card is not sensitive.
+        // Its Allow therefore needs no Touch ID, even for an outside client.
         #expect(AgentPolicy.entry(.p19).effect == .asks(sensitive: false) && !AgentPolicy.sensitiveRules.contains(.p19))
         #expect(AgentPolicy.entry(.p19).sentence == "Renaming a tab the user shared asks the user once for that tab.")
         let next = Self.click(Self.button("Next"))
@@ -148,13 +168,15 @@ import Testing
         for client in [AgentClientKind.inApp, .outside] {
             #expect(Expected(AgentPolicy.decide(next, client: client, mode: .readOnly)) == .readOnly)
             #expect(Expected(AgentPolicy.decide(next, client: client, mode: .actInAgentTabs)) == .allow)
-            // Ask Before Acting asks with Allow on This Page and Allow on <site>, and either covers the next one.
+            // Ask Before Acting asks with Allow on This Page and Allow on <site>.
+            // Either covers the next action.
             guard case .ask(let ask) = AgentPolicy.decide(next, client: client, mode: .askBeforeActing) else { Issue.record("Ask Before Acting must ask."); continue }
             #expect(ask.offersPage && ask.offersSite && !ask.isSensitive && ask.rules.isEmpty)
             #expect(AgentApproval.offers(for: ask) == [.allowOnce, .allowOnPage, .allowOnSite, .deny, .denyAndStop, .reply("")])
             #expect(AgentPolicy.decide(next, client: client, mode: .askBeforeActing, allowances: AgentAllowances(page: true)) == .allow)
             #expect(AgentPolicy.decide(next, client: client, mode: .askBeforeActing, allowances: AgentAllowances(site: true)) == .allow)
-            // scroll and hover change no data: they run in every mode without asking, also in Read Only.
+            // scroll and hover change no data.
+            // They run in every mode without asking, including Read Only.
             for tool in ["scroll", "hover"] {
                 for mode in Self.modes {
                     #expect(AgentPolicy.decide(.interaction(AgentInteraction(tool: tool, element: Self.button("Next"))), client: client, mode: mode) == .allow, "\(tool) \(mode)")
@@ -180,7 +202,9 @@ import Testing
         // P5 compares sites: a form posting to another host of the same site does not ask.
         let sameSite = Self.click(Self.button("Continue", submits: true, action: "checkout.shop.example"), typed: true)
         #expect(AgentPolicy.decide(sameSite, client: .outside, mode: .actInAgentTabs) == .allow)
-        // Sites are registrable domains as the site scope counts them: two customers of a hosting platform, and two IP addresses, are different sites.
+        // The site scope counts sites as registrable domains.
+        // Two customers of a hosting platform are different sites.
+        // Two IP addresses are different sites.
         func submission(from page: String, to action: String) -> AgentPolicyStep {
             .interaction(AgentInteraction(tool: "click", element: Self.button("Continue", submits: true, action: action), submits: true, typedIntoForm: true, pageHost: page))
         }
@@ -188,7 +212,9 @@ import Testing
         #expect(Expected(AgentPolicy.decide(submission(from: "203.0.113.5", to: "198.51.113.5"), client: .outside, mode: .actInAgentTabs)) == .asksSensitive([.p5]))
         #expect(AgentPolicy.decide(submission(from: "203.0.113.5", to: "203.0.113.5"), client: .outside, mode: .actInAgentTabs) == .allow)
         #expect(AgentPolicy.decide(submission(from: "www.example.co.uk", to: "pay.example.co.uk"), client: .outside, mode: .actInAgentTabs) == .allow)
-        // Enter, by type with submit or by press, submits with the form's default button, whose name P4 reads as a click on it would, and whose formaction P5 reads.
+        // Enter, by type with submit or by press, submits with the form's default button.
+        // P4 reads the button's name as it would for a click.
+        // P5 reads its formaction.
         var comment = Self.field(name: "Comment", action: "post.other.example")
         comment.submitterName = "Post comment"
         for tool in ["type", "press"] {
@@ -203,12 +229,13 @@ import Testing
         func press(_ keys: String, on element: AgentElementFacts, typed: Bool = false, mode: AgentAccessLevel = .actInAgentTabs) -> Expected {
             Expected(AgentPolicy.decide(.interaction(AgentInteraction(tool: "press", element: element, text: keys, typedIntoForm: typed, pageHost: "shop.example")), client: .outside, mode: mode))
         }
-        // A script's button that places an order on its key handler asks as a click on it would (P4), by Enter or Space, with a modifier too, and whatever the allowances.
+        // A script's button that places an order in its key handler asks as a click would (P4).
+        // This holds for Enter or Space, with a modifier too, and whatever the allowances.
         let order = AgentElementFacts(tag: "div", role: "button", name: "Place order")
         for keys in ["Enter", "Space", " ", "Shift+Enter"] { #expect(press(keys, on: order) == .asksSensitive([.p4]), "\(keys)") }
         let allowed = AgentInteraction(tool: "press", element: order, text: "Enter", pageHost: "shop.example")
         #expect(Expected(AgentPolicy.decide(.interaction(allowed), client: .outside, mode: .askBeforeActing, allowances: AgentAllowances(page: true, site: true))) == .asksSensitive([.p4]))
-        // Other keys are no click.
+        // Other keys do not count as clicks.
         for keys in ["a", "Tab", "ArrowDown", "Escape"] { #expect(press(keys, on: order) == .allow, "\(keys)") }
         // A focused button, as trusted input presses it on its own (VII.21).
         for keys in ["Enter", "Space"] { #expect(press(keys, on: Self.button("Place order")) == .asksSensitive([.p4]), "\(keys)") }
@@ -217,7 +244,8 @@ import Testing
             #expect(press("Space", on: AgentElementFacts(tag: "div", role: role, name: "I agree to the terms")) == .asksSensitive([.p4]), "\(role)")
         }
         #expect(press("Enter", on: AgentElementFacts(tag: "input", role: "button", name: "", inputType: "submit", value: "Buy now", submitsForm: true, formKey: "0:0")) == .asksSensitive([.p4]))
-        // Any other element a key handler can act on, such as a menu item or a tab, asks as a click on it would, in both acting modes and whatever the allowances.
+        // Any other element a key handler can act on, such as a menu item or a tab, asks as a click would.
+        // This holds in both acting modes, whatever the allowances.
         for element in [AgentElementFacts(tag: "div", role: "menuitem", name: "Delete account"), AgentElementFacts(tag: "div", role: "tab", name: "Delete")] {
             for keys in ["Enter", "Space"] {
                 for mode in [AgentAccessLevel.askBeforeActing, .actInAgentTabs] {
@@ -226,15 +254,20 @@ import Testing
                 }
             }
         }
-        // A submit control submits its form: P3 for the form's fields, and P5 for another site once the session typed into it.
+        // A submit control submits its form.
+        // P3 checks the form's fields.
+        // P5 checks for another site once the session has typed into the form.
         #expect(press("Enter", on: Self.button("Continue", submits: true, formFields: [.password])) == .asksSensitive([.p3]))
         #expect(press("Space", on: Self.button("Continue", submits: true, action: "collect.other.example"), typed: true) == .asksSensitive([.p5]))
-        // A control that reads as no irreversible step asks only as the mode does, a file input too, whose chooser then asks under P7.
+        // A control that names no irreversible step asks only as the mode requires.
+        // This includes a file input, whose chooser then asks under P7.
         #expect(press("Enter", on: Self.button("Next")) == .allow)
         #expect(press("Enter", on: Self.button("Next"), mode: .askBeforeActing) == .asks([]))
         #expect(press("Space", on: Self.fileInput) == .allow)
         #expect(press("Enter", on: Self.fileInput, mode: .askBeforeActing) == .asks([]))
-        // A text field is no control: Enter there is P3's and P4's submission by the default button, which `submits` carries.
+        // A text field is not a control.
+        // Enter there submits through the default button under P3 and P4.
+        // `submits` marks that submission.
         #expect(press("Enter", on: Self.field(name: "Place order")) == .allow)
         let signIn = Self.field(name: "Email", formFields: [.password])
         let enter = AgentInteraction(tool: "press", element: signIn, text: "Enter", submits: true, pageHost: "shop.example")
@@ -249,10 +282,12 @@ import Testing
         #expect(expected(AgentNavigationFacts(isWritten: true, isSeen: true)) == .allow)
         #expect(expected(AgentNavigationFacts(isWritten: true, isSearchResults: true)) == .allow)
         #expect(expected(AgentNavigationFacts(isWritten: true, isBareOriginInScope: true)) == .allow)
-        // An unseen path, query, or fragment on a site in scope asks in Read Only too, and so does any address on a site outside it.
+        // An unseen path, query, or fragment on a site in scope asks in Read Only too.
+        // Any address on a site outside the scope also asks.
         #expect(expected(AgentNavigationFacts(isWritten: true, siteInScope: true)) == .asksSensitive([.p13]))
         #expect(expected(AgentNavigationFacts(isWritten: true, siteInScope: false)) == .asksSensitive([.p13]))
-        // A redirect hop of a written address's navigation asks only when it leaves the scope; a followed link's hops do not.
+        // A redirect hop from a written address asks only when it leaves the scope.
+        // A followed link's hops do not ask.
         #expect(expected(AgentNavigationFacts(isWritten: true, isSeen: true, siteInScope: true, isRedirectHop: true)) == .allow)
         #expect(expected(AgentNavigationFacts(isWritten: true, isSeen: true, siteInScope: false, isRedirectHop: true)) == .asksSensitive([.p13]))
         #expect(expected(AgentNavigationFacts(isWritten: false, siteInScope: false, isRedirectHop: true)) == .allow)
@@ -261,7 +296,8 @@ import Testing
     }
 
     @Test func wordsTheRulesRead() {
-        // P1's secret words, in labels, names, and IDs, split at case changes, digits, and punctuation; Korean anywhere in a word.
+        // P1 splits secret words in labels, names, and IDs at case changes, digits, and punctuation.
+        // It matches Korean anywhere in a word.
         for text in ["Password", "newPassword", "user_pin", "otpCode", "Card number", "CVV", "api-key", "Social Security Number", "비밀번호 확인", "인증번호", "password2"] {
             #expect(AgentPolicy.names(text, oneOf: AgentPolicy.secretWords), "\(text)")
         }

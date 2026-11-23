@@ -5,6 +5,7 @@ import Darwin
 import Foundation
 import Security
 
+/// The secret that binds an in-app session's `arch-mcp` connection to that session.
 struct AgentSessionTicket: Sendable {
     /// What `ARCH_AGENT_TICKET` carries.
     let text: String

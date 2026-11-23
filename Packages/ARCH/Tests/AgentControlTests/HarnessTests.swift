@@ -1,15 +1,20 @@
-// The harness: every guide topic the design names, the tool, parameter, and value names and the statuses the topics use, the skills made from the same text with front matter of only `name` and `description` and the version line with its digest first, the version line and digest check, and the `guide` tool's results.
+// Tests every harness guide topic the design names.
+// Tests the tool, parameter, and value names and the statuses the topics use.
+// Tests skills made from the same text with only `name` and `description` in their front matter.
+// The version line and its digest come first.
+// Tests the version line and digest check and the `guide` tool's results.
 import AgentControl
 import CryptoKit
 import Foundation
 import Testing
 
-/// The hex SHA-256 digest of a text's UTF-8 bytes, computed here as the design describes it.
+/// Computes the hex SHA-256 digest of a text's UTF-8 bytes as the design describes.
 private func sha256(_ text: String) -> String {
     SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
 }
 
-/// A `SKILL.md`'s front matter as key and raw value, its body's lines, or nil without front matter.
+/// Returns a `SKILL.md`'s front matter as keys and raw values, along with its body's lines.
+/// Returns nil without front matter.
 private func parts(_ markdown: String) -> (frontMatter: [(String, String)], body: [Substring])? {
     let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false)
     guard lines.first == "---", let end = lines.dropFirst().firstIndex(of: "---") else { return nil }
@@ -20,7 +25,8 @@ private func parts(_ markdown: String) -> (frontMatter: [(String, String)], body
     return (frontMatter, Array(lines[(end + 1)...]))
 }
 
-/// Checks a skill as the tools read it and returns its front matter's description, decoded.
+/// Checks a skill as the tools read it.
+/// Returns the decoded description from its front matter.
 private func checkSkill(_ skill: AgentSkill) throws -> String {
     #expect(skill.name.count <= 64)
     #expect(skill.name.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") }, "\(skill.name)")
@@ -64,7 +70,7 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
             default: return []
             }
         }
-        // Words with an underscore, such as hand_to_user or max_chars, must be the catalog's, or the tools of outside programs beside it.
+        // Words with an underscore, such as hand_to_user or max_chars, must come from the catalog or outside programs' tools beside it.
         let catalog = AgentToolCatalog.tools + [AgentToolCatalog.renameTab, AgentToolCatalog.watchEvents]
         var known = Set(catalog.map(\.name))
         for tool in catalog {
@@ -78,7 +84,8 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         for word in words where word.contains("_") {
             #expect(known.contains(word), "\(word)")
         }
-        // The other names the texts use, without an underscore: each must be the named tool's parameter or value, and stays listed only while a text names it.
+        // Each name without an underscore must be a parameter or value of the named tool.
+        // It stays listed only while a text uses it.
         let uses: [(tool: String, parameter: String?, values: [String])] = [
             ("guide", "topic", []),
             ("navigate", nil, []),
@@ -140,7 +147,7 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         #expect(skill.body.contains("Allow Outside Clients"))
         #expect(skill.body.contains("<untrusted source=\"page\""))
         for topic in AgentGuideTopic.allCases { #expect(skill.body.contains(topic.rawValue), "\(topic)") }
-        // A path with spaces and quotes is written as the shell reads it.
+        // Write a path with spaces and quotes as the shell reads it.
         let odd = AgentHarness.entrySkill(cliPath: "/Users/someone/My Apps/Arch's.app/Contents/Helpers/arch-cli")
         #expect(odd.body.contains(#"'/Users/someone/My Apps/Arch'\''s.app/Contents/Helpers/arch-cli' guide"#))
         #expect(odd.markdown != skill.markdown)
@@ -152,7 +159,8 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
         for name in ["session_info", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "wait_for", "ask_user", "request_approval", "hand_to_user", "guide"] {
             #expect(guide.text.contains(name), "\(name)")
         }
-        // An in-app session's call waits on its card, so its guidance never sends it to approval_wait.
+        // An in-app session's call waits on its card.
+        // Its guidance therefore never sends it to approval_wait.
         for topic in AgentGuideTopic.allCases {
             let text = AgentHarness.guideResult(arguments: ["topic": .string(topic.rawValue)], inSession: true).text
             for unavailable in ["approval_wait", "approvalPending", "arch-cli guide"] {
@@ -191,7 +199,7 @@ private func checkSkill(_ skill: AgentSkill) throws -> String {
     @Test func theVersionLineMarksArchsSkillsAndItsDigestShowsChanges() {
         let skill = AgentSkill(name: "a", description: "b", body: "Text.")
         #expect(AgentSkill.origin(of: skill.markdown) == .archs)
-        // Another format version with its digest is Arch's too.
+        // Arch also recognizes another format version with its digest.
         let bare = "---\nname: a\n---\narch-skill-version: 12\n\nText.\n"
         #expect(AgentSkill.origin(of: bare.replacingOccurrences(of: "version: 12", with: "version: 12 sha256=\(sha256(bare))")) == .archs)
         // Arch's version line with a line added, the body or front matter edited, a wrong digest, or none.

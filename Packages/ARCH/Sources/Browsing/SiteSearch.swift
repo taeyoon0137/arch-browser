@@ -40,6 +40,7 @@ public final class SiteSearchStore: ObservableObject {
     /// Set while the store keeps its defaults in place of a file that did not decode. The first write moves that file aside.
     private var hasUnreadableFile = false
 
+    /// The layout of `site-search.json`.
     private struct File: Codable {
         var shortcuts: [SiteSearchShortcut]
     }

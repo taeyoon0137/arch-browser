@@ -1,4 +1,12 @@
-// Plugins' page calls (`docs/plugins.md`, Plugins and the context; JavaScript API for script plugins): `runPageScript(_:in:)` running a built-in plugin's script text or a script plugin's package file once in the tab's main frame, in the plugin's world with its channel as `arch`, and returning what the script returns; refusing another Persona's tab, a page outside the granted sites, a tab without a page or whose document changed, a document that the page's own check finds outside the sites, scripts the plugin may not run, and for a plugin with `ai` a page on a site excluded from AI, also one the page moved to while the script ran; what a script throws; `postMessage(_:toTab:)` under the same rules; and `arch.pages.run` and `post` in the background script, with the time a page run takes not counted toward the hang limit, and none of them in a panel.
+// Tests plugins' page calls (`docs/plugins.md`, Plugins and the context; JavaScript API for script plugins).
+// `runPageScript(_:in:)` runs a built-in plugin's script text or a script plugin's package file once in the tab's main frame.
+// It runs in the plugin's world with its channel as `arch`. It returns the script's return value.
+// It refuses another Persona's tab, a page outside the granted sites, and a tab without a page or whose document changed.
+// It also refuses a document that the page's own check finds outside the sites and scripts the plugin may not run.
+// A plugin with `ai` cannot reach a page on a site excluded from AI, even if the page moved there while the script ran.
+// Tests also cover what a script throws. `postMessage(_:toTab:)` follows the same rules.
+// The background script can use `arch.pages.run` and `post`. Time spent running a page script does not count toward the hang limit.
+// A panel cannot use any of these calls.
 import AI
 import ARCHEngine
 import Events
@@ -8,7 +16,8 @@ import Testing
 import WebKit
 @testable import Plugins
 
-/// A page that runs the scripts the engine would run in its main frame in a JavaScriptCore context of its own, with `location` for its address and a channel whose `send` records what the scripts send, and records the values posted to its worlds.
+/// Runs the engine's main-frame scripts in its own JavaScriptCore context, with `location` for its address.
+/// The channel's `send` records what scripts send. The page records values posted to its worlds.
 final class ScriptedPage: EngineWebContents {
     /// The address of the document that scripts run in.
     var address: String
@@ -16,9 +25,11 @@ final class ScriptedPage: EngineWebContents {
     var onRun: (() -> Void)?
     /// Whether the engine fails each run, as for a page with no document to run in.
     var fails = false
-    /// Whether the engine answers runs at all; WebKit does not while a script loops.
+    /// Whether the engine answers runs at all.
+    /// WebKit does not answer while a script loops.
     var answers = true
-    /// Whether the engine could run a script or deliver a message only with the user's gesture, as WebKit while the flags switch plugins' page runs off.
+    /// Whether the engine needs the user's gesture to run a script or deliver a message.
+    /// WebKit does while the flags switch plugins' page runs off.
     var needsGesture = false
     /// How long the engine takes to answer each run.
     var delay: TimeInterval = 0
@@ -149,7 +160,8 @@ final class PageHost: PluginBrowserHost {
     }
 }
 
-/// Reaches example.org and the local network; `AIPageCallsPlugin` also asks for `ai`.
+/// Reaches example.org and the local network.
+/// `AIPageCallsPlugin` also asks for `ai`.
 @MainActor
 private class PageCallsPlugin: BuiltInPlugin {
     class var id: PluginID { PluginID(rawValue: "org.example.page-calls")! }
@@ -227,7 +239,8 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         await #expect(throws: PluginError.stopped) { _ = try await context.runPageScript(script, in: other.id) }
     }
 
-    /// The page's own check catches a document that changed after the call checked the tab, and the call catches a tab that moved to another document while the script ran.
+    /// The page's own check catches a document that changed after the call checked the tab.
+    /// The call catches a tab that moved to another document while the script ran.
     @Test func runsAndReturnsOnlyInTheDocumentItChecked() async throws {
         let manager = manager()
         let context = try context(PageCallsPlugin.self, in: manager)
@@ -242,7 +255,9 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         await #expect(throws: PluginError.noPage) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
     }
 
-    /// WebKit waits for a page as long as a script loops in it, so a run waits for the page at most for the hang limit, and the instance's stop ends the wait at once.
+    /// WebKit waits for a page as long as a script loops in it.
+    /// A run waits for the page only until the hang limit.
+    /// Stopping the instance ends the wait at once.
     @Test func aRunThatThePageLeavesUnansweredEnds() async throws {
         let manager = manager(hang: 0.3)
         let context = try context(PageCallsPlugin.self, in: manager)
@@ -252,13 +267,16 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         let started = ContinuousClock.now
         await #expect(throws: PluginError.timedOut) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
         #expect(ContinuousClock.now - started >= .seconds(0.3))
-        // An engine that fails the run once it has waited as long, as Chromium's does, times out too.
+        // An engine that fails the run after waiting as long, as Chromium's does, also times out.
         page.answers = true
         page.fails = true
         page.delay = 0.3
         await #expect(throws: PluginError.timedOut) { _ = try await context.runPageScript(.source("return 1;"), in: tab.id) }
 
-        // The context holds its manager weakly, and this one's limit is one the test does not reach: an engine that fails the run sooner leaves no page, and the context's end ends a run's wait.
+        // The context holds its manager weakly.
+        // The test does not reach this manager's limit.
+        // An engine that fails the run sooner leaves no page.
+        // Ending the context ends a run's wait.
         let unlimited = self.manager(hang: 10)
         let ending = try self.context(PageCallsPlugin.self, in: unlimited)
         page.delay = 0.05
@@ -273,7 +291,9 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         withExtendedLifetime(unlimited) {}
     }
 
-    /// A run or a message with the user's gesture would give the page's handlers user activation, so an engine that cannot run the script or deliver the message without it does neither, as WebKit while the flags switch plugins' page runs off.
+    /// A run or message with the user's gesture would give the page's handlers user activation.
+    /// An engine that cannot run the script or deliver the message without it does neither.
+    /// WebKit does neither while the flags switch plugins' page runs off.
     @Test func runsNothingWhereTheEngineWouldGiveTheUsersGesture() async throws {
         let manager = manager()
         let context = try context(PageCallsPlugin.self, in: manager)
@@ -314,7 +334,9 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         #expect(host.pages[tab.id]?.worlds.isEmpty == true)
     }
 
-    /// A plugin with `ai` could send what a script read to a model as text, so it reaches no page on a site excluded from AI, which new settings make the local network.
+    /// A plugin with `ai` could send what a script read to a model as text.
+    /// It cannot reach a page on a site excluded from AI.
+    /// New settings exclude the local network.
     @Test func aPluginWithAIReachesNoPageOnSitesExcludedFromAI() async throws {
         let manager = manager(ai: AIService(directory: folder.url.appendingPathComponent("AI", isDirectory: true)))
         defer { manager.close() }
@@ -441,7 +463,9 @@ private final class AIPageCallsPlugin: PageCallsPlugin {
         #expect(try await run("twice", in: manager, on: tab) == .array([value, value]))
     }
 
-    /// A run that the page leaves unanswered, as a WebKit page does while a script loops, rejects at the hang limit, after which the background script's own wait counts again: the command that keeps waiting fails at the limit after that.
+    /// A run that the page leaves unanswered rejects at the hang limit, as on a WebKit page while a script loops.
+    /// The background script's own wait then counts again.
+    /// A command that keeps waiting fails when it reaches the limit again.
     @Test func aRunThatThePageLeavesUnansweredEndsAtTheHangLimit() async throws {
         let manager = try await manager(hang: 3)
         defer { manager.close() }

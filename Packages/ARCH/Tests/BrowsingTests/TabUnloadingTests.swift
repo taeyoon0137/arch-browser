@@ -1,4 +1,4 @@
-// Unloading (`docs/bookmarks.md`, Unloading; bookmark rules 4 and 5): what each way of closing does to each kind of tab, the stand-in a pinned tab takes when it closes and the one any tab takes when it unloads on its own, the tab a window selects after a close or an unload, which tabs that no window shows unload, the hours setting, the reports that keep a tab loaded, the leave-page answer of an automatic unload, and Delete Tab's record. Tabs run on `PageStub` and `UnloadedWebContents`, without a session or an engine, so the session's side of each close, which keeps a pinned tab at its place in its list without a closed record or a Tab Close Log entry, is regression check 69.
+// Unloading (`docs/bookmarks.md`, Unloading; bookmark rules 4 and 5): tests cover what each way of closing does to each kind of tab. They check the stand-in a pinned tab takes when it closes and the one any tab takes when it unloads on its own. They cover the tab a window selects after a close or unload. They check which tabs unload when no window shows them. They cover the hours setting, reports that keep a tab loaded, an automatic unload's leave-page answer, and Delete Tab's record. Tabs run on `PageStub` and `UnloadedWebContents`, without a session or engine. Regression check 69 covers the session's side of each close. The session keeps a pinned tab in its place in the list without a closed record or Tab Close Log entry.
 import Agent
 import AppKit
 import ARCHEngine
@@ -18,7 +18,7 @@ import Testing
     /// Every reason a tab closes for: ⌘W and the row's button, the page's `window.close()`, a crashed page, archiving, a tab that only pointed at a file, an extension's `tabs.remove`, a plugin's `closeTab(_:)`, Delete Persona, and sync.
     private let reasons: [TabCloseReason] = [.user, .page, .crash, .archive, .download, .webExtension, .plugin, .persona, .sync]
 
-    /// A tab of the space, or a favorite's tab without `inSpace`, on a page in `engine` that shows `url` with `title`.
+    /// A tab of the space, or a favorite's tab without `inSpace`. Its page in `engine` shows `url` with `title`.
     private func tab(at url: URL, title: String, pinned: Bool, inSpace: Bool = true, engine: EngineKind = .webKit) -> (tab: Tab, page: PageStub) {
         let page = PageStub(engine: engine, url: url)
         let tab = Tab(id: UUID(), webContents: page, spaceID: inSpace ? spaceID : nil, isPinned: pinned, personaID: personaID)
@@ -26,7 +26,7 @@ import Testing
         return (tab, page)
     }
 
-    /// A pinned tab with the user's name in a folder, saved at `home`, whose page in `engine` moved to `elsewhere`.
+    /// A pinned tab in a folder has the user's name and a saved page at `home`. Its page in `engine` moved to `elsewhere`.
     private func pinnedTabThatLeftHome(engine: EngineKind = .webKit) -> (tab: Tab, page: PageStub) {
         let (tab, page) = tab(at: home, title: "Home", pinned: false, engine: engine)
         tab.isPinned = true
@@ -75,7 +75,7 @@ import Testing
 
     // MARK: The pinned tab's side of Close
 
-    /// `Tab.unloadToSavedPage()`, which the session's Close on a pinned tab calls once the tab's windows have selected other tabs.
+    /// The session's Close on a pinned tab calls `Tab.unloadToSavedPage()` once the tab's windows select other tabs.
     @Test func unloadingToTheSavedPageLeavesThePinnedTabAStandInWithoutState() {
         let (tab, page) = pinnedTabThatLeftHome()
         page.restorableState = Data([1, 2, 3])
@@ -83,7 +83,7 @@ import Testing
         let closed = tab.unloadToSavedPage()
         #expect(closed === page)
         #expect(page.uiDelegate == nil)
-        // The same tab keeps its ID, pin, folder, saved page, and name, at its saved page without page state, and loading it again counts as a visit.
+        // The same tab keeps its ID, pin, folder, saved page, and name. It stays at its saved page without page state. Loading it again counts as a visit.
         #expect(tab.id == id && tab.isPinned && tab.folderID == folderID && tab.customTitle == "Mine")
         #expect(tab.savedPage == SavedPage(url: home, title: "Home"))
         #expect(!tab.isLoaded)
@@ -130,7 +130,7 @@ import Testing
         var downloads: [Bool] = []
         tab.didOpenOnlyDownload = { downloads.append($0) }
         tab.loadPage { url, engine, _ in PageStub(engine: engine, url: url) }
-        // A restored tab does not fetch the file again, and closes as a tab that only pointed at a file.
+        // A restored tab does not fetch the file again. It closes as a tab that only pointed at a file.
         #expect(tab.webContents(tab.webContents, shouldDownload: file, hasPage: false) == false)
         #expect(TabCloseAction.of(tab, reason: .download) == .unload)
         _ = tab.unloadToSavedPage()
@@ -142,7 +142,7 @@ import Testing
 
     // MARK: The selection after a close
 
-    /// The tab a window picks among `tabs` after `tab` closes or unloads, with `shownElsewhere` shown by another window.
+    /// The tab a window picks among `tabs` after `tab` closes or unloads. Another window shows `shownElsewhere`.
     private func selection(after tab: Tab, among tabs: [Tab], opener: Tab? = nil, splitNeighbor: Tab? = nil, shownElsewhere: [Tab] = []) -> Tab? {
         BrowserSession.tabToSelect(after: tab, opener: opener, splitNeighbor: splitNeighbor, among: tabs, spaceID: spaceID,
                                    isShownInAnotherWindow: { tab in shownElsewhere.contains { $0 === tab } })
@@ -156,7 +156,7 @@ import Testing
     }
 
     @Test func twoPinnedTabsWhoseSavedPagesAreFilesDoNotSelectEachOther() {
-        // Unloading the first after its download selects nothing, rather than the second, whose load would download its file and unload it in turn, back to the first.
+        // Unloading the first after its download selects nothing. Selecting the second would download its file, then unload it and return to the first.
         let first = tab(at: URL(string: "https://site.example/a.dmg")!, title: "", pinned: true).tab
         let second = unloadedPinnedTab(at: URL(string: "https://site.example/b.dmg")!)
         #expect(selection(after: first, among: [first, second]) == nil)
@@ -215,7 +215,7 @@ import Testing
         #expect(made?.url == elsewhere && made?.engine == .webKit && made?.state == Data([4, 5, 6]))
     }
 
-    /// The Chromium adapter keeps no page state, so the tab loads its last address without its back list.
+    /// The Chromium adapter keeps no page state. The tab therefore loads its last address without its back list.
     @Test func anAutomaticUnloadOfAChromiumPageKeepsNoState() {
         for inSpace in [true, false] {
             let (tab, _) = tab(at: elsewhere, title: "Other", pinned: false, inSpace: inSpace, engine: .chromium)
@@ -266,7 +266,7 @@ import Testing
 
     @Test func theUnloadSettingReadsItsHoursAndDefaultsToTwelve() throws {
         #expect(TabUnloading.unloadAfterHoursKey == "ARCHUnloadAfterHours")
-        // A domain of the test's own, emptied when it starts and when it ends. macOS keeps an empty file for a removed domain, so the name stays the same on every run in a checkout.
+        // The test empties its own domain at the start and end. macOS keeps an empty file for a removed domain. The name therefore stays the same on every run in a checkout.
         let name = "test.arch.tab-unloading.\(checkoutID)"
         let defaults = try #require(UserDefaults(suiteName: name))
         defaults.removePersistentDomain(forName: name)
@@ -346,7 +346,7 @@ import Testing
         #expect(TabUnloading.InputEvent(inputMessage("\"start\"")) == .start)
         #expect(TabUnloading.InputEvent(inputMessage("\"typed\"")) == .typed)
         #expect(TabUnloading.InputEvent(inputMessage("\"typed\"", mainFrame: false)) == .typed)
-        // Only the main frame starts a document over, and other values and worlds are no events.
+        // Only the main frame starts a document over. Other values and worlds produce no events.
         #expect(TabUnloading.InputEvent(inputMessage("\"start\"", mainFrame: false)) == nil)
         #expect(TabUnloading.InputEvent(inputMessage("\"other\"")) == nil)
         #expect(TabUnloading.InputEvent(inputMessage("{\"typed\": true}")) == nil)
@@ -368,17 +368,17 @@ import Testing
         #expect(!tab.hasTypedInput)
         deliver(inputMessage("\"typed\"", mainFrame: false), page)
         #expect(tab.hasTypedInput)
-        // A frame's document starts nothing over; the main frame's next document does.
+        // A frame's document starts nothing over. The main frame's next document does.
         deliver(inputMessage("\"start\"", mainFrame: false), page)
         #expect(tab.hasTypedInput)
-        // A main document's commit clears it, before the frames of a page back from the back-forward cache report again.
+        // A main document's commit clears it before the frames of a page from the back-forward cache report again.
         tab.webContents(page, didCommitDocumentAt: elsewhere)
         #expect(!tab.hasTypedInput)
         deliver(inputMessage("\"typed\"", mainFrame: false), page)
         #expect(tab.hasTypedInput)
         deliver(inputMessage("\"start\""), page)
         #expect(!tab.hasTypedInput)
-        // A page that no longer reports to the tab changes nothing, and the plugins never see the app's world.
+        // A page that no longer reports to the tab changes nothing. The plugins never see the app's world.
         deliver(inputMessage("\"typed\""), PageStub(engine: .webKit, url: elsewhere))
         #expect(!tab.hasTypedInput)
         deliver(inputMessage("\"typed\""), page)
@@ -427,5 +427,5 @@ import Testing
     }
 }
 
-/// A part of the defaults name that stays the same on every run in a checkout and differs between checkouts, so that runs in two checkouts at the same time keep apart, while SwiftPM runs one command at a time in a checkout's build folder: a hash of this file's path.
+/// A hash of this file's path forms part of the defaults name. It stays the same on every run in a checkout. It differs between checkouts, keeping concurrent runs in two checkouts apart. SwiftPM runs one command at a time in a checkout's build folder.
 private let checkoutID = String(#filePath.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }, radix: 36)

@@ -3,6 +3,7 @@
 import AppKit
 import Foundation
 
+/// Arch's interface language, chosen in Settings ▸ General and stored as the app's own `AppleLanguages` value.
 public struct LanguageSetting {
     /// The languages Arch's string catalogs translate into, as `CFBundleLocalizations` lists them (`scripts/bundle_app.sh`).
     public static let languages = ["en", "ko"]

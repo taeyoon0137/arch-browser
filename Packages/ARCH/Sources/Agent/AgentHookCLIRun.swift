@@ -3,6 +3,7 @@ import AgentControl
 import AI
 import Foundation
 
+/// A hook's one-turn agent run on the user's CLI: its ticket, tools, call limit, and the process its MCP peer binds to.
 @MainActor
 final class AgentHookCLIRun {
     let id = UUID()

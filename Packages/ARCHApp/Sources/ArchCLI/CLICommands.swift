@@ -9,6 +9,7 @@
 import AgentControl
 import Foundation
 
+/// Parses and runs an `arch-cli` command, and returns its exit code.
 enum CLICommands {
     static func run(_ arguments: [String]) -> AgentExitCode {
         let request: AgentCLIRequest

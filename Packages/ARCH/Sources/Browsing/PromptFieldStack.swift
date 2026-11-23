@@ -9,6 +9,7 @@ enum PromptFocus: Hashable {
     case button(String)
 }
 
+/// The text fields of a `PromptCard`, which write into `values` by field ID and submit on Return.
 struct PromptFieldStack: View {
     let fields: [PromptField]
     @Binding var values: [String: String]

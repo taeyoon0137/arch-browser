@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// A provider that runs a command-line tool for each request, with the prompt on standard input and the reply on standard output.
 struct CommandLineProvider: AIProvider {
     let configuration: AIProviderConfiguration
     let tool: AICommandLineConfiguration
@@ -190,6 +191,7 @@ protocol CommandLineReplyDecoder: Sendable {
 
 /// A preset's ordinary request read with its session decoder: the reply's text and usage pass on, and an `init` that fails the start check, a forbidden item, or a failed turn ends the request.
 struct AgentReplyDecoder: CommandLineReplyDecoder {
+    /// The session decoder of the preset that runs the request.
     enum Stream {
         case claudeCode(ClaudeCodeStreamDecoder)
         case codex(CodexStreamDecoder)

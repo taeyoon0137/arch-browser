@@ -1,6 +1,7 @@
 // A scroll view as tall as its content up to a limit, so that a prompt's short text takes only its own height and a long one scrolls. A plain scroll view would take all the height it is offered. Its ideal height is that height, which a card measures itself by (`PromptHeightLimit`), and its content's height stays inside it, so an area inside another one, as the page's words in a card's middle, does not stretch the outer one.
 import SwiftUI
 
+/// A vertical scroll view as tall as its content up to `maxHeight`, as the file header describes; `PromptCard` puts long text in it.
 struct PromptScrollArea<Content: View>: View {
     /// The tallest it gets, or nil for whatever the card leaves it.
     var maxHeight: CGFloat?
@@ -30,6 +31,7 @@ struct PromptScrollArea<Content: View>: View {
     }
 }
 
+/// Carries the content's measured height up to `PromptScrollArea`, which sizes itself by it.
 private struct PromptContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 

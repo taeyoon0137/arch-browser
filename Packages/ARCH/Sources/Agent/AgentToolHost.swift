@@ -7,6 +7,7 @@ import AgentControl
 import ARCHEngine
 import Foundation
 
+/// Checks and runs the tool calls of every client against the browser host.
 @MainActor struct AgentToolHost {
     /// The tools this build runs; `tools/list` lists only these, and the others answer that they are not available yet.
     static let servedTools = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press",
@@ -1221,6 +1222,7 @@ import Foundation
 
 /// Who a call is for: an outside client's grant, or an in-app session. The host runs both on the same path and reads the same facts from both; a session adds its site scope (P13), what is left of its call limits, and the turn and take-over the call belongs to.
 struct AgentToolClient {
+    /// What an in-app session adds to a call: its site scope, its calls left, its reader excerpt, and the turn and take-over the call belongs to.
     struct Session {
         var siteScope: [String]
         var hasSearchResults: Bool

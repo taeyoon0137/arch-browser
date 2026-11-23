@@ -204,6 +204,7 @@ public struct AgentLinkInstaller {
         return removed
     }
 
+    /// What is at a path: nothing, a symbolic link, or something else.
     private enum Kind {
         case none, link, other
     }

@@ -3,6 +3,7 @@
 // The window shows one tab. Find, prompt cards, page fullscreen, docked developer tools, reader, agent panel, and address palette work there. Sidebar commands go to the main window.
 import SwiftUI
 
+/// The contents of a small window, as the file header describes; `BrowserWindowController` hosts it.
 struct SmallWindowView: View {
     @ObservedObject var session: BrowserSession
     /// The window this view shows. Its subviews read it from the environment.

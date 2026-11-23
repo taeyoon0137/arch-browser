@@ -92,6 +92,7 @@ public struct HookRunEntry: Codable, Identifiable, Equatable, Sendable {
     public static let keptDays = 30
     public static let keptEntries = 10_000
 
+    /// The run log file's contents: its format version and the entries.
     private struct File: Codable {
         var version = 1
         var entries: [HookRunEntry]

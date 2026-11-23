@@ -1,4 +1,4 @@
-// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab is an agent's while an agent folder holds it; `session.json` leaves agent folders and their tabs out, so that an unkept agent tab is gone after a relaunch, and never writes a folder's `agentSessionID`; an agent tab records no visits, and closing one adds it to neither the closed list nor the tab close log, nor counts for ⌘Z; an agent folder goes once its last tab has left it; Keep Tabs makes the folder and its tabs the user's; and an agent tab denies permission requests without asking (P8), dismisses alerts (P10), refuses downloads (P6) and other apps (P11), hands every file chooser to the agents' service before any panel and ends it with no file when its page moves on, its engine changes, its tab closes, or Arch quits (P7), and asks the agent monitor about each navigation (P16).
+// Agent tabs in the browser (docs/agents.md, In the browser ▸ Agent folders; Rules): a tab belongs to an agent while an agent folder holds it. `session.json` omits agent folders and their tabs, so an unkept agent tab is gone after a relaunch. It never writes a folder's `agentSessionID`. An agent tab records no visits. Closing one adds it to neither the closed list nor the tab close log. It does not count for ⌘Z. An agent folder goes once its last tab leaves. Keep Tabs makes the folder and its tabs the user's. An agent tab denies permission requests without asking (P8). It dismisses alerts (P10). It refuses downloads (P6) and other apps (P11). It hands every file chooser to the agents' service before any panel. It ends the chooser with no file when its page moves on, its engine changes, its tab closes, or Arch quits (P7). It asks the agent monitor about each navigation (P16).
 import AppKit
 import Combine
 import Agent
@@ -11,7 +11,7 @@ import Testing
     private let space = Space(name: "Personal", personaID: Persona.defaultID)
     private let owner = UUID()
 
-    /// The session's folders, which the tabs read their owner from as the session's tabs do.
+    /// The session's folders. Tabs read their owner from these folders, as the session's tabs do.
     private final class Folders {
         var folders: [TabFolder] = []
     }
@@ -38,7 +38,7 @@ import Testing
         #expect(kept.tabs.map(\.id) == [userTab.id, looseTab.id])
         #expect(kept.folders.map(\.id) == [userFolder.id])
 
-        // The saved file has neither, and a relaunch reopens only the user's tabs.
+        // The saved file has neither. A relaunch reopens only the user's tabs.
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentTabTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = SessionStore(directory: directory, seal: .fixture)
@@ -50,7 +50,7 @@ import Testing
         #expect(reopened.tabs.map(\.id) == [userTab.id, looseTab.id])
         #expect(reopened.folders?.map(\.id) == [userFolder.id])
 
-        // A folder's agent is never encoded, so a folder that comes back from a file is the user's.
+        // Encoding omits a folder's agent. A folder loaded from a file therefore belongs to the user.
         let decoded = try JSONDecoder().decode(TabFolder.self, from: JSONEncoder().encode(agentFolder))
         #expect(decoded.id == agentFolder.id && decoded.agentSessionID == nil)
         #expect(!String(decoding: try JSONEncoder().encode(agentFolder), as: UTF8.self).contains("agentSessionID"))
@@ -105,7 +105,7 @@ import Testing
         let (first, _) = tab(in: agentFolder, folders: folders)
         let (second, _) = tab(in: agentFolder, folders: folders)
         #expect(BrowserSession.emptyAgentFolderIDs(in: folders.folders, tabs: [first, second]).isEmpty)
-        // The user drags one tab out, then moves the other into a folder of theirs: the agent folder is empty then, and an empty folder of the user's stays.
+        // The user drags one tab out, then moves the other into their own folder. The agent folder is then empty. An empty folder of the user's stays.
         var tree = FolderTree(folders: folders.folders, tabs: [first, second])
         tree.moveTabOut(first)
         #expect(BrowserSession.emptyAgentFolderIDs(in: folders.folders, tabs: [first, second]).isEmpty)
@@ -176,7 +176,7 @@ import Testing
         #expect(!source.isLoaded && ended[source.id] == [initial, reloaded])
     }
 
-    /// Only agent tabs run the agents' target check and give the tool host their trusted input, at the page's zoom (docs/agents.md, Actions); a tab the user keeps runs no check in its next documents.
+    /// Only agent tabs run the agents' target check (docs/agents.md, Actions). Only they give the tool host their trusted input at the page's zoom. A tab the user keeps runs no check in its next documents.
     @Test func onlyAgentTabsRunTheTargetCheckAndGiveTheirTrustedInput() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentInputTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -203,7 +203,7 @@ import Testing
         #expect(agentPage.pageScripts == [TabUnloading.inputScript] && host.trustedInput(of: info.id) == nil)
     }
 
-    /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts and reaches the agents' service first through `BrowserAgentHost`, with who asks as Arch's panel names it. The service's denial, a new document, quitting, a change of engine, the tab's close, and a session without the service's callback give the page no file, and the user's own tab still queues Arch's panel.
+    /// P7 through the session: an agent tab's chooser queues no panel among the tab's prompts. It reaches the agents' service first through `BrowserAgentHost`, naming who asks as Arch's panel does. The page gets no file on the service's denial, a new document, quitting, an engine change, or the tab's close. It also gets no file in a session without the service's callback. The user's own tab still queues Arch's panel.
     @Test func anAgentTabsFileChooserReachesTheServiceBeforeAnyPanelAndEndsWithItsPage() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ArchAgentChooserTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -221,7 +221,7 @@ import Testing
         // Without the service's callback, the page gets no file.
         tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
         #expect(replies == [nil] && !session.prompts.hasPrompt(for: tab.id))
-        // The service gets the chooser before any panel, with who asks as Arch's panel names it, and nothing waits among the tab's prompts.
+        // The service gets the chooser before any panel. The chooser names who asks as Arch's panel does. Nothing waits among the tab's prompts.
         var handed: [(owner: UUID, tab: UUID, chooser: AgentFileChooser)] = []
         host.agentTabChoosesFiles = { handed.append(($0, $1, $2)) }
         tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
@@ -231,7 +231,7 @@ import Testing
         #expect(replies == [nil] && !session.prompts.hasPrompt(for: tab.id) && !first.chooser.hasEnded)
         first.chooser.deny()
         #expect(replies == [nil, nil])
-        // A new document ends a waiting chooser with no file, and so does quitting.
+        // A new document or quitting ends a waiting chooser with no file.
         tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
         let waiting = try #require(handed.last?.chooser)
         tab.webContents(tab.webContents, didCommitDocumentAt: URL(string: "https://example.org/next"))
@@ -241,21 +241,21 @@ import Testing
         session.isQuitting = true
         #expect(quitting.hasEnded && replies == [nil, nil, nil, nil])
         session.isQuitting = false
-        // A change of the tab's engine ends one.
+        // Changing the tab's engine ends a waiting chooser.
         registry.register(SessionTestEngine(kind: .chromium))
         _ = session.runtime(for: .chromium, in: space.resolvedPersonaID)
         tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
         let switching = try #require(handed.last?.chooser)
         session.switchEngine(of: tab, to: .chromium)
         #expect(tab.engineKind == .chromium && switching.hasEnded && replies == [nil, nil, nil, nil, nil])
-        // The tab's close ends one, and its late answer reaches no page.
+        // Closing the tab ends a waiting chooser. Its late answer reaches no page.
         tab.webContents(tab.webContents, runFileChooser: request) { replies.append($0) }
         let closing = try #require(handed.last?.chooser)
         host.closeAgentTab(tab.id)
         #expect(closing.hasEnded && replies == [nil, nil, nil, nil, nil, nil])
         closing.deny()
         #expect(replies.count == 6 && handed.count == 5)
-        // The user's own tab queues Arch's panel among its prompts and asks no service.
+        // The user's own tab queues Arch's panel among its prompts. It asks no service.
         let userTab = session.openTab(url: URL(string: "https://example.org/mine")!, in: space.id, select: false)
         userTab.webContents(userTab.webContents, runFileChooser: request) { _ in }
         #expect(session.prompts.hasPrompt(for: userTab.id) && handed.count == 5)
@@ -296,7 +296,7 @@ import Testing
         session.moveTab(copy.id, toFolder: folderID)
         session.moveTab(copy.id, to: agent)
         #expect(copy.folderID == nil)
-        // The copy only pointed at a download. Its log entry belongs to it, and no closed record is kept.
+        // The copy only pointed at a download. Its log entry belongs to it. The session keeps no closed record.
         session.closeTab(copy, reason: .download)
         #expect(session.closeLog.entries.map(\.reason) == [.download])
         #expect(session.closeTab(agent))
@@ -366,7 +366,7 @@ import Testing
             completion(.answered(PromptAnswer(buttonID: "ok")))
         }
 
-        // P8: denied without asking, through the session's denial that leaves the profile's kept answers as they were.
+        // P8: the session denies without asking. Its denial leaves the profile's kept answers unchanged.
         var denied = 0
         agentTab.denyPermission = { _, completion in
             denied += 1
@@ -380,16 +380,16 @@ import Testing
         agentTab.requestActivation = { activations += 1 }
         agentTab.webContentsDidRequestActivation(page)
         #expect(activations == 0)
-        // P10: an alert is dismissed without a card; P9: a confirm waits for the user on a card.
+        // P10: the tab dismisses an alert without a card. P9: a confirm waits for the user on a card.
         var dismissed = false
-        // Each report names the frame's origin, by which the tool host keeps another site's text from the agent.
+        // Each report names the frame's origin. The tool host uses it to keep another site's text from the agent.
         let frame = URL(string: "https://widgets.example.net")!
         agentTab.webContents(page, runJavaScriptAlert: "Hello", frameOrigin: frame, completion: { dismissed = true })
         #expect(dismissed && cards == 0)
         var confirmed: Bool?
         agentTab.webContents(page, runJavaScriptConfirm: "Sure?", frameOrigin: nil, completion: { confirmed = $0 })
         #expect(confirmed == true && cards == 1)
-        // P6 and P11: a download the user has not allowed stops and waits for a card, as a link to another app does; one the user allowed goes ahead.
+        // P6 and P11: a download the user has not allowed stops and waits for a card. A link to another app does the same. A download the user allowed goes ahead.
         #expect(!agentTab.webContents(page, shouldDownload: URL(string: "https://example.org/file.zip")!, hasPage: true))
         agentTab.webContents(page, openExternally: URL(string: "mailto:someone@example.org")!, isUserInitiated: true)
         monitor.allowedDownloads = [URL(string: "https://example.org/allowed.zip")!]
@@ -399,7 +399,7 @@ import Testing
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://excluded.example/")!, disposition: .currentTab, isUserInitiated: false)) == .cancel)
         monitor.allows = true
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/next")!, disposition: .currentTab, isUserInitiated: true)) == .allow)
-        // A server redirect is asked about as a hop of the tab's navigation (P13), and a window the page opens elsewhere as a popup, never as a hop.
+        // The tab asks about a server redirect as a navigation hop (P13). It asks about a window the page opens elsewhere as a popup, never as a hop.
         #expect(agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/hop")!, disposition: .currentTab, isUserInitiated: false, isRedirect: true)) == .allow)
         _ = agentTab.webContents(page, decidePolicyFor: EngineNavigationAction(url: URL(string: "https://example.org/window")!, disposition: .newWindow, isUserInitiated: false, isRedirect: true))
         #expect(monitor.asked == ["https://excluded.example/", "https://example.org/next", "https://example.org/hop", "https://example.org/window"].map { URL(string: $0)! })
@@ -408,14 +408,14 @@ import Testing
                                     .downloadAsked(URL(string: "https://example.org/file.zip")!), .externalAppAsked(URL(string: "mailto:someone@example.org")!),
                                     .downloadStarted(URL(string: "https://example.org/allowed.zip")!)])
         #expect(monitor.owners == Set([owner]))
-        // P7: the tab hands every chooser to the session, which asks the agents' service first for an agent tab (`BrowserSession.chooseFiles(inAgentTab:owner:request:completion:)`); without the session's callback the page gets no file.
+        // P7: the tab hands every chooser to the session. For an agent tab, the session asks the agents' service first (`BrowserSession.chooseFiles(inAgentTab:owner:request:completion:)`). Without the session's callback, the page gets no file.
         var queued = 0
         let chooser = EngineFileChooserRequest(mode: .openFile, acceptedTypes: ["image/*"])
         var chosen: [URL]?? = .none
         agentTab.webContents(page, runFileChooser: chooser) { chosen = .some($0) }
         #expect(chosen == .some(nil) && monitor.choosers.isEmpty)
 
-        // The user's own tab asks, shows its alerts, and downloads, and the monitor hears nothing of it.
+        // The user's own tab asks, shows its alerts, and downloads. The monitor hears nothing of it.
         let (userTab, userPage) = tab(in: nil, folders: folders)
         userTab.agentMonitor = monitor
         userTab.requestPermission = { _, completion in
@@ -474,7 +474,7 @@ private final class MonitorDouble: AgentTabMonitor {
     func agentTabDidClose(_ tab: Tab, owner: UUID) {}
 }
 
-/// An engine's page whose address and loading state the test sets, reporting to the tab as an engine does.
+/// An engine's page whose address and loading state the test sets. It reports to the tab as an engine does.
 final class PageDouble: EngineWebContents {
     let engineKind: EngineKind
     private(set) var url: URL?
@@ -497,7 +497,7 @@ final class PageDouble: EngineWebContents {
     let closingStopsDownloads = false
     let devTools: (any EngineDevTools)? = nil
     var input: (any EngineInput)?
-    /// The page scripts the page got with its configuration, and from `setPageScripts(_:)` since, or those of `listOwner`.
+    /// The page scripts from the page's configuration and later calls to `setPageScripts(_:)`, or those of `listOwner`.
     var pageScripts: [EnginePageScript] { listOwner?.pageScripts ?? ownPageScripts }
     private var ownPageScripts: [EnginePageScript]
     /// The page whose script list this one uses, as a WebKit popup uses its opener's, or nil for a list of its own.
@@ -570,7 +570,7 @@ private final class NavigationDouble: EngineNavigationController, EngineBackForw
     func go(to item: any EngineBackForwardListItem) {}
 }
 
-/// The session's in-memory engine. Each call for a profile gets its own context, and pages report only the initial address.
+/// The session's in-memory engine. Each call for a profile gets its own context. Pages report only the initial address.
 final class SessionTestEngine: Engine, EngineApplication {
     let kind: EngineKind
     var unavailableStorageID: UUID?

@@ -1,4 +1,16 @@
-// `agent.json`'s seal (docs/agents.md, Sealed settings): sealed settings read back; a file edited without the key, one that does not read, one whose key the Keychain no longer has, and an earlier copy put back after a Revoke are renamed `agent.json.unreadable` and ignored, with outside access off and the Agents Persona ordinary; a Keychain that does not give the key leaves the file untouched, keeps outside access off and every grant unused, and keeps the recorded Agents Persona agent-only until Try Again reads the key, and the app reads that Persona without the key; until the seal is checked, new sessions start in Read Only and their end keeps Codex's copy; and members of a later build count in the seal.
+// Tests `agent.json`'s seal (docs/agents.md, Sealed settings).
+// Sealed settings read back.
+// Arch renames a file edited without the key, an unreadable file, a file whose key the Keychain no longer has, or an earlier copy restored after a Revoke to `agent.json.unreadable`.
+// Arch ignores those files.
+// Outside access stays off.
+// The Agents Persona becomes ordinary.
+// A Keychain that does not give the key leaves the file untouched.
+// Outside access stays off and every grant stays unused.
+// The recorded Agents Persona stays agent-only until Try Again reads the key.
+// The app reads that Persona without the key.
+// New sessions start in Read Only until the seal check finishes.
+// Ending those sessions keeps Codex's copy.
+// Members of a later build count in the seal.
 import AgentControl
 import CryptoKit
 import Foundation
@@ -72,7 +84,10 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: reading.settingsURL.appendingPathExtension("unreadable").path))
     }
 
-    /// An outside agent with a shell keeps a copy of `agent.json` and puts it back while Arch is closed, after the user revoked its grant. The copy's seal matches, but its generation is below the one the Keychain keeps with the key.
+    /// An outside agent with a shell keeps a copy of `agent.json`.
+    /// It restores the copy while Arch is closed, after the user revoked its grant.
+    /// The copy's seal matches.
+    /// Its generation is below the one the Keychain keeps with the key.
     @Test func anEarlierCopyPutBackAfterARevokeIsRenamedAndIgnored() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -132,7 +147,9 @@ import Testing
         #expect(harness.socketExists)
     }
 
-    /// The defaults stand in for the settings until the seal is checked, so they must neither raise a new session's mode above the user's choice nor delete a Codex thread the user kept.
+    /// The defaults stand in for the settings until the seal check finishes.
+    /// They must not raise a new session's mode above the user's choice.
+    /// They must not delete a Codex thread the user kept.
     @Test func sessionsStartInReadOnlyAndKeepCodexsCopyUntilTheSealIsChecked() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -183,7 +200,9 @@ import Testing
         #expect(SealedSettingsFile<AgentSettings>.open(try Data(contentsOf: reading.settingsURL), with: SymmetricKey(size: .bits256)) == nil)
     }
 
-    /// A file sealed before grants had Watch Browser Events and their runs a day (VII.30) opens with its grants and Allow Outside Clients, which take the scope off and 200 runs a day, instead of being set aside.
+    /// A file sealed before grants had Watch Browser Events and runs a day (VII.30) opens instead of being set aside.
+    /// It keeps its grants and Allow Outside Clients.
+    /// Its grants default to the scope off and 200 runs a day.
     @Test func aFileFromBeforeTheEventsScopeOpensWithItsGrants() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -216,7 +235,8 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: harness.settingsURL.path))
     }
 
-    /// Watch Browser Events asks for Touch ID, as every extra scope does, and a grant's runs a day stay within 1 to 2,000.
+    /// Watch Browser Events asks for Touch ID, as every extra scope does.
+    /// A grant's runs a day stay within 1 to 2,000.
     @Test func theEventsScopeAsksForTouchIDAndRunsADayStayInRange() async throws {
         #expect(AgentGrantChoice(scopes: AgentGrantScopes(watchEvents: true)).needsAuthentication)
         #expect(!AgentGrantChoice().needsAuthentication)

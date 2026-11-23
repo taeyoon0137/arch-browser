@@ -1,11 +1,20 @@
-// Hooks from outside programs on the service's side (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks; Control methods and the registrar): `hooks/add` checks a proposal against the caps before the registrar sees it, refusing `tabs`, tab access `page`, Keep Nothing, agent tabs, places outside the grant's Persona, and unknown tools, says that it waits for the user, answers with the registrar's decision, and is cancelled when the client's connection closes; `hooks/list` and `hooks/remove` reach the registrar with the client's identity, the list without last runs unless the grant has Watch Browser Events; and the registrar learns which programs keep a grant once `agent.json` was checked, and at each grant's end.
+// Tests the service's handling of hooks from outside programs (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks; Control methods and the registrar).
+// `hooks/add` checks a proposal against the caps before the registrar sees it.
+// It refuses `tabs`, tab access `page`, Keep Nothing, agent tabs, places outside the grant's Persona, and unknown tools.
+// It says that it waits for the user.
+// It answers with the registrar's decision.
+// Closing the client's connection cancels it.
+// `hooks/list` and `hooks/remove` reach the registrar with the client's identity.
+// The list omits last runs unless the grant has Watch Browser Events.
+// The registrar learns which programs keep a grant after the service checks `agent.json` and at each grant's end.
 import AgentControl
 import Events
 import Foundation
 import Testing
 @testable import Agent
 
-/// The registry as the service sees it, answering each proposal with `decision`, or with `waits` once the proposing task is cancelled.
+/// The registry as the service sees it.
+/// It answers each proposal with `decision`, or with `waits` once the proposing task is canceled.
 @MainActor final class FakeRegistrar: AgentHookRegistrar {
     var decision = AgentHookDecision.added(UUID())
     var waits = false
@@ -155,7 +164,8 @@ import Testing
         let params = try AgentJSON(encoding: Self.add())
         let call = Task.detached { try? client.connection.call(AgentControlMethod.hooksAdd, params: params, timeout: 5) }
         try await waitUntil { !registrar.proposals.isEmpty }
-        // Revoking closes the client's connection, whose calls stop, so that the sheet closes before the user answers it.
+        // Revoking closes the client's connection.
+        // Its calls stop, so the sheet closes before the user answers it.
         service.revoke(try #require(service.grants.first).id)
         try await waitUntil { registrar.cancelledProposals == 1 }
         _ = await call.value

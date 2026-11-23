@@ -223,6 +223,7 @@ public enum HookShellScript {
         return digest
     }
 
+    /// A file's device, inode, size, and modification and change times, which tell `digest(ofFileAt:)` whether its cached digest still holds.
     private struct FileIdentity: Equatable {
         var device: dev_t
         var inode: ino_t

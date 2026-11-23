@@ -15,6 +15,7 @@ public struct EngineWebContentsConfiguration: Sendable {
     }
 }
 
+/// The result of a find in a page: which match is selected and how many there are.
 public struct EngineFindResult: Hashable, Sendable {
     public var activeMatchOrdinal: Int
     public var numberOfMatches: Int
@@ -24,16 +25,19 @@ public struct EngineFindResult: Hashable, Sendable {
     }
 }
 
+/// One page in a tab's back-forward list.
 public protocol EngineBackForwardListItem: AnyObject {
     var url: URL { get }
     var title: String { get }
 }
 
+/// A tab's back-forward list, which the back button's menu shows.
 public protocol EngineBackForwardList: AnyObject {
     /// The earlier pages, oldest first.
     var backList: [any EngineBackForwardListItem] { get }
 }
 
+/// Loads, reloads, stops, and moves back and forward in one tab.
 public protocol EngineNavigationController: AnyObject {
     var backForwardList: any EngineBackForwardList { get }
     func load(_ request: URLRequest)
@@ -148,6 +152,7 @@ public enum EnginePictureInPictureScript {
     """
 }
 
+/// A tab's developer tools, which the app opens, closes, and places through `DevToolsDock`.
 public protocol EngineDevTools: AnyObject {
     var isOpen: Bool { get }
     /// The view the tools fill while they are open, for the app to place beside the page or in a window of its own.
@@ -210,6 +215,7 @@ public struct EngineWheelTurn: Hashable, Sendable {
     }
 }
 
+/// The modifier keys held during an `EngineInput` click, move, or key press.
 public struct EngineInputModifiers: OptionSet, Hashable, Sendable {
     public let rawValue: Int
     public init(rawValue: Int) {

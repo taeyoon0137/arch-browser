@@ -1,6 +1,7 @@
 // The text fields that float over the selected tab's page, the find bar's and the question popover's, report their keyboard focus to the window, so that a prompt card over that page counts their focus as the page's (`PromptPresentation.isInPage`). Other fields over the pane, as the palette's or the floating sidebar's, report nothing.
 import SwiftUI
 
+/// A text field that floats over the selected tab's page: the find bar's or the question popover's.
 enum PageField: Hashable {
     case find, question
 }
@@ -12,6 +13,7 @@ extension View {
     }
 }
 
+/// Tells the window model when the field gains or loses the focus; `reportsFocus(of:isFocused:)` applies it.
 private struct PageFieldFocusReport: ViewModifier {
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let field: PageField

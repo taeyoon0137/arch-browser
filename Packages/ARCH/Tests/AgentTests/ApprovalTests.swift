@@ -1,4 +1,23 @@
-// The cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals): grouping per page, withdrawal when the page moves on, also before its document finishes, denial on timeout, Touch ID for outside clients' sensitive Allow and Share, and none for P19's Allow for This Tab, which answers the tab's other rename cards, the warning line on cards whose text names a secret, ended cards leaving memory, `approvalPending` and `approval_wait`, the tools that wait for the user, the cards a page's download, file chooser, or link to another app opens, one download card and one file chooser card per tab, a file chooser's panel on the window of the card the user answered and a result that names no file, and, through the service and the socket, the ends that deny waiting cards: Stop All Agents, revocation, the client leaving, and quit, a client's `tools/cancel` of a call and of an `approval_wait`, which withdraws the card of the call it waits on, the connected state of a grant allowed after its only call was cancelled, and the activity log and panel step of a call that goes on after `approvalPending`; and the posted-click check on a real button.
+// Tests cards that wait for the user (docs/agents.md, Approval interface; Tests ▸ Approvals).
+// Cards group by page.
+// A page moving on withdraws its cards, even before its document finishes.
+// A timeout denies a card.
+// Outside clients' sensitive Allow and Share require Touch ID.
+// P19's Allow for This Tab needs no Touch ID.
+// It answers the tab's other rename cards.
+// Cards whose text names a secret show a warning line.
+// Ended cards leave memory.
+// Tests `approvalPending`, `approval_wait`, and tools that wait for the user.
+// A page's download, file chooser, or link to another app opens a card.
+// Each tab has at most one download card and one file chooser card.
+// A file chooser's panel opens on the window of the card the user answered.
+// Its result names no file.
+// Tests the service and socket: Stop All Agents, revocation, the client leaving, and quit deny waiting cards.
+// Tests a client's `tools/cancel` of a call and of an `approval_wait`.
+// Canceling an `approval_wait` withdraws the card of the call it waits on.
+// Tests the connected state of a grant allowed after its only call was canceled.
+// Tests the activity log and panel step of a call that continues after `approvalPending`.
+// Tests the posted-click check on a real button.
 import AgentControl
 import AppKit
 import ARCHEngine
@@ -31,7 +50,8 @@ import Testing
         #expect(await approvals.answer(first.id, with: .allowOnPage))
         #expect(await tasks[0].value == .allowOnPage)
         #expect(await tasks[1].value == .allowOnPage)
-        // Another page's card, and a sensitive card that offers no allowance, still wait.
+        // Another page's card still waits.
+        // A sensitive card that offers no allowance also waits.
         #expect(approvals.pending.map(\.id) == [elsewhere.id, sensitive.id])
         #expect(await approvals.answer(elsewhere.id, with: .deny))
         #expect(await tasks[2].value == .deny)
@@ -40,7 +60,9 @@ import Testing
         #expect(approvals.outcomes[sensitive.id] == .ended("Arch quit."))
     }
 
-    /// P19's card (docs/agents.md, Rules): Allow for This Tab, which is not sensitive, counts without Touch ID and answers the client's other waiting rename cards of that tab, never another tab's.
+    /// P19's Allow for This Tab is not sensitive (docs/agents.md, Rules).
+    /// It counts without Touch ID.
+    /// It answers the client's other waiting rename cards for that tab, never another tab.
     @Test func allowForThisTabAnswersTheTabsOtherRenameCardsWithoutTouchID() async {
         let approvals = AgentApprovals()
         let authenticator = FakeAuthenticator()
@@ -66,7 +88,9 @@ import Testing
         let tab = UUID()
         let page = Self.card(tab: tab, document: 1), handed = Self.card(tab: tab, document: nil), late = Self.card(tab: UUID(), deadline: 0.2)
         let pageTask = await Self.open(page, in: approvals), handedTask = await Self.open(handed, in: approvals), lateTask = await Self.open(late, in: approvals)
-        // The same document keeps the card; the tab's next document withdraws it, but not a card the page moving on does not end.
+        // The same document keeps the card.
+        // The tab's next document withdraws it.
+        // A card that survives page changes stays open.
         approvals.withdraw(tab: tab, owner: Self.owner, document: 1)
         #expect(approvals.isPending(page.id))
         approvals.withdraw(tab: tab, owner: Self.owner, document: 2)
@@ -77,7 +101,8 @@ import Testing
         #expect(await handedTask.value == .withdrawn)
         #expect(await lateTask.value == .timedOut)
         #expect(approvals.pending.isEmpty)
-        // An answer after the end counts for nothing, and an ended card, with its capture, leaves memory.
+        // An answer after the end has no effect.
+        // An ended card leaves memory with its capture.
         #expect(!(await approvals.answer(late.id, with: .allowOnce)))
         #expect(approvals.approval(page.id) == nil && approvals.approval(late.id) == nil)
     }
@@ -140,7 +165,8 @@ import Testing
         let sensitive = Self.card(sensitive: true, offers: [.allowOnce, .deny]), plain = Self.card(), inApp = Self.card(sensitive: true, outside: false, offers: [.allowOnce, .deny])
         let task = await Self.open(sensitive, in: approvals), plainTask = await Self.open(plain, in: approvals), inAppTask = await Self.open(inApp, in: approvals)
         #expect(sensitive.needsAuthentication && !plain.needsAuthentication && !inApp.needsAuthentication)
-        // A failed Touch ID leaves the card waiting; Deny needs none.
+        // A failed Touch ID leaves the card waiting.
+        // Deny needs no Touch ID.
         #expect(!(await approvals.answer(sensitive.id, with: .allowOnce)))
         #expect(approvals.isPending(sensitive.id) && authenticator.count == 1)
         authenticator.answer = true
@@ -200,7 +226,8 @@ import Testing
     @Test func aCallThatWaitsAnswersApprovalPendingAndApprovalWaitTakesItsResult() async throws {
         let fixture = Fixture()
         let first = await fixture.call("request_approval", ["summary": "Send the reply to Dana", "kind": "send"])
-        // The protocol's approval names what approval_wait waits on, for arch-mcp and API-key sessions, and structured names it for arch-cli --json.
+        // The protocol's approval names what approval_wait waits on for arch-mcp and API-key sessions.
+        // structured names it for arch-cli --json.
         #expect(first.status == .approvalPending && first.approval == "a1" && first.structured?["approval"] == "a1")
         #expect(first.text == "request_approval waits for the user in Arch; call approval_wait with approval a1.")
         let card = try #require(fixture.toolHost.approvals.pending.first)
@@ -230,7 +257,9 @@ import Testing
         await fixture.toolHost.approvals.answer(question.id, with: .answer("I will type it myself"))
         #expect(await asked.text == "The user answered: I will type it myself")
 
-        // request_tab shares the tab the user picks, for reading or acting, and it is listed as shared. An outside client's Share counts only after Touch ID or the login password.
+        // request_tab shares the tab the user picks for reading or acting.
+        // The list shows it as shared.
+        // An outside client's Share counts only after Touch ID or the login password.
         let userTab = AgentTabInfo(id: UUID(), spaceID: fixture.grant.spaceID, title: "Inbox", url: URL(string: "https://mail.example/inbox?id=9"), isLoading: false, engine: .webKit)
         fixture.host.tabs.append(userTab)
         fixture.host.userTabIDs = [userTab.id]
@@ -254,7 +283,8 @@ import Testing
         let action = await fixture.call("scroll", ["tab": "t1", "direction": "down"])
         #expect(action.status != .ok)
 
-        // hand_to_user shows the tab and waits for Done; a denial of request_tab shares nothing.
+        // hand_to_user shows the tab and waits for Done.
+        // Denying request_tab shares nothing.
         let opened = await fixture.call("open_tab", ["url": "https://docs.example/sign-in"])
         let handle = try #require(opened.structured?["tab"]?.stringValue)
         async let handed = fixture.call("hand_to_user", ["tab": .string(handle), "reason": "sign_in", "message": "Please sign in, then choose Done."])
@@ -341,7 +371,9 @@ import Testing
         let handle = try #require(opened.structured?["tab"]?.stringValue)
         let tabID = try #require(fixture.state.handles.tabs.id(for: handle))
         let file = URL(string: "https://docs.example/files/report.pdf?token=1")!
-        // P6: refused until the user answers; Allow Once lets that address download once, and the tab asks for it again.
+        // P6 refuses the download until the user answers.
+        // Allow Once lets that address download once.
+        // The tab asks for it again.
         #expect(!fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
         fixture.host.report(.downloadAsked(file), in: tabID)
         let download = try await fixture.waitForCard()
@@ -351,7 +383,9 @@ import Testing
         try await waitUntil { fixture.host.navigations.contains(.load(file)) }
         #expect(fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
         #expect(!fixture.toolHost.tab(tabID, mayDownload: file, state: fixture.state))
-        // Allow Downloads from This Site covers the next one from it. While a download card waits, the page's further downloads get no card of their own and do not start.
+        // Allow Downloads from This Site covers the next download from it.
+        // While a download card waits, the page's further downloads get no card of their own.
+        // Those downloads do not start.
         fixture.host.report(.downloadAsked(file), in: tabID)
         let waiting = try await fixture.waitForCard()
         for number in 1 ... 3 { fixture.host.report(.downloadAsked(URL(string: "https://docs.example/files/file?n=\(number)")!), in: tabID) }
@@ -364,7 +398,8 @@ import Testing
         try await waitUntil { fixture.state.downloadSites.contains("docs.example") }
         #expect(fixture.toolHost.tab(tabID, mayDownload: URL(string: "https://docs.example/other.zip")!, state: fixture.state))
         #expect(!fixture.toolHost.tab(tabID, mayDownload: URL(string: "https://elsewhere.example/other.zip")!, state: fixture.state))
-        // P11: a sensitive card naming the app; the link opens only after Allow.
+        // P11 shows a sensitive card naming the app.
+        // The link opens only after Allow.
         let mail = URL(string: "mailto:dana@example.org")!
         fixture.host.report(.externalAppAsked(mail), in: tabID)
         // A page that asks again while the card waits gets no second card.
@@ -381,7 +416,8 @@ import Testing
         #expect(events.text.contains("The user opened the link from \(handle) in Mail."))
         #expect(events.text.contains("tried to open another link in another app while one waits for the user"))
         #expect(!events.text.contains("token=1") && !events.text.contains("dana@example.org") && !downloads.text.contains("token=1"))
-        // Deny and Stop stops the client, as on other sensitive cards; the host is a value, so this copy reports with its own stop.
+        // Deny and Stop stops the client, as on other sensitive cards.
+        // The host is a value, so this copy reports with its own stop.
         var stopped: [UUID] = []
         var toolHost = fixture.toolHost
         toolHost.stopClient = { stopped.append($0) }
@@ -409,7 +445,10 @@ import Testing
         let asker = "\u{201C}upload.example\u{201D} in \u{201C}docs.example\u{201D}"
         let picked = [URL(fileURLWithPath: "/Users/someone/Private/scan-2026.pdf"), URL(fileURLWithPath: "/Users/someone/Private/photo.png")]
 
-        // A card comes before any panel. It names who asks as Arch's panel does, from the request's origins and never from the tab's address, what the page asks for, and its types. It is no sensitive card, in every mode.
+        // A card comes before any panel.
+        // Like Arch's panel, it names who asks from the request's origins, never the tab's address.
+        // It names what the page asks for and its types.
+        // The card is not sensitive in any mode.
         let panel = FakeChooserPanel()
         fixture.host.chooseFiles(request, asker: asker, in: tabID, panel: panel)
         let card = try await fixture.waitForCard()
@@ -421,10 +460,12 @@ import Testing
         let second = FakeChooserPanel()
         fixture.host.chooseFiles(request, asker: asker, in: tabID, panel: second)
         #expect(second.received == [nil] && second.windows.isEmpty && fixture.toolHost.approvals.pending.count == 1)
-        // Allow Once opens Arch's panel on the window of the card the user answered, and the page receives only the files the user picked there.
+        // Allow Once opens Arch's panel on the window of the card the user answered.
+        // The page receives only the files the user picked there.
         #expect(await fixture.toolHost.approvals.answer(card.id, with: .allowOnce, in: window))
         #expect(panel.windows == [window] && panel.received.isEmpty)
-        // Another chooser while Arch's panel shows gets no file and no card either: one chooser at a time per tab.
+        // Each tab allows one chooser at a time.
+        // Another chooser while Arch's panel shows gets no file or card.
         let during = FakeChooserPanel()
         fixture.host.chooseFiles(request, asker: asker, in: tabID, panel: during)
         #expect(during.received == [nil] && during.windows.isEmpty && fixture.toolHost.approvals.pending.isEmpty)
@@ -445,7 +486,8 @@ import Testing
         #expect(deniedCard.exactTextNote == "Arch has no file types from the page, so the panel offers every file. You pick in Arch's panel. The agent learns only how many items you chose.")
         await fixture.toolHost.approvals.answer(deniedCard.id, with: .deny, in: window)
         #expect(denied.windows.isEmpty && denied.received == [nil])
-        // Cancel in the panel gives the page no file, and the agent hears that the user cancelled.
+        // Cancel in the panel gives the page no file.
+        // The agent hears that the user canceled.
         let cancelled = FakeChooserPanel()
         fixture.host.chooseFiles(EngineFileChooserRequest(mode: .openFolder, pageOrigin: page), asker: "a page on \u{201C}docs.example\u{201D}", in: tabID, panel: cancelled)
         let folderCard = try await fixture.waitForCard()
@@ -454,14 +496,18 @@ import Testing
         await fixture.toolHost.approvals.answer(folderCard.id, with: .allowOnce, in: window)
         cancelled.pick(nil)
         #expect(cancelled.windows == [window] && cancelled.received == [nil])
-        // A save chooser shows the name the page suggests on one line, with its closing quote doubled, its control characters and separators as spaces, and its format characters, such as a bidirectional override, dropped.
+        // A save chooser shows the name the page suggests on one line.
+        // It doubles the closing quote.
+        // It replaces control characters and separators with spaces.
+        // It drops format characters, such as a bidirectional override.
         let saving = FakeChooserPanel()
         fixture.host.chooseFiles(EngineFileChooserRequest(mode: .save, suggestedName: "report\u{201D}\r2\u{202E}.pdf\u{2028}", pageOrigin: page), asker: "a page on \u{201C}docs.example\u{201D}", in: tabID,
                                  panel: saving)
         let saveCard = try await fixture.waitForCard()
         #expect(saveCard.action == "Choose where a page on \u{201C}docs.example\u{201D} saves a file (\(handle))")
         #expect(saveCard.exactTextNote?.hasPrefix("The page suggests the name \u{201C}report\u{201D}\u{201D} 2.pdf\u{201D}. ") == true, "\(saveCard.exactTextNote ?? "")")
-        // Without the card's window and without a front main window, the page gets no file, and the agent hears that no window could show the panel.
+        // If neither the card's window nor a front main window exists, the page gets no file.
+        // The agent hears that no window could show the panel.
         await fixture.toolHost.approvals.answer(saveCard.id, with: .allowOnce)
         #expect(saving.windows.isEmpty && saving.received == [nil])
         // Without the card's window, the panel opens on the front main window.
@@ -489,7 +535,8 @@ import Testing
         quick.askAboutFileChooser(lateChooser, in: tabID, of: fixture.grant.id, state: fixture.state, client: AgentToolClient(grant: fixture.grant))
         try await waitUntil { !late.received.isEmpty }
         #expect(late.received == [nil] && late.windows.isEmpty && fixture.toolHost.approvals.pending.isEmpty)
-        // A load of the document and an address change within it, as by `pushState`, leave the card waiting: `Browsing` ends the chooser, and with it the card, once the tab commits another document.
+        // Loading the document or changing its address, as by `pushState`, leaves the card waiting.
+        // `Browsing` ends the chooser and its card once the tab commits another document.
         let moved = FakeChooserPanel()
         fixture.host.chooseFiles(request, asker: asker, in: tabID, panel: moved)
         let movedCard = try await fixture.waitForCard()
@@ -498,7 +545,10 @@ import Testing
         #expect(fixture.toolHost.approvals.isPending(movedCard.id) && moved.received.isEmpty)
         await fixture.toolHost.approvals.answer(movedCard.id, with: .deny)
         #expect(moved.received == [nil] && moved.windows.isEmpty)
-        // Browsing ends a chooser whose page moved on or whose tab closed: a waiting card goes, and a panel that shows closes with Cancel, which the agent hears as a chooser that ended before the user chose.
+        // Browsing ends a chooser whose page moved on or whose tab closed.
+        // It removes a waiting card.
+        // It closes an open panel with Cancel.
+        // The agent hears that the chooser ended before the user chose.
         let closing = FakeChooserPanel()
         let closingChooser = try #require(fixture.host.chooseFiles(request, asker: asker, in: tabID, panel: closing))
         let closingCard = try await fixture.waitForCard()
@@ -516,7 +566,8 @@ import Testing
         #expect(third.text.contains("The file chooser in \(handle) ended without the user's answer, so the page received no file (P7)."))
         #expect(Self.events(of: third).contains { $0["kind"] == "fileChooserEnded" && $0["chosen"] == .null })
 
-        // Deny and Stop stops the client; Stop, as at Stop All Agents, ends the card with no file.
+        // Deny and Stop stops the client.
+        // Stop, as in Stop All Agents, ends the card with no file.
         var stopped: [UUID] = []
         var stopping = fixture.toolHost
         stopping.stopClient = { stopped.append($0) }
@@ -531,7 +582,8 @@ import Testing
         fixture.toolHost.approvals.end(owner: fixture.grant.id, because: "Stop All Agents.")
         #expect(ending.received == [nil] && ending.windows.isEmpty)
 
-        // No result names a file or a path, and no tool takes one.
+        // No result names a file or a path.
+        // No tool takes one.
         for result in [first, second2, third] {
             let json = String(describing: result.structured)
             for name in ["scan-2026", "photo.png", "/Users/someone", "Private", "elsewhere.example", "report"] {
@@ -569,7 +621,8 @@ import Testing
     }
 
     @Test func aRequestedApprovalEndsWhenThePageChangesOnDenyAndStopAndOnAReply() async throws {
-        // Actions in Ask Before Acting are tested on the page script's fixtures (PageScriptTests); here request_approval about a tab stands in for a card the page withdraws.
+        // PageScriptTests tests actions in Ask Before Acting on the page script's fixtures.
+        // Here, request_approval about a tab stands in for a card the page withdraws.
         let fixture = Fixture()
         fixture.toolHost.answerWait = 10
         let opened = await fixture.call("open_tab", ["url": "https://docs.example/guide"])
@@ -579,7 +632,9 @@ import Testing
         let card = try await fixture.waitForCard()
         // The tab's address changed when its document committed, and again when it finished loading.
         #expect(card.tabID == tabID && card.document == 2 && fixture.state.activity(of: tabID).documents == 1)
-        // The page moves on to a document that commits and never finishes: the card goes, and the call is stale.
+        // The page moves on to a document that commits and never finishes.
+        // This removes the card.
+        // The call is stale.
         let next = URL(string: "https://docs.example/other")!
         fixture.host.committingAddresses.insert(next)
         fixture.host.navigate(tabID, .load(next))
@@ -620,7 +675,9 @@ import Testing
         let service = try await harness.makeOpenService()
         harness.prompt.answers = [AgentGrantChoice(persona: .existing(FakeHost.defaultPersona.id), level: .askBeforeActing, duration: .day)]
 
-        // Stop All Agents: the waiting card ends, its client's connection closes, and the grant stays.
+        // Stop All Agents ends the waiting card.
+        // Its client's connection closes.
+        // The grant stays.
         let client = try TestClient(harness.location)
         _ = try await client.hello()
         _ = try await client.callTool("session_info")
@@ -635,7 +692,9 @@ import Testing
         _ = await waiting.value
         #expect(service.grants.map(\.id) == [grant.id])
 
-        // The client leaving ends the cards of its connection: it stops waiting for the answer, and its connection closes.
+        // The client leaving ends its connection's cards.
+        // It stops waiting for the answer.
+        // Its connection closes.
         var leaving: TestClient? = try TestClient(harness.location)
         _ = try await leaving?.hello()
         _ = try? await leaving?.callTool("request_approval", ["summary": "Send it", "kind": "send"], timeout: 0.5)
@@ -688,7 +747,8 @@ import Testing
             return result.status == .error && result.code == "cancelled"
         }
 
-        // A call that waits on the grant sheet stops waiting, and the sheet stays open for the client's next call.
+        // A call that waits on the grant sheet stops waiting.
+        // The sheet stays open for the client's next call.
         try connection.send(.request(id: .number(41), method: "tools/call", params: AgentToolCall(name: "session_info").params))
         try await waitUntil { harness.prompt.requests.count == 1 }
         try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 41).params))
@@ -697,11 +757,12 @@ import Testing
         harness.prompt.release()
         #expect(try await next.value.status == .ok)
         #expect(harness.prompt.requests.count == 1)
-        // The cancelled call ran nothing once the user allowed the client.
+        // The canceled call ran nothing once the user allowed the client.
         try await waitUntil { service.activity.entries.contains { $0.tool == "session_info" } }
         #expect(service.activity.entries.filter { $0.tool == "session_info" }.count == 1)
 
-        // A call that waits on its card: the card is withdrawn, and the slot frees, so the connection's fifth call runs while three others wait.
+        // Canceling a call that waits on its card withdraws the card.
+        // This frees the slot, so the connection's fifth call runs while three others wait.
         for id in 42 ... 45 {
             try connection.send(.request(id: .number(id), method: "tools/call", params: AgentToolCall(name: "request_approval", arguments: ["summary": .string("Send reply \(id)"), "kind": "send"]).params))
         }
@@ -712,7 +773,7 @@ import Testing
         #expect(service.approvals.outcomes[card.id] == .ended("The client cancelled the call."))
         #expect(service.approvals.pending.count == 3)
         #expect(try await client.callTool("list_tabs").status == .ok)
-        // A call that has ended, or one that never ran, is left alone.
+        // Canceling a call that has ended or never ran has no effect.
         try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 42).params))
         try connection.send(.notification(method: "tools/cancel", params: AgentToolCancel(call: 99).params))
         #expect(service.approvals.pending.count == 3)
@@ -741,7 +802,8 @@ import Testing
         }.value
         let cancelled = try answer.decode(as: AgentToolResult.self)
         #expect(cancelled.status == .error && cancelled.code == "cancelled")
-        // The card is withdrawn, so a later Allow runs nothing, and the call it waited on ends and records so.
+        // Withdrawing the card makes a later Allow run nothing.
+        // The call it waited on ends and records that outcome.
         #expect(service.approvals.outcomes[card.id] == .ended("The client cancelled the call."))
         #expect(service.approvals.pending.isEmpty)
         #expect(!(await service.approvals.answer(card.id, with: .allowOnce)))
@@ -766,7 +828,8 @@ import Testing
                 if case .result(.number(41), _) = try connection.receive(timeout: 5) { return }
             }
         }.value
-        // The user allows the client with no call left waiting: the indicator and Settings show it as connected at once.
+        // The user allows the client with no call left waiting.
+        // The indicator and Settings show it as connected at once.
         harness.prompt.release()
         try await waitUntil { !service.grants.isEmpty }
         #expect(service.connectedGrantIDs == Set(service.grants.map(\.id)))
@@ -791,7 +854,8 @@ import Testing
         let entries = service.activity.entries.filter { $0.tool == "request_approval" }
         #expect(entries.map(\.decision) == [.pending, .approvedWithTouchID] && entries.map(\.outcome) == ["approvalPending", "ok"])
         #expect(service.panel.steps[grant.id]?.last?.sentence == "You approved: Send the reply")
-        // approval_wait takes the result, and the log has it as a plain read.
+        // approval_wait takes the result.
+        // The log records it as a plain read.
         #expect(try await client.callTool("approval_wait", ["approval": "a1"]).status == .ok)
         try await waitUntil { service.activity.entries.contains { $0.tool == "approval_wait" } }
         #expect(service.activity.entries.last { $0.tool == "approval_wait" }?.decision == .auto)
@@ -799,7 +863,13 @@ import Testing
     }
 }
 
-/// The click check on sensitive cards' Allow, Share, Done, and the grant sheet's Allow (docs/agents.md, Approval interface): a click that another program of this user posted names that program as its source, which Arch reads by its running code and refuses unless it is one of the system's programs that click for a person; a click whose source is no process, Arch, or another user's process counts; and only the click the button tracks counts, never an accessibility press or `performClick`, whatever event came last.
+/// Tests the click check on sensitive cards' Allow, Share, Done, and the grant sheet's Allow (docs/agents.md, Approval interface).
+/// A click that another program of this user posts names that program as its source.
+/// Arch reads the source from its running code.
+/// Arch refuses it unless it is one of the system's programs that click for a person.
+/// A click whose source is no process, Arch, or another user's process counts.
+/// Only the click the button tracks counts.
+/// An accessibility press or `performClick` never counts, whatever event came last.
 @MainActor @Suite struct PointerCheckTests {
     @Test func clicksPostedByOtherProgramsAreRefusedByTheirRunningCode() {
         let me = getuid()
@@ -814,7 +884,8 @@ import Testing
         let read: (pid_t) -> AgentPointerCheck.Source? = { sources[$0] }
         for source in [501, 502, 503, 504, 505] as [pid_t] { #expect(AgentPointerCheck.isPostedByAnotherProgram(source: source, read: read), "\(source)") }
         for source in [510, 511, 520, 521] as [pid_t] { #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: source, read: read), "\(source)") }
-        // No source and Arch itself count; a source that cannot be read, as one that exited after it posted, does not.
+        // No source and Arch itself count.
+        // An unreadable source, such as one that exited after it posted, does not count.
         #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: 0, read: read))
         let anyProgram: (pid_t) -> AgentPointerCheck.Source? = { _ in .init(userID: me, appleIdentifier: nil) }
         #expect(!AgentPointerCheck.isPostedByAnotherProgram(source: getpid(), read: anyProgram))
@@ -822,7 +893,9 @@ import Testing
     }
 
     @Test func theSystemsReaderReadsTheRunningCode() throws {
-        // This test process: this user's, and not signed by Apple. A process of another user, launchd, gives its owner only.
+        // This test process belongs to this user.
+        // Apple did not sign it.
+        // A process of another user, launchd, gives its owner only.
         let own = try #require(AgentPointerCheck.readSource(getpid()))
         #expect(own.userID == getuid() && own.appleIdentifier == nil)
         #expect(AgentPointerCheck.readSource(1)?.userID == 0)
@@ -830,7 +903,8 @@ import Testing
     }
 
     @Test func onlyTheClickTheButtonTracksCounts() async throws {
-        // The button reads the app's current event; its tracking loop, which takes events from the window server, is regression check 76's.
+        // The button reads the app's current event.
+        // Regression check 76 covers its tracking loop, which takes events from the window server.
         _ = NSApplication.shared
         var pressed = 0
         let button = AgentPointerButton(title: "Allow", requiresPointer: true) { pressed += 1 }
@@ -841,7 +915,9 @@ import Testing
         window.isReleasedWhenClosed = false
         window.contentView?.addSubview(view)
         view.frame = NSRect(x: 20, y: 20, width: 100, height: 30)
-        // An accessibility press and performClick send the action without a mouse-down the button tracks, so they press nothing, whatever event the app handled last, such as a mouse-up from a real click elsewhere in Arch.
+        // An accessibility press and performClick send the action without a mouse-down the button tracks.
+        // They therefore press nothing, whatever event the app handled last.
+        // This includes a mouse-up from a real click elsewhere in Arch.
         view.performClick(nil)
         _ = view.accessibilityPerformPress()
         #expect(pressed == 0 && !view.isPressedByPointer)

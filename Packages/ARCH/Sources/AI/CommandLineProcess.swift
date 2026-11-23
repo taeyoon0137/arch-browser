@@ -175,6 +175,7 @@ public final class CommandLineProcess: @unchecked Sendable {
 
     // MARK: Descriptors
 
+    /// The read and write ends of the pipes for the child's standard input, output, and error.
     private struct Pipes {
         var inputRead, inputWrite, outputRead, outputWrite, errorRead, errorWrite: Int32
 

@@ -4,10 +4,12 @@ import Darwin
 import Foundation
 import os
 
+/// The whole saved session as `session.json` holds it: spaces, tabs, favorites, folders, Personas, and windows. `SessionStore` writes and reads it, and `BrowserSession` builds and restores it.
 struct SessionSnapshot: Codable {
     /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, version 12 each open tab's suggested title, version 13 seals the page state (`SessionStateSeal`), version 14 adds each pinned tab's saved page, version 15 each folder's parent folder, and version 16 each live folder's configuration and each item tab's item, which this build no longer writes since live folders were removed: it reads a live folder as an ordinary folder and drops its item tabs (`docs/bookmarks.md`, Live sources). Files without a version are version 1.
     static let currentVersion = 16
 
+    /// One tab as the session file keeps it, for open, pinned, and favorite tabs and for the closed-tab records.
     struct TabRecord: Codable, Equatable {
         /// The tab's ID. `nil` in files before version 8; `normalized()` gives every record one.
         var id: UUID?
@@ -259,6 +261,7 @@ extension SessionSnapshot.TabRecord {
     }
 }
 
+/// Reads `session.json` at launch and writes each new `SessionSnapshot` to it away from the main thread, setting aside a file it cannot read. `BrowserSession` owns it.
 final class SessionStore {
     let fileURL: URL
     private var pendingSave: (work: DispatchWorkItem, deadline: DispatchTime, limit: DispatchTime)?
@@ -297,6 +300,7 @@ final class SessionStore {
 
     /// The parts of a file that show it held live folders: a folder with a `live` value, also one that this build cannot decode, or a tab record with a live folder item.
     private struct LiveFolderMarks: Decodable {
+        /// A folder of the file, read only for whether it has a `live` value.
         struct Folder: Decodable {
             var isLive: Bool
 
@@ -310,6 +314,7 @@ final class SessionStore {
             }
         }
 
+        /// A tab record of the file, read only for its live folder item.
         struct Tab: Decodable {
             var liveItemID: String?
         }

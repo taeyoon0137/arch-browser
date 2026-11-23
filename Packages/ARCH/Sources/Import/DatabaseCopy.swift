@@ -2,6 +2,7 @@
 import Foundation
 import SQLite3
 
+/// Reads another browser's SQLite database through a copy, as the file header describes.
 enum DatabaseCopy {
     /// Starts the name of each temporary folder that holds a copy.
     private static let folderPrefix = "ArchImport-"

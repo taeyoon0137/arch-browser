@@ -148,6 +148,7 @@ struct ShortcutsSection: View {
     }
 }
 
+/// The commands of one menu, a group of the shortcuts list.
 private struct MenuGroup: Identifiable {
     let title: String
     var commands: [ShortcutCommand]

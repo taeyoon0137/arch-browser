@@ -34,6 +34,7 @@ extension BrowserTabCloseReason {
     }
 }
 
+/// Watches the session's tabs, windows, and downloads and posts their changes as browser events to the session's bus, as the file header describes.
 @MainActor
 final class BrowserEventSource {
     let bus: BrowserEventBus
@@ -64,6 +65,7 @@ final class BrowserEventSource {
         }
     }
 
+    /// The parts of a tab that make the name it shows, kept to tell when the name changes.
     private struct Shown: Equatable {
         var title: String
         var customTitle: String?

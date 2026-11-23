@@ -3,6 +3,7 @@ import AppKit
 
 /// Builds a submenu of standard actions aimed at one view.
 enum EngineStandardActionSubmenu {
+    /// One entry of the submenu.
     enum Entry {
         /// AppKit's standard action, sent to the view. Left out when the view does not take it.
         case action(String, Selector)

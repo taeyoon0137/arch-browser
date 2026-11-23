@@ -114,6 +114,7 @@ enum AgentPageOperation: Encodable {
     /// Ends whatever the target check holds, so that it cancels none of the user's own input once the user acts in the tab.
     case releaseInput
 
+    /// The keys of the operation's JSON for the page script.
     private enum Keys: String, CodingKey { case op, full, ref, shared, scroll, action, words, token, need, cancelRest, disarm }
 
     /// Encodes the operation and the policy word lists for the page script.

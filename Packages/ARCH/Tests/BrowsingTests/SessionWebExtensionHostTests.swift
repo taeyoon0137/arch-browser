@@ -1,4 +1,4 @@
-// The session's side of the tabs and windows that web extensions open (`SessionWebExtensionHost`, `docs/plugins.md`, Web extensions as plugins), as a tab that the user opens, unlike a script plugin's tabs, as other browsers do: a tab that `tabs.create` opens, a small window's tab that `windows.create` opens, and a tab that a page of either opens download the file that their address points at as a normal download, and their pages' downloads go through the tab's gate. A tab that a page opens straight onto a file downloads as that page's download, so a page opens no file after file without asking. The small windows' AppKit windows are never ordered in.
+// The session handles tabs and windows that web extensions open (`SessionWebExtensionHost`, `docs/plugins.md`, Web extensions as plugins) like tabs the user opens, as other browsers do. Script plugins' tabs differ. A tab that `tabs.create` opens downloads a file at its address as a normal download. So does a small window's tab that `windows.create` opens or a tab that a page of either opens. Their pages' downloads go through the tab's gate. A tab that a page opens straight onto a file counts as that page's download. This prevents a page from opening file after file without asking. The tests never order the small windows' AppKit windows in.
 import AppKit
 import ARCHEngine
 import Combine
@@ -24,7 +24,7 @@ import Testing
         try check(session, session.webExtensionHost, persona)
     }
 
-    /// Gives each small window that the session opens a window that is never ordered in before the session raises it, and keeps those windows.
+    /// Gives each small window that the session opens a window before the session raises it. Keeps those windows without ever ordering them in.
     @MainActor private final class OffscreenSmallWindows {
         private(set) var windows: [WindowSpy] = []
         private var observation: AnyCancellable?
@@ -69,7 +69,7 @@ import Testing
         return item
     }
 
-    /// An extension's tab whose address turns out to be a file downloads it as a normal download, as a tab that the user opens does and as other browsers download what an extension's tabs open, and the tab's page downloads through its own gate, whose first goes on without asking and whose next asks with a card.
+    /// An extension's tab downloads a file at its address as a normal download. This matches tabs the user opens and how other browsers download what an extension's tabs open. The tab's page downloads through its own gate. Its first download goes through without asking. The next asks with a card.
     @Test func aTabThatAnExtensionOpensDownloadsAsTheUsersTabDoes() throws {
         try withSession { session, host, persona in
             let onFile = try openTab(file, in: .chromium, with: host, persona: persona, session: session)
@@ -100,7 +100,7 @@ import Testing
         }
     }
 
-    /// A tab that a page of an extension's tab opens onto a file, as a link of the extension's popup or options page does, downloads it as that page's download: the first goes through, and the next asks with a card over the page's tab.
+    /// An extension tab's page can open a tab onto a file, as a link in the extension's popup or options page does. The file counts as that page's download. The first goes through. The next asks with a card over the page's tab.
     @Test func aFileThatAnExtensionsPageOpensDownloadsAsThatPagesDownload() throws {
         try withSession { session, host, persona in
             let page = URL(string: "https://example.org/opener")!
@@ -117,7 +117,7 @@ import Testing
         }
     }
 
-    /// A page of the user's own tab, as one where an extension's content script runs, downloads the files that it opens in new tabs through its own gate: its first goes through, the next waits for a card over the page's tab, and Don't Allow there refuses it and the ones after it.
+    /// A page in the user's own tab, such as one running an extension's content script, downloads files it opens in new tabs through its own gate. Its first download goes through. The next waits for a card over the page's tab. Don't Allow refuses that download and later ones.
     @Test func filesThatAPageOpensInNewTabsAreThatPagesDownloads() throws {
         try withSession { session, _, _ in
             let space = try #require(session.spaces.first)
@@ -141,7 +141,7 @@ import Testing
     }
 }
 
-/// A download that the page of `webContents` started, which the session admits, and what became of it.
+/// Tracks a download that the page of `webContents` started, its admission by the session, and its outcome.
 private final class DownloadDouble: EngineDownloadItem {
     enum Decision: Equatable {
         /// The session went on to choose the file's destination.
@@ -159,7 +159,7 @@ private final class DownloadDouble: EngineDownloadItem {
     var state: EngineDownloadState = .inProgress
     var completedBytes: Int64 = 0
     var totalBytes: Int64 = 0
-    /// Set once the session answers the engine's question for the file's name.
+    /// The session sets this once it answers the engine's question for the file's name.
     var isDecided = false
     private var isRemoved = false
 

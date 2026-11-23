@@ -144,6 +144,7 @@ private struct FavoriteTabSavedPageItems: View {
     }
 }
 
+/// One favorite's tile in `FavoritesGridView`, also drawn as the drag preview: its icon, dimmed while unopened, its selected fill, and the prompt mark.
 struct FavoriteTileView: View {
     let favorite: Favorite
     /// Set while the favorite's tab is selected.

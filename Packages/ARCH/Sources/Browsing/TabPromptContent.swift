@@ -4,6 +4,7 @@ import ARCHEngine
 import Extensions
 import Foundation
 
+/// Builds the `PromptContent` of each kind of tab prompt and reads its answer, as the file header describes.
 enum TabPromptContent {
     // MARK: Page dialogs
 
@@ -88,6 +89,7 @@ enum TabPromptContent {
                       defaultButtonID: "open", cancelButtonID: "cancel")
     }
 
+    /// The answer to a link that opens another app.
     enum OpenInAppAnswer: Equatable {
         case open
         /// The user said no, which the tab remembers for the site.

@@ -45,6 +45,7 @@ struct PluginInstallSheet: View {
         case pairReview([PluginStagedVersion])
     }
 
+    /// The step the sheet shows now: the store sheet, a review, a pair's review, or the offer of the other engine's version after an install.
     private enum Step {
         case webStore(WebStoreStart)
         case review(PluginReview)

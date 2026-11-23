@@ -5,6 +5,7 @@ import ARCHEngine
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// The Downloads section at the top of the sidebar's library (`LibraryView`): its title with Clear, and a scrolling list of one `DownloadRowView` per download.
 struct DownloadsSectionView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject private var summary: DownloadSummary
@@ -72,6 +73,7 @@ struct DownloadsSectionView: View {
     }
 }
 
+/// One download's row in `DownloadsSectionView`: the file's name and progress or state, with the actions that fit its state.
 struct DownloadRowView: View {
     /// Only the row's actions use the session, so the row does not follow its changes.
     let session: BrowserSession

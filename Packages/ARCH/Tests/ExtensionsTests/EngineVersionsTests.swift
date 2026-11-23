@@ -1,4 +1,4 @@
-// Engine versions of one web extension plugin: the pairing rule at staging, the review's choice, update targets, entry identifiers of versions that share an identifier, pairs made from the review and by hand, their switch, failures, actions, and palette command, separation, removal of one version, a version installed again after a removal that `plugins.json` missed, records the build ignores, copies of a pair to another Persona, when a plugin asks for another engine's version, and the name an extension's page shows. A recording engine stands in for Chromium.
+// Engine versions of one web extension plugin: tests cover the pairing rule at staging, the review's choice, and update targets. They check entry identifiers for versions that share an identifier. They cover pairs made from the review and by hand, including their switch, failures, actions, and palette command. They check separation, removal of one version, and reinstalling a version after a removal that `plugins.json` missed. They cover records the build ignores and copies of a pair to another Persona. They check when a plugin asks for another engine's version and the name an extension's page shows. A recording engine stands in for Chromium.
 import AppKit
 import ARCHEngine
 @testable import Extensions
@@ -25,7 +25,7 @@ struct EngineVersionsTests {
     /// The engine identifier of the packages with `key`.
     private var keyID: String { WebExtensionManifest.extensionID(ofBytes: Data(base64Encoded: key)!) }
 
-    /// A manager of the test's Persona, as a launch makes it, whose web extensions run in a new runtime with the host's engines.
+    /// A manager of the test's Persona, as a launch makes it. Its web extensions run in a new runtime with the host's engines.
     private func launch() -> (PluginManager, WebExtensionRuntime) {
         let runtime = WebExtensionRuntime(persona: persona, host: host, nativeMessagingHosts: folder.url)
         return (PluginManager(persona: persona, directory: folder.url, builtIns: [], runtimes: [runtime], secretStore: NoSecrets()), runtime)
@@ -58,7 +58,7 @@ struct EngineVersionsTests {
         try #require(manager.plugins.first { $0.id == id })
     }
 
-    /// Installs "Reader", which only WebKit runs, and then "Reader for Chromium" with the same key, which only Chromium runs, as its Chromium version. Returns the two plugins' identifiers.
+    /// Installs "Reader", which only WebKit runs. Then installs "Reader for Chromium" with the same key as its Chromium version. Only Chromium runs that version. Returns the two plugins' identifiers.
     private func installComplementaryPair(in manager: PluginManager, chromiumPermissions: [String] = []) async throws -> (webKit: PluginID, chromium: PluginID) {
         chromium.refusedNames.insert("Reader")
         webKit.refusedNames.insert("Reader for Chromium")
@@ -71,7 +71,7 @@ struct EngineVersionsTests {
 
     // MARK: Copies to another Persona
 
-    /// A `.crx` file of an extension with the name and host permissions, signed by the test's developer key, so that its package has the developer's proof.
+    /// A `.crx` file of an extension with the name and host permissions. The test's developer key signs it, giving the package the developer's proof.
     private func signedPackage(_ name: String, hosts: [String]) throws -> URL {
         let manifest: [String: Any] = ["manifest_version": 3, "name": name, "version": "1", "host_permissions": hosts]
         let source = try folder.package("crx-" + name, ["manifest.json": String(decoding: try JSONSerialization.data(withJSONObject: manifest), as: UTF8.self)])
@@ -82,7 +82,7 @@ struct EngineVersionsTests {
         return file
     }
 
-    /// Install in Another Persona stages both versions of a pair, each with its origin and proof, for one review whose grant is the union of their permissions and sites; installing it pairs them in the other Persona, each with the part of the grant that its manifest asks for. A Persona that has either already refuses the pair, and an unpaired plugin offers no pair.
+    /// Install in Another Persona stages both versions of a pair for one review. Each keeps its origin and proof. The review's grant combines their permissions and sites. Installation pairs them in the other Persona. Each gets the part of the grant its manifest asks for. A Persona that already has either version refuses the pair. An unpaired plugin offers no pair.
     @Test func copiesBothVersionsOfAPairToAnotherPersonaWithTheirProofs() async throws {
         chromium.refusedNames.insert("Reader")
         webKit.refusedNames.insert("Reader for Chromium")
@@ -111,7 +111,7 @@ struct EngineVersionsTests {
         #expect(try plugin(reader.id, in: target).grant.sites == [try MatchPattern("https://a.example/*")])
         #expect(try #require(installed.first { $0.id != reader.id }).grant.sites == [try MatchPattern("https://b.example/*")])
 
-        // The Persona has the pair now, so another copy is refused and stages nothing that stays.
+        // The Persona now has the pair. It refuses another copy and keeps nothing staged for it.
         let again = try await target.stage(copy)
         #expect(target.pairInstallRefusal(for: again) != nil)
         #expect(throws: PluginError.self) { try target.installPair(again, grant: PluginGrant(permissions: [], sites: []), isEnabled: false) }
@@ -162,7 +162,7 @@ struct EngineVersionsTests {
         await runtime.waitForEngines()
         #expect(try plugin(reader.id, in: second).engineChecks.isEmpty)
         let staged = try await second.stage(package("other", name: "Reader for Chromium", author: "dev@example.org"))
-        // The name differs, so the package names another extension; with the same name, the check comes first and decides the engines to join for.
+        // The different name makes the package name another extension. With the same name, the check comes first and decides which engines to join for.
         #expect(staged.counterpart == nil)
         second.discard(staged)
         let same = try await second.stage(package("same", name: "Reader", author: "dev@example.org"))
@@ -196,7 +196,7 @@ struct EngineVersionsTests {
         #expect(update.counterpart == reader.id && update.joinableEngines.isEmpty && update.updates == reader.id)
         try manager.install(update, grant: PluginGrant(requestedBy: update.manifest), isEnabled: true)
         #expect(manager.plugins.map(\.manifest.version) == ["2"])
-        // Another identifier with the same name and developer installs as its own plugin, and dismisses nothing.
+        // Another identifier with the same name and developer installs as its own plugin. It dismisses nothing.
         let other = try await manager.stage(package("other", name: "Reader", author: "dev@example.org"))
         #expect(other.counterpart == reader.id && other.joinableEngines.isEmpty && other.updates == nil)
         let id = try manager.install(other, grant: PluginGrant(requestedBy: other.manifest), isEnabled: true)
@@ -224,7 +224,7 @@ struct EngineVersionsTests {
         let (reader, version) = try await installComplementaryPair(in: manager, chromiumPermissions: ["nativeMessaging"])
         #expect(version.rawValue == "extension.\(keyID).chromium")
         await runtime.waitForEngines()
-        // The version takes the pair's switch, and each engine loads its own version.
+        // The version takes the pair's switch. Each engine loads its own version.
         #expect(try plugin(version, in: manager).isEnabled && plugin(version, in: manager).counterpart == reader && plugin(reader, in: manager).pairEngine == .webKit)
         #expect(try webKit.loaded[keyID]?.packageURL == plugin(reader, in: manager).packageURL)
         #expect(try chromium.loaded[keyID]?.packageURL == plugin(version, in: manager).packageURL)
@@ -246,7 +246,7 @@ struct EngineVersionsTests {
         #expect(second.plugins.map(\.id) == [reader, version] && second.engineVersions == [PluginEngineVersions([.webKit: reader, .chromium: version])])
         second.close()
 
-        // A build before engine versions dropped the record: the version is paired again from its identifier.
+        // A build before engine versions dropped the record. The identifier pairs the version again.
         try editList { $0["engineVersions"] = nil }
         let (third, _) = launch()
         #expect(third.engineVersions == [PluginEngineVersions([.webKit: reader, .chromium: version])])
@@ -270,7 +270,7 @@ struct EngineVersionsTests {
 
     @Test func warnsThatAVersionUnderItsCounterpartsIdentifierTakesOverItsCopy() async throws {
         let (manager, runtime) = launch()
-        // Both engines run "Reader", so Chromium has its copy, which keeps its data under the identifier.
+        // Both engines run "Reader". Chromium therefore has its copy, which keeps its data under the identifier.
         let reader = try await manager.installEverything(from: package("reader", name: "Reader", key: key))
         await runtime.waitForEngines()
         #expect(chromium.loaded[keyID] != nil)
@@ -303,11 +303,11 @@ struct EngineVersionsTests {
         let fromSource = try await manager.stage(package("reader", name: "Reader for Chromium", version: "2", key: key))
         #expect(fromSource.updates == reader && fromSource.updateChoices.isEmpty)
         manager.discard(fromSource)
-        // From another place, the answers decide: WebKit alone runs "Reader", as it runs the WebKit version.
+        // From another place, the answers decide. WebKit alone runs "Reader", as it runs the WebKit version.
         let sameAnswers = try await manager.stage(package("elsewhere", name: "Reader", version: "2", key: key))
         #expect(sameAnswers.updates == reader && sameAnswers.updateChoices.isEmpty)
         manager.discard(sameAnswers)
-        // Both engines run this one, so the review chooses.
+        // Both engines run this one. The review therefore chooses.
         let either = try await manager.stage(package("elsewhere", name: "Reader Everywhere", version: "2", key: key))
         #expect(either.updates == reader && either.updateChoices == [reader, version])
         var chosen = either
@@ -350,7 +350,7 @@ struct EngineVersionsTests {
     @Test func switchesBothVersionsAndKeepsAFailureToOne() async throws {
         let (manager, runtime) = launch()
         let (reader, version) = try await installComplementaryPair(in: manager)
-        // The version took the pair's switch, which turns both versions on or off.
+        // The version took the pair's switch. That switch turns both versions on or off.
         #expect(manager.plugins.allSatisfy { $0.isEnabled })
         manager.setEnabled(false, for: version)
         #expect(manager.plugins.allSatisfy { !$0.isEnabled })
@@ -359,7 +359,7 @@ struct EngineVersionsTests {
         manager.setEnabled(true, for: reader)
         #expect(manager.plugins.allSatisfy { $0.isEnabled })
         await runtime.waitForEngines()
-        // One version's failure to start switches it off alone, with why, while the other keeps running.
+        // A version that fails to start switches off with a reason. The other version keeps running.
         chromium.refused = [keyID]
         manager.setEnabled(false, for: reader)
         await runtime.waitForEngines()
@@ -389,10 +389,10 @@ struct EngineVersionsTests {
             let tab = profile.makeTab()
             let tabID = UUID()
             host.tabs[tabID] = tab
-            // The suite's host outlives the profile, so it lets the tab go for WebKit to delete the profile's store.
+            // The suite's host outlives the profile. It releases the tab so WebKit can delete the profile's store.
             defer { host.tabs[tabID] = nil }
             let (manager, runtime) = launch()
-            // The Chromium version comes first, so the pair takes its name and place.
+            // The Chromium version comes first. The pair therefore takes its name and place.
             webKit.refusedNames = ["Reader for Chromium"]
             chromium.refusedNames = ["Reader"]
             let first = try await manager.installEverything(from: package("reader-chromium", name: "Reader for Chromium", action: true))
@@ -404,7 +404,7 @@ struct EngineVersionsTests {
             #expect(items.map(\.id) == [first.id] && items.first?.name == "Reader for Chromium" && items.first?.action != nil)
             #expect(items.first?.engines == [.webKit, .chromium] && items.first?.asksForVersion == false)
             #expect(runtime.performAction(of: first.id, for: tab) && webKit.performed == [webKitID] && chromium.performed.isEmpty)
-            // The palette lists the pair's command once and runs it with the version for the tab's engine.
+            // The palette lists the pair's command once. It runs the command with the version for the tab's engine.
             let commands = manager.contributions.paletteCommands(matching: "Reader")
             #expect(commands.map(\.plugin) == [first.id])
             let command = try #require(commands.first)
@@ -429,10 +429,10 @@ struct EngineVersionsTests {
             let tab = profile.makeTab()
             let tabID = UUID()
             host.tabs[tabID] = tab
-            // The suite's host outlives the profile, so it lets the tab go for WebKit to delete the profile's store.
+            // The suite's host outlives the profile. It releases the tab so WebKit can delete the profile's store.
             defer { host.tabs[tabID] = nil }
             let (manager, runtime) = launch()
-            // Only the version installed second has an action, and the popover still lists the pair under the first one's identifier and name.
+            // Only the version installed second has an action. The popover still lists the pair under the first version's identifier and name.
             webKit.refusedNames = ["Reader for Chromium"]
             chromium.refusedNames = ["Reader"]
             let first = try await manager.installEverything(from: package("reader", name: "Reader"))
@@ -442,13 +442,13 @@ struct EngineVersionsTests {
             await runtime.waitForEngines()
             let items = runtime.actions(for: tab)
             #expect(items.map(\.id) == [first.id] && items.first?.name == "Reader" && items.first?.action != nil)
-            // The palette lists the other version's action once, under the first one's identifier and name, and running it runs the action of the version for the tab's engine.
+            // The palette lists the other version's action once, under the first version's identifier and name. Running it runs the action of the version for the tab's engine.
             let commands = manager.contributions.paletteCommands(matching: "Reader")
             #expect(commands.map(\.plugin) == [first.id] && commands.first?.pluginName == "Reader" && commands.first?.item.id == WebExtensionManifest.actionCommand)
             let command = try #require(commands.first)
             await manager.run(command.ref, PluginInvocation(tab: PluginTab(id: tabID, spaceID: nil, title: nil, url: nil, engine: .webKit, isPinned: false, isSelected: true)))
             #expect(webKit.performed == [WebExtensionManifest.extensionID(of: first.id)] && chromium.performed.isEmpty)
-            // While the other version is off after failing to start, the pair has no action to list, and a run of the command does nothing.
+            // While the other version is off after failing to start, the pair has no action to list. Running the command does nothing.
             chromium.refused = [WebExtensionManifest.extensionID(of: chromiumVersion.manifest.id)]
             manager.setEnabled(false, for: first.id)
             await runtime.waitForEngines()
@@ -468,7 +468,7 @@ struct EngineVersionsTests {
         let a = try await first.installEverything(from: package("a", name: "A"))
         let b = try await first.installEverything(from: package("b", name: "B"), isEnabled: false)
         first.close()
-        // A record that names an engine this build does not know stays in the file and is ignored.
+        // A record that names an engine this build does not know stays in the file. The build ignores it.
         try editList { $0["engineVersions"] = [["webKit": a.id.rawValue, "future": "extension.future"]] }
         let (manager, _) = launch()
         #expect(manager.engineVersions.isEmpty)
@@ -476,7 +476,7 @@ struct EngineVersionsTests {
         #expect(throws: PluginError.self) { try manager.join(PluginEngineVersions([.webKit: a.id, .chromium: a.id])) }
         #expect(throws: PluginError.self) { try manager.join(PluginEngineVersions([.webKit: b.id, .chromium: a.id])) }
         try manager.join(PluginEngineVersions([.webKit: a.id, .chromium: b.id]))
-        // The pair takes the switch of the version installed first, and the join drops the ignored record that named one of its plugins.
+        // The pair takes the switch of the version installed first. The join drops the ignored record that named one of its plugins.
         #expect(manager.engineVersions == [PluginEngineVersions([.webKit: a.id, .chromium: b.id])] && manager.plugins.allSatisfy { $0.isEnabled })
         #expect(try list()["engineVersions"] as? [[String: String]] == [["webKit": a.id.rawValue, "chromium": b.id.rawValue]])
         #expect(manager.missingEngine(of: a.id) == nil && manager.versionEngines(of: a.id).isEmpty)
@@ -484,7 +484,7 @@ struct EngineVersionsTests {
     }
 
     @Test func offersNoJoinWhileAnEngineRunsNoExtensions() async throws {
-        // With WebKit alone, as before Chromium runs extensions, Join With… lists nothing, and a join that gives Chromium a version is refused.
+        // With WebKit alone, as before Chromium runs extensions, Join With… lists nothing. The manager refuses a join that gives Chromium a version.
         host.engines = [.webKit: webKit]
         let (alone, _) = launch()
         let a = try await alone.installEverything(from: package("a", name: "A"))
@@ -496,7 +496,7 @@ struct EngineVersionsTests {
         #expect(alone.engineVersions.isEmpty && alone.plugins.allSatisfy { $0.engines == [.webKit] })
         alone.close()
 
-        // Once Chromium runs extensions, Join With… lists the other plugin, and a version that Chromium has not checked yet cannot join for it.
+        // Once Chromium runs extensions, Join With… lists the other plugin. A version that Chromium has not checked yet cannot join for it.
         host.engines = [.webKit: webKit, .chromium: chromium]
         let (manager, runtime) = launch()
         #expect(manager.joinCandidates(of: a.id).map(\.id) == [b.id])
@@ -504,7 +504,7 @@ struct EngineVersionsTests {
             try manager.join(PluginEngineVersions([.webKit: b.id, .chromium: a.id]))
         }
         await runtime.waitForEngines()
-        // Both engines run both packages, so the choice starts with the version installed first on WebKit.
+        // Both engines run both packages. The choice therefore starts with the version installed first on WebKit.
         #expect(manager.proposedJoin(of: b.id, with: a.id) == PluginEngineVersions([.webKit: a.id, .chromium: b.id]))
         try manager.join(PluginEngineVersions([.webKit: a.id, .chromium: b.id]))
         #expect(try plugin(a.id, in: manager).engines == [.webKit] && plugin(b.id, in: manager).engines == [.chromium] && manager.joinCandidates(of: a.id).isEmpty)
@@ -526,7 +526,7 @@ struct EngineVersionsTests {
         #expect(webKit.loaded[bID] == nil && chromium.loaded[bID] != nil)
         manager.setEnabled(false, for: b.id)
         try manager.separate(a.id)
-        // Both stay installed with their switches, each on every engine its package runs on, and each one's note is dismissed for the other's engines.
+        // Both stay installed with their switches, each on every engine its package runs on. Each dismisses its note for the other's engines.
         #expect(manager.engineVersions.isEmpty && manager.plugins.map(\.id) == [a.id, b.id] && manager.plugins.allSatisfy { !$0.isEnabled && $0.counterpart == nil })
         #expect(manager.plugins.allSatisfy { $0.dismissedVersionNotes == [.webKit, .chromium] })
         manager.setEnabled(true, for: b.id)
@@ -552,12 +552,12 @@ struct EngineVersionsTests {
         let grant = try plugin(version, in: manager).grant
         try manager.remove(reader.id)
         await runtime.waitForEngines()
-        // The other version keeps its grant, storage, and switch, takes the pair's place, and the record goes.
+        // The other version keeps its grant, storage, and switch. It takes the pair's place. The record goes.
         #expect(try manager.plugins.map(\.id) == [version, other.id] && manager.engineVersions.isEmpty && list()["engineVersions"] == nil)
         let kept = try plugin(version, in: manager)
         #expect(kept.grant == grant && kept.isEnabled && kept.counterpart == nil)
         #expect(FileManager.default.fileExists(atPath: folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/\(version.rawValue)/package").path))
-        // The removed version leaves WebKit with its storage there; Chromium keeps the other version's copy and storage.
+        // WebKit removes the version and its storage. Chromium keeps the other version's copy and storage.
         #expect(webKit.removedData == [keyID] && chromium.removedData.isEmpty && webKit.loaded[keyID] == nil && chromium.loaded[keyID] != nil)
         // The remaining version asks for a WebKit version again.
         #expect(manager.missingEngine(of: version) == .webKit)
@@ -585,7 +585,7 @@ struct EngineVersionsTests {
         await firstRuntime.waitForEngines()
         first.close()
 
-        // Chromium's profile does not start when the user removes the WebKit version, and Chromium keeps the Chromium version's storage under the same identifier, so no removal waits for Chromium.
+        // Chromium's profile does not start when the user removes the WebKit version. Chromium keeps its version's storage under the same identifier. No removal therefore waits for Chromium.
         host.enginesThatDoNotStart = [.chromium]
         let (second, secondRuntime) = launch()
         await secondRuntime.waitForEngines()
@@ -593,11 +593,11 @@ struct EngineVersionsTests {
         await secondRuntime.waitForEngines()
         #expect(webKit.removedData == [keyID])
         #expect(!FileManager.default.fileExists(atPath: folder.url.appendingPathComponent("Plugins/\(persona.uuidString)/webExtension.json").path))
-        // Without Chromium, the remaining version runs on no engine, as WebKit refuses its package, and goes off.
+        // WebKit refuses the remaining version's package. Without Chromium, it therefore runs on no engine and switches off.
         #expect(try !plugin(version, in: second).isEnabled)
         second.close()
 
-        // At the next launch Chromium deletes nothing, and the remaining version, switched on again, runs there.
+        // At the next launch, Chromium deletes nothing. The remaining version runs there once switched on again.
         host.enginesThatDoNotStart = []
         let (third, thirdRuntime) = launch()
         await thirdRuntime.waitForEngines()
@@ -627,11 +627,11 @@ struct EngineVersionsTests {
         try FileManager.default.removeItem(at: listURL)
         try FileManager.default.moveItem(at: savedList, to: listURL)
 
-        // The file keeps B's entry and the pair's record, which the next launch ignores, since B's package is gone.
+        // The file keeps B's entry and the pair's record. The next launch ignores them because B's package is gone.
         let (manager, _) = launch()
         #expect(manager.plugins.map(\.id) == [a.id, c.id] && manager.engineVersions.isEmpty)
         #expect(try list()["engineVersions"] as? [[String: String]] == [["webKit": a.id.rawValue, "chromium": b.id.rawValue]])
-        // Installed again, switched off, without a join to offer, since the names differ, B is a new plugin: it pairs with nothing and takes neither the old entry's place nor its dismissed note.
+        // Reinstalling B switched off makes it a new plugin. The different names leave no join to offer. B pairs with nothing. It takes neither the old entry's place nor its dismissed note.
         let again = try await manager.installEverything(from: package("b", name: "B"), isEnabled: false)
         #expect(again.id == b.id && again.counterpart == nil && again.dismissedVersionNotes.isEmpty && manager.missingEngine(of: b.id) == .webKit)
         #expect(try manager.engineVersions.isEmpty && manager.plugins.map(\.id) == [a.id, c.id, b.id] && list()["engineVersions"] == nil)
@@ -664,14 +664,14 @@ struct EngineVersionsTests {
     // MARK: Guidance
 
     @Test func asksForAVersionOnlyWhereTheRuleSays() async throws {
-        // With WebKit alone, as before Chromium runs extensions, nothing asks and nothing offers a version.
+        // With WebKit alone, as before Chromium runs extensions, nothing asks for a version. Nothing offers one.
         host.engines = [.webKit: webKit]
         let (alone, _) = launch()
         let reader = try await alone.installEverything(from: package("reader", name: "Reader"))
         #expect(alone.missingEngine(of: reader.id) == nil && alone.versionEngines(of: reader.id).isEmpty)
         alone.close()
 
-        // Chromium runs extensions but has not checked the package: it offers the version, and does not ask yet.
+        // Chromium runs extensions but has not checked the package. It offers the version. It does not ask yet.
         host.engines = [.webKit: webKit, .chromium: chromium]
         chromium.refusedNames = ["Reader"]
         let (manager, runtime) = launch()
@@ -689,7 +689,7 @@ struct EngineVersionsTests {
         #expect(later.plugins.first?.dismissedVersionNotes == [.chromium] && later.missingEngine(of: reader.id) == nil)
         later.close()
 
-        // A plugin that both engines run offers no version and asks for none; a failure to start on Chromium offers the Chromium version and makes it ask.
+        // A plugin that both engines run offers no version. It asks for none. A failure to start on Chromium makes it offer and ask for the Chromium version.
         chromium.refusedNames = []
         let (both, bothRuntime) = launch()
         let everywhere = try await both.installEverything(from: package("everywhere", name: "Everywhere"), isEnabled: false)
@@ -712,11 +712,11 @@ struct EngineVersionsTests {
         _ = try await installComplementaryPair(in: manager)
         let tool = try await manager.installEverything(from: package("tool", name: "Tool"), isEnabled: false)
         let toolID = WebExtensionManifest.extensionID(of: tool.id)
-        // Each engine's address of a page of the pair names it by its version installed first, whatever the case of the host; an extension that is off keeps its name.
+        // Each engine's address for a page of the pair uses the name of the version installed first, regardless of the host's case. An extension that is off keeps its name.
         #expect(runtime.name(ofPageAt: URL(string: "chrome-extension://\(keyID)/options.html")!) == "Reader")
         #expect(runtime.name(ofPageAt: URL(string: "webkit-extension://\(keyID.uppercased())/popup.html")!) == "Reader")
         #expect(runtime.name(ofPageAt: URL(string: "webkit-extension://\(toolID)/options.html")!) == "Tool")
-        // A web page on a host of that name and a page of an extension that is not installed are not named.
+        // The runtime names neither a web page on a host of that name nor a page of an extension that is not installed.
         #expect(runtime.name(ofPageAt: URL(string: "https://\(keyID)/options.html")!) == nil)
         #expect(runtime.name(ofPageAt: URL(string: "chrome-extension://\(String(repeating: "a", count: 32))/options.html")!) == nil)
         // A name of nothing but spaces, as a localized name whose message is empty, names the extension by its identifier, as everywhere else.
@@ -734,7 +734,7 @@ struct EngineVersionsTests {
         let toolID = WebExtensionManifest.extensionID(of: tool.id)
         let options = URL(string: "chrome-extension://\(toolID)/options.html")!
         #expect(runtime.name(ofPageAt: options) == "Tool" && published.last == [toolID: "Tool"])
-        // A switch on or off names the page as before and publishes nothing.
+        // Switching on or off keeps the page's name. It publishes nothing.
         let count = published.count
         manager.setEnabled(true, for: tool.id)
         manager.setEnabled(false, for: tool.id)
@@ -746,7 +746,7 @@ struct EngineVersionsTests {
         // A pair's version installed first names the pages of both versions.
         let (reader, _) = try await installComplementaryPair(in: manager)
         #expect(runtime.name(ofPageAt: URL(string: "chrome-extension://\(keyID)/options.html")!) == "Reader" && published.last?[keyID] == "Reader")
-        // A removal takes the name away, so the page goes by its identifier again; removing the pair's version installed first leaves the name to the other version.
+        // Removal takes the name away, so the page uses its identifier again. Removing the pair's version installed first leaves the name to the other version.
         try manager.remove(tool.id)
         #expect(runtime.name(ofPageAt: options) == nil && published.last == [keyID: "Reader"])
         try manager.remove(reader)

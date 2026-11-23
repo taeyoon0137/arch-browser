@@ -76,6 +76,7 @@ struct TerminalPosition: Comparable {
 
 /// Applies the parser's actions to the grid, the scrollback, the cursor, and the modes.
 final class TerminalScreen {
+    /// The cursor's place, the style that new characters take, and whether the next character wraps first.
     struct Cursor: Equatable {
         var row = 0
         var column = 0

@@ -7,6 +7,7 @@
 
 /// One tab's downloads from its current documents. `BrowserSession` admits each download through it and asks with a card over the tab when it says so. The gate returns the decisions for the caller to run, so that none runs while the gate changes.
 struct PageDownloadGate {
+    /// What the gate says of one download.
     enum Admission: Equatable {
         /// The download goes on at once.
         case allow

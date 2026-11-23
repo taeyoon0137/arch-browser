@@ -3,6 +3,7 @@ import AgentControl
 import AI
 import Foundation
 
+/// The space, model, and mode that an outside client's `task/start` runs with.
 struct AgentTaskPlan: Equatable {
     var spaceID: UUID
     var model: AIModelRef?

@@ -12,6 +12,7 @@ public struct BrowserEventRateLimiter: Sendable {
         case allowed, overSubject, overOwner
     }
 
+    /// A counted run: its event subject and when it was counted.
     private struct Admitted: Sendable {
         var subject: UUID
         var date: Date

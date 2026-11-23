@@ -1,4 +1,15 @@
-// The `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins): a manifest's `ai`; the feature `plugin.<id>` that each enabled plugin with it registers, automatic when the plugin lists events and shared by the Personas that hold the plugin, also while only another Persona's version lists events; the context's AI under that feature and its route only; nothing of a tab, a page, or a command's click on a site excluded from AI for a plugin with `ai`; `arch.ai.reply` with the time it waits not counted toward the hang limit, which refused and failed calls do not stretch; `arch.ai.stream` handing on the reply's text as it arrives, stopped when its listener throws, and ending as `AIClient.reply(_:)` does; a panel's requests, renames, closes, selections, and moves outside the plugin's hook steps, and its requests stopped when it closes; and the events of a plugin with `ai` running one at a time as steps of the shared hook scheduler once the feature has a model of its own, not after a stop that came while the plugin started, with the step's requests ending when the scheduler stops it, as at a close or a route change, and later ones never going out, three provider errors pausing the plugin, and the step's renames bound to its event's document and its closes, selections, and moves of its event's tab refused once it stops; and the setting changes of such a plugin reaching it outside the scheduler, also before its feature has a model.
+// Tests the `ai` permission and plugin hooks (`docs/plugins.md`, AI hooks and plugins that AI writes; `docs/hooks.md`, Plugins).
+// A manifest declares `ai`. Each enabled plugin with it registers the feature `plugin.<id>`.
+// Personas that hold the plugin share the feature. It is automatic when any enabled version lists events, even if only another Persona's version does.
+// The context's AI uses only that feature and its route. A plugin with `ai` gets no data from a tab, page, or command's click on a site excluded from AI.
+// Time spent waiting for `arch.ai.reply` does not count toward the hang limit. Refused and failed calls do not extend the limit.
+// `arch.ai.stream` passes on reply text as it arrives. It stops when its listener throws. It ends as `AIClient.reply(_:)` does.
+// A panel's requests, renames, closes, selections, and moves run outside the plugin's hook steps. Closing the panel stops its requests.
+// A plugin with `ai` runs events one at a time as steps of the shared hook scheduler once its feature has a model.
+// An event does not run after a stop during plugin startup. Stopping a step, such as at a close or route change, ends its requests. Later requests never go out.
+// Three provider errors pause the plugin. A step's renames apply only to its event's document.
+// A stopped step cannot close, select, or move its event's tab.
+// The plugin receives setting changes outside the scheduler, even before its feature has a model.
 import AI
 import ARCHEngine
 import Events
@@ -11,16 +22,17 @@ import WebKit
 @MainActor
 private final class AIRecorder {
     static var shared = AIRecorder()
-    /// The kinds of the events that reached the hook plugin, and of those that reached the plugin without `ai`.
+    /// The event kinds that reached the hook plugin and the plugin without `ai`.
     var hookEvents: [BrowserEventKind?] = []
     var plainEvents: [BrowserEventKind?] = []
-    /// How many of the hook plugin's listeners run at once, and the most that ever did.
+    /// The current and highest counts of the hook plugin's listeners running at once.
     var running = 0
     var mostRunning = 0
     /// How long the hook plugin's activation and each of its listeners take.
     var activation: Duration = .zero
     var pause: Duration = .zero
-    /// Whether the hook plugin's listener waits for `release()` after its pause, sends a request, and renames its event's tab, and what came of it.
+    /// Whether the hook plugin's listener waits for `release()` after its pause, sends a request, and renames its event's tab.
+    /// Also records the results.
     var holds = false
     var asks = false
     var renames = false
@@ -44,7 +56,8 @@ private final class AIRecorder {
     }
 }
 
-/// Asks for `ai` and `tabs.rename` and listens for page loads, so its listeners run as hooks, and for its setting changes, which do not.
+/// Asks for `ai` and `tabs.rename`.
+/// Listens for page loads as hooks. Listens for setting changes outside hooks.
 @MainActor
 private final class AIHookPlugin: BuiltInPlugin {
     static let id = PluginID(rawValue: "org.example.ai-hook")!
@@ -128,7 +141,8 @@ private final class PlainEventsPlugin: BuiltInPlugin {
     }
 }
 
-/// Answers each page script value with the value, on every website; `PageAIPlugin` also asks for `ai`.
+/// Answers each page script value with that value on every website.
+/// `PageAIPlugin` also asks for `ai`.
 @MainActor
 private class PagePlugin: BuiltInPlugin {
     class var id: PluginID { PluginID(rawValue: "org.example.page")! }
@@ -156,7 +170,8 @@ private final class PageAIPlugin: PagePlugin {
     override class var permissions: Set<PluginPermission> { [.ai] }
 }
 
-/// Reads tabs and records its command's invocations; `TabsAIPlugin` also asks for `ai`.
+/// Reads tabs and records its command's invocations.
+/// `TabsAIPlugin` also asks for `ai`.
 @MainActor
 private class TabsPlugin: BuiltInPlugin {
     class var id: PluginID { PluginID(rawValue: "org.example.tabs")! }
@@ -184,7 +199,8 @@ private final class TabsAIPlugin: TabsPlugin {
     override class var permissions: Set<PluginPermission> { [.tabs, .ai] }
 }
 
-/// The Persona's tabs, which the tests set, and the renames that reached them, each with the document it was for, and the closes and selections.
+/// Holds the Persona's tabs, which the tests set.
+/// Records renames with their documents. Also records closes and selections.
 @MainActor
 private final class RecordingHost: PluginBrowserHost {
     var tabs: [PluginTab] = []
@@ -289,7 +305,8 @@ private final class RecordingHost: PluginBrowserHost {
         let feature = try #require(service.features.first { $0.id == id })
         #expect(feature.trigger == .user && feature.data.kinds.isEmpty && feature.name == "Asking")
 
-        // Whatever feature a request names, it goes out under the plugin's feature, which has no model yet.
+        // A request uses the plugin's feature regardless of the feature it names.
+        // The plugin's feature has no model yet.
         let context = manager.makeContext(for: installed)
         let client = try context.ai()
         await #expect(throws: AIError.self) { _ = try await client.reply(request) }
@@ -334,7 +351,8 @@ private final class RecordingHost: PluginBrowserHost {
         #expect(!service.features.contains { $0.id == id || $0.id == .plugin(AskingPlugin.id.rawValue) })
     }
 
-    /// One Persona's version of a plugin lists events and another's does not: the shared feature is automatic while the version with events is enabled.
+    /// One Persona's version of a plugin lists events. Another's does not.
+    /// The shared feature is automatic while the version with events is enabled.
     @Test func theSharedFeatureIsAutomaticWhileOneVersionRunsHooks() async throws {
         let service = service()
         let id = AIFeatureID.plugin("org.example.shared")
@@ -359,7 +377,8 @@ private final class RecordingHost: PluginBrowserHost {
         #expect(service.features.first { $0.id == id }?.trigger == .automatic)
     }
 
-    /// A page script could read a page that AI may not see, and the plugin send it to a model as text.
+    /// A page script could read a page that AI may not see.
+    /// The plugin could then send it to a model as text.
     @Test func aPluginWithAIGetsNoPageValuesFromSitesExcludedFromAI() async throws {
         let manager = manager(builtIns: [PageAIPlugin.self, PagePlugin.self], ai: service())
         defer { manager.close() }
@@ -413,7 +432,8 @@ private final class RecordingHost: PluginBrowserHost {
         defer { manager.close() }
         let page = tab()
         bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: true))
-        // Without a model of its own the hook skips, while a plugin without `ai` gets the event as it arrives.
+        // The hook skips without a model of its own.
+        // A plugin without `ai` gets the event as it arrives.
         #expect(await eventually { AIRecorder.shared.plainEvents == [.pageLoaded] })
         try await Task.sleep(for: .milliseconds(300))
         #expect(AIRecorder.shared.hookEvents.isEmpty)
@@ -424,7 +444,8 @@ private final class RecordingHost: PluginBrowserHost {
         bus.post(.pageLoaded(tab: page, isRestore: false, isFirstLoadAfterOpen: false))
         #expect(await eventually { AIRecorder.shared.hookEvents == [.pageLoaded] })
 
-        // Another tab's chain runs at the same time, but the plugin's steps wait for each other.
+        // Another tab's chain runs at the same time.
+        // The plugin's steps wait for each other.
         AIRecorder.shared.pause = .milliseconds(200)
         bus.post(.pageLoaded(tab: tab("/a"), isRestore: false, isFirstLoadAfterOpen: true))
         bus.post(.pageLoaded(tab: tab("/b"), isRestore: false, isFirstLoadAfterOpen: true))
@@ -432,7 +453,8 @@ private final class RecordingHost: PluginBrowserHost {
         #expect(AIRecorder.shared.mostRunning == 1)
     }
 
-    /// A plugin whose page loads run as hooks hears of its setting changes outside the scheduler, so they reach it while the scheduler skips its page loads for want of a model.
+    /// A plugin whose page loads run as hooks receives setting changes outside the scheduler.
+    /// It receives them even while the scheduler skips its page loads because it has no model.
     @Test func anAIPluginHearsOfItsSettingChangesWithoutAModelOfItsOwn() async throws {
         let manager = manager(builtIns: [AIHookPlugin.self], ai: service())
         defer { manager.close() }
@@ -462,7 +484,8 @@ private final class RecordingHost: PluginBrowserHost {
         #expect(await eventually { AIRecorder.shared.hookEvents == [.pageLoaded] })
     }
 
-    /// A step's rename is for its event's document, and a stopped step renames nothing.
+    /// A step's rename applies to its event's document.
+    /// A stopped step renames nothing.
     @Test func aStepsRenamesAreForItsEventsDocumentUntilItStops() async throws {
         let feature = AIFeatureID.plugin(AIHookPlugin.id.rawValue)
         let service = service(answeringAfter: 0, for: [feature])
@@ -543,12 +566,14 @@ private final class RecordingHost: PluginBrowserHost {
         let installed = try #require(manager.plugins.first)
         let storage = manager.makeContext(for: installed).storage
 
-        // The reply comes after the hang limit, which the wait for it does not count toward.
+        // The reply arrives after the hang limit.
+        // Waiting for it does not count toward the limit.
         await manager.run(PluginCommandRef(plugin: installed.id, command: "ask"), PluginInvocation(tab: nil))
         #expect(storage.value(forKey: "result") == .object(["text": .string("Short answer"), "finishReason": .string("completed")]))
         #expect(manager.plugins.first?.failure == nil && service.activity.last?.feature == feature)
 
-        // A tab that closes while its hook step waits for a reply stops the step's request, and the step's next request ends at once.
+        // Closing a tab while its hook step waits for a reply stops the step's request.
+        // The step's next request ends at once.
         service.settings.providers = [Self.tool(answeringAfter: 8)]
         let tool = try #require(service.settings.providers.first)
         service.settings.setRoute(AIRoute(isEnabled: true, models: [Self.model(of: tool)]), for: feature)
@@ -571,7 +596,7 @@ private final class RecordingHost: PluginBrowserHost {
         #expect(await eventually { storage.value(forKey: "again") == .string("cancelled") })
         #expect(storage.value(forKey: "result") == .string("cancelled"))
 
-        // Without the grant, the call is refused.
+        // The context refuses the call without the grant.
         try storage.setValue(nil, forKey: "result")
         manager.setEnabled(false, for: installed.id)
         let refused = try await manager.stage(try writePackage(["plugin.json": manifest.replacingOccurrences(of: #""permissions": ["ai"], "#, with: ""), "b.js": background]))
@@ -580,11 +605,13 @@ private final class RecordingHost: PluginBrowserHost {
         #expect(manager.makeContext(for: try #require(manager.plugins.first)).storage.value(forKey: "result") == .string("permissionDenied"))
     }
 
-    /// Calls that the bridge refuses or that fail at once take no time of Arch's, so a script that makes them while it leaves a call unanswered still hangs.
+    /// Calls that the bridge refuses or that fail at once take none of Arch's time.
+    /// A script that makes them while leaving a call unanswered still hangs.
     @Test func refusedAndFailedAIRequestsDoNotStretchTheHangLimit() async throws {
         let manifest = #"{"id": "org.example.ai-hang", "name": "AI Hang", "version": "1", "apiVersion": 1, "summary": "Hangs.", "permissions": ["ai"], "background": "b.js", "contributes": {"commands": [{"id": "hang", "title": "Hang"}]}}"#
         let background = """
-        // A promise that nothing can settle any more fails at once, so the script keeps its resolver.
+        // A promise that nothing can settle anymore fails at once.
+        // The script keeps its resolver.
         let settle;
         arch.commands.onRun("hang", () => {
           (async () => {
@@ -616,7 +643,9 @@ extension PluginAITests {
                                 models: [AIModelConfiguration(name: "")], limits: .commandLine)
     }
 
-    /// The stream's listener gets each piece of the reply as it arrives, and waiting for the next piece does not count toward the hang limit. A listener that throws stops the request.
+    /// The stream's listener gets each piece of the reply as it arrives.
+    /// Waiting for the next piece does not count toward the hang limit.
+    /// A listener that throws stops the request.
     @Test func aScriptPluginStreamsAReplyAsItArrives() async throws {
         let manifest = #"{"id": "org.example.ai-stream", "name": "AI Stream", "version": "1", "apiVersion": 1, "summary": "Streams.", "permissions": ["ai"], "background": "b.js", "contributes": {"commands": [{"id": "stream", "title": "Stream"}, {"id": "stop", "title": "Stop"}]}}"#
         let background = """
@@ -703,7 +732,8 @@ extension PluginAITests {
         #expect(await eventually { storage.value(forKey: "panel") == .string("Short answer") })
     }
 
-    /// A panel's rename belongs to no hook step: it is for the document the tab shows, both while a step runs for the tab and once the scheduler has stopped that step, whose listener still runs.
+    /// A panel's rename belongs to no hook step.
+    /// It applies to the document the tab shows, both while a step runs for the tab and after the scheduler stops it but its listener still runs.
     @Test func aPanelsRenamesStayOutOfThePluginsHookSteps() async throws {
         let manifest = #"{"id": "org.example.rename-panel", "name": "Rename Panel", "version": "1", "apiVersion": 1, "summary": "Renames.", "permissions": ["ai", "tabs.rename"], "events": ["pageLoaded"], "background": "b.js", "contributes": {"sidebarItems": [{"id": "panel", "title": "Rename", "symbol": "pencil", "panel": "panel.html"}]}}"#
         // The listener runs on for a while after the scheduler stops its step.
@@ -747,7 +777,9 @@ extension PluginAITests {
         #expect(host.renames.map(\.name) == ["During", "After"] && host.renames.last?.document == nil)
     }
 
-    /// Once the scheduler stops a step, whose listener still runs, the listener closes, selects, and moves the step's tab no more, since the tab can show the user's next document by then, while it still reaches another tab and a panel reaches the step's tab.
+    /// Once the scheduler stops a step, its listener cannot close, select, or move the step's tab even if the listener still runs.
+    /// The tab can show the user's next document by then.
+    /// The listener can still reach another tab. A panel can still reach the step's tab.
     @Test func aStoppedStepClosesSelectsAndMovesItsTabNoMore() async throws {
         let manifest = #"{"id": "org.example.close-panel", "name": "Close Panel", "version": "1", "apiVersion": 1, "summary": "Closes.", "permissions": ["ai", "tabs.manage"], "events": ["pageLoaded"], "background": "b.js", "contributes": {"sidebarItems": [{"id": "panel", "title": "Close", "symbol": "xmark", "panel": "panel.html"}]}}"#
         let background = """
@@ -788,7 +820,8 @@ extension PluginAITests {
         #expect(await eventually { storage.value(forKey: "step") != nil })
         #expect(storage.value(forKey: "step") == .object(["select": .string("stopped"), "move": .string("stopped"), "close": .string("stopped"), "other": .string("resolved")]))
         #expect(host.changes == ["select \(other.id)"])
-        // The listener still runs, and the panel's calls belong to no step.
+        // The listener still runs.
+        // The panel's calls belong to no step.
         let moved = try await webView.callAsyncJavaScript("await arch.tabs.select(id); const moved = await arch.tabs.move(id); await arch.tabs.close(id); return moved;",
                                                           arguments: ["id": page.id.uuidString], contentWorld: .page)
         #expect(moved as? Bool == true)
@@ -823,7 +856,8 @@ extension PluginAITests {
         #expect(service.activity.count == 1 && service.activity.last?.feature == feature && ContinuousClock.now - closed < .seconds(3))
     }
 
-    /// The `ai` permission can list the data kinds beyond text that the plugin's requests carry: `page` and `selection`, whose content a plugin reaches.
+    /// The `ai` permission can list data kinds beyond text that the plugin's requests carry: `page` and `selection`.
+    /// A plugin can reach their content.
     @Test func theAIPermissionMayListDataKinds() async throws {
         let manager = manager(ai: nil)
         func stage(_ permissions: String) async throws -> PluginPackage {
@@ -863,7 +897,8 @@ extension PluginAITests {
         }
     }
 
-    /// An update that lists other data kinds changes the kinds that the plugin's feature declares, with neither its name nor its trigger changing.
+    /// An update that lists other data kinds changes the kinds that the plugin's feature declares.
+    /// Its name and trigger stay the same.
     @Test func anUpdateChangesTheKindsTheFeatureDeclares() async throws {
         let service = service()
         let manager = manager(ai: service)
@@ -883,7 +918,9 @@ extension PluginAITests {
         #expect(service.features.first { $0.id == id }?.name == "AI Kinds" && manager.plugins.count == 1)
     }
 
-    /// Plugins with one identifier in several Personas share the feature, which declares the kinds that any of them lists, while each one's requests carry only its own.
+    /// Plugins with one identifier in several Personas share the feature.
+    /// The feature declares every kind that any of them lists.
+    /// Each plugin's requests carry only its own kinds.
     @Test func theFeatureDeclaresTheListedKindsAndEachPluginSendsOnlyItsOwn() async throws {
         let service = service()
         let id = AIFeatureID.plugin("org.example.ai-data")
@@ -969,7 +1006,8 @@ extension PluginAITests {
         }
     }
 
-    /// `arch.ai.stream` reads a reply by the rules of `AIClient.reply(_:)`, which `arch.ai.reply` follows: the same events end it with the same reason or error and hand on the same text.
+    /// `arch.ai.stream` reads a reply by the rules of `AIClient.reply(_:)`, as `arch.ai.reply` does.
+    /// The same events end it with the same reason or error. It passes on the same text.
     @Test func aStreamEndsAsAReplyDoes() async {
         let model = AIModelRef(provider: AIProviderID(), model: "")
         let json = AIOutputFormat.json(schema: Data(#"{"type": "object"}"#.utf8))

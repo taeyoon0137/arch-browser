@@ -5,6 +5,7 @@ import ARCHPrivateAPI
 import Foundation
 import WebKit
 
+/// The WebKit engine, which macOS provides.
 public final class WebKitEngine: Engine {
     public let kind: EngineKind = .webKit
     /// Web extensions need macOS 15.4.
@@ -49,6 +50,7 @@ public final class WebKitEngine: Engine {
     }
 }
 
+/// The WebKit engine in the app's process. It makes a website data store for each profile and a web view for each tab.
 public final class WebKitApplication: EngineApplication {
     public let engineKind: EngineKind = .webKit
     public weak var delegate: (any EngineApplicationDelegate)?
@@ -524,6 +526,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         context.drawPDFPage(page)
         return context.makeImage().map { NSImage(cgImage: $0, size: box.size) }
     }
+    /// Why `createPDF(completion:)` failed.
     public enum PDFError: Error {
         case exportFailed
     }
@@ -626,6 +629,7 @@ extension WebKitWebContents {
     }
 }
 
+/// The navigation controller of a WebKit tab, which drives its web view.
 public final class WebKitNavigationController: EngineNavigationController {
     let webView: WKWebView
     private weak var contents: WebKitWebContents?
@@ -699,6 +703,7 @@ final class WebKitBackForwardListItem: EngineBackForwardListItem {
     var title: String { item.title ?? "" }
 }
 
+/// The private WebKit preference that allows picture in picture, behind its flags on `flags://`.
 enum WebKitPictureInPictureAPI {
     static let apiID = "webkit.pictureInPicturePlayback"
     static let featureID = "webkit.pictureInPicture"

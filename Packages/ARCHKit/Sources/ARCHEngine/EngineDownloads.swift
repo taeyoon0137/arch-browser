@@ -1,5 +1,6 @@
 import Foundation
 
+/// Where a download stands.
 public enum EngineDownloadState: String, Codable, Sendable {
     case inProgress
     case paused
@@ -8,6 +9,7 @@ public enum EngineDownloadState: String, Codable, Sendable {
     case failed
 }
 
+/// One download of an engine, with its addresses, destination, progress, and controls.
 public protocol EngineDownloadItem: AnyObject {
     var sourceURL: URL { get }
     /// The address the download was requested at, before any redirect, which `sourceURL` can already follow.
@@ -34,6 +36,7 @@ public extension EngineDownloadItem {
     var requestURL: URL { sourceURL }
 }
 
+/// Hears of an engine's downloads as they start, change, and go, and names each download's file.
 public protocol EngineDownloadsDelegate: AnyObject {
     func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem)
     func downloads(_ downloads: any EngineDownloads, didUpdate item: any EngineDownloadItem)
@@ -41,6 +44,7 @@ public protocol EngineDownloadsDelegate: AnyObject {
     func downloads(_ downloads: any EngineDownloads, determineFilenameFor item: any EngineDownloadItem, defaultFilename: String, completion: @escaping (URL?) -> Void)
 }
 
+/// The downloads of one engine profile and the delegate that hears of them.
 public protocol EngineDownloads: AnyObject {
     var delegate: (any EngineDownloadsDelegate)? { get set }
     var items: [any EngineDownloadItem] { get }

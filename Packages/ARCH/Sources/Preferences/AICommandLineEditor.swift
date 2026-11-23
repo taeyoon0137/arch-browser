@@ -7,11 +7,13 @@ import SwiftUI
 
 /// A command-line tool being added or edited. Nothing reaches `ai.json` until the user saves.
 struct AICommandLineDraft: Identifiable {
+    /// One argument of the tool's command line, with an identity for the editor's list.
     struct Argument: Identifiable {
         let id = UUID()
         var value: String
     }
 
+    /// How the tool prints its answer: plain text, or JSON lines that the editor's paths read.
     enum OutputFormat {
         case text
         case jsonLines
@@ -102,6 +104,7 @@ struct AICommandLineDraft: Identifiable {
     }
 }
 
+/// The sheet that adds or edits a command-line provider in Settings ▸ AI ▸ Providers, and saves the draft to `ai.json`.
 struct AICommandLineEditor: View {
     @State var draft: AICommandLineDraft
     let service: AIService

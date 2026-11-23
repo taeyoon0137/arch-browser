@@ -4,6 +4,7 @@ import ARCHEngine
 import CEFBridge
 import Foundation
 
+/// The Chromium engine, which runs through CEF from the framework at `frameworkPath`.
 public final class ChromiumEngine: Engine {
     public let kind: EngineKind = .chromium
     public let capabilities: Set<EngineCapability> = [.extensions]
@@ -117,6 +118,7 @@ extension EngineApplicationConfiguration {
     }
 }
 
+/// The Chromium engine in the app's process. It makes a CEF request context for each profile and a browser for each tab.
 public final class ChromiumApplication: EngineApplication {
     public let engineKind: EngineKind = .chromium
     public weak var delegate: (any EngineApplicationDelegate)?
@@ -353,10 +355,12 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         popup.delegate = self
     }
 
+    /// Why `createPDF(completion:)` failed.
     public enum PDFError: Error {
         case exportFailed
     }
 
+    /// Why a script that the app runs in the page failed.
     public enum ScriptError: Error {
         /// The function threw, or the main frame had no document to run it in or did not answer within ten seconds.
         case failed
@@ -925,6 +929,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
 }
 
+/// The navigation controller of a Chromium tab, which passes each call to its `ChromiumWebContents`.
 public final class ChromiumNavigationController: EngineNavigationController {
     unowned let webContents: ChromiumWebContents
 

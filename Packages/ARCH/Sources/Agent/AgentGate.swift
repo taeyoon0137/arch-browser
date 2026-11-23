@@ -1,6 +1,7 @@
 // A gate that tool calls wait at: closed until something opens it, with each wait bounded. An in-app session holds its calls at one until the model's first output (`ready`) and at another while the user has taken the session over; closing a gate for good, as when the session ends, sends every waiting call on with no.
 import Foundation
 
+/// A gate that tool calls wait at, which `AgentSession` and `AgentHookCLIRun` open and close.
 @MainActor final class AgentGate {
     private(set) var isOpen: Bool
     /// Set once the gate can never open again.

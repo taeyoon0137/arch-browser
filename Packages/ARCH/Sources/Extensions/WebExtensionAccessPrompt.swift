@@ -3,6 +3,7 @@ import ARCHEngine
 import LocalAuthentication
 import Plugins
 
+/// The question for a web extension's request for more access, as the file header describes; `WebExtensionRuntime` makes one for each request.
 struct WebExtensionAccessPrompt {
     /// The access the prompt asks about: what the extension requested, except native messaging, which the runtime relays for the install's grant only, and sites and pages other than web pages, which Arch never grants.
     let access: Set<EngineExtensionAccess>

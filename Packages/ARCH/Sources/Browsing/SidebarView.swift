@@ -26,6 +26,7 @@ enum SidebarDimming {
     static let unopened = 0.5
 }
 
+/// The sidebar of a main window, as the file header describes: the top row, the space pages, and the bottom bar, with the library beside them. `BrowserWindowView` places it.
 struct SidebarView: View {
     static let defaultWidth: CGFloat = 250
     /// The top row needs about 231 points: the window buttons end 79 points in, and its four buttons, gaps, spacer, and trailing inset take 140 more inside the margins.
@@ -255,7 +256,7 @@ struct LibrarySwipePushKey: PreferenceKey {
     }
 }
 
-// Observes the selected tab directly so the controls reflect navigation within the page.
+/// The sidebar's top row and address pill for the selected tab. It observes the tab directly, so the controls follow navigation within the page.
 struct SelectedTabHeaderView: View {
     @ObservedObject var session: BrowserSession
     @ObservedObject var tab: Tab
@@ -332,22 +333,27 @@ struct SidebarIconButton: View {
     }
 }
 
+/// The environment key behind `sidebarWidth`.
 private struct SidebarWidthKey: EnvironmentKey {
     static let defaultValue = SidebarView.defaultWidth
 }
 
+/// The environment key behind `sidebarIsFloating`.
 private struct SidebarIsFloatingKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// The environment key behind `isDraggingTab`.
 private struct IsDraggingTabKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// The environment key behind `addressPillPull`.
 private struct AddressPillPullKey: EnvironmentKey {
     static let defaultValue = CGSize.zero
 }
 
+/// The environment key behind `libraryReveal`.
 private struct LibraryRevealKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
@@ -396,6 +402,7 @@ struct SidebarResizeHandle: NSViewRepresentable {
         view.onResize = onResize
     }
 
+    /// The view of `SidebarResizeHandle`: it shows the resize pointer and turns a drag into new widths for `onResize`.
     final class HandleView: NSView {
         var width: CGFloat = 0
         var onResize: ((CGFloat) -> Void)?

@@ -4,6 +4,7 @@ import Foundation
 /// Delivers browser events in sequence on the main actor to matching subscribers.
 @MainActor
 public final class BrowserEventBus {
+    /// A subscription: its identifier, its filter, and the handler that matching events reach.
     private struct Subscriber {
         let id: UUID
         let filter: BrowserEventFilter

@@ -1,6 +1,7 @@
 // How a prompt card moves: it comes down from behind the top edge of the page frame on a critically damped spring and goes back up, the dimming fades, and a card that refuses a login shakes. With Reduce Motion the card only fades, and nothing moves or shakes.
 import SwiftUI
 
+/// The animations of a prompt card's arrival, departure, dimming, and shake, as the file header describes.
 enum PromptMotion {
     static func arrival(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.3, dampingFraction: 1)

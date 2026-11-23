@@ -29,6 +29,7 @@ extension URL {
 
 /// An address reduced to the parts that bookmark rule 3 compares.
 private struct ComparedAddress: Equatable {
+    /// The site part of a compared address: its host, or its scheme when it has no host.
     enum Site: Equatable {
         /// The host in lowercase without a leading `www.`.
         case host(String)

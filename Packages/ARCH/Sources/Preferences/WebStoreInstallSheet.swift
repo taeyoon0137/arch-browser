@@ -15,6 +15,7 @@ struct WebStoreStart {
     var startsAtOnce = false
 }
 
+/// The store sheet of the install sheet: it takes a Web Store address or extension ID, stages the package, and hands its review back.
 struct WebStoreInstallSheet: View {
     @ObservedObject var plugins: PluginManager
     let installer: WebStoreInstaller

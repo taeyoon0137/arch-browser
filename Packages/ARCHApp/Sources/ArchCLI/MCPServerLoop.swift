@@ -3,6 +3,7 @@ import AgentControl
 import Darwin
 import Foundation
 
+/// Runs `arch-mcp`: it reads standard input and the control socket, hands each message to `AgentMCPServer`, and performs the effects it returns.
 final class MCPServerLoop: @unchecked Sendable {
     /// Parses arch-mcp's arguments and runs the server until standard input closes, or for a session's server until its connection ends.
     static func run(_ arguments: [String]) -> Never {

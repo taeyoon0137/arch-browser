@@ -112,6 +112,7 @@ public final class AIUsageStore: ObservableObject {
         public var totals: [Total]
     }
 
+    /// The contents of the usage file.
     private struct File: Codable {
         var version = 1
         var months: [Month]

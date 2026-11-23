@@ -2115,10 +2115,11 @@ Run rounds in order, then start again at X1 with the next round number, until `d
 
 - Z1 did not run; the review replaced it (see the note at the top of this section). Ticks that the review found false or partial:
   - A3 to A5: `arch.net.fetch` is built but refuses every request with `networkUnavailable` (X1.r1.3), and X3 removed its rate limit and current-grant check.
-  - A15, D1.11, X2: contracts, "Not built yet" markers in `docs/plugins.md`, and type comments were left for some items.
+  - A15, D1.11: contracts and "Not built yet" markers in `docs/plugins.md` were left for some items.
+  - X2 is done since November 23: each of the 294 type declarations in `Packages/ARCH/Sources`, `Packages/ARCHKit/Sources`, and `Packages/ARCHApp/Sources` that had no `///` comment, nested ones included and `CodingKeys` left out, now has one (ARCHKit 51, ARCHApp 4, AI 22, Agent 31, AgentControl 3, Browsing 110, Preferences 29, Plugins 11, Hooks 10, Import 8, Terminal 7, Extensions 3, History 3, Events 2).
   - X5.r1.7 to X5.r1.10 stay open for the user (`docs/bookmarks.md`, Open decisions), and X5.r1.4 and X5.r1.5 are defaults still open in `docs/plugins.md`.
-  - W1's two weak-capture warnings were never fixed, and E2 left the 37 prose-pass notes on Tests files.
-    - Fixed on November 23: W1's two weak-capture warnings and the other 12 Swift warnings of `swift build --build-tests` (Sendable function values, a sendable closure's captured variable, main-actor statics in default arguments, redundant or ambiguous `#require`). A clean build now warns only in CEF's own headers: 437 `-Wundefined-var-template` instances at four lines of `cefroot/libcef_dll/cpptoc` and `ctocpp`, which Arch does not change.
+  - W1 is done since November 23: its two weak-capture warnings and the other 12 Swift warnings of `swift build --build-tests` (Sendable function values, a sendable closure's captured variable, main-actor statics in default arguments, redundant or ambiguous `#require`) are fixed. A clean build now warns only in CEF's own headers: 437 `-Wundefined-var-template` instances at four lines of `cefroot/libcef_dll/cpptoc` and `ctocpp`, which Arch does not change.
+  - E2 is done since November 23: the prose pass ran over the comments of all 37 Tests files that the prose-pass notes name, and changed no code, test name, or string.
 
 ### Codex handoff queue
 

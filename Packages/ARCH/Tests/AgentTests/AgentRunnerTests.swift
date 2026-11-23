@@ -5,7 +5,7 @@ import Foundation
 import Testing
 @testable import Agent
 
-/// Lets a scripted step reach the runner that it runs under.
+/// Lets a scripted step reach its runner.
 @MainActor
 private final class RunnerBox {
     var runner: AgentRunner?
@@ -61,7 +61,8 @@ private final class RunnerBox {
         #expect(pageParts.count == 1 && pageParts[0].url.absoluteString == "https://example.org/path" && pageParts[0].title == "Title" && pageParts[0].text.isEmpty)
     }
 
-    /// A program's hook (`docs/hooks.md`, Hooks from outside programs): its prompt is labeled as the program's, not the user's, and its grant returns no reply.
+    /// A program's hook labels its prompt as the program's, not the user's (`docs/hooks.md`, Hooks from outside programs).
+    /// Its grant returns no reply.
     @Test func aProgramsHookRunIsLabeledAndReturnsNoReply() async throws {
         var req = request()
         req.promptSource = .program(name: "agent in Agent")
@@ -108,7 +109,8 @@ private final class RunnerBox {
         #expect(!text.contains("Alex Kim") && !text.contains("session=secret"))
     }
 
-    /// A full outline holds the page's text, so a hook granted only `snapshot` gets interactive outlines.
+    /// A full outline holds the page's text.
+    /// A hook granted only `snapshot` therefore gets interactive outlines.
     @Test func aFullOutlineNeedsThePageTextGrant() async throws {
         let page = try await FixturePage("form")
         let req = outlineRequest(page)
@@ -234,7 +236,7 @@ private final class RunnerBox {
         if missing { req.documentIDs = [:] } else { host.tabs[0].documentID = UUID() }
         let client = ScriptedClient { _ in [] }
         let result = await runner(client).run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
-        // The tab shows another page than the event's, which `stale` says, not an excluded site.
+        // `stale` means the tab shows a different page from the event's, not an excluded site.
         #expect(result.status == .refused && result.code == "stale" && client.requests.isEmpty)
     }
 
@@ -304,7 +306,8 @@ private final class RunnerBox {
         let result = await runner.run(req, personaID: FakeHost.defaultPersona.id) { _, _, _, _ in false }
         let id = try #require(result.keptRun)
         #expect(result.reply == nil && runner.keptRuns.first?.id == id && client.requests.first?.recordsContent == true)
-        // A kept run names the hook run whose script started it, a test's too, for that run's Show Session.
+        // A kept run names the hook run whose script started it for that run's Show Session.
+        // This includes test runs.
         guard case .hook(_, let hookRun) = req.origin else { Issue.record("Expected a hook run"); return }
         #expect(runner.keptRuns.first?.hookRun == hookRun && runner.keptRuns.first?.messages.count == 2)
         let testRun = UUID()
@@ -316,7 +319,10 @@ private final class RunnerBox {
         #expect(runner.keptRuns.map(\.id) == [testedID])
     }
 
-    /// A run that is still ending when its hook is removed, or its editor test ends, keeps no session, while later runs of the feature do. Delete Session, a run that left its row's last runs, and Clear Activity delete kept runs too.
+    /// A run keeps no session if its hook is removed or its editor test ends while the run is ending.
+    /// Later runs of the feature keep sessions.
+    /// Delete Session and Clear Activity delete kept runs too.
+    /// A run leaving its row's last runs also deletes its kept run.
     @Test func aRunEndingAfterItsFeatureEndedKeepsNoSession() async throws {
         var req = request()
         req.options.record = .session
@@ -446,7 +452,8 @@ private final class RunnerBox {
         #expect(runner.keptRuns.isEmpty && service.sessions.isEmpty)
     }
 
-    /// A rename request already queued on the main actor when the caller cancels the run finds it ended, before the run's task takes the cancel.
+    /// A rename request already queued on the main actor when the caller cancels the run finds the run ended.
+    /// This happens before the run's task handles the cancellation.
     @Test func aQueuedRenameAfterTheCallerCancelsTheRunChangesNothing() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -531,7 +538,8 @@ private final class RunnerBox {
         #expect(!FileManager.default.fileExists(atPath: harness.location.path))
     }
 
-    /// Hooks that fire together wait for one of the two slots instead of failing, and Stop All Agents ends the waiting runs too.
+    /// Hooks that fire together wait for one of the two slots instead of failing.
+    /// Stop All Agents ends the waiting runs too.
     @Test func aThirdRunWaitsForASlotAndStopAllCancelsEveryRun() async throws {
         let req = request()
         let client = ScriptedClient { _ in [.hold] }
@@ -554,7 +562,7 @@ private final class RunnerBox {
     }
 }
 
-/// The names a run's renames gave, in order.
+/// The names a run assigned, in order.
 @MainActor
 private final class RenameLog {
     var names: [String?] = []

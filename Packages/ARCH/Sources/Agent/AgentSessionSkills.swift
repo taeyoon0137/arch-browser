@@ -3,6 +3,7 @@ import AgentControl
 import AI
 import Foundation
 
+/// Names and writes an in-app session's skill folder, which Claude Code loads through `--plugin-dir`.
 enum AgentSessionSkills {
     /// The plugin's name, which `init` lists skills under, as `arch:arch-browsing`.
     static let pluginName = "arch"

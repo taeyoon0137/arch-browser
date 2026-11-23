@@ -10,6 +10,7 @@ import Darwin
 import Security
 import SwiftUI
 
+/// One approval card in an agent panel: the host's facts about the step, the agent's words, and the user's answers.
 struct AgentApprovalCard: View {
     let approval: AgentApproval
     @ObservedObject var approvals: AgentApprovals
@@ -291,6 +292,7 @@ struct AgentPointerButton: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
+    /// The button's target, which runs the action only for a press that the button accepts.
     @MainActor final class Coordinator: NSObject {
         var parent: AgentPointerButton
 

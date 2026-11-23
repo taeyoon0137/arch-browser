@@ -102,6 +102,7 @@ public final class HookScriptRunner: HookScriptRunning {
 
     // MARK: Instances
 
+    /// Names a hook's instance in one Persona.
     private struct InstanceKey: Hashable {
         let hook: UUID
         let persona: UUID
@@ -203,6 +204,7 @@ public final class HookScriptRunner: HookScriptRunning {
     /// One instance of a hook's script in one Persona.
     @MainActor
     private final class Instance {
+        /// Why the instance stopped, with the outcome that its unfinished runs record.
         enum EndReason {
             case cancelled, timedOut, retired
             case failed(String)

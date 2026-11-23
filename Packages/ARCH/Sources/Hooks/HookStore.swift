@@ -316,6 +316,7 @@ public final class HookStore {
     }
 }
 
+/// Thrown for a hook file whose contents are not an object or that this build cannot migrate.
 private struct HookStoreReadError: Error {}
 
 extension AgentJSON {

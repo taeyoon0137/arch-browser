@@ -73,6 +73,7 @@ struct AgentSystemProcessInspector: AgentProcessInspector {
     }
 }
 
+/// Why the walk up a connecting `arch-cli`'s parent chain found no client.
 enum AgentClientIdentificationError: Error, Equatable {
     /// A process on the chain could not be read, or ended while the walk read it.
     case processChanged
@@ -80,6 +81,7 @@ enum AgentClientIdentificationError: Error, Equatable {
     case chainTooLong
 }
 
+/// Finds the outside client behind a connecting `arch-cli` by walking its parent chain, for the service's grants.
 struct AgentClientIdentifier: Sendable {
     let inspector: any AgentProcessInspector
     /// Arch's own process, which the walk never takes.

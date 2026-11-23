@@ -1,4 +1,11 @@
-// Shell hook run tickets (`docs/hooks.md`, Shell scripts ▸ Acting): a run's ticket binds `arch-cli`, and only `arch-cli`, from the run's script process and its descendants, by process ID and start time, while the run lasts; the socket listens during the run with outside access off; the bound connection lists the run's tools and gives their calls to the run's handler, refusing any other tool; and the run's end closes its connections and the socket.
+// Tests shell hook run tickets (`docs/hooks.md`, Shell scripts ▸ Acting).
+// A run's ticket binds `arch-cli`, and only `arch-cli`, from the run's script process and its descendants while the run lasts.
+// It checks the process ID and start time.
+// The socket listens during the run with outside access off.
+// The bound connection lists the run's tools.
+// It gives their calls to the run's handler.
+// It refuses any other tool.
+// The run's end closes its connections and the socket.
 import AgentControl
 import Darwin
 import Foundation
@@ -41,7 +48,8 @@ import Testing
         harness.addProcess(Self.scriptProcess, parent: 1, start: AgentProcessStart(seconds: 1_700_000_300, microseconds: 0))
         await #expect(throws: refusal) { try await TestClient(harness.location).hello(ticket: ticket, client: .cli) }
         harness.addProcess(Self.scriptProcess, parent: 1, start: Self.scriptStart)
-        // Only `arch-cli` presents a run's ticket, and another ticket of the same length binds nothing.
+        // Only `arch-cli` presents a run's ticket.
+        // Another ticket of the same length binds nothing.
         await #expect(throws: AgentClientError.self) { try await TestClient(harness.location).hello(ticket: ticket, client: .mcp) }
         await #expect(throws: refusal) { try await TestClient(harness.location).hello(ticket: try #require(AgentSessionTicket.make()).text, client: .cli) }
 
@@ -57,13 +65,17 @@ import Testing
         await #expect(throws: AgentClientError.self) { try await bound.call(AgentControlMethod.sessionsList) }
         #expect(harness.prompt.requests.isEmpty)
 
-        // The run's end closes its connection; its ticket then binds nothing, and the socket goes.
+        // The run's end closes its connection.
+        // Its ticket then binds nothing.
+        // The socket closes.
         service.closeHookRun(run)
         await #expect(throws: AgentClientError.self) { try await bound.call(AgentControlMethod.toolsList) }
         try await waitUntil { !harness.socketExists }
     }
 
-    /// `agent/run` on a run's bound connection reaches the run's handler, whose answer names each renamed tab by its run handle, never by Arch's identifier, and a run without one answers -32601 (`docs/hooks.md`, arch-cli agent run and rename).
+    /// `agent/run` on a run's bound connection reaches the run's handler (`docs/hooks.md`, arch-cli agent run and rename).
+    /// The answer names each renamed tab by its run handle, never Arch's identifier.
+    /// A run without a handler answers -32601.
     @Test func aRunsAgentRunReachesItsHandler() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -104,7 +116,7 @@ import Testing
         _ = service.openHookRun(run, tools: ["list_tabs"]) { _ in AgentToolResult(status: .ok, text: "") }
         harness.addProcess(Self.scriptProcess, parent: 1, start: Self.scriptStart)
         service.hookRun(run, didStart: Self.scriptProcess)
-        // A command of the script that cleared ARCH_HOOK_TICKET, as `env -i arch-cli tabs` does, is refused with Allow Outside Clients on.
+        // With Allow Outside Clients on, Arch refuses a script command that cleared ARCH_HOOK_TICKET, as `env -i arch-cli tabs` does.
         harness.addProcess(getpid(), parent: 777)
         harness.addProcess(777, parent: Self.scriptProcess)
         await #expect(throws: AgentClientError.refused(AgentRefusal(reason: .ticket, message: "Programs in a hook's run reach Arch only with the run's ticket."))) {
