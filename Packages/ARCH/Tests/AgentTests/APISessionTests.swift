@@ -580,7 +580,7 @@ private func toolResults(in message: AIMessage?) -> [AIToolResult] {
         try session.send("Read the agent tab.")
         try await waitUntil { client.requests.count == 3 && session.state == .done }
         #expect(client.requests[2].messages.description.contains("Private research body"))
-        let read = try #require(session.items.last?.pagesRead.first)
+        let read = try #require(session.latestTurnPagesRead?.first)
         #expect(service.currentReadPage(read, in: session)?.id == copy.id)
         // Keep in Sidebar clears the owner. The document remains open in the user's Persona.
         let index = try #require(harness.host.tabs.firstIndex { $0.id == copy.id })

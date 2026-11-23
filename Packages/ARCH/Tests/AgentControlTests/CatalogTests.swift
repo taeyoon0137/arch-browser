@@ -26,7 +26,7 @@ import Testing
 
     @Test func namesAreValidForMCPAndAIToolAndUnique() throws {
         let valid = try Regex("^[a-z0-9_]{1,64}$")
-        for tool in AgentToolCatalog.tools {
+        for tool in AgentToolCatalog.tools + [AgentToolCatalog.renameTab, AgentToolCatalog.watchEvents, AgentToolCatalog.sessionTabRequest] {
             #expect(tool.name.wholeMatch(of: valid) != nil, "\(tool.name)")
             for parameter in tool.parameters { #expect(parameter.name.wholeMatch(of: valid) != nil, "\(tool.name).\(parameter.name)") }
             #expect(Set(tool.parameters.map(\.name)).count == tool.parameters.count, "\(tool.name) repeats a parameter")

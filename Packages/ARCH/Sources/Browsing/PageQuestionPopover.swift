@@ -45,9 +45,7 @@ private struct PageQuestionPopover: View {
             if let url = tab.url, !settings.allowsAI(on: url) {
                 PageAIOffNotice(url: url)
             } else {
-                SiteSettingsGroup("Question") {
-                    questionField.padding(10)
-                }
+                questionField
                 if let exchange = conversation.exchanges.last {
                     let answer = PageExchangeView(exchange: exchange, assistant: assistant, tab: tab, pageURL: tab.url, showsSelection: false) { conversation.retry(exchange.id) }
                     // As tall as the reply, up to a limit; a longer reply scrolls.

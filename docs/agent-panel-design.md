@@ -1,6 +1,6 @@
 # Agent panel redesign record
 
-This design covers the panel in row VII.34. Its shared parts and view changes were implemented after this proposal. The panel remains a trailing column at `PageReaderColumn.width` in a main or small window. A destination with a known space is named "Persona / Space".
+This design covers the panel in row VII.34. Its shared parts and view changes were implemented after this proposal. The panel remains a trailing column at `PageReaderColumn.width` in a main or small window. A destination with a known space is named "Persona / Space"; a Persona-wide destination, such as an outside grant without a space, shows the Persona name alone.
 
 ## States
 
@@ -20,6 +20,13 @@ This design covers the panel in row VII.34. Its shared parts and view changes we
 - Use the existing attachment chip, transcript row, approval card, and session action menu. Reuse `SiteSettingsGroup` and `SiteSettingsRow` as visual models for options and details: 32-point minimum row height, 10-point horizontal row inset, 18-point icon column, 8-point icon gap, and 10-point corner radius. Do not move site settings code into the Agent module.
 - Primary text uses `.primary`; labels, steps, and metadata use `.secondary`; failures use the existing red role; a sensitive pending decision retains the orange border and a secret warning retains red semibold text. Preserve selection, keyboard focus, accessibility labels, and the page's current background roles.
 - A disclosure may hide explanations, prior steps, or settings. It must not hide the current task, destination, selected attachment, requested target, exact text to send, pending choice, or security warning.
+
+## As built
+
+- Composer: the task field, the attachment chip with Share reader excerpt beside it, the place line, and the permission note stay above Options; the notes on a model that is gone and on Codex's own instructions sit below it. Options holds only Use the Agents Persona, mode, model, and effort, and opens when the chosen model goes away.
+- Transcript: the user's messages are 13-point text in a bubble (`AgentPanelFill.user`, 10-point radius) at the trailing edge, with 36 points of room before it; the agent's replies are 13-point plain text at the leading edge. A step is one 11-point secondary line with its status mark, orange with plain words ("Not allowed", "You declined", "The page changed", "Timed out", "Didn't work") when it did not go through, and Show Tab when it names a tab. Tool names and raw states are not shown.
+- Waiting on a card: the oldest card is pinned above the message field and takes the height it needs, up to 60 percent of the panel and at least 180 points (`AgentHeightCap`, since `frame(maxHeight:)` grows to the offered height). The facts scroll inside the card; the inputs and buttons below them stay in view, and the buttons wrap to a column when one row does not fit. A capture is drawn at most 160 points tall and opens larger on click. Later cards follow under a count.
+- The metrics and fills are named in `AgentPanelMetrics` and `AgentPanelFill` (`AgentPanelParts.swift`), and both panels share the step marks and words (`AgentResultStatus.symbol`, `plainWords`).
 
 ## Review before implementation
 

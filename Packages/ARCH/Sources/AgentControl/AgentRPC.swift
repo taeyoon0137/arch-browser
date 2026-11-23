@@ -14,7 +14,7 @@ public enum AgentRPCID: Hashable, Sendable {
         }
     }
 
-    /// Accepts only string IDs or finite integer IDs within the protocol's numeric range.
+    /// Accepts only string IDs or finite integer IDs smaller than 10^15 in magnitude.
     init?(_ json: AgentJSON) {
         switch json {
         case .number(let number) where number.rounded() == number && abs(number) < 1e15: self = .number(Int(number))

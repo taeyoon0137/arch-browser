@@ -331,14 +331,15 @@ public final class ShellHookRunner: HookScriptRunning {
         if tools.permitsAgentRuns {
             agentRun = { @MainActor fields in await tools.runAgent(fields) }
         }
-        let opened = channel?.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun)
-        // A channel gives an empty ticket only when it could not make one, so the script would start without access; the run fails and its record says why.
-        if opened?.isEmpty == true {
-            tools.end()
-            channel?.closeHookRun(invocation.run)
-            return .failed(code: "notStarted", message: HookShellScript.noTicketSentence)
+        var ticket = ""
+        if let channel {
+            // Without a ticket, every arch-cli call of the script would fail as not granted, so the run does not start.
+            guard let opened = channel.openHookRun(invocation.run, tools: tools.names, handles: tools.handles, call: { call in tools.call(call) }, agentRun: agentRun) else {
+                tools.end()
+                return .failed(code: "notStarted", message: HookShellScript.noTicketSentence)
+            }
+            ticket = opened
         }
-        let ticket = opened ?? ""
         state.accessEnd = { [channel] in
             tools.end()
             channel?.closeHookRun(invocation.run)

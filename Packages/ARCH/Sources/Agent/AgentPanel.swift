@@ -1,6 +1,7 @@
 // The agent panel shows an in-app session's conversation in the browser's trailing column (docs/agents.md, The agent panel).
-// Its header shows the title, tool, model, site scope, and Stop. Lowering the mode acts at once; raising it asks first.
-// The transcript shows replies as the page reader does, collapsed thinking, host tool steps with tab buttons, pending cards, errors, and each turn's model and tokens.
+// Its header shows the title, a plain status sentence, and Stop; Session details hold the model, place, mode, shared tabs, and sites. Lowering the mode acts at once; raising it asks first.
+// The transcript shows the user's messages in bubbles at the trailing edge, replies as the page reader does, collapsed thinking, steps with a mark and plain words for a step that did not go through, errors, and each turn's model and tokens.
+// The oldest waiting card is pinned above the message field and takes only the room it needs, up to a share of the panel; its buttons stay in view while its facts scroll.
 // Cards cover approvals, questions, tab sharing, downloads, and external links. Queued messages have Remove.
 // Take Over and Hand Back control the session. The next-message field's Send becomes Stop while a turn runs.
 import AgentControl
@@ -20,6 +21,7 @@ public struct AgentSessionPanel: View {
     @State private var sharingProblem: String?
     @State private var raisingTo: AgentAccessLevel?
     @State private var deleting: AgentSession?
+    @State private var panelHeight: CGFloat = 0
 
     public init(service: AgentService, session: AgentSession, actions: AgentPanelActions, keepTabs: (() -> Void)? = nil) {
         self.service = service
@@ -34,9 +36,13 @@ public struct AgentSessionPanel: View {
             header
             Divider()
             transcript
-            if !pendingCards.isEmpty {
+            if let card = pendingCards.first {
                 Divider()
-                pendingDecisions
+                // The decision takes the room it needs, up to its share of the panel; the transcript keeps the rest.
+                AgentHeightCap(maxHeight: max(AgentPanelMetrics.pendingMinHeight, panelHeight * AgentPanelMetrics.pendingShare)) {
+                    pendingDecision(card)
+                }
+                .layoutPriority(1)
             }
             if !session.queuedMessages.isEmpty {
                 Divider()
@@ -45,6 +51,7 @@ public struct AgentSessionPanel: View {
             Divider()
             field
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
         .environment(\.openURL, OpenURLAction { url in
             actions.openLink(url)
             return .handled
@@ -103,7 +110,10 @@ public struct AgentSessionPanel: View {
             AgentTechnicalDetails(title: "Session details") {
                 AgentSectionBox {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(details).help(details)
+                        Text(details)
+                            .font(.system(size: AgentPanelMetrics.detailSize))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 6) {
                             modeMenu
                             if service.canEditAttachments(of: session) {
@@ -115,11 +125,14 @@ public struct AgentSessionPanel: View {
                                 .popover(isPresented: $showsSharedTabs) { sharedTabs }
                             }
                         }
-                        Text(scopeText).help(scopeText)
+                        Text(scopeText)
+                            .font(.system(size: AgentPanelMetrics.detailSize))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, AgentPanelMetrics.inset)
             .padding(.bottom, 8)
         }
     }
@@ -161,14 +174,14 @@ public struct AgentSessionPanel: View {
         .frame(width: 320)
     }
 
-    /// The tool and model, and the place as "Persona / Space".
+    /// The tool and model, and the place as "Persona / Space". The header's sentence already says how the task stands.
     private var details: String {
         let model = session.model ?? session.requestedModel
-        return [model.map(settings.title(of:)), service.place(of: session), session.statusText].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        return [model.map(settings.title(of:)), service.place(of: session)].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
     private var scopeText: String {
-        session.siteScope.isEmpty ? "No sites in scope yet" : "Scope: " + session.siteScope.joined(separator: ", ")
+        session.siteScope.isEmpty ? "The agent has no sites to work on yet." : "Sites the agent works on: " + session.siteScope.joined(separator: ", ")
     }
 
     /// Lowering takes effect at once; raising asks first.
@@ -192,18 +205,22 @@ public struct AgentSessionPanel: View {
 
     private var pendingCards: [AgentApproval] { approvals.pending.filter { $0.ownerID == session.id } }
 
-    private var pendingDecisions: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(pendingCards) { card in
-                    AgentApprovalCard(approval: card, approvals: approvals) {
-                        if let tabID = card.tabID { actions.showTab(tabID) }
-                    }
-                }
+    /// The decision to make now, the oldest waiting card, pinned above the message field. The card keeps its buttons in view and scrolls its own facts; the next card follows once it is answered.
+    private func pendingDecision(_ card: AgentApproval) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            AgentApprovalCard(approval: card, approvals: approvals) {
+                if let tabID = card.tabID { actions.showTab(tabID) }
             }
-            .padding(14)
+            // A card for each request, so each answer resets its own fields.
+            .id(card.id)
+            if pendingCards.count > 1 {
+                Text(pendingCards.count == 2 ? "1 more request waits after this one." : "\(pendingCards.count - 1) more requests wait after this one.")
+                    .font(.system(size: AgentPanelMetrics.detailSize))
+                    .foregroundStyle(.secondary)
+            }
         }
-        .frame(maxHeight: 280)
+        .padding(.horizontal, AgentPanelMetrics.inset)
+        .padding(.vertical, 10)
     }
 
     /// Shows transcript items and scrolls to the newest one when they change.
@@ -220,7 +237,7 @@ public struct AgentSessionPanel: View {
                         note("You took over. The agent waits until you hand the session back.")
                     }
                 }
-                .padding(14)
+                .padding(AgentPanelMetrics.inset)
             }
             // Row IDs become scroll targets after the transcript has a viewport.
             .onGeometryChange(for: Bool.self) { $0.size.height > 0 } action: { ready in
@@ -239,17 +256,17 @@ public struct AgentSessionPanel: View {
 
     private var queued: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Queued").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+            Text("Queued").font(.system(size: AgentPanelMetrics.detailSize, weight: .medium)).foregroundStyle(.secondary)
             ForEach(Array(session.queuedMessages.enumerated()), id: \.offset) { index, message in
                 HStack(alignment: .top) {
-                    Text(message).font(.system(size: 12)).lineLimit(3)
+                    Text(message).font(.system(size: AgentPanelMetrics.supportingSize)).lineLimit(3)
                     Spacer()
                     Button("Remove") { session.removeQueuedMessage(at: index) }
                         .controlSize(.small)
                 }
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, AgentPanelMetrics.inset)
         .padding(.vertical, 8)
     }
 
@@ -259,14 +276,14 @@ public struct AgentSessionPanel: View {
         VStack(alignment: .leading, spacing: 4) {
             if let problem {
                 Text(problem)
-                    .font(.system(size: 11))
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(alignment: .bottom, spacing: 4) {
                 TextField(session.isTurnRunning ? "Queue a message" : "Message the agent", text: $session.messageDraft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(.system(size: AgentPanelMetrics.bodySize))
                     .lineLimit(1...5)
                     .onSubmit(send)
                     .padding(.vertical, 6)
@@ -285,7 +302,7 @@ public struct AgentSessionPanel: View {
                 }
             }
         }
-        .padding(.leading, 14)
+        .padding(.leading, AgentPanelMetrics.inset)
         .padding(.trailing, 8)
         .padding(.vertical, 6)
     }
@@ -302,7 +319,7 @@ public struct AgentSessionPanel: View {
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .font(.system(size: AgentPanelMetrics.detailSize))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -319,47 +336,44 @@ private struct AgentTranscriptRow: View {
     var body: some View {
         switch item.kind {
         case .user(let text):
-            Text(text)
-                .font(.system(size: 13))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            // The user's own words sit in a bubble at the trailing edge; the agent's replies are plain text at the leading edge.
+            HStack(spacing: 0) {
+                Spacer(minLength: AgentPanelMetrics.bubbleLeadingRoom)
+                Text(text)
+                    .font(.system(size: AgentPanelMetrics.bodySize))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(AgentPanelMetrics.bubblePadding)
+                    .background(RoundedRectangle(cornerRadius: AgentPanelMetrics.boxRadius, style: .continuous).fill(AgentPanelFill.user))
+                    .accessibilityLabel("You: \(text)")
+            }
         case .reply(let text):
             VStack(alignment: .leading, spacing: 6) {
                 Text(actions.formatReply(text))
-                    .font(.system(size: 13))
+                    .font(.system(size: AgentPanelMetrics.bodySize))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 sources
             }
         case .thinking(let text):
-            DisclosureGroup("Thinking") {
+            AgentTechnicalDetails(title: "Thinking") {
                 Text(text)
-                    .font(.system(size: 11))
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.system(size: 11))
         case .step(let step):
-            AgentTechnicalDetails(title: step.sentence) {
-                HStack(spacing: 6) {
-                    Text(step.tool + " · " + String(describing: step.status))
-                    if let handle = step.tabHandle, let tabID = step.tabID {
-                        Button(handle) { actions.showTab(tabID) }
-                            .buttonStyle(.link)
-                            .help("Show \(handle)")
-                    }
-                }
-            }
+            stepRow(step)
         case .notice(let text):
             Text(text)
-                .font(.system(size: 11))
+                .font(.system(size: AgentPanelMetrics.detailSize))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         case .error(let text, let action):
             VStack(alignment: .leading, spacing: 6) {
                 Text(text)
-                    .font(.system(size: 12))
+                    .font(.system(size: AgentPanelMetrics.supportingSize))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 if let action {
@@ -370,11 +384,35 @@ private struct AgentTranscriptRow: View {
         case .turnFooter(let model, let usage):
             VStack(alignment: .leading, spacing: 4) {
                 Text(footer(model: model, usage: usage))
-                    .font(.system(size: 11))
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.secondary)
                 sources
             }
         }
+    }
+
+    /// A step as one quiet line: its mark, the host's sentence, what went wrong in plain words, and the tab it acted in.
+    private func stepRow(_ step: AgentStep) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: step.status.symbol)
+                .foregroundStyle(step.status.tint)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(step.sentence)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let words = step.status.plainWords {
+                    Text(words).foregroundStyle(.orange)
+                }
+            }
+            Spacer(minLength: 0)
+            if step.tabHandle != nil, let tabID = step.tabID {
+                Button("Show Tab") { actions.showTab(tabID) }
+                    .buttonStyle(.link)
+                    .help("Show the tab this step used")
+            }
+        }
+        .font(.system(size: AgentPanelMetrics.detailSize))
     }
 
     /// Links to tabs read for this transcript item while they remain available.
@@ -390,7 +428,7 @@ private struct AgentTranscriptRow: View {
                     if let current = readTab(row.page) { actions.showReadTab(current.id) }
                 }
                 .buttonStyle(.link)
-                .font(.system(size: 11))
+                .font(.system(size: AgentPanelMetrics.detailSize))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(row.label)

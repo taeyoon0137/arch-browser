@@ -891,7 +891,7 @@ import Foundation
             session.ticket = nil
             return AgentAPISession(client: dependencies.apiClient, tools: SessionTools(service: self, session: session), model: model, id: session.id)
         }
-        guard let ticket = AgentSessionTicket.makeIfPossible() else { throw SessionError(message: "The session ticket could not be created.") }
+        guard let ticket = AgentSessionTicket.make() else { throw SessionError(message: "The session ticket could not be created.") }
         session.ticket = ticket
         let folder = dependencies.sessionFolder(session.id)
         let skills = AgentSessionSkills.skills(inSessionFolder: folder)
@@ -1873,11 +1873,11 @@ extension AIFeature {
 /// A shell hook run's access to Arch through `arch-cli` (`docs/hooks.md`, Shell scripts ▸ Acting): the run's ticket, which the script's environment carries as `ARCH_HOOK_TICKET`, binds a connection only from the run's script process or its descendants, and only while the run lasts. The socket listens meanwhile, as for an in-app session on a CLI. `Hooks` runs the scripts and answers their calls; `AgentService` keeps the tickets and binds the connections.
 @MainActor
 public protocol AgentHookRunChannel: AnyObject {
-    /// Opens the run's access and returns its ticket: its connections list `tools`, and `call` answers each of their calls to one of them.
-    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String
+    /// Opens the run's access and returns its ticket: its connections list `tools`, and `call` answers each of their calls to one of them. Nil when Arch could not make a ticket; the run then does not start.
+    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String?
     /// The same, with `agentRun` answering the connections' `agent/run` under the hook's grant, feature, and run tabs (`docs/hooks.md`, arch-cli agent run and rename), whose answer names each renamed tab by its handle in `handles`, the run tabs' handles; without `agentRun`, `agent/run` is refused.
     func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String
+                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String?
     /// The run's script process started; connections bind only from it and its descendants.
     func hookRun(_ run: UUID, didStart processID: pid_t)
     /// The run ended: its ticket binds nothing more, and its connections close.
@@ -1887,7 +1887,7 @@ public protocol AgentHookRunChannel: AnyObject {
 extension AgentHookRunChannel {
     /// A channel that serves no `agent/run` opens the run's access without it.
     public func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
+                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String? {
         openHookRun(run, tools: tools, call: call)
     }
 }
@@ -1907,7 +1907,7 @@ private final class ShellHookRunAccess {
 
     init?(tools: [String], handles: [UUID: String] = [:], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
          agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)? = nil) {
-        guard let ticket = AgentSessionTicket.makeIfPossible() else { return nil }
+        guard let ticket = AgentSessionTicket.make() else { return nil }
         self.ticket = ticket
         self.tools = tools
         self.handles = handles
@@ -1926,13 +1926,13 @@ extension AgentService {
 }
 
 extension AgentService: AgentHookRunChannel {
-    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
+    public func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String? {
         openHookRun(run, tools: tools, handles: [:], call: call, agentRun: nil)
     }
 
     public func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
-        guard let access = ShellHookRunAccess(tools: tools, handles: handles, call: call, agentRun: agentRun) else { return "" }
+                            agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String? {
+        guard let access = ShellHookRunAccess(tools: tools, handles: handles, call: call, agentRun: agentRun) else { return nil }
         shellHookRuns[run] = access
         if endpoint == nil { updateListening() }
         return access.ticket.text

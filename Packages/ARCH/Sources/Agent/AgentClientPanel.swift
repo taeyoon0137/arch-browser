@@ -198,36 +198,33 @@ private struct AgentStepRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: symbol)
-                    .foregroundStyle(step.status == .ok ? Color.secondary : Color.orange)
-                    .font(.caption)
+                Image(systemName: step.status.symbol)
+                    .foregroundStyle(step.status.tint)
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .accessibilityHidden(true)
-                Text(step.sentence)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(step.sentence)
+                        .font(.system(size: AgentPanelMetrics.supportingSize))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let words = step.status.plainWords {
+                        Text(words)
+                            .font(.system(size: AgentPanelMetrics.detailSize))
+                            .foregroundStyle(.orange)
+                    }
+                }
                 Spacer(minLength: 0)
                 if let handle = step.tabHandle, step.tabID != nil {
                     Button(handle, action: show)
                         .buttonStyle(.link)
-                        .font(.caption)
+                        .font(.system(size: AgentPanelMetrics.detailSize))
                         .help("Show this tab")
                 }
             }
             if step.addressesAgents {
                 Text("This page contains text addressed to AI agents.")
-                    .font(.caption)
+                    .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.orange)
             }
-        }
-    }
-
-    private var symbol: String {
-        switch step.status {
-        case .ok: return "checkmark.circle"
-        case .denied: return "hand.raised"
-        case .refused: return "nosign"
-        case .timeout, .approvalPending: return "clock"
-        case .stale, .error: return "exclamationmark.triangle"
         }
     }
 }

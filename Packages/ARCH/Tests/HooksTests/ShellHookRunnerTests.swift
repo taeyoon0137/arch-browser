@@ -18,8 +18,9 @@ private func shellFixture(_ name: String) throws -> Data {
 /// Stands in for the agents' service: it records each run's tools, start, and end, and keeps each open run's handler of `arch-cli`'s calls.
 @MainActor
 final class FakeRunChannel: AgentHookRunChannel {
-    /// Empty, as the service gives when it cannot make a ticket.
-    var ticket = "fixture-ticket"
+    let ticket = "fixture-ticket"
+    /// Stands for a service that could not make the run's ticket.
+    var refusesTicket = false
     private(set) var tools: [UUID: [String]] = [:]
     private(set) var started: [UUID: pid_t] = [:]
     private(set) var closed: [UUID] = []
@@ -27,14 +28,14 @@ final class FakeRunChannel: AgentHookRunChannel {
     /// Each run's tab handles, by which the service's answer to `arch-cli agent run` names renamed tabs.
     private(set) var handles: [UUID: [UUID: String]] = [:]
 
-    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String {
+    func openHookRun(_ run: UUID, tools: [String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult) -> String? {
         self.tools[run] = tools
         handlers[run] = call
-        return ticket
+        return refusesTicket ? nil : ticket
     }
 
     func openHookRun(_ run: UUID, tools: [String], handles: [UUID: String], call: @escaping @MainActor (AgentToolCall) async -> AgentToolResult,
-                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String {
+                     agentRun: (@MainActor ([String: AgentJSON]) async -> AgentRunResult)?) -> String? {
         self.handles[run] = handles
         return openHookRun(run, tools: tools, call: call)
     }
@@ -212,6 +213,18 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         if case .shell(_, _, let interpreter) = hook.script { #expect(interpreter.path != link.path) } else { Issue.record("Not a shell hook.") }
     }
 
+    @Test func aRunWithoutATicketNeverStartsItsScript() async throws {
+        defer { harness.cleanUp() }
+        let script = try shellFixture("input.sh")
+        let tab = harness.tab()
+        harness.host.show(tab)
+        channel.refusesTicket = true
+        let run = invocation(of: try shellHook(script), script: script, loading: tab)
+        let outcome = await runner().run(run)
+        #expect(outcome.code == "notStarted")
+        #expect(channel.started[run.run] == nil)
+    }
+
     @Test func aNonzeroStatusFailsTheRunWithItsLastErrorLine() async throws {
         defer { harness.cleanUp() }
         let script = try shellFixture("fails.sh")
@@ -222,18 +235,6 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         let outcome = await shell.run(run)
         #expect(outcome.code == "exitStatus" && outcome.failure == "Exited with status 3: no tab to rename")
         #expect(shell.takeErrorOutput(of: run.run) == "looking for the tab\nno tab to rename\n")
-    }
-
-    @Test func aRunWhoseTicketCouldNotBeMadeDoesNotStartTheScript() async throws {
-        defer { harness.cleanUp() }
-        let script = try shellFixture("fails.sh")
-        let tab = harness.tab()
-        harness.host.show(tab)
-        channel.ticket = ""
-        let run = invocation(of: try shellHook(script), script: script, loading: tab)
-        let outcome = await runner().run(run)
-        #expect(outcome.code == "notStarted" && outcome.failure == HookShellScript.noTicketSentence)
-        #expect(channel.started[run.run] == nil && channel.closed.contains(run.run))
     }
 
     @Test func theTimeLimitEndsTheProcessGroup() async throws {

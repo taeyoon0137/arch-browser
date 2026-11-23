@@ -126,7 +126,11 @@ public struct AgentTool: Sendable {
     public var inputSchema: AgentJSON {
         var schema: [String: AgentJSON] = [
             "type": "object",
-            "properties": .object(Dictionary(parameters.map { ($0.name, $0.schema) }, uniquingKeysWith: { first, _ in first })),
+            // A parameter listed twice is a mistake in the definition: debug builds stop on it, and a release build keeps the first.
+            "properties": .object(Dictionary(parameters.map { ($0.name, $0.schema) }, uniquingKeysWith: { first, _ in
+                assertionFailure("\(name) lists a parameter twice.")
+                return first
+            })),
             "additionalProperties": false,
         ]
         let required = parameters.filter(\.isRequired).map { AgentJSON.string($0.name) }

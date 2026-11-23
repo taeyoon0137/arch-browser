@@ -73,15 +73,12 @@ struct AgentGrantSheetView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Allow \u{201C}\(request.client.displayName)\u{201D} to use Arch?")
                 .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(request.client.executablePath)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(request.client.executablePath)
+                    .fixedSize(horizontal: false, vertical: true)
                 if request.client.isInterpreter {
                     Text("\(request.client.name) runs scripts, and this access covers every script it runs.")
                 }
