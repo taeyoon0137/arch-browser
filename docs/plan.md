@@ -2118,6 +2118,7 @@ Run rounds in order, then start again at X1 with the next round number, until `d
   - A15, D1.11, X2: contracts, "Not built yet" markers in `docs/plugins.md`, and type comments were left for some items.
   - X5.r1.7 to X5.r1.10 stay open for the user (`docs/bookmarks.md`, Open decisions), and X5.r1.4 and X5.r1.5 are defaults still open in `docs/plugins.md`.
   - W1's two weak-capture warnings were never fixed, and E2 left the 37 prose-pass notes on Tests files.
+    - Fixed on November 23: W1's two weak-capture warnings and the other 12 Swift warnings of `swift build --build-tests` (Sendable function values, a sendable closure's captured variable, main-actor statics in default arguments, redundant or ambiguous `#require`). A clean build now warns only in CEF's own headers: 437 `-Wundefined-var-template` instances at four lines of `cefroot/libcef_dll/cpptoc` and `ctocpp`, which Arch does not change.
 
 ### Codex handoff queue
 
