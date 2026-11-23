@@ -1,6 +1,7 @@
 #!/bin/sh
 # Assemble `build/Arch.app` using Swift Package Manager (SwiftPM) build products, among them `arch-cli`, and the Chromium Embedded Framework (CEF) distribution in `Frameworks/cef`, with the Sparkle framework that SwiftPM fetches for app updates.
 # Usage: scripts/bundle_app.sh [debug|release]
+# `ARCH_HARDENED_RUNTIME=1` signs every executable with the hardened runtime and a secure timestamp, as notarization requires (`docs/updates.md`, Notarization). It is off by default.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-debug}"
@@ -273,13 +274,14 @@ elif [ -n "$CERT_KIND" ]; then
 fi
 
 # Signs Sparkle's framework in the bundle with identity `$1`, from the inside out, as Sparkle's documentation does: the XPC services, the Autoupdate helper, the Updater app, and then the framework, each with the hardened runtime that Sparkle's own signatures have. Only the downloader service keeps its entitlements.
+# A hardened build also gives each signature a secure timestamp, which notarization requires.
 sign_sparkle() {
   versions="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
-  codesign --force --sign "$1" --options runtime "$versions/XPCServices/Installer.xpc" &&
-    codesign --force --sign "$1" --options runtime --preserve-metadata=entitlements "$versions/XPCServices/Downloader.xpc" &&
-    codesign --force --sign "$1" --options runtime "$versions/Autoupdate" &&
-    codesign --force --sign "$1" --options runtime "$versions/Updater.app" &&
-    codesign --force --sign "$1" --options runtime "$APP/Contents/Frameworks/Sparkle.framework"
+  codesign --force --sign "$1" --options runtime ${TIMESTAMP:+--timestamp} "$versions/XPCServices/Installer.xpc" &&
+    codesign --force --sign "$1" --options runtime ${TIMESTAMP:+--timestamp} --preserve-metadata=entitlements "$versions/XPCServices/Downloader.xpc" &&
+    codesign --force --sign "$1" --options runtime ${TIMESTAMP:+--timestamp} "$versions/Autoupdate" &&
+    codesign --force --sign "$1" --options runtime ${TIMESTAMP:+--timestamp} "$versions/Updater.app" &&
+    codesign --force --sign "$1" --options runtime ${TIMESTAMP:+--timestamp} "$APP/Contents/Frameworks/Sparkle.framework"
 }
 
 # Signs the bundle with identity `$1`, and the app with the entitlements at `$2` when it is not empty. `--deep` signs the helper apps and the CEF framework without entitlements, so Sparkle's framework joins the bundle after it, keeping the entitlements and runtime of its signatures, and the last signing seals the app with both.
@@ -291,7 +293,76 @@ sign_app() {
     codesign --force --sign "$1" ${2:+--entitlements "$2"} "$APP"
 }
 
-if ! SIGN_OUTPUT="$(sign_app "${IDENTITY:--}" "${PROFILE:+$ENTITLEMENTS}" 2>&1)"; then
+# The hardened runtime's entitlements follow Chromium's own macOS signing configuration and entitlement files in the pinned Chromium source. Each key has its reason:
+# - The renderer and GPU helpers get `com.apple.security.cs.allow-jit`. V8 and WebAssembly in the renderer, and SwiftShader's code generator in the GPU process, write code to memory that they map with `MAP_JIT`, which the hardened runtime allows only with this key. Chromium gives these two helpers this key alone: `com.apple.security.cs.allow-unsigned-executable-memory` is not needed, because no part maps executable memory without `MAP_JIT`.
+# - The base helper, which runs the utility processes (network, storage, audio, and video capture), and the Alerts helper get none, as in Chromium. The Plugin helper gets none: the pinned Chromium launches only the base, renderer, and GPU helpers, so CEF's Plugin helper never runs.
+# - The app keeps the provisioning profile's entitlements (`docs/sync.md`) and adds the hardened runtime's resource keys for what pages may use after the user allows them, as Chromium's app does: `com.apple.security.device.audio-input` for the microphone, `com.apple.security.device.camera` for the camera, and `com.apple.security.personal-information.location` for location, which the browser process reads through Core Location. Without them, macOS denies those devices to a hardened app whatever the user allows. Bluetooth, USB, and printing have no hardened runtime key; Chromium's keys for them are App Sandbox keys, and Arch has no sandbox. The app sends no Apple Events, so it has no `com.apple.security.automation.apple-events`. It gets no `allow-jit`: WebKit pages run in the system's own WebKit processes, and the plugins' syntax checks run JavaScriptCore in the app, which runs code without its compiler when the process may not map `MAP_JIT` memory.
+# - No executable gets `com.apple.security.cs.disable-library-validation`: the script signs the CEF framework, its libraries, and Sparkle's framework with the app's own identity, so library validation accepts them.
+# Ad-hoc signing has no team, so library validation would refuse the frameworks, and the notary service accepts only Developer ID; a hardened build therefore fails instead of falling back to ad-hoc signing.
+HARDENED="${ARCH_HARDENED_RUNTIME:-0}"
+TIMESTAMP=""
+JIT_ENTITLEMENTS="$ROOT/build/ArchHelperJIT.entitlements"
+rm -f "$JIT_ENTITLEMENTS"
+
+# Writes the hardened app's entitlements at `$1`: the profile's, when the script wrote them there, and the resource keys above.
+hardened_app_entitlements() {
+  python3 -I -c '
+import os, plistlib, sys
+path = sys.argv[1]
+entitlements = {}
+if os.path.exists(path):
+    with open(path, "rb") as file:
+        entitlements = plistlib.load(file)
+for key in ("com.apple.security.device.audio-input", "com.apple.security.device.camera", "com.apple.security.personal-information.location"):
+    entitlements[key] = True
+with open(path, "wb") as file:
+    plistlib.dump(entitlements, file)
+' "$1"
+}
+
+# Signs the bundle with identity `$1` from the inside out, each part with the hardened runtime and a secure timestamp: the CEF framework's libraries and the framework, the helper apps with their entitlements, `arch-cli`, Sparkle's framework, and last the app with the entitlements at `$2`.
+sign_hardened() {
+  cef="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+  for lib in "$cef/Libraries/"*.dylib; do
+    codesign --force --sign "$1" --options runtime --timestamp "$lib" || return 1
+  done
+  codesign --force --sign "$1" --options runtime --timestamp "$cef" || return 1
+  for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
+    case "$suffix" in
+      " (GPU)" | " (Renderer)") helper_entitlements="$JIT_ENTITLEMENTS" ;;
+      *) helper_entitlements="" ;;
+    esac
+    codesign --force --sign "$1" --options runtime --timestamp ${helper_entitlements:+--entitlements "$helper_entitlements"} "$APP/Contents/Frameworks/Arch Helper$suffix.app" || return 1
+  done
+  codesign --force --sign "$1" --options runtime --timestamp "$APP/Contents/Helpers/arch-cli" &&
+    rm -rf "$APP/Contents/Frameworks/Sparkle.framework" &&
+    ditto "$SPARKLE" "$APP/Contents/Frameworks/Sparkle.framework" &&
+    sign_sparkle "$1" &&
+    codesign --force --sign "$1" --options runtime --timestamp --entitlements "$2" "$APP"
+}
+
+if [ "$HARDENED" = "1" ]; then
+  [ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ] || { echo "ARCH_HARDENED_RUNTIME=1 needs a signing identity, and none was found; a hardened build is not signed ad hoc" >&2; exit 1; }
+  TIMESTAMP=1
+  mkdir -p "$ROOT/build"
+  cat > "$JIT_ENTITLEMENTS" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+  hardened_app_entitlements "$ENTITLEMENTS"
+  if ! SIGN_OUTPUT="$(sign_hardened "$IDENTITY" "$ENTITLEMENTS" 2>&1)"; then
+    printf '%s\n' "$SIGN_OUTPUT" >&2
+    echo "hardened signing failed; the bundle is not signed" >&2
+    exit 1
+  fi
+  echo "signed with the hardened runtime; the renderer and GPU helpers may compile code, and the app may use the camera, microphone, and location" >&2
+elif ! SIGN_OUTPUT="$(sign_app "${IDENTITY:--}" "${PROFILE:+$ENTITLEMENTS}" 2>&1)"; then
   printf '%s\n' "$SIGN_OUTPUT" >&2
   echo "signing failed; signing ad hoc instead, without the provisioning profile, so the Keychain items Chromium created under the identity may ask for access" >&2
   rm -f "$APP/Contents/embedded.provisionprofile" "$ENTITLEMENTS"

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Make an update release of a built Arch.app for Sparkle (`docs/updates.md`): the update archive, its EdDSA signature, and the appcast, in `build/release/<build number>/`. With `ARCH_NOTARY_PROFILE`, a `notarytool` keychain profile, the app is notarized and stapled first. Only `--publish` uploads the archive and the appcast as a GitHub release of the project; without it the script prints what it would upload.
+# Make an update release of a built Arch.app for Sparkle (`docs/updates.md`): the update archive, its EdDSA signature, and the appcast, in `build/release/<build number>/`. With `ARCH_NOTARY_PROFILE`, a `notarytool` keychain profile, the app is notarized and stapled first; it must then come from `ARCH_HARDENED_RUNTIME=1 ./scripts/bundle_app.sh release`. Only `--publish` uploads the archive and the appcast as a GitHub release of the project; without it the script prints what it would upload.
 # Usage: scripts/release_app.sh [--publish] [path/to/Arch.app]
 # `sign_update` reads the private key from the file at `ARCH_SPARKLE_KEY_FILE`, or from the login Keychain under the account `ARCH_SPARKLE_KEY_ACCOUNT`. Either comes from the environment or from `.release.env` at the repository root, which git ignores, so the repository never says where the key is.
 set -eu
@@ -31,6 +31,16 @@ COMMIT="$(info ArchBuildCommit)"
 [ -n "$BUILD" ] && [ -n "$VERSION" ] && [ -n "$MIN_MACOS" ] || fail "the app's Info.plist lacks its version, build number, or minimum system"
 [ -n "$FEED_URL" ] && [ -n "$PUBLIC_KEY" ] || fail "the app has no SUFeedURL or SUPublicEDKey, so it could not check or install an update; docs/updates.md says how to set the public key"
 codesign --verify --deep --strict "$SOURCE" || fail "the app's signature does not verify; run scripts/bundle_app.sh again"
+# Notarization requires the hardened runtime on every executable, so a release to notarize stops before it starts when any Mach-O file in the bundle lacks it.
+if [ -n "${ARCH_NOTARY_PROFILE:-}" ]; then
+  UNHARDENED="$(find "$SOURCE" -type f -print | while IFS= read -r file; do
+    file -b "$file" | grep -q '^Mach-O' || continue
+    codesign -dv "$file" 2>&1 | grep -q 'flags=.*runtime' || printf '%s\n' "${file#"$SOURCE"/}"
+  done)"
+  [ -z "$UNHARDENED" ] || fail "these executables are not signed with the hardened runtime, which notarization requires:
+$UNHARDENED
+run ARCH_HARDENED_RUNTIME=1 ./scripts/bundle_app.sh release first"
+fi
 
 TAG="v$VERSION-$BUILD"
 OUT="$ROOT/build/release/$BUILD"
@@ -44,9 +54,6 @@ APP="$OUT/Arch.app"
 ditto "$SOURCE" "$APP"
 
 if [ -n "${ARCH_NOTARY_PROFILE:-}" ]; then
-  # Notarization requires the hardened runtime on the app's executables.
-  codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime' ||
-    echo "warning: the app is not signed with the hardened runtime, which notarization requires, so the notary service may reject it" >&2
   ditto -c -k --keepParent "$APP" "$OUT/notarization.zip"
   xcrun notarytool submit "$OUT/notarization.zip" --keychain-profile "$ARCH_NOTARY_PROFILE" --wait
   rm -f "$OUT/notarization.zip"
