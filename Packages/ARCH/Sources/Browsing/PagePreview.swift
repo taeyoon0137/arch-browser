@@ -93,7 +93,7 @@ struct PagePreviewPanel: View {
         .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
         .background(PreviewDismissal(close: windowModel.closePreview, ignoresEscape: { windowModel.isTabSwitcherVisible }))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Preview")
+        .accessibilityLabel(localized("Preview"))
         .padding(Self.inset)
     }
 
@@ -127,7 +127,7 @@ struct PagePreviewPanel: View {
             .truncationMode(showsSite ? .tail : .middle)
             .help(preview.url.absoluteString)
             Spacer(minLength: 8)
-            Button("Open in Tab", action: windowModel.openPreviewInTab)
+            Button(localized("Open in Tab"), action: windowModel.openPreviewInTab)
             SidebarIconButton(symbol: "xmark", label: "Close Preview", action: windowModel.closePreview)
         }
         .padding(.leading, 6)

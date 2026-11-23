@@ -13,7 +13,7 @@ struct SiteSearchSection: View {
         Form {
             Section {
                 if store.shortcuts.isEmpty {
-                    Text("No shortcuts")
+                    Text("No shortcuts", bundle: .module)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(store.shortcuts) { shortcut in
@@ -21,7 +21,7 @@ struct SiteSearchSection: View {
                         HStack(spacing: 12) {
                             Text(shortcut.keyword)
                                 .font(.body.monospaced())
-                            Button("Edit\u{2026}") { editing = shortcut }
+                            Button(localized("Edit\u{2026}")) { editing = shortcut }
                         }
                     } label: {
                         Text(shortcut.name)
@@ -32,7 +32,7 @@ struct SiteSearchSection: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Add Shortcut\u{2026}") { editing = SiteSearchShortcut(keyword: "", name: "", template: "") }
+                    Button(localized("Add Shortcut\u{2026}")) { editing = SiteSearchShortcut(keyword: "", name: "", template: "") }
                 }
             } footer: {
                 formFootnote("Type a keyword and a space in the command palette to search its site.")
@@ -69,13 +69,13 @@ private struct SiteSearchEditor: View {
                 .padding([.horizontal, .top], 20)
             Form {
                 Section {
-                    TextField("Name", text: $shortcut.name, prompt: Text("Example"))
-                    TextField("Keyword", text: $shortcut.keyword, prompt: Text("ex"))
+                    TextField(localized("Name"), text: $shortcut.name, prompt: Text("Example", bundle: .module))
+                    TextField(localized("Keyword"), text: $shortcut.keyword, prompt: Text("ex", bundle: .module))
                     if store.isKeywordInUse(shortcut.keyword, except: shortcut.id) {
-                        Text("Another shortcut uses this keyword.").font(.callout).foregroundStyle(.red)
+                        Text("Another shortcut uses this keyword.", bundle: .module).font(.callout).foregroundStyle(.red)
                     }
                     // Verbatim text keeps `%s` from being read as a format specifier.
-                    TextField("Address", text: $shortcut.template, prompt: Text(verbatim: "https://example.com/search?q=%s"))
+                    TextField(localized("Address"), text: $shortcut.template, prompt: Text(verbatim: "https://example.com/search?q=%s"))
                 } footer: {
                     // The footnote's text is verbatim, so `%s` stays as typed.
                     formFootnote("Put %s in the address where the search text goes.")
@@ -84,13 +84,13 @@ private struct SiteSearchEditor: View {
             .formStyle(.grouped)
             HStack {
                 if !isNew {
-                    Button("Remove Shortcut", role: .destructive) {
+                    Button(localized("Remove Shortcut"), role: .destructive) {
                         store.remove(shortcut)
                         dismiss()
                     }
                 }
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(localized("Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(isNew ? "Add" : "Save") {
                     store.save(shortcut)

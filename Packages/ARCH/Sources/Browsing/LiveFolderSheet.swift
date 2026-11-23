@@ -505,29 +505,29 @@ struct LiveFolderSheetView: View {
                 .font(.headline)
             SiteSettingsGroup("Folder") {
                 SiteSettingsRow(symbol: "square.stack", title: "Source") {
-                    Picker("Source", selection: $model.sourceKind) {
-                        Text("Feed").tag(LiveFolderSheetModel.SourceKind.feed)
-                        Text("GitHub").tag(LiveFolderSheetModel.SourceKind.gitHub)
+                    Picker(localized("Source"), selection: $model.sourceKind) {
+                        Text("Feed", bundle: .module).tag(LiveFolderSheetModel.SourceKind.feed)
+                        Text("GitHub", bundle: .module).tag(LiveFolderSheetModel.SourceKind.gitHub)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .accessibilityLabel("Source")
+                    .accessibilityLabel(localized("Source"))
                 }
                 SiteSettingsDivider()
                 SiteSettingsRow(symbol: "textformat", title: "Name") {
-                    TextField("Name", text: $model.name, prompt: Text(model.namePlaceholder))
+                    TextField(localized("Name"), text: $model.name, prompt: Text(model.namePlaceholder))
                 }
                 SiteSettingsDivider()
                 SiteSettingsRow(symbol: "number", title: "Items") {
-                    Picker("Items", selection: $model.itemLimit) {
+                    Picker(localized("Items"), selection: $model.itemLimit) {
                         ForEach(LiveFolderConfiguration.itemLimits, id: \.self) { Text("\($0)").tag($0) }
-                    }.labelsHidden().accessibilityLabel("Items").fixedSize()
+                    }.labelsHidden().accessibilityLabel(localized("Items")).fixedSize()
                 }
                 SiteSettingsDivider()
                 SiteSettingsRow(symbol: "arrow.clockwise", title: "Refresh") {
-                    Picker("Refresh", selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
+                    Picker(localized("Refresh"), selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
                         ForEach(LiveFolderConfiguration.refreshIntervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
-                    }.labelsHidden().accessibilityLabel("Refresh").fixedSize()
+                    }.labelsHidden().accessibilityLabel(localized("Refresh")).fixedSize()
                 }
             }
             .disabled(model.isWorking)
@@ -551,7 +551,7 @@ struct LiveFolderSheetView: View {
                         .controlSize(.small)
                 }
                 Spacer()
-                Button("Cancel", action: model.cancel)
+                Button(localized("Cancel"), action: model.cancel)
                     .keyboardShortcut(.cancelAction)
                     .disabled(model.isSaving)
                 Button(model.isNew ? "Add" : "Save", action: model.startAdding)
@@ -572,10 +572,10 @@ struct LiveFolderSheetView: View {
     }
 
     @ViewBuilder private var feedRows: some View {
-        TextField("Address:", text: $model.address, prompt: Text("https://example.com/feed.xml"))
+        TextField(localized("Address:"), text: $model.address, prompt: Text("https://example.com/feed.xml", bundle: .module))
             .focused($focusedField, equals: .address)
         if !model.feedLinks.isEmpty {
-            Picker("Feed:", selection: $model.chosenFeed) {
+            Picker(localized("Feed:"), selection: $model.chosenFeed) {
                 ForEach(model.feedLinks, id: \.url) { link in
                     Text(link.title ?? link.url.absoluteString).tag(Optional(link.url))
                 }
@@ -594,14 +594,14 @@ struct LiveFolderSheetView: View {
     }
 
     @ViewBuilder private var gitHubRows: some View {
-        TextField("Host:", text: $model.host, prompt: Text("github.com"))
+        TextField(localized("Host:"), text: $model.host, prompt: Text("github.com", bundle: .module))
             .focused($focusedField, equals: .host)
-        Picker("Show:", selection: $model.gitHubKind) {
+        Picker(localized("Show:"), selection: $model.gitHubKind) {
             ForEach(GitHubSearch.Kind.allCases, id: \.self) { Text(LiveFolderSheetModel.title(of: $0)).tag($0) }
         }
         .fixedSize()
         if model.gitHubKind == .search {
-            TextField("Search:", text: $model.searchText, prompt: Text("is:pr is:open review-requested:@me"))
+            TextField(localized("Search:"), text: $model.searchText, prompt: Text("is:pr is:open review-requested:@me", bundle: .module))
         }
         LabeledContent {
             VStack(alignment: .leading, spacing: 8) {
@@ -612,14 +612,14 @@ struct LiveFolderSheetView: View {
                 }
                 HStack {
                     if let openTerminal = model.openTerminal {
-                        Button("Open Terminal", action: openTerminal)
+                        Button(localized("Open Terminal"), action: openTerminal)
                     }
-                    Button("Check Again") { Task { await model.checkGitHub(again: true) } }
+                    Button(localized("Check Again")) { Task { await model.checkGitHub(again: true) } }
                         .disabled(model.gitHubState == .checking)
                 }
             }
         } label: {
-            Text("Status:")
+            Text("Status:", bundle: .module)
         }
     }
 

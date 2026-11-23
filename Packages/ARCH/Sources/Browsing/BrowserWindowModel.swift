@@ -306,8 +306,8 @@ public enum BrowserWindowKind {
         let alert = NSAlert()
         alert.messageText = texts.message
         alert.informativeText = texts.information
-        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Delete")).hasDestructiveAction = true
+        alert.addButton(withTitle: localized("Cancel"))
         alert.beginSheetModal(for: nsWindow) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.session.deletePersona(id) }
         }
@@ -338,9 +338,9 @@ public enum BrowserWindowKind {
         alert.messageText = title
         if let message { alert.informativeText = message }
         let confirm = alert.addButton(withTitle: button)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Cancel"))
         let field = NSTextField(string: name)
-        field.placeholderString = "Persona Name"
+        field.placeholderString = localized("Persona Name")
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
@@ -461,7 +461,7 @@ public enum BrowserWindowKind {
         alert.messageText = title
         if let message { alert.informativeText = message }
         alert.addButton(withTitle: button)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Cancel"))
         let textFields = fields.map { field in
             let textField = NSTextField(string: field.value)
             textField.setAccessibilityLabel(field.label)

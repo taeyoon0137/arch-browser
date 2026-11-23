@@ -228,7 +228,7 @@ struct SiteSettingsView: View {
             SiteSettingsGroup("New Tabs", footnote: "Tabs that a page opens use that page\u{2019}s engine.") {
                 // The group's title says which tabs. “Engine for New Tabs” would leave the picker no room, so only VoiceOver reads it.
                 SiteSettingsRow(symbol: "plus.square.on.square", title: "Engine") {
-                    Picker("Engine for New Tabs", selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
+                    Picker(localized("Engine for New Tabs"), selection: Binding(get: { session.defaultEngine }, set: { session.defaultEngine = $0 })) {
                         ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
                     }
                     .pickerStyle(.segmented)
@@ -256,7 +256,7 @@ struct TabEngineSection: View {
     var body: some View {
         SiteSettingsGroup("This Tab", footnote: note) {
             SiteSettingsRow(symbol: "gearshape.2", title: "Engine") {
-                Picker("Engine for This Tab", selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
+                Picker(localized("Engine for This Tab"), selection: Binding(get: { tab.engineKind }, set: { session.switchEngine(of: tab, to: $0) })) {
                     ForEach(session.availableEngines, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)

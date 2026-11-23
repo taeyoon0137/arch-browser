@@ -50,34 +50,34 @@ struct SyncSection: View {
                                      deleting: controller.isDeletingCloudData, offReason: controller.offReason)
         Form {
             Section {
-                Toggle("Sync with iCloud", isOn: Binding(get: { state.isOn }, set: { value in
+                Toggle(localized("Sync with iCloud"), isOn: Binding(get: { state.isOn }, set: { value in
                     Task { await controller.setEnabled(value) }
                 }))
                 .disabled(!state.canToggle)
-                Text("Personas, spaces, favorites, pinned tabs and their folders, and some settings. Open tabs, history, and website data stay on this Mac.")
+                Text("Personas, spaces, favorites, pinned tabs and their folders, and some settings. Open tabs, history, and website data stay on this Mac.", bundle: .module)
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section {
-                LabeledContent("iCloud account", value: state.account)
+                LabeledContent(localized("iCloud account"), value: state.account)
                 if let explanation = state.explanation { Text(explanation).foregroundStyle(.secondary) }
                 if state.canPause {
-                    Button("Turn Off Sync on This Mac") { Task { await controller.setEnabled(false) } }
+                    Button(localized("Turn Off Sync on This Mac")) { Task { await controller.setEnabled(false) } }
                 }
                 if let date = controller.lastSync {
-                    LabeledContent("Last completed sync") { Text(date, format: .dateTime) }
+                    LabeledContent(localized("Last completed sync")) { Text(date, format: .dateTime) }
                 } else {
-                    LabeledContent("Last completed sync", value: "Never")
+                    LabeledContent(localized("Last completed sync"), value: "Never")
                 }
-                if let message = controller.lastError { LabeledContent("Sync status", value: message) }
+                if let message = controller.lastError { LabeledContent(localized("Sync status"), value: message) }
             }
             Section {
-                Button("Delete iCloud Data…", role: .destructive) { confirmsDeletion = true }
+                Button(localized("Delete iCloud Data…"), role: .destructive) { confirmsDeletion = true }
                     .disabled(!state.canDelete)
-                    .confirmationDialog("Delete Arch’s iCloud Data?", isPresented: $confirmsDeletion, titleVisibility: .visible) {
-                        Button("Delete iCloud Data", role: .destructive) { Task { await controller.deleteCloudData() } }
-                        Button("Cancel", role: .cancel) {}
+                    .confirmationDialog(localized("Delete Arch’s iCloud Data?"), isPresented: $confirmsDeletion, titleVisibility: .visible) {
+                        Button(localized("Delete iCloud Data"), role: .destructive) { Task { await controller.deleteCloudData() } }
+                        Button(localized("Cancel"), role: .cancel) {}
                     } message: {
-                        Text("This removes Arch’s synced data from iCloud and turns off sync on your Macs. Each Mac keeps its local sidebar and settings.")
+                        Text("This removes Arch’s synced data from iCloud and turns off sync on your Macs. Each Mac keeps its local sidebar and settings.", bundle: .module)
                     }
             }
         }

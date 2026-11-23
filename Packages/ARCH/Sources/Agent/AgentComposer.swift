@@ -173,7 +173,7 @@ public struct AgentComposer: View {
 
     private var form: some View {
         VStack(alignment: .leading, spacing: 10) {
-            TextField("What should the agent do?", text: $context.text, axis: .vertical)
+            TextField(localized("What should the agent do?"), text: $context.text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: AgentPanelMetrics.bodySize))
                 .lineLimit(3...10)
@@ -187,7 +187,7 @@ public struct AgentComposer: View {
                 }
             } else if !context.attachesTab, !context.usesAgentsPersona, let tab = attachableTab, service.canReattach(tab, in: context.personaID) {
                 HStack {
-                    Button("Reattach Reviewed Tab") {
+                    Button(localized("Reattach Reviewed Tab")) {
                         guard service.canReattach(tab, in: context.personaID) else {
                             context.problem = "The reviewed page changed or is no longer available."
                             return
@@ -202,14 +202,14 @@ public struct AgentComposer: View {
             if let tab = attachableTab, context.attachesTab,
                let excerpt = context.readerExcerpt, excerpt.matches(tab), !context.usesAgentsPersona {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Share reader excerpt", isOn: $context.sharesExcerpt)
+                    Toggle(localized("Share reader excerpt"), isOn: $context.sharesExcerpt)
                         .toggleStyle(.checkbox)
                         .font(.system(size: AgentPanelMetrics.supportingSize))
                     AgentTechnicalDetails(title: "Preview excerpt") {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 6) {
-                                if let selection = excerpt.selection { Text("Selected text").fontWeight(.medium); Text(verbatim: selection) }
-                                if let reply = excerpt.reply { Text("Reader answer").fontWeight(.medium); Text(verbatim: reply) }
+                                if let selection = excerpt.selection { Text("Selected text", bundle: .module).fontWeight(.medium); Text(verbatim: selection) }
+                                if let reply = excerpt.reply { Text("Reader answer", bundle: .module).fontWeight(.medium); Text(verbatim: reply) }
                             }
                             .font(.system(size: AgentPanelMetrics.detailSize))
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,7 +228,7 @@ public struct AgentComposer: View {
             if models.isEmpty {
                 modelSetup
             } else {
-                DisclosureGroup("Options", isExpanded: $optionsExpanded) {
+                DisclosureGroup(localized("Options"), isExpanded: $optionsExpanded) {
                     AgentSectionBox { options }
                 }
                 .font(.system(size: AgentPanelMetrics.supportingSize))
@@ -266,39 +266,39 @@ public struct AgentComposer: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: 8) {
             // The place line above names where the task runs; this only changes it.
-            Toggle("Use the Agents Persona", isOn: $context.usesAgentsPersona)
+            Toggle(localized("Use the Agents Persona"), isOn: $context.usesAgentsPersona)
                 .toggleStyle(.checkbox)
                 .font(.system(size: AgentPanelMetrics.supportingSize))
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
                     label("Mode")
                     // Settings' mode is the highest a new session starts in; the panel's mode menu raises it after a confirmation.
-                    Picker("Mode", selection: Binding(get: { chosenMode }, set: { context.mode = $0 })) {
+                    Picker(localized("Mode"), selection: Binding(get: { chosenMode }, set: { context.mode = $0 })) {
                         ForEach(AgentAccessLevel.allCases.filter { $0.rank <= service.newSessionMode.rank }, id: \.self) { Text($0.title).tag($0) }
                     }
                     .labelsHidden()
-                    .accessibilityLabel("Mode")
+                    .accessibilityLabel(localized("Mode"))
                     .controlSize(.small)
                 }
                 GridRow {
                     label("Model")
-                    Picker("Model", selection: Binding(get: { selectedModel }, set: { context.model = $0; context.effort = nil })) {
-                        if selectedModel == nil { Text("Choose a model…").tag(nil as AIModelRef?).disabled(true) }
+                    Picker(localized("Model"), selection: Binding(get: { selectedModel }, set: { context.model = $0; context.effort = nil })) {
+                        if selectedModel == nil { Text("Choose a model…", bundle: .module).tag(nil as AIModelRef?).disabled(true) }
                         ForEach(models, id: \.self) { Text(settings.title(of: $0)).tag(Optional($0)) }
                     }
                     .labelsHidden()
-                    .accessibilityLabel("Model")
+                    .accessibilityLabel(localized("Model"))
                     .controlSize(.small)
                 }
                 if !effortLevels.isEmpty {
                     GridRow {
                         label("Effort")
-                        Picker("Effort", selection: $context.effort) {
-                            Text("Tool\u{2019}s default").tag(String?.none)
+                        Picker(localized("Effort"), selection: $context.effort) {
+                            Text("Tool\u{2019}s default", bundle: .module).tag(String?.none)
                             ForEach(effortLevels, id: \.self) { Text($0).tag(Optional($0)) }
                         }
                         .labelsHidden()
-                        .accessibilityLabel("Effort")
+                        .accessibilityLabel(localized("Effort"))
                         .controlSize(.small)
                     }
                 }
@@ -448,8 +448,8 @@ struct AgentAttachmentLabel: View {
             Text(verbatim: tab.attachmentLabel).lineLimit(1).truncationMode(.middle)
         }
         .buttonStyle(.plain)
-        .help("Review tab address")
-        .accessibilityLabel("Review tab: \(tab.attachmentLabel)")
+        .help(localized("Review tab address"))
+        .accessibilityLabel(localized("Review tab: \(tab.attachmentLabel)"))
         .popover(isPresented: $showsAddress) {
             Text(verbatim: tab.attachmentAddress ?? tab.attachmentLabel)
                 .textSelection(.enabled)
@@ -477,8 +477,8 @@ struct AgentTabChip: View {
                     .font(.system(size: 9, weight: .semibold))
             }
             .buttonStyle(.plain)
-            .help("Don\u{2019}t Attach This Tab")
-            .accessibilityLabel("Don\u{2019}t Attach This Tab")
+            .help(localized("Don\u{2019}t Attach This Tab"))
+            .accessibilityLabel(localized("Don\u{2019}t Attach This Tab"))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)

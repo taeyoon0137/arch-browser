@@ -26,13 +26,13 @@ struct AgentSettingsPage: View {
             Section {
                 Text(notice).foregroundStyle(.secondary)
                 if case .keyUnavailable = service.state {
-                    Button("Try Again") { service.retryReadingSettings() }
+                    Button(localized("Try Again")) { service.retryReadingSettings() }
                 }
             }
         }
         sessionsSection
         Section {
-            Toggle("Allow Outside Clients (arch-cli and arch-mcp)", isOn: Binding(get: { service.settings.allowsOutsideClients }, set: setAllowsOutsideClients))
+            Toggle(localized("Allow Outside Clients (arch-cli and arch-mcp)"), isOn: Binding(get: { service.settings.allowsOutsideClients }, set: setAllowsOutsideClients))
                 .disabled(!service.canChangeSettings || isChangingAccess)
             if let accessError {
                 Text(accessError).font(.callout).foregroundStyle(.red)
@@ -41,14 +41,14 @@ struct AgentSettingsPage: View {
                 HStack {
                     Text(problem).font(.callout).foregroundStyle(.red)
                     Spacer()
-                    Button("Try Again") { service.retryChannel() }
+                    Button(localized("Try Again")) { service.retryChannel() }
                 }
             }
             if let problem = service.saveProblem {
-                Text("agent.json could not be written: \(problem)").font(.callout).foregroundStyle(.red)
+                Text("agent.json could not be written: \(problem)", bundle: .module).font(.callout).foregroundStyle(.red)
             }
         } header: {
-            Text("Outside Clients")
+            Text("Outside Clients", bundle: .module)
         } footer: {
             formFootnote("Programs you run, such as Claude Code or Codex in a terminal, can then ask to use Arch through arch-cli and arch-mcp, which come with Arch. The first time each program asks, Arch shows which program it is and lets you choose its Persona, space, and access; the Agents Persona, with no sign-ins, and Read Only come first. Pages a program reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that. Programs that run as you can still start arch-cli, so Arch's checks make misuse harder but are not a wall against your own account.")
         }
@@ -62,13 +62,13 @@ struct AgentSettingsPage: View {
 
     private var sessionsSection: some View {
         Section {
-            Picker("New sessions start in", selection: Binding(get: { service.newSessionMode }, set: service.setNewSessionMode)) {
+            Picker(localized("New sessions start in"), selection: Binding(get: { service.newSessionMode }, set: service.setNewSessionMode)) {
                 ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
             }
-            Toggle("Let In-App Agents Search History", isOn: Binding(get: { service.settings.inAppAgentsSearchHistory }, set: service.setInAppAgentsSearchHistory))
-            Toggle("Keep Codex\u{2019}s Copy of Agent Conversations", isOn: Binding(get: { service.keepsCodexCopy }, set: service.setKeepsCodexCopy))
+            Toggle(localized("Let In-App Agents Search History"), isOn: Binding(get: { service.settings.inAppAgentsSearchHistory }, set: service.setInAppAgentsSearchHistory))
+            Toggle(localized("Keep Codex\u{2019}s Copy of Agent Conversations"), isOn: Binding(get: { service.keepsCodexCopy }, set: service.setKeepsCodexCopy))
         } header: {
-            Text("Agent Sessions")
+            Text("Agent Sessions", bundle: .module)
         } footer: {
             formFootnote("A session you start begins in this mode. You can lower it at any time; raising it asks first. Sessions a program starts with arch-cli task begin at most in this mode. Codex keeps its own copy of each agent conversation, with the pages the agent read, until Arch deletes it with the session, unless you keep it here; a delete that fails or that quitting cuts off leaves the copy. Claude Code keeps none of Arch\u{2019}s sessions.")
         }
@@ -102,17 +102,17 @@ struct AgentSettingsPage: View {
     private var grantsSection: some View {
         Section {
             if service.grants.isEmpty {
-                Text("No program has access to Arch.").foregroundStyle(.secondary)
+                Text("No program has access to Arch.", bundle: .module).foregroundStyle(.secondary)
             }
             ForEach(service.grants) { grant in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(grant.client.displayName).fontWeight(.medium)
                         if service.connectedGrantIDs.contains(grant.id) {
-                            Text("Connected").font(.caption).foregroundStyle(.green)
+                            Text("Connected", bundle: .module).font(.caption).foregroundStyle(.green)
                         }
                         Spacer()
-                        Button("Revoke") { service.revoke(grant.id) }
+                        Button(localized("Revoke")) { service.revoke(grant.id) }
                     }
                     Text(grant.client.executablePath).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     Text(details(of: grant)).font(.caption).foregroundStyle(.secondary)
@@ -127,11 +127,11 @@ struct AgentSettingsPage: View {
             if service.grants.count > 1 {
                 HStack {
                     Spacer()
-                    Button("Revoke All") { service.revokeAll() }
+                    Button(localized("Revoke All")) { service.revokeAll() }
                 }
             }
         } header: {
-            Text("Grants")
+            Text("Grants", bundle: .module)
         } footer: {
             formFootnote("Revoking ends a program's access at once: its connections close, and its next command asks again.")
         }
@@ -142,17 +142,17 @@ struct AgentSettingsPage: View {
         let runs = Binding(get: { grant.runsPerDay }, set: { service.setRunsPerDay($0, for: grant.id) })
         return LabeledContent {
             HStack(spacing: 6) {
-                TextField("Agent runs a day", value: runs, format: .number)
+                TextField(localized("Agent runs a day"), value: runs, format: .number)
                     .labelsHidden()
-                    .accessibilityLabel("Agent runs a day")
+                    .accessibilityLabel(localized("Agent runs a day"))
                     .multilineTextAlignment(.trailing)
                     .frame(width: 64)
-                Stepper("Agent runs a day", value: runs, in: AgentGrant.runsPerDayRange)
+                Stepper(localized("Agent runs a day"), value: runs, in: AgentGrant.runsPerDayRange)
                     .labelsHidden()
-                    .accessibilityLabel("Agent runs a day")
+                    .accessibilityLabel(localized("Agent runs a day"))
             }
         } label: {
-            Text("Agent runs a day").font(.caption).foregroundStyle(.secondary)
+            Text("Agent runs a day", bundle: .module).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -182,16 +182,16 @@ struct AgentSettingsPage: View {
         }
         let listed = Array(entries.prefix(Self.listedEntries))
         Section {
-            Picker("Client", selection: $clientFilter) {
-                Text("All").tag(String?.none)
+            Picker(localized("Client"), selection: $clientFilter) {
+                Text("All", bundle: .module).tag(String?.none)
                 ForEach(Array(Set(activity.entries.map(\.clientName))).sorted(), id: \.self) { Text($0).tag(Optional($0)) }
             }
-            Picker("Site", selection: $siteFilter) {
-                Text("All").tag(String?.none)
+            Picker(localized("Site"), selection: $siteFilter) {
+                Text("All", bundle: .module).tag(String?.none)
                 ForEach(Array(Set(activity.entries.compactMap(\.site))).sorted(), id: \.self) { Text($0).tag(Optional($0)) }
             }
             if listed.isEmpty {
-                Text("No activity.").foregroundStyle(.secondary)
+                Text("No activity.", bundle: .module).foregroundStyle(.secondary)
             }
             ForEach(Self.days(of: listed), id: \.day) { day in
                 Text(day.day.formatted(date: .complete, time: .omitted)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -207,14 +207,14 @@ struct AgentSettingsPage: View {
             }
             HStack {
                 if entries.count > listed.count {
-                    Text("Showing the latest \(listed.count) of \(entries.count).").font(.caption).foregroundStyle(.secondary)
+                    Text("Showing the latest \(listed.count) of \(entries.count).", bundle: .module).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Clear Activity") { activity.clear() }
+                Button(localized("Clear Activity")) { activity.clear() }
                     .disabled(activity.entries.isEmpty)
             }
         } header: {
-            Text("Activity")
+            Text("Activity", bundle: .module)
         } footer: {
             formFootnote("Arch keeps \(AgentActivityLog.keptDays) days of what agents did and what you decided, without page text, typed text, addresses' paths, or screenshots.")
         }
@@ -368,13 +368,13 @@ struct AgentCommandLineToolsSection: View {
         Section {
             if AgentCommandLineTools.hasTools(bundle) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("arch-cli and arch-mcp are in")
+                    Text("arch-cli and arch-mcp are in", bundle: .module)
                     AgentPathText(bundle.helpersURL.path)
                 }
                 .task { await readTools() }
-                .alert("Install Command-Line Tools?", isPresented: $isConfirmingInstall) {
-                    Button("Install") { install(pendingLinks) }
-                    Button("Cancel", role: .cancel) {}
+                .alert(localized("Install Command-Line Tools?"), isPresented: $isConfirmingInstall) {
+                    Button(localized("Install")) { install(pendingLinks) }
+                    Button(localized("Cancel"), role: .cancel) {}
                 } message: {
                     Text(AgentCommandLineTools.confirmation(for: pendingLinks, bundle: bundle))
                 }
@@ -387,10 +387,10 @@ struct AgentCommandLineToolsSection: View {
                     }
                 }
             } else {
-                Text("This copy of Arch does not run from an app bundle, so it has no arch-cli or arch-mcp to link or configure.").foregroundStyle(.secondary)
+                Text("This copy of Arch does not run from an app bundle, so it has no arch-cli or arch-mcp to link or configure.", bundle: .module).foregroundStyle(.secondary)
             }
         } header: {
-            Text("Command-Line Tools")
+            Text("Command-Line Tools", bundle: .module)
         } footer: {
             formFootnote("Install links both tools into a folder on your PATH inside your home folder, ~/.local/bin first, so that terminals and agents run them by name; Arch replaces and removes only links into Arch. Arch never edits Claude Code's or Codex's settings: run the Claude Code command in a terminal, or add the table to Codex's config.toml. Either reaches Arch only while Allow Outside Clients is on.")
         }
@@ -399,13 +399,13 @@ struct AgentCommandLineToolsSection: View {
     @ViewBuilder private var linksRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             if isReadingPath {
-                Text("Reading PATH from your login shell\u{2026}").foregroundStyle(.secondary)
+                Text("Reading PATH from your login shell\u{2026}", bundle: .module).foregroundStyle(.secondary)
             } else if tools == nil {
-                Text("Arch could not check the links on your PATH.").foregroundStyle(.secondary)
+                Text("Arch could not check the links on your PATH.", bundle: .module).foregroundStyle(.secondary)
             } else if installed.isEmpty {
-                Text("Not linked into a folder on your PATH.").foregroundStyle(.secondary)
+                Text("Not linked into a folder on your PATH.", bundle: .module).foregroundStyle(.secondary)
             } else {
-                Text("Linked on your PATH:")
+                Text("Linked on your PATH:", bundle: .module)
                 ForEach(installed, id: \.location.path) { AgentPathText(AgentCommandLineTools.line($0)) }
             }
             if let problem {
@@ -416,10 +416,10 @@ struct AgentCommandLineToolsSection: View {
         }
         HStack {
             Spacer()
-            Button("Remove") { remove() }
+            Button(localized("Remove")) { remove() }
                 .disabled(isReadingPath || installed.isEmpty)
             if !AgentCommandLineTools.isTranslocated(bundle) {
-                Button("Install Command-Line Tools\u{2026}") { Task { await prepareInstall() } }
+                Button(localized("Install Command-Line Tools\u{2026}")) { Task { await prepareInstall() } }
                     .disabled(isReadingPath)
             }
         }
@@ -431,7 +431,7 @@ struct AgentCommandLineToolsSection: View {
             HStack {
                 Text(format.title)
                 Spacer()
-                Button("Copy") {
+                Button(localized("Copy")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
@@ -679,18 +679,18 @@ struct AgentSkillsSection: View {
         Section {
             if AgentCommandLineTools.hasTools(bundle) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("The arch-browser skill tells agents how to use Arch, with arch-cli at")
+                    Text("The arch-browser skill tells agents how to use Arch, with arch-cli at", bundle: .module)
                     AgentPathText(bundle.cliExecutableURL.path)
                 }
                 .task { await read() }
                 .alert(pendingWrite.map { "\($0.action == .update ? "Update" : "Install") the Skill for \($0.target.title)?" } ?? "", isPresented: $isConfirmingWrite, presenting: pendingWrite) { pending in
                     Button(pending.action == .update ? "Update" : "Install") { write(pending) }
-                    Button("Cancel", role: .cancel) {}
+                    Button(localized("Cancel"), role: .cancel) {}
                 } message: { pending in
                     Text(places?.confirmation(for: pending.action, at: pending.destination) ?? "")
                 }
                 if isReading {
-                    Text("Reading your login shell's environment\u{2026}").foregroundStyle(.secondary)
+                    Text("Reading your login shell's environment\u{2026}", bundle: .module).foregroundStyle(.secondary)
                 }
                 ForEach(rows, id: \.target) { row in
                     AgentSkillRow(row: row) { action, destination in perform(action, for: row.target, at: destination) }
@@ -704,10 +704,10 @@ struct AgentSkillsSection: View {
                     Text(outcome).font(.callout).foregroundStyle(.secondary)
                 }
             } else {
-                Text("This copy of Arch does not run from an app bundle, so it has no arch-cli for a skill to name.").foregroundStyle(.secondary)
+                Text("This copy of Arch does not run from an app bundle, so it has no arch-cli for a skill to name.", bundle: .module).foregroundStyle(.secondary)
             }
         } header: {
-            Text("Skills")
+            Text("Skills", bundle: .module)
         } footer: {
             formFootnote("Install copies Arch's skill into the folder that Claude Code or Codex reads, so that their sessions in a terminal know how to use Arch; new sessions read it. Arch replaces and removes only its own copies that nobody changed. Codex also reads skills under CODEX_HOME, but lists a skill found in both folders twice, so Arch writes only to ~/.agents/skills, and not while a skill of that name is under CODEX_HOME.")
         }

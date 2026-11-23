@@ -149,13 +149,13 @@ public struct AgentPanel: View {
                     }
                 }
                 Spacer()
-                Button("Stop") { model.stop(ownerID) }
+                Button(localized("Stop")) { model.stop(ownerID) }
                     .controlSize(.small)
-                    .help("Disconnect this client and deny its waiting requests. Its access stays.")
+                    .help(localized("Disconnect this client and deny its waiting requests. Its access stays."))
                 Button(action: close) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
-                    .accessibilityLabel("Close Agent Panel")
-                    .help("Close Agent Panel")
+                    .accessibilityLabel(localized("Close Agent Panel"))
+                    .help(localized("Close Agent Panel"))
             }
             .padding(.leading, 14)
             .padding(.trailing, 8)
@@ -165,7 +165,7 @@ public struct AgentPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         if steps.isEmpty, approvals.groups(of: ownerID).isEmpty {
-                            Text("The steps of this client show here, with what Arch asks you.")
+                            Text("The steps of this client show here, with what Arch asks you.", bundle: .module)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 8)
@@ -217,11 +217,11 @@ private struct AgentStepRow: View {
                     Button(handle, action: show)
                         .buttonStyle(.link)
                         .font(.system(size: AgentPanelMetrics.detailSize))
-                        .help("Show this tab")
+                        .help(localized("Show this tab"))
                 }
             }
             if step.addressesAgents {
-                Text("This page contains text addressed to AI agents.")
+                Text("This page contains text addressed to AI agents.", bundle: .module)
                     .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.orange)
             }

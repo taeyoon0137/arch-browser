@@ -44,7 +44,7 @@ struct WebsitesSection: View {
             }
             if origins.isEmpty {
                 Section {
-                    Text("No remembered permissions")
+                    Text("No remembered permissions", bundle: .module)
                         .foregroundStyle(.secondary)
                 } footer: {
                     footer
@@ -80,8 +80,8 @@ struct WebsitesSection: View {
                         if type == .notifications, decision == .allow { notifications.request { _ in } }
                     }
                 )) {
-                    Text("Allow").tag(SitePermissionStore.Decision.allow)
-                    Text("Don\u{2019}t Allow").tag(SitePermissionStore.Decision.deny)
+                    Text("Allow", bundle: .module).tag(SitePermissionStore.Decision.allow)
+                    Text("Don\u{2019}t Allow", bundle: .module).tag(SitePermissionStore.Decision.deny)
                 }
                 .labelsHidden()
                 .accessibilityLabel(Self.permissionTitle(for: type))
@@ -92,8 +92,8 @@ struct WebsitesSection: View {
                     Image(systemName: "minus.circle")
                 }
                 .buttonStyle(.borderless)
-                .help("Remove")
-                .accessibilityLabel("Remove")
+                .help(localized("Remove"))
+                .accessibilityLabel(localized("Remove"))
             }
         }
     }
@@ -103,17 +103,17 @@ struct WebsitesSection: View {
         switch notice {
         case .openSystemSettings:
             LabeledContent {
-                Button("Open System Settings") { notifications.openSystemSettings() }
+                Button(localized("Open System Settings")) { notifications.openSystemSettings() }
             } label: {
-                Text("Notifications for Arch are off")
-                Text("The websites you allow can\u{2019}t show notifications.")
+                Text("Notifications for Arch are off", bundle: .module)
+                Text("The websites you allow can\u{2019}t show notifications.", bundle: .module)
             }
         case .turnOn:
             LabeledContent {
-                Button("Turn On Notifications\u{2026}") { notifications.request { _ in } }
+                Button(localized("Turn On Notifications\u{2026}")) { notifications.request { _ in } }
             } label: {
-                Text("Notifications for Arch aren\u{2019}t turned on")
-                Text("The websites you allow can\u{2019}t show notifications.")
+                Text("Notifications for Arch aren\u{2019}t turned on", bundle: .module)
+                Text("The websites you allow can\u{2019}t show notifications.", bundle: .module)
             }
         }
     }

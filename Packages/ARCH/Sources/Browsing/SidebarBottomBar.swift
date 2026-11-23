@@ -171,6 +171,6 @@ private struct NewSpaceButton: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(shortcut.map { "New Space (\($0))" } ?? "New Space")
-        .accessibilityLabel("New Space")
+        .accessibilityLabel(localized("New Space"))
     }
 }

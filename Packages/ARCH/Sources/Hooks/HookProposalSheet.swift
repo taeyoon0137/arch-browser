@@ -96,7 +96,7 @@ struct HookProposalSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Allow \u{201C}\(review.clientName)\u{201D} to add the hook \u{201C}\(review.name)\u{201D}?")
+            Text("Allow \u{201C}\(review.clientName)\u{201D} to add the hook \u{201C}\(review.name)\u{201D}?", bundle: .module)
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
             Text(review.clientPath)
@@ -121,7 +121,7 @@ struct HookProposalSheetView: View {
             .font(.callout)
             .fixedSize(horizontal: false, vertical: true)
             if let prompt = review.prompt {
-                Text("Agent Instructions")
+                Text("Agent Instructions", bundle: .module)
                     .font(.subheadline.weight(.semibold))
                 ScrollView {
                     Text(prompt)
@@ -134,7 +134,7 @@ struct HookProposalSheetView: View {
                 .background(Color(nsColor: .textBackgroundColor))
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor)))
             }
-            Text("Script")
+            Text("Script", bundle: .module)
                 .font(.subheadline.weight(.semibold))
             ScrollView {
                 Text(review.script)
@@ -146,7 +146,7 @@ struct HookProposalSheetView: View {
             .frame(height: 220)
             .background(Color(nsColor: .textBackgroundColor))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(nsColor: .separatorColor)))
-            Text("Allowing asks for Touch ID or your login password. The hook pauses when this program's access ends.")
+            Text("Allowing asks for Touch ID or your login password. The hook pauses when this program's access ends.", bundle: .module)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

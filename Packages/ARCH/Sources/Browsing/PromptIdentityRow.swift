@@ -31,7 +31,7 @@ struct PromptIdentityRow: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.tertiary)
-                    .accessibilityLabel("Secure connection")
+                    .accessibilityLabel(localized("Secure connection"))
             }
             if let tag = identity.tag {
                 Text(tag)

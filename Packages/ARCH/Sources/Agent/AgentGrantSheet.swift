@@ -71,7 +71,7 @@ struct AgentGrantSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Allow \u{201C}\(request.client.displayName)\u{201D} to use Arch?")
+            Text("Allow \u{201C}\(request.client.displayName)\u{201D} to use Arch?", bundle: .module)
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 2) {
@@ -80,35 +80,35 @@ struct AgentGrantSheetView: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 if request.client.isInterpreter {
-                    Text("\(request.client.name) runs scripts, and this access covers every script it runs.")
+                    Text("\(request.client.name) runs scripts, and this access covers every script it runs.", bundle: .module)
                 }
                 if request.client.reachedThroughShell {
                     Text(AgentClientIdentity.shellNote)
                 }
                 if request.client.isBoundToProcess {
-                    Text("This access ends when this \(request.client.name) process ends.")
+                    Text("This access ends when this \(request.client.name) process ends.", bundle: .module)
                 }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
             Form {
-                Picker("Persona", selection: $choice.persona) {
-                    Text("Agents (no sign-ins)").tag(AgentGrantChoice.PersonaChoice.agents)
+                Picker(localized("Persona"), selection: $choice.persona) {
+                    Text("Agents (no sign-ins)", bundle: .module).tag(AgentGrantChoice.PersonaChoice.agents)
                     ForEach(request.personas) { persona in
                         Text(persona.name).tag(AgentGrantChoice.PersonaChoice.existing(persona.id))
                     }
                 }
                 if spaces.isEmpty {
-                    LabeledContent("Space", value: "A new space")
+                    LabeledContent(localized("Space"), value: "A new space")
                 } else {
-                    Picker("Space", selection: Binding(get: { choice.spaceID ?? spaces.first?.id }, set: { choice.spaceID = $0 })) {
+                    Picker(localized("Space"), selection: Binding(get: { choice.spaceID ?? spaces.first?.id }, set: { choice.spaceID = $0 })) {
                         ForEach(spaces) { space in Text(space.name).tag(Optional(space.id)) }
                     }
                 }
-                Picker("Access", selection: $choice.level) {
+                Picker(localized("Access"), selection: $choice.level) {
                     ForEach(AgentAccessLevel.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
-                Toggle("Search history", isOn: $choice.scopes.searchHistory)
+                Toggle(localized("Search history"), isOn: $choice.scopes.searchHistory)
                 Toggle(isOn: $choice.scopes.startTasks) {
                     labeled("Start agent tasks on your AI subscription",
                             detail: "Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change.")
@@ -116,7 +116,7 @@ struct AgentGrantSheetView: View {
                 Toggle(isOn: $choice.scopes.watchEvents) {
                     labeled("Watch browser events", detail: Self.watchSentence(persona: personaName))
                 }
-                Picker("Duration", selection: $choice.duration) {
+                Picker(localized("Duration"), selection: $choice.duration) {
                     ForEach(AgentGrantChoice.Duration.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
             }

@@ -13,11 +13,11 @@ struct AIProvidersPage: View {
     var body: some View {
         Section {
             if settings.providers.isEmpty {
-                Text("No providers yet").foregroundStyle(.secondary)
+                Text("No providers yet", bundle: .module).foregroundStyle(.secondary)
             }
             ForEach(settings.providers) { provider in
                 LabeledContent {
-                    Button("Edit\u{2026}") { editing = AIProviderSheet(provider) }
+                    Button(localized("Edit\u{2026}")) { editing = AIProviderSheet(provider) }
                 } label: {
                     Text(provider.name)
                     Text(Self.detail(of: provider))
@@ -26,14 +26,14 @@ struct AIProvidersPage: View {
             HStack {
                 Spacer()
                 if let openTerminal = PreferencesWindowController.openTerminal {
-                    Button("Open Terminal", action: openTerminal)
+                    Button(localized("Open Terminal"), action: openTerminal)
                 }
-                Menu("Add Provider") {
-                    Button("HTTP API\u{2026}") { editing = .http(AIProviderDraft()) }
-                    Button("Command-Line Tool\u{2026}") { editing = .commandLine(AICommandLineDraft()) }
+                Menu(localized("Add Provider")) {
+                    Button(localized("HTTP API\u{2026}")) { editing = .http(AIProviderDraft()) }
+                    Button(localized("Command-Line Tool\u{2026}")) { editing = .commandLine(AICommandLineDraft()) }
                     Divider()
-                    Button("Claude Code (Claude Subscription)\u{2026}") { addPreset(.claudeCode) }
-                    Button("Codex (ChatGPT Subscription)\u{2026}") { addPreset(.codex) }
+                    Button(localized("Claude Code (Claude Subscription)\u{2026}")) { addPreset(.claudeCode) }
+                    Button(localized("Codex (ChatGPT Subscription)\u{2026}")) { addPreset(.codex) }
                 }
                 .fixedSize()
             }
@@ -44,7 +44,7 @@ struct AIProvidersPage: View {
                 }
             }
         } header: {
-            Text("Providers")
+            Text("Providers", bundle: .module)
         } footer: {
             formFootnote("Connect a service you subscribe to with its API key, a model server on this Mac, or a command-line tool you install and sign in to in the terminal. Keys stay in the Keychain and go only to their provider. Nothing is sent until a feature makes a request.")
         }
@@ -178,13 +178,13 @@ private struct AIProviderEditor: View {
                 .padding([.horizontal, .top], 20)
             Form {
                 Section {
-                    TextField("Name", text: $draft.name)
-                    Picker("Format", selection: $draft.format) {
+                    TextField(localized("Name"), text: $draft.name)
+                    Picker(localized("Format"), selection: $draft.format) {
                         ForEach(AIWireFormat.allCases, id: \.self) { Text($0.title) }
                     }
-                    TextField("Base URL", text: $draft.baseURL, prompt: Text("https://api.example.com/v1"))
+                    TextField(localized("Base URL"), text: $draft.baseURL, prompt: Text("https://api.example.com/v1", bundle: .module))
                     if !draft.baseURL.isEmpty, draft.validBaseURL == nil {
-                        Text("Use an https address, or http for a server on this Mac.").font(.callout).foregroundStyle(.red)
+                        Text("Use an https address, or http for a server on this Mac.", bundle: .module).font(.callout).foregroundStyle(.red)
                     }
                 } footer: {
                     formFootnote(draft.format == .chatCompletions
@@ -212,23 +212,23 @@ private struct AIProviderEditor: View {
     @ViewBuilder private var keySection: some View {
         Section {
             if draft.hasKey && !isReplacingKey {
-                LabeledContent("Key") {
+                LabeledContent(localized("Key")) {
                     Text(draft.removesKey ? "Removed when you save" : "Saved in the Keychain").foregroundStyle(.secondary)
                 }
                 HStack {
                     Spacer()
                     if draft.removesKey {
-                        Button("Keep Key") { draft.removesKey = false }
+                        Button(localized("Keep Key")) { draft.removesKey = false }
                     } else {
-                        Button("Replace\u{2026}") { isReplacingKey = true }
-                        Button("Remove") { draft.removesKey = true }
+                        Button(localized("Replace\u{2026}")) { isReplacingKey = true }
+                        Button(localized("Remove")) { draft.removesKey = true }
                     }
                 }
             } else {
-                SecureField("Key", text: $draft.newKey, prompt: Text(draft.hasKey ? "New API key" : "API key"))
+                SecureField(localized("Key"), text: $draft.newKey, prompt: Text(draft.hasKey ? "New API key" : "API key"))
             }
         } header: {
-            Text("API Key")
+            Text("API Key", bundle: .module)
         } footer: {
             formFootnote("A server on this Mac may need no key. The key is entered once and never shown again.")
         }
@@ -240,7 +240,7 @@ private struct AIProviderEditor: View {
         Section {
             AINameValueRows(rows: $draft.headers, addTitle: "Add Header", removeTitle: "Remove Header")
         } header: {
-            Text("Headers")
+            Text("Headers", bundle: .module)
         } footer: {
             formFootnote("Headers are saved in ai.json, so they must not hold secrets. The key goes under API Key.")
         }
@@ -251,9 +251,9 @@ private struct AIProviderEditor: View {
     @ViewBuilder private var modelsSection: some View {
         Section {
             AIModelList(models: $draft.models, defaultCapabilities: draft.format.capabilities) {
-                Button("Refresh") { Task { await refreshModels() } }
+                Button(localized("Refresh")) { Task { await refreshModels() } }
                     .disabled(isRefreshing || draft.configuration == nil)
-                    .help("Add the models the provider lists")
+                    .help(localized("Add the models the provider lists"))
             }
             // The button keeps its width while it runs, so the field beside it stays still.
             if isRefreshing {
@@ -262,7 +262,7 @@ private struct AIProviderEditor: View {
                 Text(refreshResult).font(.callout).foregroundStyle(refreshFailed ? .red : .secondary)
             }
         } header: {
-            Text("Models")
+            Text("Models", bundle: .module)
         } footer: {
             formFootnote("Refresh asks the provider for its models; it is the only request Settings sends on its own.")
         }
@@ -355,11 +355,11 @@ struct AIModelList<Accessory: View>: View {
             }
         }
         HStack {
-            TextField("Model", text: $newModel, prompt: Text("Model name"))
+            TextField(localized("Model"), text: $newModel, prompt: Text("Model name", bundle: .module))
                 .labelsHidden()
-                .accessibilityLabel("Model")
+                .accessibilityLabel(localized("Model"))
                 .onSubmit(add)
-            Button("Add", action: add)
+            Button(localized("Add"), action: add)
                 .disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
             accessory()
         }
@@ -410,12 +410,12 @@ struct AINameValueRows: View {
     var body: some View {
         ForEach(rows) { row in
             HStack {
-                TextField("Name", text: rowBinding($rows, id: row.id, field: \.name), prompt: Text("Name"))
+                TextField(localized("Name"), text: rowBinding($rows, id: row.id, field: \.name), prompt: Text("Name", bundle: .module))
                     .labelsHidden()
-                    .accessibilityLabel("Name")
-                TextField("Value", text: rowBinding($rows, id: row.id, field: \.value), prompt: Text("Value"))
+                    .accessibilityLabel(localized("Name"))
+                TextField(localized("Value"), text: rowBinding($rows, id: row.id, field: \.value), prompt: Text("Value", bundle: .module))
                     .labelsHidden()
-                    .accessibilityLabel("Value")
+                    .accessibilityLabel(localized("Value"))
                 Button {
                     rows.removeAll { $0.id == row.id }
                 } label: {
@@ -447,9 +447,9 @@ struct AIProviderLimitsSection: View {
     @Binding var limits: AIProviderLimits
 
     var body: some View {
-        Section("Limits") {
-            Stepper("Concurrent requests: \(limits.concurrentRequests)", value: $limits.concurrentRequests, in: 1...16)
-            TextField("Requests per minute", value: $limits.requestsPerMinute, format: .number, prompt: Text("No limit"))
+        Section(localized("Limits")) {
+            Stepper(localized("Concurrent requests: \(limits.concurrentRequests)"), value: $limits.concurrentRequests, in: 1...16)
+            TextField(localized("Requests per minute"), value: $limits.requestsPerMinute, format: .number, prompt: Text("No limit", bundle: .module))
         }
     }
 }
@@ -489,10 +489,10 @@ struct AIProviderEditorButtons: View {
             }
             HStack {
                 if !isNew {
-                    Button("Remove Provider\u{2026}", role: .destructive) { confirmsRemoval = true }
+                    Button(localized("Remove Provider\u{2026}"), role: .destructive) { confirmsRemoval = true }
                 }
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(localized("Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(isNew ? "Add" : "Save") { Task { await save() } }
                     .keyboardShortcut(.defaultAction)
@@ -500,8 +500,8 @@ struct AIProviderEditorButtons: View {
             }
         }
         .padding(20)
-        .confirmationDialog("Remove \u{201C}\(name.trimmingCharacters(in: .whitespaces))\u{201D}?", isPresented: $confirmsRemoval) {
-            Button("Remove", role: .destructive) { Task { await remove() } }
+        .confirmationDialog(localized("Remove \u{201C}\(name.trimmingCharacters(in: .whitespaces))\u{201D}?"), isPresented: $confirmsRemoval) {
+            Button(localized("Remove"), role: .destructive) { Task { await remove() } }
         } message: {
             Text(removalNote)
         }
@@ -516,17 +516,17 @@ private struct AIModelRow: View {
 
     var body: some View {
         DisclosureGroup(model.name.isEmpty ? "Default model" : model.name) {
-            TextField("Input limit (characters)", value: $model.inputCharacterLimit, format: .number)
-            Toggle("Price per million tokens", isOn: Binding(
+            TextField(localized("Input limit (characters)"), value: $model.inputCharacterLimit, format: .number)
+            Toggle(localized("Price per million tokens"), isOn: Binding(
                 get: { model.price != nil },
                 set: { model.price = $0 ? AIPrice(currency: Locale.current.currency?.identifier ?? "USD", inputPerMillion: 0, outputPerMillion: 0) : nil }))
             if model.price != nil {
-                TextField("Currency", text: Binding(get: { model.price?.currency ?? "" }, set: { model.price?.currency = $0.uppercased() }))
-                TextField("Input", value: priceBinding(\.inputPerMillion, fallback: 0), format: .number)
-                TextField("Output", value: priceBinding(\.outputPerMillion, fallback: 0), format: .number)
-                TextField("Cached input", value: priceBinding(\.cachedInputPerMillion, fallback: nil), format: .number, prompt: Text("Same as input"))
+                TextField(localized("Currency"), text: Binding(get: { model.price?.currency ?? "" }, set: { model.price?.currency = $0.uppercased() }))
+                TextField(localized("Input"), value: priceBinding(\.inputPerMillion, fallback: 0), format: .number)
+                TextField(localized("Output"), value: priceBinding(\.outputPerMillion, fallback: 0), format: .number)
+                TextField(localized("Cached input"), value: priceBinding(\.cachedInputPerMillion, fallback: nil), format: .number, prompt: Text("Same as input", bundle: .module))
             }
-            Toggle("Use the provider\u{2019}s capabilities", isOn: Binding(
+            Toggle(localized("Use the provider\u{2019}s capabilities"), isOn: Binding(
                 get: { model.capabilities == nil },
                 set: { model.capabilities = $0 ? nil : defaultCapabilities }))
             if let capabilities = model.capabilities {
@@ -540,7 +540,7 @@ private struct AIModelRow: View {
             }
             HStack {
                 Spacer()
-                Button("Remove Model", role: .destructive, action: remove)
+                Button(localized("Remove Model"), role: .destructive, action: remove)
             }
         }
     }

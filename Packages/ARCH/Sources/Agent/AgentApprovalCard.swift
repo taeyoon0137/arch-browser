@@ -51,7 +51,7 @@ struct AgentApprovalCard: View {
             AgentDetailRow(title: "Requested by") {
                 Text(approval.clientName).lineLimit(1).truncationMode(.tail).help(approval.clientName)
                 if let handle = approval.tabHandle, approval.tabID != nil {
-                    Button("Show \(handle)", action: showTab).buttonStyle(.link)
+                    Button(localized("Show \(handle)"), action: showTab).buttonStyle(.link)
                 }
             }
             if !approval.rules.isEmpty {
@@ -61,7 +61,7 @@ struct AgentApprovalCard: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } label: {
-                    Text("Why Arch asks")
+                    Text("Why Arch asks", bundle: .module)
                         .font(.system(size: AgentPanelMetrics.detailSize))
                         .foregroundStyle(.secondary)
                 }
@@ -75,9 +75,9 @@ struct AgentApprovalCard: View {
                         .frame(maxWidth: .infinity, maxHeight: AgentPanelMetrics.captureMaxHeight)
                 }
                 .buttonStyle(.plain)
-                .help("Show Larger")
-                .accessibilityLabel("The page, with the element marked")
-                .accessibilityHint("Shows the capture larger")
+                .help(localized("Show Larger"))
+                .accessibilityLabel(localized("The page, with the element marked"))
+                .accessibilityHint(localized("Shows the capture larger"))
                 .popover(isPresented: $showsLargeCapture) {
                     Image(nsImage: capture)
                         .resizable()
@@ -104,7 +104,7 @@ struct AgentApprovalCard: View {
             }
             if let says = approval.agentSays, !says.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("The agent says:")
+                    Text("The agent says:", bundle: .module)
                         .font(.system(size: AgentPanelMetrics.detailSize))
                         .foregroundStyle(.secondary)
                     Text(says)
@@ -147,13 +147,13 @@ struct AgentApprovalCard: View {
         switch approval.kind {
         case .question:
             // The offered answers sit with the facts above, which scroll when they are many.
-            TextField("Your answer", text: questionAnswer, axis: .vertical)
+            TextField(localized("Your answer"), text: questionAnswer, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
         case .handToUser:
-            Text("Do the step in the tab, then choose Done.")
+            Text("Do the step in the tab, then choose Done.", bundle: .module)
                 .font(.system(size: AgentPanelMetrics.detailSize))
                 .foregroundStyle(.secondary)
-            TextField("A note for the agent (optional)", text: $written, axis: .vertical)
+            TextField(localized("A note for the agent (optional)"), text: $written, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
         case .renameSharedTab:
             Text(verbatim: "Allow for This Tab lets \(approval.clientName) rename this tab again without asking. A name you give the tab yourself always stays.")
@@ -162,13 +162,13 @@ struct AgentApprovalCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         case .shareSessionTab(let tabs), .requestTab(let tabs, _):
             if tabs.isEmpty {
-                Text("No eligible tabs to share in this Persona.")
+                Text("No eligible tabs to share in this Persona.", bundle: .module)
                     .font(.system(size: AgentPanelMetrics.detailSize))
                     .foregroundStyle(.secondary)
             } else {
                 let labels = AgentTabInfo.attachmentLabels(for: tabs)
-                Picker("Tab to share", selection: $chosenTab) {
-                    Text("Choose a tab").tag(UUID?.none)
+                Picker(localized("Tab to share"), selection: $chosenTab) {
+                    Text("Choose a tab", bundle: .module).tag(UUID?.none)
                     ForEach(tabs) { tab in
                         Text(verbatim: labels[tab.id] ?? tab.attachmentLabel).tag(Optional(tab.id))
                     }
@@ -188,7 +188,7 @@ struct AgentApprovalCard: View {
             EmptyView()
         }
         if isReplying {
-            TextField("Tell the agent what to do instead", text: $reply, axis: .vertical)
+            TextField(localized("Tell the agent what to do instead"), text: $reply, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
         }
     }

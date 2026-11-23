@@ -36,34 +36,34 @@ struct AgentHooksPage: View {
 
     var body: some View {
         Section {
-            Toggle("Run Hooks", isOn: $registry.runsHooks)
+            Toggle(localized("Run Hooks"), isOn: $registry.runsHooks)
                 .disabled(!registry.isReady)
-            Toggle("Allow Shell Scripts", isOn: Binding(get: { registry.allowsShellScripts }, set: { registry.setAllowsShellScripts($0) }))
+            Toggle(localized("Allow Shell Scripts"), isOn: Binding(get: { registry.allowsShellScripts }, set: { registry.setAllowsShellScripts($0) }))
                 .disabled(!registry.isReady)
             if let notice = registry.notice {
                 HStack(alignment: .firstTextBaseline) {
                     Text(HookSummary.sentence(for: notice)).foregroundStyle(.secondary)
                     if case .keyUnavailable = notice {
                         Spacer()
-                        Button("Try Again") { registry.retryLoading() }
+                        Button(localized("Try Again")) { registry.retryLoading() }
                     }
                 }
             }
             HStack {
                 Spacer()
                 if aiSettings.providers.contains(where: { provider in provider.models.contains { provider.capabilities(of: $0).contains(.agent) } }) {
-                    Menu("Presets") {
-                        Button("Tidy Tab Names") {
+                    Menu(localized("Presets")) {
+                        Button(localized("Tidy Tab Names")) {
                             let hook = HookPresets.tidyTabNames
                             sheet = ScriptHookDraft(editing: hook, script: AgentHookTemplate.script(for: hook.trigger.kind),
                                                     places: registry.places, reviewing: false, isNew: true)
                         }
                     }
                     .disabled(!registry.isReady)
-                    Button("New Agent Hook…") { sheet = ScriptHookDraft(new: registry.places, guided: true) }
+                    Button(localized("New Agent Hook…")) { sheet = ScriptHookDraft(new: registry.places, guided: true) }
                         .disabled(!registry.isReady)
                 }
-                Button("New Script Hook…") { sheet = ScriptHookDraft(new: registry.places) }
+                Button(localized("New Script Hook…")) { sheet = ScriptHookDraft(new: registry.places) }
                     .disabled(!registry.isReady)
             }
         } footer: {
@@ -71,7 +71,7 @@ struct AgentHooksPage: View {
         }
         Section {
             if registry.hooks.isEmpty {
-                Text("No hooks yet.").foregroundStyle(.secondary)
+                Text("No hooks yet.", bundle: .module).foregroundStyle(.secondary)
             }
             ForEach(registry.hooks) { hook in
                 row(for: hook)
@@ -84,43 +84,43 @@ struct AgentHooksPage: View {
             }
             HStack {
                 Spacer()
-                Button("Clear Activity") {
+                Button(localized("Clear Activity")) {
                     registry.clearActivity()
                     shownSessions = []
                 }
                 .disabled(registry.lastRuns.isEmpty && registry.log.entries.isEmpty)
             }
         } header: {
-            Text("Hooks")
+            Text("Hooks", bundle: .module)
         } footer: {
             formFootnote("Arch keeps \(HookRunLog.keptDays) days of hook runs, without titles, page text, prompts, or replies. A hook that keeps nothing logs no run. A hook that keeps the session keeps its agent's transcript in memory until you choose Delete Session or Clear Activity, or quit Arch. With a model on an API key, the Activity page also keeps what each request sent until Arch quits.")
         }
         .sheet(item: $sheet) { draft in
             ScriptHookSheet(registry: registry, draft: draft, currentTab: currentTab) { sheet = nil }
         }
-        .confirmationDialog("Allow this hook’s provider destinations?", isPresented: Binding(get: { providerReview != nil }, set: { if !$0 { providerReview = nil } }),
+        .confirmationDialog(localized("Allow this hook’s provider destinations?"), isPresented: Binding(get: { providerReview != nil }, set: { if !$0 { providerReview = nil } }),
                             titleVisibility: .visible, presenting: providerReview) { review in
-            Button("Allow") { registry.approveProviders(review.providers, for: review.hook) }
+            Button(localized("Allow")) { registry.approveProviders(review.providers, for: review.hook) }
         } message: { review in
             Text(review.description)
         }
-        .confirmationDialog("Delete \u{201C}\(deleting?.name ?? "")\u{201D}?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+        .confirmationDialog(localized("Delete \u{201C}\(deleting?.name ?? "")\u{201D}?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { hook in
-            Button("Delete", role: .destructive) { registry.remove(hook.id) }
+            Button(localized("Delete"), role: .destructive) { registry.remove(hook.id) }
         } message: { _ in
-            Text("Arch deletes the hook and its script.")
+            Text("Arch deletes the hook and its script.", bundle: .module)
         }
-        .confirmationDialog("Delete this run\u{2019}s session?", isPresented: Binding(get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }),
+        .confirmationDialog(localized("Delete this run\u{2019}s session?"), isPresented: Binding(get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }),
                             titleVisibility: .visible, presenting: deletingSession) { run in
-            Button("Delete Session", role: .destructive) {
+            Button(localized("Delete Session"), role: .destructive) {
                 shownSessions.remove(run)
                 runner.deleteKeptRuns(ofHookRuns: [run])
             }
         } message: { _ in
-            Text("Arch deletes the agent\u{2019}s transcript of this run. The run stays in the hook\u{2019}s last runs.")
+            Text("Arch deletes the agent\u{2019}s transcript of this run. The run stays in the hook\u{2019}s last runs.", bundle: .module)
         }
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
-            Button("OK") { message = nil }
+            Button(localized("OK")) { message = nil }
         }
     }
 
@@ -162,9 +162,9 @@ struct AgentHooksPage: View {
             Text(reason == .scriptChanged && hook.script.isShell ? "Its script or its interpreter changed." : HookSummary.sentence(for: reason)).font(.caption).foregroundStyle(.orange)
             switch reason {
             case .scriptChanged:
-                Button("Review") { edit(hook, reviewing: true) }
+                Button(localized("Review")) { edit(hook, reviewing: true) }
             case .unknownProvider:
-                Button("Review") {
+                Button(localized("Review")) {
                     let providers = registry.providersForReview(of: hook.id)
                     guard !providers.isEmpty else { return registry.resume(hook.id) }
                     let settings = AIService.shared.settings
@@ -175,7 +175,7 @@ struct AgentHooksPage: View {
             case .user, .needsNewerArch, .shellScriptsOff:
                 EmptyView()
             default:
-                Button("Resume") { registry.resume(hook.id) }
+                Button(localized("Resume")) { registry.resume(hook.id) }
             }
         }
     }
@@ -183,30 +183,30 @@ struct AgentHooksPage: View {
     private func menu(for hook: Hook) -> some View {
         let isReadable = hook.state != .paused(.needsNewerArch)
         return Menu {
-            Button("Edit…") { edit(hook, reviewing: false) }
+            Button(localized("Edit…")) { edit(hook, reviewing: false) }
                 .disabled(!isReadable)
-            Button("Run on Current Tab") { runOnCurrentTab(hook) }
+            Button(localized("Run on Current Tab")) { runOnCurrentTab(hook) }
                 .disabled(!isReadable)
             // The user trusts a shell script for its own hook only.
-            Button("Duplicate") { duplicate(hook) }
+            Button(localized("Duplicate")) { duplicate(hook) }
                 .disabled(!isReadable || hook.state == .paused(.scriptChanged) || hook.script.isShell)
             Divider()
-            Button("Delete…", role: .destructive) { deleting = hook }
+            Button(localized("Delete…"), role: .destructive) { deleting = hook }
         } label: {
             Image(systemName: "ellipsis.circle")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .accessibilityLabel("Hook Actions")
-        .help("Hook Actions")
+        .accessibilityLabel(localized("Hook Actions"))
+        .help(localized("Hook Actions"))
     }
 
     @ViewBuilder
     private func lastRuns(of hook: Hook) -> some View {
         let runs = (registry.lastRuns[hook.id] ?? []).reversed()
         if runs.isEmpty {
-            Text("No runs since Arch started.").foregroundStyle(.secondary)
+            Text("No runs since Arch started.", bundle: .module).foregroundStyle(.secondary)
         }
         ForEach(Array(runs)) { run in
             VStack(alignment: .leading, spacing: 4) {
@@ -241,7 +241,7 @@ struct AgentHooksPage: View {
                 }
                 .buttonStyle(.link)
                 // Destructive, as the page's other deletions, and asking first, as an agent's Delete Session… does.
-                Button("Delete Session\u{2026}", role: .destructive) { deletingSession = run.id }
+                Button(localized("Delete Session\u{2026}"), role: .destructive) { deletingSession = run.id }
                     .buttonStyle(.borderless)
             }
             .font(.subheadline)
@@ -301,8 +301,8 @@ struct TabNamesWarning: View {
     var body: some View {
         let route = settings.route(for: .tabNameHook)
         if Self.applies(renames: renames, kind: kind, tabNames: route) {
-            Text("Tab Names also names tabs. Turn on one of them.").font(.caption)
-            Button("Turn Off Tab Names") {
+            Text("Tab Names also names tabs. Turn on one of them.", bundle: .module).font(.caption)
+            Button(localized("Turn Off Tab Names")) {
                 var updated = route
                 updated.isEnabled = false
                 settings.setRoute(updated, for: .tabNameHook)

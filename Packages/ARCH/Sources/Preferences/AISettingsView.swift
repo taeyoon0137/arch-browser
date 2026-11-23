@@ -41,18 +41,18 @@ struct AISettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Page", selection: $navigation.page) {
+            Picker(localized("Page"), selection: $navigation.page) {
                 ForEach(Page.allCases.filter { ($0 != .agents || agents != nil) && ($0 != .agentHooks || (hooks != nil && agents != nil)) }, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .accessibilityLabel("Page")
+            .accessibilityLabel(localized("Page"))
             .padding(.horizontal, 20)
             .padding(.top, 16)
             Form {
                 if settings.replacedUnreadableFile {
                     Section {
-                        Text("ai.json could not be read, so Arch renamed it ai.json.unreadable and started with new AI settings.")
+                        Text("ai.json could not be read, so Arch renamed it ai.json.unreadable and started with new AI settings.", bundle: .module)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -94,13 +94,13 @@ private struct AIFeaturesPage: View {
         Section {
             AIRoutePickers(settings: settings, feature: .defaultRoute, emptyChoice: nil)
         } header: {
-            Text("Default Model")
+            Text("Default Model", bundle: .module)
         } footer: {
             formFootnote("Features you start, such as a question about a page, use these models unless they have their own. Features that run on their own never do.")
         }
         ForEach(service.features.filter { $0.routing == .stored }) { feature in
             Section {
-                Toggle("Use \(feature.name)", isOn: Binding(
+                Toggle(localized("Use \(feature.name)"), isOn: Binding(
                     get: { settings.route(for: feature.id).isEnabled },
                     set: { isOn in
                         var route = settings.route(for: feature.id)
@@ -115,9 +115,9 @@ private struct AIFeaturesPage: View {
                 }
                 if hooks.pausedFeatures.contains(feature.id) {
                     HStack {
-                        Text("Paused after \(AIHookCenter.failuresBeforePause) failed requests in a row.").foregroundStyle(.secondary)
+                        Text("Paused after \(AIHookCenter.failuresBeforePause) failed requests in a row.", bundle: .module).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Resume") { hooks.resume(feature.id) }
+                        Button(localized("Resume")) { hooks.resume(feature.id) }
                     }
                 }
             } header: {
@@ -155,7 +155,7 @@ private struct AIRoutePickers: View {
         let route = settings.route(for: feature)
         let options = settings.providers.flatMap { provider in provider.models.map { AIModelRef(provider: provider.id, model: $0.name) } }
         if options.isEmpty {
-            Text("Add a provider with a model under Providers first.").foregroundStyle(.secondary)
+            Text("Add a provider with a model under Providers first.", bundle: .module).foregroundStyle(.secondary)
         } else {
             ForEach(0..<min(route.models.count + 1, AIRoute.maximumModels), id: \.self) { slot in
                 let current = route.models[safe: slot]
@@ -206,14 +206,14 @@ private struct AITestPromptRows: View {
     @Binding var task: Task<Void, Never>?
 
     var body: some View {
-        TextField("Prompt", text: $prompt, axis: .vertical)
+        TextField(localized("Prompt"), text: $prompt, axis: .vertical)
             .lineLimit(1...4)
         HStack {
             Spacer()
             if task != nil {
-                Button("Stop") { task?.cancel() }
+                Button(localized("Stop")) { task?.cancel() }
             } else {
-                Button("Send", action: send)
+                Button(localized("Send"), action: send)
                     .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !service.isAvailable(AIFeature.testPrompt.id))
             }
         }
@@ -277,7 +277,7 @@ private struct AIModelTierSections: View {
             Section {
                 AIRoutePickers(settings: settings, feature: .tier(tier), emptyChoice: "None")
             } header: {
-                Text("\(tier.title) Tier")
+                Text("\(tier.title) Tier", bundle: .module)
             } footer: {
                 formFootnote(tier == AIModelTier.allCases.first
                              ? "\(Self.purpose(of: tier)) A request that names a tier, such as an agent hook\u{2019}s, uses its model and fallbacks; the features above use the models chosen for them. A tier without a model fails and never uses another tier or the default model."
@@ -314,18 +314,18 @@ private struct AISitesPage: View {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.borderless)
-                    .help("Allow AI on this site")
-                    .accessibilityLabel("Allow AI on this site")
+                    .help(localized("Allow AI on this site"))
+                    .accessibilityLabel(localized("Allow AI on this site"))
                 }
             }
             HStack {
-                TextField("Site", text: $newSite, prompt: Text("example.org"))
+                TextField(localized("Site"), text: $newSite, prompt: Text("example.org", bundle: .module))
                     .onSubmit(add)
-                Button("Add", action: add)
+                Button(localized("Add"), action: add)
                     .disabled(AISitePattern(parsing: newSite) == nil)
             }
         } header: {
-            Text("AI Is Off on These Sites")
+            Text("AI Is Off on These Sites", bundle: .module)
         } footer: {
             formFootnote("Nothing from these sites goes to any provider. A site includes its subdomains. Internal pages such as flags:// are always excluded.")
         }

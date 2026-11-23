@@ -32,7 +32,7 @@ private struct PageReaderPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Page Reader")
+                Text("Page Reader", bundle: .module)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 SidebarIconButton(symbol: "xmark", label: "Hide Page Reader", action: windowModel.togglePageReader)
@@ -99,14 +99,14 @@ private struct PageReaderTabView: View {
         }
         .overlay {
             if conversation.exchanges.isEmpty {
-                Button("Summarize This Page") { assistant.summarize(tab) }
+                Button(localized("Summarize This Page")) { assistant.summarize(tab) }
             }
         }
     }
 
     private var questionField: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            TextField("Ask a question about this page", text: $draft, axis: .vertical)
+            TextField(localized("Ask a question about this page"), text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .lineLimit(1...5)

@@ -55,19 +55,19 @@ struct FlagsPageView: View {
                     Text(InternalPage.flags.title)
                         .font(.system(size: 26, weight: .bold))
                     Spacer()
-                    Button("Close", action: windowModel.closeInternalPage)
+                    Button(localized("Close"), action: windowModel.closeInternalPage)
                         .keyboardShortcut(closesOnEscape ? .cancelAction : nil)
                 }
-                Text("Private APIs are parts of macOS and the engines that are not documented for apps. Arch uses one only while its flags are on and the running system has it; otherwise the feature falls back or stays hidden.")
+                Text("Private APIs are parts of macOS and the engines that are not documented for apps. Arch uses one only while its flags are on and the running system has it; otherwise the feature falls back or stays hidden.", bundle: .module)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Text("Use private APIs")
+                    Text("Use private APIs", bundle: .module)
                         .accessibilityHidden(true)
                     Spacer()
-                    Toggle("Use private APIs", isOn: Binding(get: { flags.allowsPrivateAPIs }, set: { flags.allowsPrivateAPIs = $0 }))
+                    Toggle(localized("Use private APIs"), isOn: Binding(get: { flags.allowsPrivateAPIs }, set: { flags.allowsPrivateAPIs = $0 }))
                         .labelsHidden()
-                        .accessibilityLabel("Use private APIs")
+                        .accessibilityLabel(localized("Use private APIs"))
                         .toggleStyle(.switch)
                 }
                 FlagsSection(title: "Private APIs", emptyText: "Arch uses no private API yet.", isEmpty: flags.apis.isEmpty) {

@@ -126,7 +126,7 @@ private struct TabCloseLogView: View {
     var body: some View {
         Group {
             if log.entries.isEmpty {
-                Text("No Tabs Closed")
+                Text("No Tabs Closed", bundle: .module)
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

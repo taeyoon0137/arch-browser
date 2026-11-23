@@ -632,7 +632,7 @@ struct PaletteTabRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
-            Text("Switch to Tab")
+            Text("Switch to Tab", bundle: .module)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

@@ -203,7 +203,7 @@ struct SidebarColumn: View {
                             .contentShape(Rectangle())
                             .onTapGesture { finishLibrarySwipe(opens: false) }
                             .accessibilityElement()
-                            .accessibilityLabel("Show Sidebar")
+                            .accessibilityLabel(localized("Show Sidebar"))
                             .accessibilityAddTraits(.isButton)
                             .accessibilityAction { finishLibrarySwipe(opens: false) }
                             .frame(maxWidth: .infinity, alignment: .leading)

@@ -76,14 +76,14 @@ import Terminal
         guard profileOwnership == nil, !isAbandoningLaunch else { return }
         let alert = NSAlert()
         if let error = error as? POSIXError, error.code == .EWOULDBLOCK {
-            alert.messageText = "Another copy of Arch is open."
-            alert.informativeText = "Quit the other copy of Arch, then click Try Again. Links sent to this copy open once it starts."
+            alert.messageText = localized("Another copy of Arch is open.")
+            alert.informativeText = localized("Quit the other copy of Arch, then click Try Again. Links sent to this copy open once it starts.")
         } else {
-            alert.messageText = "Arch couldn’t open its data folder."
+            alert.messageText = localized("Arch couldn’t open its data folder.")
             alert.informativeText = error.localizedDescription
         }
-        alert.addButton(withTitle: "Quit")
-        alert.addButton(withTitle: "Try Again")
+        alert.addButton(withTitle: localized("Quit"))
+        alert.addButton(withTitle: localized("Try Again"))
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertSecondButtonReturn {
             startWithProfile(in: directory)
@@ -98,13 +98,13 @@ import Terminal
 
     private static func quit(afterSessionFailure error: Error) {
         let alert = NSAlert()
-        alert.messageText = "Arch couldn’t start a browser engine."
+        alert.messageText = localized("Arch couldn’t start a browser engine.")
         if case BrowserSession.SessionError.noEngineStarted = error {
-            alert.informativeText = "Neither Chromium nor WebKit could start, so Arch will quit. Reinstalling Arch may fix this. The system log lists the reason under Launch."
+            alert.informativeText = localized("Neither Chromium nor WebKit could start, so Arch will quit. Reinstalling Arch may fix this. The system log lists the reason under Launch.")
         } else {
             alert.informativeText = error.localizedDescription
         }
-        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: localized("Quit"))
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
         NSApp.terminate(nil)
@@ -287,10 +287,10 @@ import Terminal
         guard confirmsStoppingWorkAtQuit() else { return false }
         guard let session, case let .failure(error) = session.saveNow() else { return true }
         let alert = NSAlert()
-        alert.messageText = "Arch couldn’t save your session."
-        alert.informativeText = "\(error.localizedDescription)\n\nIf you quit now, changes to your tabs, windows, and sidebar since the last save may be lost."
-        alert.addButton(withTitle: "Keep Working")
-        alert.addButton(withTitle: "Quit Without Saving").hasDestructiveAction = true
+        alert.messageText = localized("Arch couldn’t save your session.")
+        alert.informativeText = localized("\(error.localizedDescription)\n\nIf you quit now, changes to your tabs, windows, and sidebar since the last save may be lost.")
+        alert.addButton(withTitle: localized("Keep Working"))
+        alert.addButton(withTitle: localized("Quit Without Saving")).hasDestructiveAction = true
         NSApp.activate()
         return alert.runModal() == .alertSecondButtonReturn
     }
@@ -301,10 +301,10 @@ import Terminal
         let runsProgram = TerminalWindowController.hasRunningProgram
         guard downloads > 0 || runsProgram else { return true }
         let alert = NSAlert()
-        alert.messageText = "Quit Arch?"
+        alert.messageText = localized("Quit Arch?")
         alert.informativeText = Self.quitWarning(downloads: downloads, runsProgram: runsProgram)
-        alert.addButton(withTitle: "Quit")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Quit"))
+        alert.addButton(withTitle: localized("Cancel"))
         if runsProgram { TerminalWindowController.bringForward() }
         NSApp.activate()
         return alert.runModal() == .alertFirstButtonReturn
@@ -364,189 +364,189 @@ import Terminal
         let mainMenu = NSMenu()
         // The application menu has the items every Mac app's has, in their order. NSApplication answers and validates About, Hide, Hide Others, and Show All itself.
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Arch", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: localized("About Arch"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Settings\u{2026}", action: #selector(showSettings), keyEquivalent: ",")
-        appMenu.addItem(withTitle: "Set as Default Browser\u{2026}", action: #selector(setAsDefaultBrowser), keyEquivalent: "")
+        appMenu.addItem(withTitle: localized("Settings\u{2026}"), action: #selector(showSettings), keyEquivalent: ",")
+        appMenu.addItem(withTitle: localized("Set as Default Browser\u{2026}"), action: #selector(setAsDefaultBrowser), keyEquivalent: "")
         appMenu.addItem(.separator())
-        let servicesMenu = NSMenu(title: "Services")
+        let servicesMenu = NSMenu(title: localized("Services"))
         appMenu.addItem(submenu(servicesMenu, title: "Services"))
         self.servicesMenu = servicesMenu
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Arch", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h").keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: localized("Hide Arch"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: localized("Hide Others"), action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h").keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: localized("Show All"), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Arch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: localized("Quit Arch"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         mainMenu.addItem(submenu(appMenu, title: "Arch"))
 
         // Open Location… asks for an address before it opens anything, so it sits with the New commands and ends with an ellipsis.
-        let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(withTitle: "New Tab", action: #selector(newTab), keyEquivalent: "t")
-        fileMenu.addItem(withTitle: "New Window", action: #selector(newWindow), keyEquivalent: "n")
-        fileMenu.addItem(withTitle: "Open Location\u{2026}", action: #selector(openLocation), keyEquivalent: "l")
+        let fileMenu = NSMenu(title: localized("File"))
+        fileMenu.addItem(withTitle: localized("New Tab"), action: #selector(newTab), keyEquivalent: "t")
+        fileMenu.addItem(withTitle: localized("New Window"), action: #selector(newWindow), keyEquivalent: "n")
+        fileMenu.addItem(withTitle: localized("Open Location\u{2026}"), action: #selector(openLocation), keyEquivalent: "l")
         fileMenu.addItem(.separator())
-        let closeTabItem = fileMenu.addItem(withTitle: "Close Tab", action: #selector(closeTab), keyEquivalent: "w")
-        let closeWindowItem = fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
+        let closeTabItem = fileMenu.addItem(withTitle: localized("Close Tab"), action: #selector(closeTab), keyEquivalent: "w")
+        let closeWindowItem = fileMenu.addItem(withTitle: localized("Close Window"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W")
         closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
-        let closeOthersItem = fileMenu.addItem(withTitle: "Close Other Tabs", action: #selector(closeOtherTabs), keyEquivalent: "w")
+        let closeOthersItem = fileMenu.addItem(withTitle: localized("Close Other Tabs"), action: #selector(closeOtherTabs), keyEquivalent: "w")
         closeOthersItem.keyEquivalentModifierMask = [.command, .option]
-        let reopenItem = fileMenu.addItem(withTitle: "Reopen Last Closed Tab", action: #selector(reopenClosedTab), keyEquivalent: "T")
+        let reopenItem = fileMenu.addItem(withTitle: localized("Reopen Last Closed Tab"), action: #selector(reopenClosedTab), keyEquivalent: "T")
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
         closingItems = [closeTabItem, closeOthersItem, reopenItem]
         fileMenu.addItem(.separator())
         // A menu cannot show a double press as its key equivalent, so ⌘F pressed twice (`installDoubleFindShortcut`) is in the tooltip.
-        fileMenu.addItem(withTitle: "New Agent Task", action: #selector(newAgentTask), keyEquivalent: "").toolTip = "Press ⌘F twice to start a task."
-        fileMenu.addItem(withTitle: "Stop All Agents", action: #selector(stopAllAgents), keyEquivalent: "")
+        fileMenu.addItem(withTitle: localized("New Agent Task"), action: #selector(newAgentTask), keyEquivalent: "").toolTip = localized("Press ⌘F twice to start a task.")
+        fileMenu.addItem(withTitle: localized("Stop All Agents"), action: #selector(stopAllAgents), keyEquivalent: "")
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
+        fileMenu.addItem(withTitle: localized("Share\u{2026}"), action: #selector(sharePage), keyEquivalent: "")
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "Import from Browser\u{2026}", action: #selector(importFromBrowser), keyEquivalent: "")
-        fileMenu.addItem(withTitle: "Import Bookmarks and History\u{2026}", action: #selector(importBookmarksAndHistory), keyEquivalent: "")
-        fileMenu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(exportAsPDF), keyEquivalent: "")
+        fileMenu.addItem(withTitle: localized("Import from Browser\u{2026}"), action: #selector(importFromBrowser), keyEquivalent: "")
+        fileMenu.addItem(withTitle: localized("Import Bookmarks and History\u{2026}"), action: #selector(importBookmarksAndHistory), keyEquivalent: "")
+        fileMenu.addItem(withTitle: localized("Export as PDF\u{2026}"), action: #selector(exportAsPDF), keyEquivalent: "")
         // ⌘S stays Show Sidebar's.
-        fileMenu.addItem(withTitle: "Save Page As\u{2026}", action: #selector(savePageAs), keyEquivalent: "S").keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(withTitle: localized("Save Page As\u{2026}"), action: #selector(savePageAs), keyEquivalent: "S").keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "Print\u{2026}", action: #selector(printPage), keyEquivalent: "p")
+        fileMenu.addItem(withTitle: localized("Print\u{2026}"), action: #selector(printPage), keyEquivalent: "p")
         mainMenu.addItem(submenu(fileMenu, title: "File"))
 
         // Undo becomes Undo Close Tab while ⌘Z reopens closed tabs (`menuNeedsUpdate(_:)`).
-        let editMenu = NSMenu(title: "Edit")
-        undoItem = editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        let editMenu = NSMenu(title: localized("Edit"))
+        undoItem = editMenu.addItem(withTitle: localized("Undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: localized("Redo"), action: Selector(("redo:")), keyEquivalent: "Z")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Paste and Match Style", action: #selector(pasteAndMatchStyle(_:)), keyEquivalent: "V").keyEquivalentModifierMask = [.command, .option, .shift]
+        editMenu.addItem(withTitle: localized("Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: localized("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: localized("Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: localized("Paste and Match Style"), action: #selector(pasteAndMatchStyle(_:)), keyEquivalent: "V").keyEquivalentModifierMask = [.command, .option, .shift]
         // SwiftUI's delete commands, such as the History list's, answer Delete.
-        editMenu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(withTitle: localized("Delete"), action: #selector(NSText.delete(_:)), keyEquivalent: "")
+        editMenu.addItem(withTitle: localized("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
-        findItem = editMenu.addItem(withTitle: "Find\u{2026}", action: #selector(showFindBar), keyEquivalent: "f")
-        editMenu.addItem(withTitle: "Find Next", action: #selector(findNext), keyEquivalent: "g")
-        let findPreviousItem = editMenu.addItem(withTitle: "Find Previous", action: #selector(findPrevious), keyEquivalent: "G")
+        findItem = editMenu.addItem(withTitle: localized("Find\u{2026}"), action: #selector(showFindBar), keyEquivalent: "f")
+        editMenu.addItem(withTitle: localized("Find Next"), action: #selector(findNext), keyEquivalent: "g")
+        let findPreviousItem = editMenu.addItem(withTitle: localized("Find Previous"), action: #selector(findPrevious), keyEquivalent: "G")
         findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
         editMenu.delegate = self
         self.editMenu = editMenu
         mainMenu.addItem(submenu(editMenu, title: "Edit"))
 
         // The panels' toggles name what they will do, as the sidebar's button does; Settings ▸ Shortcuts lists them by these launch titles. The library item keeps its `toggleDownloads` action, by which saved shortcuts know it.
-        let viewMenu = NSMenu(title: "View")
-        viewMenu.addItem(withTitle: "Show Sidebar", action: #selector(toggleSidebar), keyEquivalent: "s")
-        let libraryItem = viewMenu.addItem(withTitle: "Show Library", action: #selector(toggleDownloads), keyEquivalent: "J")
+        let viewMenu = NSMenu(title: localized("View"))
+        viewMenu.addItem(withTitle: localized("Show Sidebar"), action: #selector(toggleSidebar), keyEquivalent: "s")
+        let libraryItem = viewMenu.addItem(withTitle: localized("Show Library"), action: #selector(toggleDownloads), keyEquivalent: "J")
         libraryItem.keyEquivalentModifierMask = [.command, .shift]
-        viewMenu.addItem(withTitle: "Show Page Reader", action: #selector(togglePageReader), keyEquivalent: "")
-        viewMenu.addItem(withTitle: "Show Agent Panel", action: #selector(toggleAgentPanel), keyEquivalent: "")
-        viewMenu.addItem(withTitle: "Picture in Picture", action: #selector(startPictureInPicture), keyEquivalent: "")
+        viewMenu.addItem(withTitle: localized("Show Page Reader"), action: #selector(togglePageReader), keyEquivalent: "")
+        viewMenu.addItem(withTitle: localized("Show Agent Panel"), action: #selector(toggleAgentPanel), keyEquivalent: "")
+        viewMenu.addItem(withTitle: localized("Picture in Picture"), action: #selector(startPictureInPicture), keyEquivalent: "")
         viewMenu.addItem(.separator())
         // Targeted, so that a focused web view, which answers `reload:` itself, cannot take it past the window's rules.
-        viewMenu.addItem(withTitle: "Reload Page", action: #selector(reload), keyEquivalent: "r").target = self
+        viewMenu.addItem(withTitle: localized("Reload Page"), action: #selector(reload), keyEquivalent: "r").target = self
         // Without a shortcut of its own: ⌘. stays the terminal's, the sheets', and the prompt cards' cancel key. Settings ▸ Shortcuts can give it one.
-        viewMenu.addItem(withTitle: "Stop Loading", action: #selector(stopLoading), keyEquivalent: "").target = self
+        viewMenu.addItem(withTitle: localized("Stop Loading"), action: #selector(stopLoading), keyEquivalent: "").target = self
         viewMenu.addItem(.separator())
-        viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetZoom), keyEquivalent: "0")
-        viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "+")
+        viewMenu.addItem(withTitle: localized("Actual Size"), action: #selector(resetZoom), keyEquivalent: "0")
+        viewMenu.addItem(withTitle: localized("Zoom In"), action: #selector(zoomIn), keyEquivalent: "+")
         // A hidden twin takes ⌘=, so zooming in needs no Shift where + shares a key with =.
-        let zoomInWithoutShift = viewMenu.addItem(withTitle: "Zoom In", action: #selector(zoomIn), keyEquivalent: "=")
+        let zoomInWithoutShift = viewMenu.addItem(withTitle: localized("Zoom In"), action: #selector(zoomIn), keyEquivalent: "=")
         zoomInWithoutShift.isHidden = true
         zoomInWithoutShift.allowsKeyEquivalentWhenHidden = true
-        viewMenu.addItem(withTitle: "Zoom Out", action: #selector(zoomOut), keyEquivalent: "-")
+        viewMenu.addItem(withTitle: localized("Zoom Out"), action: #selector(zoomOut), keyEquivalent: "-")
         viewMenu.addItem(.separator())
-        viewMenu.addItem(withTitle: "Capture Viewport", action: #selector(captureViewport), keyEquivalent: "")
-        viewMenu.addItem(withTitle: "Capture Full Page", action: #selector(captureFullPage), keyEquivalent: "")
-        viewMenu.addItem(withTitle: "Capture Region\u{2026}", action: #selector(captureRegion), keyEquivalent: "")
+        viewMenu.addItem(withTitle: localized("Capture Viewport"), action: #selector(captureViewport), keyEquivalent: "")
+        viewMenu.addItem(withTitle: localized("Capture Full Page"), action: #selector(captureFullPage), keyEquivalent: "")
+        viewMenu.addItem(withTitle: localized("Capture Region\u{2026}"), action: #selector(captureRegion), keyEquivalent: "")
         viewMenu.addItem(.separator())
-        let developerMenu = NSMenu(title: "Developer")
-        developerMenu.addItem(withTitle: "Show Developer Tools", action: #selector(toggleDeveloperTools), keyEquivalent: "i").keyEquivalentModifierMask = [.command, .option]
+        let developerMenu = NSMenu(title: localized("Developer"))
+        developerMenu.addItem(withTitle: localized("Show Developer Tools"), action: #selector(toggleDeveloperTools), keyEquivalent: "i").keyEquivalentModifierMask = [.command, .option]
         developerMenu.addItem(.separator())
         for side in DevToolsSide.allCases {
             developerMenu.addItem(withTitle: side.title, action: #selector(chooseDevToolsSide(_:)), keyEquivalent: "").representedObject = side.rawValue
         }
         developerMenu.addItem(.separator())
-        developerMenu.addItem(withTitle: "Show Tab Close Log", action: #selector(showTabCloseLog), keyEquivalent: "")
+        developerMenu.addItem(withTitle: localized("Show Tab Close Log"), action: #selector(showTabCloseLog), keyEquivalent: "")
         viewMenu.addItem(submenu(developerMenu, title: "Developer"))
-        let appearanceMenu = NSMenu(title: "Appearance")
+        let appearanceMenu = NSMenu(title: localized("Appearance"))
         for (title, setting) in [("System", AppearanceSetting.system), ("Light", .light), ("Dark", .dark)] {
             appearanceMenu.addItem(withTitle: title, action: #selector(chooseAppearance(_:)), keyEquivalent: "").representedObject = setting.rawValue
         }
         viewMenu.addItem(submenu(appearanceMenu, title: "Appearance"))
         mainMenu.addItem(submenu(viewMenu, title: "View"))
 
-        let tabMenu = NSMenu(title: "Tab")
+        let tabMenu = NSMenu(title: localized("Tab"))
         // Unpin Tab while the selected tab is pinned (`validateMenuItem(_:)`), as in the tab row's context menu.
-        tabMenu.addItem(withTitle: "Pin Tab", action: #selector(togglePinned), keyEquivalent: "d")
-        let favoriteItem = tabMenu.addItem(withTitle: "Add to Favorites", action: #selector(addFavorite), keyEquivalent: "D")
+        tabMenu.addItem(withTitle: localized("Pin Tab"), action: #selector(togglePinned), keyEquivalent: "d")
+        let favoriteItem = tabMenu.addItem(withTitle: localized("Add to Favorites"), action: #selector(addFavorite), keyEquivalent: "D")
         favoriteItem.keyEquivalentModifierMask = [.command, .shift]
-        let splitViewItem = tabMenu.addItem(withTitle: "Open in Split View", action: #selector(openInSplitView), keyEquivalent: "=")
+        let splitViewItem = tabMenu.addItem(withTitle: localized("Open in Split View"), action: #selector(openInSplitView), keyEquivalent: "=")
         splitViewItem.keyEquivalentModifierMask = [.command, .option]
         tabMenu.addItem(.separator())
         // The saved page items have no default shortcuts; Settings ▸ Shortcuts can give them one.
-        tabMenu.addItem(withTitle: "Go Back to Saved Page", action: #selector(goBackToSavedPage), keyEquivalent: "")
-        tabMenu.addItem(withTitle: "Use Current Page as Saved Page", action: #selector(useCurrentPageAsSavedPage), keyEquivalent: "")
-        tabMenu.addItem(withTitle: "Edit Saved Address\u{2026}", action: #selector(editSavedAddress), keyEquivalent: "")
+        tabMenu.addItem(withTitle: localized("Go Back to Saved Page"), action: #selector(goBackToSavedPage), keyEquivalent: "")
+        tabMenu.addItem(withTitle: localized("Use Current Page as Saved Page"), action: #selector(useCurrentPageAsSavedPage), keyEquivalent: "")
+        tabMenu.addItem(withTitle: localized("Edit Saved Address\u{2026}"), action: #selector(editSavedAddress), keyEquivalent: "")
         tabMenu.addItem(.separator())
-        let nextTabItem = tabMenu.addItem(withTitle: "Next Tab", action: #selector(nextTab), keyEquivalent: "]")
+        let nextTabItem = tabMenu.addItem(withTitle: localized("Next Tab"), action: #selector(nextTab), keyEquivalent: "]")
         nextTabItem.keyEquivalentModifierMask = [.command, .shift]
-        let previousTabItem = tabMenu.addItem(withTitle: "Previous Tab", action: #selector(previousTab), keyEquivalent: "[")
+        let previousTabItem = tabMenu.addItem(withTitle: localized("Previous Tab"), action: #selector(previousTab), keyEquivalent: "[")
         previousTabItem.keyEquivalentModifierMask = [.command, .shift]
-        let moveUpItem = tabMenu.addItem(withTitle: "Move Tab Up", action: #selector(moveTabUp), keyEquivalent: String(Character(UnicodeScalar(NSUpArrowFunctionKey)!)))
+        let moveUpItem = tabMenu.addItem(withTitle: localized("Move Tab Up"), action: #selector(moveTabUp), keyEquivalent: String(Character(UnicodeScalar(NSUpArrowFunctionKey)!)))
         moveUpItem.keyEquivalentModifierMask = [.command, .option]
-        let moveDownItem = tabMenu.addItem(withTitle: "Move Tab Down", action: #selector(moveTabDown), keyEquivalent: String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)))
+        let moveDownItem = tabMenu.addItem(withTitle: localized("Move Tab Down"), action: #selector(moveTabDown), keyEquivalent: String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)))
         moveDownItem.keyEquivalentModifierMask = [.command, .option]
         tabMenu.addItem(.separator())
         for number in 1...8 {
-            tabMenu.addItem(withTitle: "Select Tab \(number)", action: #selector(selectTab(_:)), keyEquivalent: String(number)).tag = number
+            tabMenu.addItem(withTitle: localized("Select Tab \(number)"), action: #selector(selectTab(_:)), keyEquivalent: String(number)).tag = number
         }
-        tabMenu.addItem(withTitle: "Select Last Tab", action: #selector(selectLastTab), keyEquivalent: "9")
+        tabMenu.addItem(withTitle: localized("Select Last Tab"), action: #selector(selectLastTab), keyEquivalent: "9")
         mainMenu.addItem(submenu(tabMenu, title: "Tab"))
 
-        let spacesMenu = NSMenu(title: "Spaces")
-        let newSpaceItem = spacesMenu.addItem(withTitle: "New Space", action: #selector(newSpace), keyEquivalent: "n")
+        let spacesMenu = NSMenu(title: localized("Spaces"))
+        let newSpaceItem = spacesMenu.addItem(withTitle: localized("New Space"), action: #selector(newSpace), keyEquivalent: "n")
         newSpaceItem.keyEquivalentModifierMask = [.command, .control]
-        let nextSpaceItem = spacesMenu.addItem(withTitle: "Next Space", action: #selector(nextSpace), keyEquivalent: String(Character(UnicodeScalar(NSRightArrowFunctionKey)!)))
+        let nextSpaceItem = spacesMenu.addItem(withTitle: localized("Next Space"), action: #selector(nextSpace), keyEquivalent: String(Character(UnicodeScalar(NSRightArrowFunctionKey)!)))
         nextSpaceItem.keyEquivalentModifierMask = [.command, .control]
-        let previousSpaceItem = spacesMenu.addItem(withTitle: "Previous Space", action: #selector(previousSpace), keyEquivalent: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)))
+        let previousSpaceItem = spacesMenu.addItem(withTitle: localized("Previous Space"), action: #selector(previousSpace), keyEquivalent: String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)))
         previousSpaceItem.keyEquivalentModifierMask = [.command, .control]
         spacesMenu.addItem(.separator())
-        spacesMenu.addItem(withTitle: "New Persona\u{2026}", action: #selector(newPersona), keyEquivalent: "")
-        spacesMenu.addItem(withTitle: "Rename Persona\u{2026}", action: #selector(renamePersona), keyEquivalent: "")
-        spacesMenu.addItem(withTitle: "Delete Persona\u{2026}", action: #selector(deletePersona), keyEquivalent: "")
+        spacesMenu.addItem(withTitle: localized("New Persona\u{2026}"), action: #selector(newPersona), keyEquivalent: "")
+        spacesMenu.addItem(withTitle: localized("Rename Persona\u{2026}"), action: #selector(renamePersona), keyEquivalent: "")
+        spacesMenu.addItem(withTitle: localized("Delete Persona\u{2026}"), action: #selector(deletePersona), keyEquivalent: "")
         mainMenu.addItem(submenu(spacesMenu, title: "Spaces"))
 
         // Filled each time it opens (`menuWillOpen(_:)`). Until then it holds only No Bookmarks, so Settings ▸ Shortcuts, which lists the menu bar at launch, lists none of its items.
-        let bookmarksMenu = NSMenu(title: "Bookmarks")
-        bookmarksMenu.addItem(withTitle: "No Bookmarks", action: nil, keyEquivalent: "")
+        let bookmarksMenu = NSMenu(title: localized("Bookmarks"))
+        bookmarksMenu.addItem(withTitle: localized("No Bookmarks"), action: nil, keyEquivalent: "")
         bookmarksMenu.delegate = self
         self.bookmarksMenu = bookmarksMenu
         mainMenu.addItem(submenu(bookmarksMenu, title: "Bookmarks"))
 
         // Back and Forward are targeted as Reload Page is: a focused web view answers `goBack:` and `goForward:` itself.
-        let historyMenu = NSMenu(title: "History")
-        historyMenu.addItem(withTitle: "Back", action: #selector(goBack), keyEquivalent: "[").target = self
-        historyMenu.addItem(withTitle: "Forward", action: #selector(goForward), keyEquivalent: "]").target = self
-        let homeItem = historyMenu.addItem(withTitle: "Home", action: #selector(goHome), keyEquivalent: "H")
+        let historyMenu = NSMenu(title: localized("History"))
+        historyMenu.addItem(withTitle: localized("Back"), action: #selector(goBack), keyEquivalent: "[").target = self
+        historyMenu.addItem(withTitle: localized("Forward"), action: #selector(goForward), keyEquivalent: "]").target = self
+        let homeItem = historyMenu.addItem(withTitle: localized("Home"), action: #selector(goHome), keyEquivalent: "H")
         homeItem.keyEquivalentModifierMask = [.command, .shift]
         historyMenu.addItem(.separator())
-        historyMenu.addItem(withTitle: "Show All History", action: #selector(showHistory), keyEquivalent: "y")
-        historyMenu.addItem(withTitle: "Clear History\u{2026}", action: #selector(clearHistory), keyEquivalent: "")
-        historyMenu.addItem(withTitle: "Clear Site Data\u{2026}", action: #selector(clearSiteData), keyEquivalent: "")
+        historyMenu.addItem(withTitle: localized("Show All History"), action: #selector(showHistory), keyEquivalent: "y")
+        historyMenu.addItem(withTitle: localized("Clear History\u{2026}"), action: #selector(clearHistory), keyEquivalent: "")
+        historyMenu.addItem(withTitle: localized("Clear Site Data\u{2026}"), action: #selector(clearSiteData), keyEquivalent: "")
         historyMenu.delegate = self
         self.historyMenu = historyMenu
         mainMenu.addItem(submenu(historyMenu, title: "History"))
 
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        let windowMenu = NSMenu(title: localized("Window"))
+        windowMenu.addItem(withTitle: localized("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: localized("Zoom"), action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
-        windowMenu.addItem(withTitle: "Move to Main Window", action: #selector(moveToMainWindow), keyEquivalent: "n").keyEquivalentModifierMask = [.command, .option]
+        windowMenu.addItem(withTitle: localized("Move to Main Window"), action: #selector(moveToMainWindow), keyEquivalent: "n").keyEquivalentModifierMask = [.command, .option]
         windowMenu.addItem(.separator())
-        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: localized("Bring All to Front"), action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         self.windowMenu = windowMenu
         mainMenu.addItem(submenu(windowMenu, title: "Window"))
 
         // AppKit puts its menu search field in the Help menu. Arch has no help of its own to add.
-        let helpMenu = NSMenu(title: "Help")
+        let helpMenu = NSMenu(title: localized("Help"))
         self.helpMenu = helpMenu
         mainMenu.addItem(submenu(helpMenu, title: "Help"))
         return mainMenu
@@ -770,7 +770,7 @@ import Terminal
             case .divider:
                 menu.addItem(.separator())
             case .noBookmarks:
-                menu.addItem(withTitle: "No Bookmarks", action: nil, keyEquivalent: "")
+                menu.addItem(withTitle: localized("No Bookmarks"), action: nil, keyEquivalent: "")
             }
         }
     }
@@ -1135,10 +1135,10 @@ import Terminal
               !defaults.bool(forKey: Self.askedDefaultBrowserKey), !DefaultBrowser.isDefault else { return }
         defaults.set(true, forKey: Self.askedDefaultBrowserKey)
         let alert = NSAlert()
-        alert.messageText = "Set Arch as your default browser?"
-        alert.informativeText = "Links from other apps will open in Arch."
-        alert.addButton(withTitle: "Set as Default")
-        alert.addButton(withTitle: "Not Now")
+        alert.messageText = localized("Set Arch as your default browser?")
+        alert.informativeText = localized("Links from other apps will open in Arch.")
+        alert.addButton(withTitle: localized("Set as Default"))
+        alert.addButton(withTitle: localized("Not Now"))
         alert.beginSheetModal(for: window) { [weak self] response in
             if response == .alertFirstButtonReturn { self?.setAsDefaultBrowser() }
         }

@@ -184,7 +184,7 @@ private struct PluginReviewView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
-                Text("Version \(manifest.version) \(origin). \(manifest.summary)")
+                Text("Version \(manifest.version) \(origin). \(manifest.summary)", bundle: .module)
                     .foregroundStyle(.secondary)
                 if let personaSentence {
                     Text(personaSentence)
@@ -199,7 +199,7 @@ private struct PluginReviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 if let match, let engine = choiceEngine ?? package.joinableEngines.first {
-                    Text("This may be the \(engine.displayName) version of \u{201C}\(name(of: match))\u{201D}, which runs on \(EngineKind.tabsList(match.engines)) tabs. Arch can show the two as one plugin.")
+                    Text("This may be the \(engine.displayName) version of \u{201C}\(name(of: match))\u{201D}, which runs on \(EngineKind.tabsList(match.engines)) tabs. Arch can show the two as one plugin.", bundle: .module)
                         .foregroundStyle(.secondary)
                 }
                 if let target, let warning = otherSourceWarning(for: target) {
@@ -231,36 +231,36 @@ private struct PluginReviewView: View {
             .padding([.horizontal, .top], 20)
             Form {
                 if let composition {
-                    Section("Requests") {
+                    Section(localized("Requests")) {
                         ForEach(composition.requests.indices, id: \.self) { Text(composition.requests[$0]) }
                     }
                 }
                 if let match {
                     Section {
-                        Picker("Install", selection: $choice) {
+                        Picker(localized("Install"), selection: $choice) {
                             ForEach(package.joinableEngines, id: \.self) { engine in
-                                Text("Install as the \(engine.displayName) version").tag(Choice.version(engine))
+                                Text("Install as the \(engine.displayName) version", bundle: .module).tag(Choice.version(engine))
                             }
                             Text(package.updates == match.id ? "Update \u{201C}\(name(of: match))\u{201D}" : "Install as a separate plugin").tag(Choice.plugin)
                         }
                         .pickerStyle(.radioGroup)
                         .labelsHidden()
-                        .accessibilityLabel("Install")
+                        .accessibilityLabel(localized("Install"))
                     }
                 }
                 if choice == .plugin, package.updateChoices.count > 1 {
                     Section {
-                        Picker("Update", selection: $updateTarget) {
+                        Picker(localized("Update"), selection: $updateTarget) {
                             ForEach(package.updateChoices, id: \.self) { id in
                                 Text(versionTitle(of: id)).tag(Optional(id))
                             }
                         }
                     }
                 }
-                Section("Access") {
+                Section(localized("Access")) {
                     let permissions = PluginPermission.allCases.filter(manifest.permissions.contains)
                     if permissions.isEmpty && manifest.sites.isEmpty && manifest.extensionPermissions.isEmpty {
-                        Text("None")
+                        Text("None", bundle: .module)
                     }
                     ForEach(permissions, id: \.self) { permission in
                         RequestRow(text: permission == .network ? "Send requests to \(manifest.network.map(\.description).joined(separator: ", "))" : permission.summary,
@@ -287,7 +287,7 @@ private struct PluginReviewView: View {
                         }
                     }
                 }
-                Section("Files") {
+                Section(localized("Files")) {
                     ForEach(package.files, id: \.self) { path in
                         if composition == nil {
                             Text(path).font(.system(.body, design: .monospaced))
@@ -312,10 +312,10 @@ private struct PluginReviewView: View {
             // Ask for Changes… goes back to the composer rather than ending the sheet, so it leads, as Don’t Ask Again does in the last step.
             HStack {
                 if let askForChanges {
-                    Button("Ask for Changes\u{2026}", action: askForChanges)
+                    Button(localized("Ask for Changes\u{2026}"), action: askForChanges)
                 }
                 Spacer()
-                Button("Cancel", role: .cancel) {
+                Button(localized("Cancel"), role: .cancel) {
                     plugins.discard(package)
                     close()
                 }
@@ -323,14 +323,14 @@ private struct PluginReviewView: View {
                 if refusal == nil {
                     if let joined {
                         // A version installs on or off as the plugin it joins is.
-                        Button("Install") { install(isEnabled: joined.isEnabled) }
+                        Button(localized("Install")) { install(isEnabled: joined.isEnabled) }
                             .keyboardShortcut(.defaultAction)
                     } else if let target {
-                        Button("Update") { install(isEnabled: target.isEnabled) }
+                        Button(localized("Update")) { install(isEnabled: target.isEnabled) }
                             .keyboardShortcut(.defaultAction)
                     } else {
-                        Button("Install") { install(isEnabled: false) }
-                        Button("Install and Enable") { install(isEnabled: true) }
+                        Button(localized("Install")) { install(isEnabled: false) }
+                        Button(localized("Install and Enable")) { install(isEnabled: true) }
                             .keyboardShortcut(.defaultAction)
                     }
                 }
@@ -473,7 +473,7 @@ private struct VersionLastStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let installed = plugins.plugins.first(where: { $0.id == plugin }) {
-                Text("\u{201C}\(installed.manifest.name)\u{201D} is installed.")
+                Text("\u{201C}\(installed.manifest.name)\u{201D} is installed.", bundle: .module)
                     .font(.headline)
                 Text(versionNote(for: installed, engine: engine))
                     .foregroundStyle(.secondary)
@@ -483,7 +483,7 @@ private struct VersionLastStep: View {
                     .foregroundStyle(.red)
             }
             HStack {
-                Button("Don\u{2019}t Ask Again") {
+                Button(localized("Don\u{2019}t Ask Again")) {
                     plugins.dismissVersionNote(of: plugin, for: engine)
                     close()
                 }
@@ -499,7 +499,7 @@ private struct VersionLastStep: View {
                         }
                     }
                 }
-                Button("Done", action: close)
+                Button(localized("Done"), action: close)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -529,8 +529,8 @@ struct InstallVersionMenu: View {
         let title = "Install \(engine.displayName) Version\u{2026}"
         if offersWebStore {
             Menu(title) {
-                Button("From a File\u{2026}") { choose(.file) }
-                Button("From the Web Store\u{2026}") { choose(.webStore) }
+                Button(localized("From a File\u{2026}")) { choose(.file) }
+                Button(localized("From the Web Store\u{2026}")) { choose(.webStore) }
             }
             .fixedSize()
         } else {
@@ -599,7 +599,7 @@ private struct RequestRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(text)
             if isNew {
-                Text("New")
+                Text("New", bundle: .module)
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)

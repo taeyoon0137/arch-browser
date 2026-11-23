@@ -265,7 +265,7 @@ struct SpaceTabsView: View {
             .opacity(offersFirstFavorite ? 0 : 1)
             .overlay {
                 if offersFirstFavorite {
-                    Label("Add to Favorites", systemImage: "star")
+                    Label(localized("Add to Favorites"), systemImage: "star")
                         .font(.callout)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
@@ -366,7 +366,7 @@ struct SpaceTabsView: View {
         let draggedHere = sidebarDrag.owner == dragOwner && sidebarDrag.tabID != nil
         return ZStack {
             if pinnedIsEmpty && draggedHere {
-                Label("Pin Tab", systemImage: "pin")
+                Label(localized("Pin Tab"), systemImage: "pin")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -755,8 +755,8 @@ struct SpaceHeaderView: View {
             .fixedSize()
             .foregroundStyle(.secondary)
             .onHover { isMenuHovering = $0 }
-            .help("Space Options")
-            .accessibilityLabel("Space Options")
+            .help(localized("Space Options"))
+            .accessibilityLabel(localized("Space Options"))
         }
         .frame(height: 22)
     }
@@ -770,7 +770,7 @@ struct SpaceHeaderView: View {
                 .lineLimit(1)
                 .hidden()
                 .overlay(alignment: .leading) {
-                    TextField("Space Name", text: $draftName)
+                    TextField(localized("Space Name"), text: $draftName)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13, weight: .semibold))
                         .focused($isNameFocused)
@@ -812,41 +812,41 @@ struct SpaceMenuItems: View {
     private var homeURL: URL? { session.spaces.first { $0.id == space.id }?.homeURL }
 
     var body: some View {
-        Button("Rename Space") {
+        Button(localized("Rename Space")) {
             windowModel.switchToSpace(space.id)
             windowModel.renamingSpaceID = space.id
         }
         // Automatic follows the system accent color; the others are the space's own color.
-        Picker("Tint", selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
+        Picker(localized("Tint"), selection: Binding(get: { space.tint }, set: { session.setTint($0, ofSpace: space.id) })) {
             ForEach([SpaceTint.automatic] + SpaceTint.colors, id: \.self) { tint in
                 Text(tint.title).tag(tint)
             }
         }
-        Picker("Icon", selection: Binding(get: { space.symbol }, set: { session.setSymbol($0, ofSpace: space.id) })) {
+        Picker(localized("Icon"), selection: Binding(get: { space.symbol }, set: { session.setSymbol($0, ofSpace: space.id) })) {
             ForEach(Space.symbolChoices, id: \.symbol) { choice in
                 Label(choice.name, systemImage: choice.symbol).tag(choice.symbol)
             }
         }
         Divider()
-        Button("Set Current Page as Home") { windowModel.setCurrentPageAsHome(ofSpace: space.id) }
+        Button(localized("Set Current Page as Home")) { windowModel.setCurrentPageAsHome(ofSpace: space.id) }
             .disabled(!windowModel.canSetCurrentPageAsHome)
-        Button("Clear Home") { session.clearHome(ofSpace: space.id) }
+        Button(localized("Clear Home")) { session.clearHome(ofSpace: space.id) }
             .disabled(homeURL == nil)
         Divider()
-        Button("Move Left") { session.moveSpace(space.id, by: -1) }
+        Button(localized("Move Left")) { session.moveSpace(space.id, by: -1) }
             .disabled(personaSpaces.first?.id == space.id)
-        Button("Move Right") { session.moveSpace(space.id, by: 1) }
+        Button(localized("Move Right")) { session.moveSpace(space.id, by: 1) }
             .disabled(personaSpaces.last?.id == space.id)
         Divider()
-        Button("New Folder") { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(toSpace: space.id) } }
-        Button("New Live Folder\u{2026}") { windowModel.showNewLiveFolderSheet(inSpace: space.id) }
-        Button("New Space", action: windowModel.addSpace)
-        Button("Delete Space") { session.deleteSpace(space.id) }
+        Button(localized("New Folder")) { withAnimation(.easeInOut(duration: 0.15)) { windowModel.addFolder(toSpace: space.id) } }
+        Button(localized("New Live Folder\u{2026}")) { windowModel.showNewLiveFolderSheet(inSpace: space.id) }
+        Button(localized("New Space"), action: windowModel.addSpace)
+        Button(localized("Delete Space")) { session.deleteSpace(space.id) }
             .disabled(!session.canDeleteSpace(space.id))
         Divider()
-        Button("New Persona\u{2026}", action: windowModel.promptForNewPersona)
-        Button("Rename Persona\u{2026}") { windowModel.promptToRenamePersona(space.resolvedPersonaID) }
-        Button("Delete Persona\u{2026}") { windowModel.confirmDeletePersona(ofSpace: space) }
+        Button(localized("New Persona\u{2026}"), action: windowModel.promptForNewPersona)
+        Button(localized("Rename Persona\u{2026}")) { windowModel.promptToRenamePersona(space.resolvedPersonaID) }
+        Button(localized("Delete Persona\u{2026}")) { windowModel.confirmDeletePersona(ofSpace: space) }
             .disabled(!session.canDeletePersona(space.resolvedPersonaID))
         PluginMenuSections(plugins: session.plugins(in: space.resolvedPersonaID), location: .spaceMenu) { windowModel.runPluginCommand($0, inSpace: space) }
     }

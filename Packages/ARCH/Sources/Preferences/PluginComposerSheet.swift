@@ -60,14 +60,14 @@ struct PluginComposerSheet: View {
             if writing != nil {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Writing the plugin\u{2026}").foregroundStyle(.secondary)
+                    Text("Writing the plugin\u{2026}", bundle: .module).foregroundStyle(.secondary)
                 }
             } else if let failure {
                 Text(AIService.shared.settings.message(for: failure))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 if Self.isFixedInSettings(failure) {
-                    Button("Open AI Settings") {
+                    Button(localized("Open AI Settings")) {
                         dismiss()
                         PreferencesWindowController.shared.showAISection()
                     }
@@ -76,16 +76,16 @@ struct PluginComposerSheet: View {
             // Back to Review goes to another step rather than ending the sheet, so it leads, as Don’t Ask Again does in the install sheet's last step.
             HStack {
                 if draft != nil {
-                    Button("Back to Review") { isReviewing = true }
+                    Button(localized("Back to Review")) { isReviewing = true }
                         .disabled(writing != nil)
                 }
                 Spacer()
                 Button(draft == nil ? "Cancel" : "Discard", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 if writing != nil {
-                    Button("Stop") { writing?.cancel() }
+                    Button(localized("Stop")) { writing?.cancel() }
                 } else {
-                    Button("Write Plugin", action: write)
+                    Button(localized("Write Plugin"), action: write)
                         .keyboardShortcut(.defaultAction)
                         .disabled(request.isEmpty)
                 }

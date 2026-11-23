@@ -90,7 +90,7 @@ struct WebExtensionActionsSection: View {
             if item.wantsSiteAccess || runsNote != nil {
                 VStack(alignment: .leading, spacing: 6) {
                     if item.wantsSiteAccess {
-                        Button("Allow on This Site") {
+                        Button(localized("Allow on This Site")) {
                             close()
                             webExtensions.grantSiteAccess(of: item.id, for: tab.webContents)
                         }
@@ -104,15 +104,15 @@ struct WebExtensionActionsSection: View {
                                 .fixedSize(horizontal: false, vertical: true)
                             if item.asksForVersion {
                                 let engine = tab.engineKind
-                                Text("Its developer may offer a separate version for \(engine.displayName).")
+                                Text("Its developer may offer a separate version for \(engine.displayName).", bundle: .module)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
-                                let install = Button("Install \(engine.displayName) Version\u{2026}") {
+                                let install = Button(localized("Install \(engine.displayName) Version\u{2026}")) {
                                     close()
                                     session.installEngineVersion?(tab.personaID, tabSpace, item.id, engine)
                                 }
-                                let dismiss = Button("Dismiss") { session.plugins(in: tab.personaID).dismissVersionNote(of: item.id, for: engine) }
+                                let dismiss = Button(localized("Dismiss")) { session.plugins(in: tab.personaID).dismissVersionNote(of: item.id, for: engine) }
                                 // Side by side the two take about all of the row, so a scroll bar that stays visible would cut them short.
                                 ViewThatFits(in: .horizontal) {
                                     HStack { install; dismiss }

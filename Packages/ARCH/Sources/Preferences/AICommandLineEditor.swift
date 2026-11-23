@@ -134,7 +134,7 @@ struct AICommandLineEditor: View {
                 Section {
                     AINameValueRows(rows: $draft.environment, addTitle: "Add Variable", removeTitle: "Remove Variable")
                 } header: {
-                    Text("Environment")
+                    Text("Environment", bundle: .module)
                 } footer: {
                     formFootnote(draft.agent == nil
                                ? "The tool runs with only HOME, USER, LOGNAME, SHELL, PATH from your login shell, LANG, TMPDIR, and TERM, plus these variables. They are saved in ai.json, so they must not hold secrets."
@@ -143,7 +143,7 @@ struct AICommandLineEditor: View {
                 if draft.agent == nil {
                     outputSection
                     Section {
-                        Toggle("Runs without its own tools", isOn: $draft.runsWithoutTools)
+                        Toggle(localized("Runs without its own tools"), isOn: $draft.runsWithoutTools)
                     } footer: {
                         formFootnote("Turn this on only if the arguments stop the tool from running commands, editing files, or using other tools of its own. Text in a page could otherwise steer the tool, so until then it gets no page, selection, file, or download data. Arch cannot check this; it only runs the tool in an empty folder with a small environment.")
                     }
@@ -151,12 +151,12 @@ struct AICommandLineEditor: View {
                 Section {
                     AIModelList(models: $draft.models, defaultCapabilities: AICommandLineConfiguration.capabilities) {
                         if !draft.models.contains(where: { $0.name.isEmpty }) {
-                            Button("Add Default") { draft.models.insert(AIModelConfiguration(name: ""), at: 0) }
-                                .help("Add the tool\u{2019}s own default model")
+                            Button(localized("Add Default")) { draft.models.insert(AIModelConfiguration(name: ""), at: 0) }
+                                .help(localized("Add the tool\u{2019}s own default model"))
                         }
                     }
                 } header: {
-                    Text("Models")
+                    Text("Models", bundle: .module)
                 } footer: {
                     formFootnote(modelsNote)
                 }
@@ -177,15 +177,15 @@ struct AICommandLineEditor: View {
 
     @ViewBuilder private var toolSection: some View {
         Section {
-            TextField("Name", text: $draft.name)
+            TextField(localized("Name"), text: $draft.name)
             HStack {
-                TextField("Executable", text: $draft.executable, prompt: Text("Name or path"))
+                TextField(localized("Executable"), text: $draft.executable, prompt: Text("Name or path", bundle: .module))
                     .onSubmit { Task { await locate() } }
                     .onChange(of: draft.executable) { locateFailure = nil }
-                Button("Find") { Task { await locate() } }
+                Button(localized("Find")) { Task { await locate() } }
                     .disabled(isLocating || draft.executable.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .help("Look the name up in your login shell\u{2019}s PATH")
-                Button("Choose\u{2026}", action: chooseExecutable)
+                    .help(localized("Look the name up in your login shell\u{2019}s PATH"))
+                Button(localized("Choose\u{2026}"), action: chooseExecutable)
             }
             // The button keeps its width while it runs, so the field beside it stays still. Until Find fails, the line under the field is guidance, not an error.
             if isLocating {
@@ -193,16 +193,16 @@ struct AICommandLineEditor: View {
             } else if let locateFailure {
                 Text(locateFailure).font(.callout).foregroundStyle(.red)
             } else if !draft.executable.isEmpty, draft.executableURL == nil {
-                Text("Enter the tool\u{2019}s full path, or its name and click Find.").font(.callout).foregroundStyle(.secondary)
+                Text("Enter the tool\u{2019}s full path, or its name and click Find.", bundle: .module).font(.callout).foregroundStyle(.secondary)
             }
             if let openTerminal = PreferencesWindowController.openTerminal {
                 HStack {
                     Spacer()
-                    Button("Open Terminal", action: openTerminal)
+                    Button(localized("Open Terminal"), action: openTerminal)
                 }
             }
         } header: {
-            Text("Tool")
+            Text("Tool", bundle: .module)
         } footer: {
             formFootnote("Install the tool and sign in to it in the terminal. The tool keeps its own sign-in; Arch never reads it.")
         }
@@ -247,21 +247,21 @@ struct AICommandLineEditor: View {
     /// The version and sign-in from the tool's own status commands, read again when the executable changes.
     @ViewBuilder private func statusSection(_ agent: AIAgentKind) -> some View {
         Section {
-            LabeledContent("Version", value: status?.version ?? (statusError == nil && draft.executableURL != nil ? "Checking\u{2026}" : "\u{2014}"))
-            LabeledContent("Sign-in", value: signInText)
+            LabeledContent(localized("Version"), value: status?.version ?? (statusError == nil && draft.executableURL != nil ? "Checking\u{2026}" : "\u{2014}"))
+            LabeledContent(localized("Sign-in"), value: signInText)
             if let statusError {
                 Text(statusError).font(.callout).foregroundStyle(.red)
             }
             HStack {
                 Spacer()
-                Button("Refresh") { Task { await loadStatus() } }
+                Button(localized("Refresh")) { Task { await loadStatus() } }
                     .disabled(draft.executableURL == nil)
                 if status?.isSignedIn == false, PreferencesWindowController.openTerminalTyping != nil {
-                    Button("Sign In\u{2026}") { Task { await signIn(agent) } }
+                    Button(localized("Sign In\u{2026}")) { Task { await signIn(agent) } }
                 }
             }
         } header: {
-            Text("Status")
+            Text("Status", bundle: .module)
         } footer: {
             formFootnote("Arch reads the version and the sign-in from \(agent.title)'s own status commands and never reads its credentials. Arch builds every argument: the tool's own tools, settings, hooks, plugins, and other servers stay off, so its ordinary requests may get page data, and agent sessions get only Arch's tools. Sign In types the tool's sign-in command in the terminal; press Return there to run it.")
         }
@@ -327,25 +327,25 @@ struct AICommandLineEditor: View {
         Section {
             ForEach(draft.arguments) { argument in
                 HStack {
-                    TextField("Argument", text: rowBinding($draft.arguments, id: argument.id, field: \.value), prompt: Text("Argument"))
+                    TextField(localized("Argument"), text: rowBinding($draft.arguments, id: argument.id, field: \.value), prompt: Text("Argument", bundle: .module))
                         .labelsHidden()
-                        .accessibilityLabel("Argument")
+                        .accessibilityLabel(localized("Argument"))
                     Button {
                         draft.arguments.removeAll { $0.id == argument.id }
                     } label: {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.borderless)
-                    .help("Remove Argument")
-                    .accessibilityLabel("Remove Argument")
+                    .help(localized("Remove Argument"))
+                    .accessibilityLabel(localized("Remove Argument"))
                 }
             }
             HStack {
                 Spacer()
-                Button("Add Argument") { draft.arguments.append(AICommandLineDraft.Argument(value: "")) }
+                Button(localized("Add Argument")) { draft.arguments.append(AICommandLineDraft.Argument(value: "")) }
             }
         } header: {
-            Text("Arguments")
+            Text("Arguments", bundle: .module)
         } footer: {
             formFootnote("Each row is one argument. \(AICommandLineConfiguration.modelPlaceholder) becomes the model\u{2019}s name, and an argument that contains it is left out for the default model, so write an option and its model as one argument, such as --model=\(AICommandLineConfiguration.modelPlaceholder). The prompt goes to the tool\u{2019}s standard input, never into its arguments.")
         }
@@ -353,19 +353,19 @@ struct AICommandLineEditor: View {
 
     @ViewBuilder private var outputSection: some View {
         Section {
-            Picker("Output", selection: $draft.outputFormat) {
-                Text("Plain Text").tag(AICommandLineDraft.OutputFormat.text)
-                Text("JSON Lines").tag(AICommandLineDraft.OutputFormat.jsonLines)
+            Picker(localized("Output"), selection: $draft.outputFormat) {
+                Text("Plain Text", bundle: .module).tag(AICommandLineDraft.OutputFormat.text)
+                Text("JSON Lines", bundle: .module).tag(AICommandLineDraft.OutputFormat.jsonLines)
             }
             if draft.outputFormat == .jsonLines {
-                TextField("Text delta", text: pathBinding(\.textDelta), prompt: Text("delta.text"))
-                TextField("Final text", text: pathBinding(\.finalText), prompt: Text("result"))
-                TextField("Input tokens", text: pathBinding(\.inputTokens), prompt: Text("usage.input_tokens"))
-                TextField("Output tokens", text: pathBinding(\.outputTokens), prompt: Text("usage.output_tokens"))
-                TextField("Error", text: pathBinding(\.error), prompt: Text("error.message"))
+                TextField(localized("Text delta"), text: pathBinding(\.textDelta), prompt: Text("delta.text", bundle: .module))
+                TextField(localized("Final text"), text: pathBinding(\.finalText), prompt: Text("result", bundle: .module))
+                TextField(localized("Input tokens"), text: pathBinding(\.inputTokens), prompt: Text("usage.input_tokens", bundle: .module))
+                TextField(localized("Output tokens"), text: pathBinding(\.outputTokens), prompt: Text("usage.output_tokens", bundle: .module))
+                TextField(localized("Error"), text: pathBinding(\.error), prompt: Text("error.message", bundle: .module))
             }
         } header: {
-            Text("Output")
+            Text("Output", bundle: .module)
         } footer: {
             formFootnote(draft.outputFormat == .text
                          ? "The tool\u{2019}s standard output is the reply."
@@ -387,9 +387,9 @@ struct AICommandLineEditor: View {
             HStack {
                 Spacer()
                 if checkTask != nil {
-                    Button("Stop") { checkTask?.cancel() }
+                    Button(localized("Stop")) { checkTask?.cancel() }
                 } else {
-                    Button("Check", action: check)
+                    Button(localized("Check"), action: check)
                         .disabled(draft.configuration == nil)
                 }
             }

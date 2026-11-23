@@ -31,40 +31,40 @@ struct GeneralSection: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Default browser") {
+                LabeledContent(localized("Default browser")) {
                     if isDefaultBrowser {
-                        Text("Arch")
+                        Text("Arch", bundle: .module)
                     } else {
-                        Button("Set as Default\u{2026}") {
+                        Button(localized("Set as Default\u{2026}")) {
                             DefaultBrowser.makeDefault { isDefaultBrowser = DefaultBrowser.isDefault }
                         }
                         .disabled(!DefaultBrowser.canBecomeDefault)
                     }
                 }
-                Toggle("Open links from other apps in a small window when Arch is in the background", isOn: $opensLinksInSmallWindow)
-                Picker("Engine for new tabs", selection: defaultEngine) {
+                Toggle(localized("Open links from other apps in a small window when Arch is in the background"), isOn: $opensLinksInSmallWindow)
+                Picker(localized("Engine for new tabs"), selection: defaultEngine) {
                     ForEach(EngineRegistry.shared.registeredKinds, id: \.self) { kind in
                         Text(kind.displayName)
                     }
                 }
-                Picker("Search engine", selection: $searchEngine) {
+                Picker(localized("Search engine"), selection: $searchEngine) {
                     ForEach(SearchEngine.allCases, id: \.self) { engine in
                         Text(engine.title)
                     }
                 }
             }
-            Section("Downloads") {
-                LabeledContent("Save downloads to") {
+            Section(localized("Downloads")) {
+                LabeledContent(localized("Save downloads to")) {
                     HStack(spacing: 6) {
                         Image(nsImage: NSWorkspace.shared.icon(forFile: downloadsFolder.path))
                             .resizable()
                             .frame(width: 16, height: 16)
                             .accessibilityHidden(true)
                         Text(FileManager.default.displayName(atPath: downloadsFolder.path))
-                        Button("Choose\u{2026}", action: chooseDownloadsFolder)
+                        Button(localized("Choose\u{2026}"), action: chooseDownloadsFolder)
                     }
                 }
-                Toggle("Ask where to save each download", isOn: $asksWhereToSaveDownloads)
+                Toggle(localized("Ask where to save each download"), isOn: $asksWhereToSaveDownloads)
             }
         }
         .formStyle(.grouped)
@@ -139,25 +139,25 @@ struct SidebarSection: View {
                             Image(systemName: "minus.circle")
                         }
                         .buttonStyle(.borderless)
-                        .accessibilityLabel("Remove row \(index + 1)")
+                        .accessibilityLabel(localized("Remove row \(index + 1)"))
                     }
                 }
                 // The default follows the rows it sets, as the grid lays them out.
                 favoriteCountPicker(favoriteRows.isEmpty ? "All rows" : "Other rows", selection: Binding(
                     get: { FavoriteTileLayout.columnCount(favoriteColumns) },
                     set: { favoriteColumns = $0 }))
-                Button("Add Row") {
+                Button(localized("Add Row")) {
                     favoriteRowData = FavoriteTileLayout.encode(rowSizes: favoriteRows + [favoriteColumns])
                 }
             } header: {
-                Text("Favorites per row")
+                Text("Favorites per row", bundle: .module)
             } footer: {
                 if !favoriteRows.isEmpty { formFootnote("Rows after these use this number.") }
             }
 
             Section {
                 // In both pickers a saved delay outside the choices, such as 5, stays listed and selected. 0 or less archives or unloads nothing.
-                Picker("Archive unpinned tabs", selection: Binding(get: { max(archiveAfterHours, 0) }, set: { archiveAfterHours = $0 })) {
+                Picker(localized("Archive unpinned tabs"), selection: Binding(get: { max(archiveAfterHours, 0) }, set: { archiveAfterHours = $0 })) {
                     ForEach(Set([0, 1, 12, 24, 168, max(archiveAfterHours, 0)]).sorted(), id: \.self) { hours in
                         Text(Self.title(for: hours)).tag(hours)
                     }
@@ -166,7 +166,7 @@ struct SidebarSection: View {
                 formFootnote("Unpinned tabs not selected for this long move to the closed list.")
             }
             Section {
-                Picker("Unload pinned tabs and favorites", selection: Binding(get: { max(unloadAfterHours, 0) }, set: { unloadAfterHours = $0 })) {
+                Picker(localized("Unload pinned tabs and favorites"), selection: Binding(get: { max(unloadAfterHours, 0) }, set: { unloadAfterHours = $0 })) {
                     ForEach(Set([0, 1, 12, 24, 168, max(unloadAfterHours, 0)]).sorted(), id: \.self) { hours in
                         Text(Self.title(for: hours)).tag(hours)
                     }
@@ -212,13 +212,13 @@ struct AppearanceSection: View {
 
     var body: some View {
         Form {
-            Picker("Appearance", selection: $appearance) {
+            Picker(localized("Appearance"), selection: $appearance) {
                 ForEach(AppearanceSetting.allCases, id: \.self) { choice in
                     Text(choice.title)
                 }
             }
             .onChange(of: appearance) { NSApp.appearance = $1.appearance }
-            Picker("Space tint", selection: $tintStrength) {
+            Picker(localized("Space tint"), selection: $tintStrength) {
                 ForEach(TintStrength.allCases, id: \.self) { strength in
                     Text(strength.title)
                 }

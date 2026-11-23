@@ -19,33 +19,33 @@ struct AIUsagePage: View {
     var body: some View {
         let totals = usage.totals(monthsAgo: monthsAgo)
         Section {
-            Picker("Month", selection: $monthsAgo) {
-                Text("This Month").tag(0)
-                Text("Last Month").tag(1)
+            Picker(localized("Month"), selection: $monthsAgo) {
+                Text("This Month", bundle: .module).tag(0)
+                Text("Last Month", bundle: .module).tag(1)
             }
             .pickerStyle(.segmented)
         }
-        Section("By Feature") {
+        Section(localized("By Feature")) {
             rows(Self.group(totals, by: { ($0.feature, $0.featureName) }))
         }
-        Section("By Model") {
+        Section(localized("By Model")) {
             rows(Self.group(totals, by: { ("\($0.provider)/\($0.model)", "\($0.providerName) \u{2014} \(aiModelTitle($0.model))") }))
         }
         Section {
-            Stepper("Automatic requests per day: \(settings.limits.automaticRequestsPerDay)", value: $settings.limits.automaticRequestsPerDay, in: 10...10_000, step: 10)
-            Toggle("Monthly spending limit", isOn: Binding(
+            Stepper(localized("Automatic requests per day: \(settings.limits.automaticRequestsPerDay)"), value: $settings.limits.automaticRequestsPerDay, in: 10...10_000, step: 10)
+            Toggle(localized("Monthly spending limit"), isOn: Binding(
                 get: { settings.limits.monthlySpendingLimit != nil },
                 set: { settings.limits.monthlySpendingLimit = $0 ? AIMoney(currency: Locale.current.currency?.identifier ?? "USD", amount: 20) : nil }))
             if let limit = settings.limits.monthlySpendingLimit {
-                TextField("Amount", value: Binding(
+                TextField(localized("Amount"), value: Binding(
                     get: { limit.amount },
                     set: { settings.limits.monthlySpendingLimit?.amount = $0 }), format: .number)
-                TextField("Currency", text: Binding(
+                TextField(localized("Currency"), text: Binding(
                     get: { limit.currency },
                     set: { settings.limits.monthlySpendingLimit?.currency = $0.uppercased() }))
             }
         } header: {
-            Text("Limits")
+            Text("Limits", bundle: .module)
         } footer: {
             formFootnote("The daily limit applies to each feature that runs on its own. At the spending limit, every AI request stops until the next month or a higher limit. Costs are estimates from the prices entered for each model.")
         }
@@ -53,7 +53,7 @@ struct AIUsagePage: View {
 
     @ViewBuilder private func rows(_ rows: [Row]) -> some View {
         if rows.isEmpty {
-            Text("No requests").foregroundStyle(.secondary)
+            Text("No requests", bundle: .module).foregroundStyle(.secondary)
         }
         ForEach(rows) { row in
             LabeledContent(row.title) {
@@ -95,7 +95,7 @@ struct AIActivityPage: View {
     var body: some View {
         Section {
             if service.activity.isEmpty {
-                Text("No requests since Arch started").foregroundStyle(.secondary)
+                Text("No requests since Arch started", bundle: .module).foregroundStyle(.secondary)
             }
             ForEach(service.activity.reversed()) { entry in
                 VStack(alignment: .leading, spacing: 4) {
@@ -132,7 +132,7 @@ struct AIActivityPage: View {
                 }
             }
         } header: {
-            Text("Recent Requests")
+            Text("Recent Requests", bundle: .module)
         } footer: {
             formFootnote("Kept in memory until Arch quits. Replies are not kept.")
         }

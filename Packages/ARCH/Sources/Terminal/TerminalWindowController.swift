@@ -152,9 +152,9 @@ public final class TerminalWindowController: NSWindowController, NSWindowDelegat
     private static func runningProgramAlert(message: String, action: String) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = message
-        alert.informativeText = "The program running in the terminal will stop."
+        alert.informativeText = localized("The program running in the terminal will stop.")
         alert.addButton(withTitle: action)
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Cancel"))
         return alert
     }
 }

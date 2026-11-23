@@ -421,15 +421,15 @@ struct ScriptHookSheet: View {
                     }
                 }
                 Section {
-                    TextField("Name", text: $draft.name)
+                    TextField(localized("Name"), text: $draft.name)
                     if draft.guided { TabNamesWarning(settings: aiSettings, renames: draft.agentRenamesTabs, kind: draft.kind) }
                 }
                 whenSection
                 whereSection
                 if !draft.guided || !draft.generated {
-                    Section("Script permissions") {
-                        if !draft.origin.isOutsideProgram { Toggle("Read Tab Titles and Addresses", isOn: $draft.readsTabs) }
-                        Toggle("Rename Tabs", isOn: $draft.renamesTabs)
+                    Section(localized("Script permissions")) {
+                        if !draft.origin.isOutsideProgram { Toggle(localized("Read Tab Titles and Addresses"), isOn: $draft.readsTabs) }
+                        Toggle(localized("Rename Tabs"), isOn: $draft.renamesTabs)
                     }
                 }
                 if draft.stored?.origin.isOutsideProgram != true { agentSettings }
@@ -444,7 +444,7 @@ struct ScriptHookSheet: View {
                 }
                 Spacer()
                 // While Touch ID is asked for, the answer decides; Cancel would leave a save behind.
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(localized("Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .disabled(isTrusting)
                 Button(saveTitle) { save() }
@@ -472,13 +472,13 @@ struct ScriptHookSheet: View {
     }
 
     @ViewBuilder private var agentSettings: some View {
-        Section("Agent") {
+        Section(localized("Agent")) {
             // A shell script starts its agent runs with `arch-cli agent run`, under the hook's grant and run tabs.
             if !draft.guided || !draft.generated {
-                Toggle("Allow Agent Runs", isOn: $draft.enablesAgent)
+                Toggle(localized("Allow Agent Runs"), isOn: $draft.enablesAgent)
             }
             if draft.enablesAgent {
-                TextField("Instructions", text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language."), axis: .vertical)
+                TextField(localized("Instructions"), text: $draft.agentPrompt, prompt: Text("Give the tab a short name in its own language.", bundle: .module), axis: .vertical)
                 if draft.isShell {
                     // The trust sheet's Let Agent Runs Read Pages decides a shell hook's page reads.
                     Text(draft.letsAgentReadPages ? "The model may read page text on the allowed tabs. Sites excluded from AI are skipped."
@@ -486,29 +486,29 @@ struct ScriptHookSheet: View {
                 } else {
                     Toggle(draft.kind == .tabClosed ? "Read Text of the Tabs Left" : "Read Page Text", isOn: $draft.readsPageText)
                     Toggle(draft.kind == .tabClosed ? "Read Outlines of the Tabs Left" : "Read Page Outline", isOn: $draft.readsPageOutline)
-                    if draft.readsPageOutline { Text("Outlines include headings, labels, and links, not the page\u{2019}s text. Form values are hidden.").font(.caption) }
+                    if draft.readsPageOutline { Text("Outlines include headings, labels, and links, not the page\u{2019}s text. Form values are hidden.", bundle: .module).font(.caption) }
                     if draft.readsPageText {
-                        Text("The model may read page text on the allowed tabs. Sites excluded from AI are skipped.").font(.caption)
+                        Text("The model may read page text on the allowed tabs. Sites excluded from AI are skipped.", bundle: .module).font(.caption)
                     } else if draft.readsPageOutline {
-                        Text("Sites excluded from AI are skipped.").font(.caption)
+                        Text("Sites excluded from AI are skipped.", bundle: .module).font(.caption)
                     } else {
-                        Text("The model receives titles and reduced addresses on the allowed tabs.").font(.caption)
+                        Text("The model receives titles and reduced addresses on the allowed tabs.", bundle: .module).font(.caption)
                     }
                 }
-                if draft.kind == .tabClosed { Text("The closed tab provides its last title and address. Actions apply to tabs left in its space.").font(.caption) }
+                if draft.kind == .tabClosed { Text("The closed tab provides its last title and address. Actions apply to tabs left in its space.", bundle: .module).font(.caption) }
             }
         }
         if draft.enablesAgent {
-            Section("Model") {
-                Picker("Use", selection: $draft.agentModel) {
-                    Text("Choose a model").tag(nil as AIRouteChoice?)
+            Section(localized("Model")) {
+                Picker(localized("Use"), selection: $draft.agentModel) {
+                    Text("Choose a model", bundle: .module).tag(nil as AIRouteChoice?)
                     ForEach(agentRoutes, id: \.self) { route in Text(agentRouteName(route)).tag(Optional(route)) }
                 }
                 if let routeProblem { Text(routeProblem).font(.caption).foregroundStyle(.secondary) }
                 if let route = draft.agentModel {
                     let refs = models(on: route)
                     if case .tier(let tier) = route, refs.isEmpty {
-                        Menu("Choose a Model for the \(tier.title) Tier") {
+                        Menu(localized("Choose a Model for the \(tier.title) Tier")) {
                             ForEach(connectedModels, id: \.self) { ref in Button(aiSettings.title(of: ref)) { aiSettings.setRoute(AIRoute(isEnabled: true, models: [ref]), for: .tier(tier)) } }
                         }
                     }
@@ -516,29 +516,29 @@ struct ScriptHookSheet: View {
                         if let provider = aiSettings.providers.first(where: { $0.id == model.provider }) {
                             let destination = provider.hookDestination
                             Text("\(aiSettings.title(of: model)) · \(destination)").font(.caption).textSelection(.enabled)
-                            if case .commandLine = provider.kind { Text("Each run starts the signed-in command-line tool and can take a few seconds.").font(.caption) }
+                            if case .commandLine = provider.kind { Text("Each run starts the signed-in command-line tool and can take a few seconds.", bundle: .module).font(.caption) }
                         }
                     }
                 }
             }
-            Section("Allowed actions") {
+            Section(localized("Allowed actions")) {
                 Toggle(draft.kind == .tabClosed ? "Rename the Tabs Left" : "Rename the Tab", isOn: $draft.agentRenamesTabs)
             }
             if draft.guided {
-                Section("Record") {
-                    Picker("Keep", selection: $draft.agentRecord) {
-                        Text("Nothing").tag(AgentRunRecord.none)
-                        Text("Activity Only").tag(AgentRunRecord.activity)
-                        Text("The Session").tag(AgentRunRecord.session)
+                Section(localized("Record")) {
+                    Picker(localized("Keep"), selection: $draft.agentRecord) {
+                        Text("Nothing", bundle: .module).tag(AgentRunRecord.none)
+                        Text("Activity Only", bundle: .module).tag(AgentRunRecord.activity)
+                        Text("The Session", bundle: .module).tag(AgentRunRecord.session)
                     }
                     Text(recordDetail).font(.caption)
                 }
-                Section("Limits") {
+                Section(localized("Limits")) {
                     numberRow("Time limit", value: $draft.seconds, in: 5...600, unit: "seconds")
                     numberRow("Model rounds", value: $draft.rounds, in: 1...20, unit: nil)
                     numberRow("Tool calls", value: $draft.toolCalls, in: 1...50, unit: nil)
                     numberRow("Runs per day", value: $draft.dailyLimit, in: 1...2_000, unit: nil)
-                    Stepper("Wait before running · \(draft.delay.formatted()) seconds", value: $draft.delay, in: 0...60, step: 0.5)
+                    Stepper(localized("Wait before running · \(draft.delay.formatted()) seconds"), value: $draft.delay, in: 0...60, step: 0.5)
                 }
             }
         }
@@ -570,12 +570,12 @@ struct ScriptHookSheet: View {
     }
 
     private var scriptSection: some View {
-        Section("Script") {
+        Section(localized("Script")) {
             // Shell scripts are offered for new hand-written hooks while Allow Shell Scripts is on.
             if draft.stored == nil, !draft.guided, registry.allowsShellScripts {
-                Picker("Language", selection: $draft.isShell) {
-                    Text("JavaScript").tag(false)
-                    Text("Shell Script").tag(true)
+                Picker(localized("Language"), selection: $draft.isShell) {
+                    Text("JavaScript", bundle: .module).tag(false)
+                    Text("Shell Script", bundle: .module).tag(true)
                 }
                 .pickerStyle(.segmented)
             }
@@ -590,13 +590,13 @@ struct ScriptHookSheet: View {
     @ViewBuilder private var javaScript: some View {
         if draft.guided {
             if draft.generated {
-                Toggle("Show Script", isOn: $showsScript)
+                Toggle(localized("Show Script"), isOn: $showsScript)
                 if showsScript {
                     Text(draft.scriptText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    Button("Edit Script") { draft.editGeneratedScript() }
+                    Button(localized("Edit Script")) { draft.editGeneratedScript() }
                 }
             } else {
-                Button("Restore Arch’s Script") { draft.restoreGeneratedScript(); showsScript = true }
+                Button(localized("Restore Arch’s Script")) { draft.restoreGeneratedScript(); showsScript = true }
             }
         }
         if !draft.guided || !draft.generated {
@@ -607,26 +607,26 @@ struct ScriptHookSheet: View {
     /// The trust sheet's part: the file, its interpreter, what the script receives and what its commands get, Let Agent Runs Read Pages, and the file's full text with the lines Update from File changed marked.
     @ViewBuilder private var shellScript: some View {
         if let shell = draft.shell {
-            LabeledContent("File") {
+            LabeledContent(localized("File")) {
                 Text(shell.source).font(.caption.monospaced()).textSelection(.enabled).lineLimit(2).truncationMode(.middle)
             }
         }
         HStack {
             Button(draft.shell == nil ? "Choose File\u{2026}" : "Choose Another File\u{2026}") { chooseShellFile() }
             if draft.stored != nil, let source = draft.shell?.source {
-                Button("Update from File") { loadShellFile(at: URL(fileURLWithPath: source)) }
+                Button(localized("Update from File")) { loadShellFile(at: URL(fileURLWithPath: source)) }
             }
         }
         if let shell = draft.shell {
             if let problem = shell.problem {
                 Text(problem).font(.callout).foregroundStyle(.red)
             } else if let resolution = shell.resolution {
-                LabeledContent("Interpreter") {
+                LabeledContent(localized("Interpreter")) {
                     Text(resolution.interpreter.path).font(.caption.monospaced()).textSelection(.enabled)
                 }
-                if resolution.named != resolution.interpreter.path { Text("Found as \(resolution.named).").font(.caption) }
+                if resolution.named != resolution.interpreter.path { Text("Found as \(resolution.named).", bundle: .module).font(.caption) }
                 ForEach(resolution.writableFolders, id: \.self) { folder in
-                    Text("You can change the files in \(folder), which holds this interpreter. If it changes, Arch pauses the hook until you trust it again.").font(.caption)
+                    Text("You can change the files in \(folder), which holds this interpreter. If it changes, Arch pauses the hook until you trust it again.", bundle: .module).font(.caption)
                 }
             } else {
                 ProgressView().controlSize(.small)
@@ -634,7 +634,7 @@ struct ScriptHookSheet: View {
             Text(HookShellScript.inputSentence).font(.caption)
             Text(HookShellScript.pathSentence).font(.caption)
             if draft.enablesAgent {
-                Toggle("Let Agent Runs Read Pages", isOn: $draft.letsAgentReadPages)
+                Toggle(localized("Let Agent Runs Read Pages"), isOn: $draft.letsAgentReadPages)
                 Text(HookShellScript.readsPagesSentence).font(.caption)
             }
             if !shell.changedLines.isEmpty || shell.removedLines > 0 {
@@ -724,8 +724,8 @@ struct ScriptHookSheet: View {
     }
 
     private var testSection: some View {
-        Section("Test") {
-            Toggle("Apply Changes", isOn: $appliesTest)
+        Section(localized("Test")) {
+            Toggle(localized("Apply Changes"), isOn: $appliesTest)
             Button(testing == nil ? "Test on Current Tab" : "Stop Test") {
                 if let testing { testing.cancel(); return }
                 guard let tab = currentTab() else { testResult = "Select a tab first."; return }
@@ -750,34 +750,34 @@ struct ScriptHookSheet: View {
                 } catch { testResult = error.localizedDescription }
             }
             .disabled(testing == nil && routeProblem != nil)
-            Text("Testing sends a request to the selected provider.").font(.caption)
+            Text("Testing sends a request to the selected provider.", bundle: .module).font(.caption)
             if let testResult { Text(testResult).textSelection(.enabled) }
         }
     }
 
     private var whenSection: some View {
-        Section("When") {
-            Picker("Situation", selection: $draft.kind) {
-                Text("A new tab opens").tag(BrowserEventKind.tabOpened)
-                Text("A tab loads a page").tag(BrowserEventKind.pageLoaded)
-                Text("A tab's address changes").tag(BrowserEventKind.addressChanged)
-                Text("A tab's title changes").tag(BrowserEventKind.titleChanged)
-                Text("You select a tab").tag(BrowserEventKind.tabSelected)
-                Text("A tab closes").tag(BrowserEventKind.tabClosed)
-                Text("A download finishes").tag(BrowserEventKind.downloadFinished)
-                Text("You switch spaces").tag(BrowserEventKind.spaceSwitched)
+        Section(localized("When")) {
+            Picker(localized("Situation"), selection: $draft.kind) {
+                Text("A new tab opens", bundle: .module).tag(BrowserEventKind.tabOpened)
+                Text("A tab loads a page", bundle: .module).tag(BrowserEventKind.pageLoaded)
+                Text("A tab's address changes", bundle: .module).tag(BrowserEventKind.addressChanged)
+                Text("A tab's title changes", bundle: .module).tag(BrowserEventKind.titleChanged)
+                Text("You select a tab", bundle: .module).tag(BrowserEventKind.tabSelected)
+                Text("A tab closes", bundle: .module).tag(BrowserEventKind.tabClosed)
+                Text("A download finishes", bundle: .module).tag(BrowserEventKind.downloadFinished)
+                Text("You switch spaces", bundle: .module).tag(BrowserEventKind.spaceSwitched)
             }
             switch draft.kind {
             case .pageLoaded:
-                Picker("Loads", selection: $draft.loads) {
-                    Text("Only a new tab's first page").tag(HookPageLoads.firstAfterOpen)
-                    Text("Each new address").tag(HookPageLoads.newAddress)
-                    Text("Every load").tag(HookPageLoads.every)
+                Picker(localized("Loads"), selection: $draft.loads) {
+                    Text("Only a new tab's first page", bundle: .module).tag(HookPageLoads.firstAfterOpen)
+                    Text("Each new address", bundle: .module).tag(HookPageLoads.newAddress)
+                    Text("Every load", bundle: .module).tag(HookPageLoads.every)
                 }
             case .addressChanged:
-                Picker("Changes", selection: $draft.addressChanges) {
-                    Text("Only a new site").tag(HookAddressChanges.newHost)
-                    Text("Any change").tag(HookAddressChanges.any)
+                Picker(localized("Changes"), selection: $draft.addressChanges) {
+                    Text("Only a new site", bundle: .module).tag(HookAddressChanges.newHost)
+                    Text("Any change", bundle: .module).tag(HookAddressChanges.any)
                 }
             case .titleChanged:
                 setToggle("The page's title", .page, in: $draft.titleSources)
@@ -786,10 +786,10 @@ struct ScriptHookSheet: View {
             case .tabClosed:
                 if draft.guided {
                     ForEach(ScriptHookDraft.offeredCloseReasons, id: \.self) { reason in setToggle(ScriptHookDraft.label(of: reason), reason, in: $draft.closeReasons) }
-                    Text("Leave all reasons off to include every close.").font(.caption)
-                } else { Toggle("Only when you close the tab", isOn: Binding(get: { draft.closeReasons == [.user] }, set: { draft.closeReasons = $0 ? [.user] : [] })) }
+                    Text("Leave all reasons off to include every close.", bundle: .module).font(.caption)
+                } else { Toggle(localized("Only when you close the tab"), isOn: Binding(get: { draft.closeReasons == [.user] }, set: { draft.closeReasons = $0 ? [.user] : [] })) }
             case .spaceSwitched:
-                Toggle("Only when the Persona changes", isOn: $draft.personaChangesOnly)
+                Toggle(localized("Only when the Persona changes"), isOn: $draft.personaChangesOnly)
             default:
                 EmptyView()
             }
@@ -797,8 +797,8 @@ struct ScriptHookSheet: View {
     }
 
     private var whereSection: some View {
-        Section("Where") {
-            Toggle("Everywhere", isOn: $draft.isEverywhere)
+        Section(localized("Where")) {
+            Toggle(localized("Everywhere"), isOn: $draft.isEverywhere)
             if !draft.isEverywhere {
                 // Places read as Persona rule 7 names them; with one Persona, Where lists its spaces alone.
                 let namesPersonas = draft.places.count > 1
@@ -812,16 +812,16 @@ struct ScriptHookSheet: View {
                     }
                 }
             }
-            Picker("Sites", selection: $draft.siteChoice) {
-                Text("All Sites").tag(ScriptHookDraft.SiteChoice.all)
-                Text("Only These Sites").tag(ScriptHookDraft.SiteChoice.only)
-                Text("All Sites Except These").tag(ScriptHookDraft.SiteChoice.except)
+            Picker(localized("Sites"), selection: $draft.siteChoice) {
+                Text("All Sites", bundle: .module).tag(ScriptHookDraft.SiteChoice.all)
+                Text("Only These Sites", bundle: .module).tag(ScriptHookDraft.SiteChoice.only)
+                Text("All Sites Except These", bundle: .module).tag(ScriptHookDraft.SiteChoice.except)
             }
             if draft.siteChoice != .all {
-                TextField("Sites", text: $draft.siteList, prompt: Text("example.com, news.example.org"), axis: .vertical)
+                TextField(localized("Sites"), text: $draft.siteList, prompt: Text("example.com, news.example.org", bundle: .module), axis: .vertical)
             }
-            Picker("Engines", selection: $draft.engine) {
-                Text("Both").tag(ScriptHookDraft.EngineChoice.both)
+            Picker(localized("Engines"), selection: $draft.engine) {
+                Text("Both", bundle: .module).tag(ScriptHookDraft.EngineChoice.both)
                 Text(EngineKind.webKit.displayName).tag(ScriptHookDraft.EngineChoice.webKit)
                 Text(EngineKind.chromium.displayName).tag(ScriptHookDraft.EngineChoice.chromium)
             }

@@ -52,7 +52,7 @@ struct WebStoreInstallSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if start.update == nil {
-                TextField("Web Store address or extension identifier", text: $text)
+                TextField(localized("Web Store address or extension identifier"), text: $text)
                     .textFieldStyle(.roundedBorder)
                     .disabled(install != nil)
                     .onSubmit(begin)
@@ -61,7 +61,7 @@ struct WebStoreInstallSheet: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Getting the extension from the Web Store\u{2026}")
+                    Text("Getting the extension from the Web Store\u{2026}", bundle: .module)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -77,15 +77,15 @@ struct WebStoreInstallSheet: View {
             HStack {
                 Spacer()
                 if installedNote != nil {
-                    Button("Done", action: close)
+                    Button(localized("Done"), action: close)
                         .keyboardShortcut(.defaultAction)
                 } else {
-                    Button("Cancel", role: .cancel) {
+                    Button(localized("Cancel"), role: .cancel) {
                         install?.cancel()
                         close()
                     }
                     .keyboardShortcut(.cancelAction)
-                    Button("Continue", action: begin)
+                    Button(localized("Continue"), action: begin)
                         .keyboardShortcut(.defaultAction)
                         .disabled(!canBegin || install != nil)
                 }

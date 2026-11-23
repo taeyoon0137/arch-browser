@@ -10,8 +10,8 @@ struct TabPromptIndicator: View {
             Image(systemName: "exclamationmark.bubble.fill")
                 .font(.system(size: 10))
                 .foregroundStyle(Color.accentColor)
-                .help("Waiting for your answer")
-                .accessibilityLabel("Waiting for your answer")
+                .help(localized("Waiting for your answer"))
+                .accessibilityLabel(localized("Waiting for your answer"))
         }
     }
 }

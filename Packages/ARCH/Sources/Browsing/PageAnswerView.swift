@@ -57,7 +57,7 @@ struct PageExchangeView: View {
             // A reply stopped by closing the reader, as its first summary can be, is asked for again here.
             VStack(alignment: .leading, spacing: 6) {
                 note("Stopped.")
-                Button("Retry", action: retry)
+                Button(localized("Retry"), action: retry)
                     .controlSize(.small)
             }
         case .failed(let error):
@@ -137,12 +137,12 @@ struct PageAIOffNotice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Body text under the panel's semibold header, set apart from the note below by color alone.
-            Text("AI is off for \(PageAssistant.siteName(of: url)).")
+            Text("AI is off for \(PageAssistant.siteName(of: url)).", bundle: .module)
                 .font(.system(size: 13))
-            Text("Nothing from this site goes to any provider.")
+            Text("Nothing from this site goes to any provider.", bundle: .module)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-            Button("Allow AI on This Site") { settings.setAllowsAI(true, on: url) }
+            Button(localized("Allow AI on This Site")) { settings.setAllowsAI(true, on: url) }
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -159,7 +159,7 @@ struct PageAISiteRow: View {
         if let url = tab.url, PageAssistant.canRead(url), service.isAvailable(.pageReader) || service.isAvailable(.pageQuestion) {
             SiteSettingsDivider()
             SiteSettingsRow(symbol: "sparkles", title: "Allow AI on This Site", help: "Features such as the page reader can send this site\u{2019}s pages to the models you chose for them.") {
-                Toggle("Allow AI on This Site", isOn: Binding(get: { settings.allowsAI(on: url) }, set: { settings.setAllowsAI($0, on: url) }))
+                Toggle(localized("Allow AI on This Site"), isOn: Binding(get: { settings.allowsAI(on: url) }, set: { settings.setAllowsAI($0, on: url) }))
                     .toggleStyle(.switch)
             }
         }

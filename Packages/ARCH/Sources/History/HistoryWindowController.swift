@@ -90,7 +90,7 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
             return item
         case Self.searchItem:
             let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
-            item.searchField.placeholderString = "Search History"
+            item.searchField.placeholderString = localized("Search History")
             item.searchField.target = self
             item.searchField.action = #selector(search(_:))
             searchToolbarItem = item
@@ -116,11 +116,11 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         let rangeButton = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26), pullsDown: false)
         rangeButton.addItems(withTitles: ranges.map(\.title))
         let alert = NSAlert()
-        alert.messageText = "Clear History"
-        alert.informativeText = "Clearing removes the pages last visited in this range from the History window and address suggestions."
+        alert.messageText = localized("Clear History")
+        alert.informativeText = localized("Clearing removes the pages last visited in this range from the History window and address suggestions.")
         alert.accessoryView = rangeButton
-        alert.addButton(withTitle: "Clear History")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: localized("Clear History"))
+        alert.addButton(withTitle: localized("Cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             self?.model.clear(ranges[rangeButton.indexOfSelectedItem])
@@ -285,7 +285,7 @@ private struct HistoryList: View {
                         Button(urls.count == 1 ? "Open in New Tab" : "Open in \(urls.count) New Tabs") { model.open(urls) }
                         Button(urls.count == 1 ? "Copy Link" : "Copy Links") { model.copy(urls) }
                         Divider()
-                        Button("Delete") { model.delete(urls) }
+                        Button(localized("Delete")) { model.delete(urls) }
                     }
                 } primaryAction: { urls in
                     model.open(urls)

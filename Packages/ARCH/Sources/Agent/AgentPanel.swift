@@ -61,9 +61,9 @@ public struct AgentSessionPanel: View {
         }
         .confirmationDialog(raisingTo.map { "Raise this session to \($0.title)?" } ?? "", isPresented: Binding(get: { raisingTo != nil }, set: { if !$0 { raisingTo = nil } })) {
             if let raisingTo {
-                Button("Raise to \(raisingTo.title)") { session.setMode(raisingTo) }
+                Button(localized("Raise to \(raisingTo.title)")) { session.setMode(raisingTo) }
             }
-            Button("Cancel", role: .cancel) { raisingTo = nil }
+            Button(localized("Cancel"), role: .cancel) { raisingTo = nil }
         } message: {
             Text(raisingTo == .actInAgentTabs
                  ? "The agent then acts in its agent tabs on sites in scope without asking. Sensitive steps still ask."
@@ -92,20 +92,20 @@ public struct AgentSessionPanel: View {
                 }
                 Menu {
                     if !session.isTakenOver {
-                        Button("Take Over") { service.takeOver(session, showTab: actions.showTab) }
+                        Button(localized("Take Over")) { service.takeOver(session, showTab: actions.showTab) }
                             .disabled(session.hasEnded)
                     }
-                    if let keepTabs { Button("Keep Tabs", action: keepTabs) }
+                    if let keepTabs { Button(localized("Keep Tabs"), action: keepTabs) }
                     Divider()
-                    Button("Delete Session…", role: .destructive) { deleting = session }
+                    Button(localized("Delete Session…"), role: .destructive) { deleting = session }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Session")
-                .accessibilityLabel("Session actions")
+                .help(localized("Session"))
+                .accessibilityLabel(localized("Session actions"))
             }
             AgentTechnicalDetails(title: "Session details") {
                 AgentSectionBox {
@@ -117,7 +117,7 @@ public struct AgentSessionPanel: View {
                         HStack(spacing: 6) {
                             modeMenu
                             if service.canEditAttachments(of: session) {
-                                Button("Shared Tabs (\(session.handles.sharedTabIDs.count))") {
+                                Button(localized("Shared Tabs (\(session.handles.sharedTabIDs.count))")) {
                                     sharingProblem = nil
                                     showsSharedTabs.toggle()
                                 }
@@ -144,22 +144,22 @@ public struct AgentSessionPanel: View {
         let available = service.shareableTabs(for: session)
         let labels = AgentTabInfo.attachmentLabels(for: available)
         return VStack(alignment: .leading, spacing: 9) {
-            Text("Shared with this session").font(.headline)
-            if shared.isEmpty { Text("No shared tabs.").foregroundStyle(.secondary) }
+            Text("Shared with this session", bundle: .module).font(.headline)
+            if shared.isEmpty { Text("No shared tabs.", bundle: .module).foregroundStyle(.secondary) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(shared, id: \.self) { id in
                         let tab = visible.first { $0.id == id }
                         HStack {
                             if let tab { AgentAttachmentLabel(tab: tab) }
-                            else { Text("Unavailable tab") }
+                            else { Text("Unavailable tab", bundle: .module) }
                             Spacer()
-                            Button("Stop Sharing") { service.stopSharing(id, with: session) }
+                            Button(localized("Stop Sharing")) { service.stopSharing(id, with: session) }
                         }
                     }
                 }
             }.frame(maxHeight: shared.isEmpty ? 0 : min(160, CGFloat(shared.count) * 32))
-            Menu("Share Tab") {
+            Menu(localized("Share Tab")) {
                 ForEach(available) { tab in
                     Button(labels[tab.id] ?? tab.attachmentLabel) {
                         sharingProblem = service.share(tab, with: session) ? nil : "This tab changed or is no longer available."
@@ -256,12 +256,12 @@ public struct AgentSessionPanel: View {
 
     private var queued: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Queued").font(.system(size: AgentPanelMetrics.detailSize, weight: .medium)).foregroundStyle(.secondary)
+            Text("Queued", bundle: .module).font(.system(size: AgentPanelMetrics.detailSize, weight: .medium)).foregroundStyle(.secondary)
             ForEach(Array(session.queuedMessages.enumerated()), id: \.offset) { index, message in
                 HStack(alignment: .top) {
                     Text(message).font(.system(size: AgentPanelMetrics.supportingSize)).lineLimit(3)
                     Spacer()
-                    Button("Remove") { session.removeQueuedMessage(at: index) }
+                    Button(localized("Remove")) { session.removeQueuedMessage(at: index) }
                         .controlSize(.small)
                 }
             }
@@ -291,13 +291,13 @@ public struct AgentSessionPanel: View {
                 if session.isTurnRunning, session.messageDraft.isEmpty {
                     Button(action: session.stop) { Image(systemName: "stop.circle") }
                         .buttonStyle(.plain)
-                        .help("Stop")
-                        .accessibilityLabel("Stop")
+                        .help(localized("Stop"))
+                        .accessibilityLabel(localized("Stop"))
                 } else {
                     Button(action: send) { Image(systemName: "arrow.up.circle") }
                         .buttonStyle(.plain)
-                        .help("Send")
-                        .accessibilityLabel("Send")
+                        .help(localized("Send"))
+                        .accessibilityLabel(localized("Send"))
                         .disabled(session.messageDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.hasEnded)
                 }
             }
@@ -345,7 +345,7 @@ private struct AgentTranscriptRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(AgentPanelMetrics.bubblePadding)
                     .background(RoundedRectangle(cornerRadius: AgentPanelMetrics.boxRadius, style: .continuous).fill(AgentPanelFill.user))
-                    .accessibilityLabel("You: \(text)")
+                    .accessibilityLabel(localized("You: \(text)"))
             }
         case .reply(let text):
             VStack(alignment: .leading, spacing: 6) {
@@ -407,9 +407,9 @@ private struct AgentTranscriptRow: View {
             }
             Spacer(minLength: 0)
             if step.tabHandle != nil, let tabID = step.tabID {
-                Button("Show Tab") { actions.showTab(tabID) }
+                Button(localized("Show Tab")) { actions.showTab(tabID) }
                     .buttonStyle(.link)
-                    .help("Show the tab this step used")
+                    .help(localized("Show the tab this step used"))
             }
         }
         .font(.system(size: AgentPanelMetrics.detailSize))
@@ -440,9 +440,9 @@ private struct AgentTranscriptRow: View {
     @ViewBuilder private func button(for action: AgentErrorAction) -> some View {
         switch action {
         case .retry:
-            if let retry { Button("Retry", action: retry) }
-        case .signIn(let provider): Button("Sign In") { actions.signIn(provider) }
-        case .openAISettings: Button("Open AI Settings", action: actions.openAISettings)
+            if let retry { Button(localized("Retry"), action: retry) }
+        case .signIn(let provider): Button(localized("Sign In")) { actions.signIn(provider) }
+        case .openAISettings: Button(localized("Open AI Settings"), action: actions.openAISettings)
         }
     }
 
@@ -468,10 +468,10 @@ extension View {
     @MainActor public func confirmAgentSessionDeletion(_ selection: Binding<AgentSession?>, delete: @escaping (AgentSession) -> Void) -> some View {
         alert("Delete Session?", isPresented: Binding(get: { selection.wrappedValue != nil }, set: { if !$0 { selection.wrappedValue = nil } }),
               presenting: selection.wrappedValue) { session in
-            Button("Delete Session", role: .destructive) { delete(session) }
-            Button("Cancel", role: .cancel) {}
+            Button(localized("Delete Session"), role: .destructive) { delete(session) }
+            Button(localized("Cancel"), role: .cancel) {}
         } message: { session in
-            Text("This deletes “\(session.title)” and closes its remaining agent tabs. Tabs you kept stay open.")
+            Text("This deletes “\(session.title)” and closes its remaining agent tabs. Tabs you kept stay open.", bundle: .module)
         }
     }
 }

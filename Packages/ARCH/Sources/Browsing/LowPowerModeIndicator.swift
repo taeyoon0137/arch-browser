@@ -48,11 +48,11 @@ struct LowPowerModeIndicator: View {
             }
             .buttonStyle(.plain)
             .onHover { isHovering = $0 }
-            .help("Low Power Mode is on, so pages may animate more slowly. Click to open its settings.")
-            .contextMenu { Button("Low Power Mode Settings…", action: LowPowerMode.openSettings) }
-            .accessibilityLabel("Low Power Mode")
+            .help(localized("Low Power Mode is on, so pages may animate more slowly. Click to open its settings."))
+            .contextMenu { Button(localized("Low Power Mode Settings…"), action: LowPowerMode.openSettings) }
+            .accessibilityLabel(localized("Low Power Mode"))
             .accessibilityValue("On")
-            .accessibilityHint("Opens Low Power Mode settings")
+            .accessibilityHint(localized("Opens Low Power Mode settings"))
         }
     }
 }

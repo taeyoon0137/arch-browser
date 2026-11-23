@@ -60,7 +60,7 @@ private struct AgentPanelFrame: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Agent")
+                Text("Agent", bundle: .module)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if case .session = content {
@@ -88,7 +88,7 @@ private struct AgentPanelFrame: View {
                     AgentSessionPanel(service: agents, session: session, actions: actions, keepTabs: keepTabs)
                         .id(id)
                 } else {
-                    Text("This session was deleted.")
+                    Text("This session was deleted.", bundle: .module)
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -143,14 +143,14 @@ private struct ConnectedAgentRow: View {
             }
             .buttonStyle(.plain)
             .help("\(name)\n\(access)")
-            .accessibilityLabel("Show \(name)")
+            .accessibilityLabel(localized("Show \(name)"))
             .accessibilityValue(access)
             Button { agents.stopClient(grant.id) } label: {
                 Image(systemName: "xmark.circle")
             }
             .buttonStyle(.borderless)
-            .help("Disconnect \(name)")
-            .accessibilityLabel("Disconnect \(name)")
+            .help(localized("Disconnect \(name)"))
+            .accessibilityLabel(localized("Disconnect \(name)"))
         }
         .padding(.leading, 10)
         .padding(.trailing, 10)
@@ -196,7 +196,7 @@ private struct AgentsIndicatorMenu: View {
                     Button(waits ? "\(grant.client.displayName) \u{2014} Waiting for You" : grant.client.displayName) { windowModel.showClientPanel(grant.id) }
                 }
                 Divider()
-                Button("Stop All Agents", action: agents.stopAllAgents)
+                Button(localized("Stop All Agents"), action: agents.stopAllAgents)
             } label: {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11))
@@ -206,7 +206,7 @@ private struct AgentsIndicatorMenu: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .help(approvals.pending.isEmpty ? "Agents are working" : "An agent is waiting for you")
-            .accessibilityLabel("Agents")
+            .accessibilityLabel(localized("Agents"))
         }
     }
 }

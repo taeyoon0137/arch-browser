@@ -23,11 +23,11 @@ struct DownloadsSectionView: View {
         VStack(alignment: .leading, spacing: 4) {
             // The section's title and its action share one size and baseline, as the space header's line does.
             HStack(alignment: .firstTextBaseline) {
-                Text("Downloads")
+                Text("Downloads", bundle: .module)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Clear", action: session.clearFinishedDownloads)
+                Button(localized("Clear"), action: session.clearFinishedDownloads)
                     .buttonStyle(.plain)
                     .font(.system(size: 13))
                     // Brightens under the pointer while there is something to clear, as the new space button does.
@@ -38,7 +38,7 @@ struct DownloadsSectionView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 4)
             if session.downloads.isEmpty {
-                Text("No Downloads")
+                Text("No Downloads", bundle: .module)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -156,9 +156,9 @@ struct DownloadRowView: View {
                 if fileIssue != nil {
                     HStack {
                         if entry.containingFolder != nil {
-                            Button("Show Folder", action: showFolder)
+                            Button(localized("Show Folder"), action: showFolder)
                         }
-                        Button("Remove from List") { session.removeDownload(entry) }
+                        Button(localized("Remove from List")) { session.removeDownload(entry) }
                     }
                     .font(.system(size: 11))
                     .buttonStyle(.link)
@@ -193,21 +193,21 @@ struct DownloadRowView: View {
         .onChange(of: entry.fileURL) { fileIssue = nil }
         .contextMenu {
             if entry.state == .completed {
-                Button("Open", action: openFile)
+                Button(localized("Open"), action: openFile)
                 if entry.fileURL != nil {
-                    Button("Show in Finder", action: revealFile)
+                    Button(localized("Show in Finder"), action: revealFile)
                 }
                 if fileIssue != nil, entry.containingFolder != nil {
-                    Button("Show Folder", action: showFolder)
+                    Button(localized("Show Folder"), action: showFolder)
                 }
                 if entry.renamedPath != nil {
-                    Button("Restore Original Name") {
+                    Button(localized("Restore Original Name")) {
                         showIssue(entry.accessFile(onFailure: .restore) { _ in entry.restoreOriginalName() })
                     }
                 }
                 Divider()
             }
-            Button("Remove from List") { session.removeDownload(entry) }
+            Button(localized("Remove from List")) { session.removeDownload(entry) }
         }
     }
 }
