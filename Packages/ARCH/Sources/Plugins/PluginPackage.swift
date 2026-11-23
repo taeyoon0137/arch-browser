@@ -151,6 +151,18 @@ public struct PluginPackage: Identifiable, Sendable {
         return fields["theme"] != nil
     }
 
+    /// Copies an installed package's folder to `root`, which must not exist yet, and reads it there with the installed plugin's origin and proof, which its install checked, so that a copy in another Persona keeps a signed package's proof. A failure leaves nothing at `root`.
+    static func stage(copyOf folder: URL, at root: URL, origin: PluginOrigin, proof: PluginProof?, runtimes: [any PluginRuntime]) throws -> PluginPackage {
+        try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do {
+            try FileManager.default.copyItem(at: folder, to: root)
+            return try PluginPackage(at: root, origin: origin, proof: proof, runtimes: runtimes)
+        } catch {
+            try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+    }
+
     /// Writes the text of each file at its package path in `root`, which must not exist yet, and reads the package. Throws `PluginError.invalidPackage` for a path that breaks the rules of `file(_:in:)`. A failure leaves nothing at `root`.
     static func stage(_ files: [String: String], at root: URL, origin: PluginOrigin) throws -> PluginPackage {
         try stage(at: root, origin: origin) {

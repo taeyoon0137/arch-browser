@@ -1,12 +1,13 @@
 // The session serves tab and page calls from plugins and hook scripts (`docs/plugins.md`, Manager, runtimes, and the browser host).
 // It lists each Persona's open tabs as plugins see them, omitting agent tabs. Suggested names follow AI hook rules (`docs/hooks.md`, hook decision 13), and their events name the caller's cause.
-// It also gives plugins access to tabs' pages. One host serves every Persona's plugin manager and the JavaScript hook runner.
+// It also gives plugins access to tabs' pages and to each Persona's own history. One host serves every Persona's plugin manager and the JavaScript hook runner.
 import ARCHEngine
 import Events
 import Foundation
+import History
 import Plugins
 
-/// Implements plugin tab, download, notification, and page access through a browser session.
+/// Implements plugin tab, download, history, notification, and page access through a browser session.
 @MainActor
 public final class SessionPluginBrowserHost: PluginBrowserHost {
     private weak var session: BrowserSession?
@@ -37,6 +38,14 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
     public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool {
         guard let entry = session?.downloads.first(where: { $0.id == id && $0.personaID == persona }) else { return false }
         return entry.rename(to: name)
+    }
+
+    /// The Persona's own visits in the session's history (`HistoryStore.pages(in:matching:limit:where:)`).
+    public func history(matching text: String, limit: Int, in persona: PersonaID, where isIncluded: @escaping @Sendable (URL) -> Bool) async -> [PluginHistoryEntry] {
+        guard let session else { return [] }
+        return await session.history.pages(in: persona, matching: text, limit: limit, where: isIncluded).map {
+            PluginHistoryEntry(url: $0.url, title: $0.title, lastVisit: $0.lastVisit, visitCount: $0.visitCount)
+        }
     }
 
     /// Asks the session to post a local notification under the plugin's name.
@@ -93,7 +102,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         session.events.withCause(cause) { select(tab, in: session) }
     }
 
-    /// The tab moves as a drag to a tab's row (`BrowserSession.moveTab(_:to:after:)`) or a drop on a space's symbol (`moveTab(_:toSpace:)`) moves it, or to the end of its own list (`moveTabToListEnd(_:pinned:)`), and keeps its list, so that it stays pinned or open. A move next to a tab of another space first goes to that space, which takes the tab out of its split view and has each window that selects it follow it there, with the `spaceSwitched` carrying the cause. A tab that a space's lists do not show, a favorite's or a small window's, and a live folder's tab, which keeps its source's order (live folder rule 4) and which nothing else enters, neither move nor take a tab next to them.
+    /// The tab moves as a drag to a tab's row (`BrowserSession.moveTab(_:to:after:)`) or a drop on a space's symbol (`moveTab(_:toSpace:)`) moves it, or to the end of its own list (`moveTabToListEnd(_:pinned:)`), and keeps its list, so that it stays pinned or open; `setPinned(_:tab:cause:)` changes the list. A move next to a tab of another space first goes to that space, which takes the tab out of its split view and has each window that selects it follow it there, with the `spaceSwitched` carrying the cause. A tab that a space's lists do not show, a favorite's or a small window's, neither move nor take a tab next to them.
     public func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool {
         guard let session, let tab = pluginTab(id) else { return false }
         switch place {
@@ -114,9 +123,16 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
         return true
     }
 
-    /// Whether a plugin moves the tab and puts a tab next to it: a space's tab that its lists show, outside live folders.
+    /// The tab pins or unpins as Pin Tab and Unpin Tab do (`BrowserSession.togglePinned(_:)`): pinning saves the page it shows as its saved page, unpinning forgets it, and a tab in a folder leaves the folder. A tab that a plugin does not move, a favorite's or a small window's, keeps its state.
+    public func setPinned(_ isPinned: Bool, tab id: UUID, cause: BrowserEventCause) -> Bool {
+        guard let session, let tab = pluginTab(id), Self.isMovable(tab, in: session) else { return false }
+        if tab.isPinned != isPinned { session.events.withCause(cause) { session.togglePinned(tab) } }
+        return true
+    }
+
+    /// Whether a plugin moves the tab and puts a tab next to it: a space's tab that its lists show.
     private static func isMovable(_ tab: Tab, in session: BrowserSession) -> Bool {
-        tab.spaceID != nil && tab.isListedInSidebar && tab.liveItemID == nil && !session.folderTree.isLive(tab.folderID)
+        tab.spaceID != nil && tab.isListedInSidebar
     }
 
     /// Selects the tab in a window of its Persona only, so that a window of another Persona keeps its Persona / Space, which selecting a favorite's tab of another Persona would change: the window of the Persona that shows it, else the front main window on its space, else the front main window of its Persona, which then shows the tab's space, or for a favorite's tab stays on its own. None selects it without such a window. A window that has the tab selected already stays as it is, so that the internal page, palette, or find bar that the user has open there stays.

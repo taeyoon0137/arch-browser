@@ -11,6 +11,26 @@
         }
       }
     },
+    "CEF did not initialize." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CEF를 초기화하지 못했습니다."
+          }
+        }
+      }
+    },
+    "CEF refused the Persona's profile folder." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CEF에서 페르소나의 프로필 폴더를 거부했습니다."
+          }
+        }
+      }
+    },
     "Chromium did not load it." : {
       "localizations" : {
         "ko" : {

@@ -648,6 +648,60 @@ public final class PluginManager: ObservableObject {
         }
     }
 
+    /// The two versions of an installed pair, as another Persona's manager stages them together (`stage(_:)` with a `PluginPairCopy`): each version's package folder, origin, proof, and engine, the version listed first leading. Nil for a plugin outside a pair and once the manager is closed.
+    public func pairForCopy(of id: PluginID) -> PluginPairCopy? {
+        guard !isClosed, let lead = leadVersion(of: id), let counterpart = plugins.first(where: { $0.id == lead.counterpart }) else { return nil }
+        let versions = [lead, counterpart].compactMap { plugin -> PluginPairCopy.Version? in
+            guard let engine = plugin.pairEngine, let folder = packages[plugin.id]?.rootURL else { return nil }
+            return PluginPairCopy.Version(folder: folder, origin: plugin.origin, proof: plugin.proof, engine: engine)
+        }
+        return versions.count == 2 ? PluginPairCopy(versions: versions) : nil
+    }
+
+    /// Stages both versions of another Persona's pair for one review, as `stage(_:)` stages a package, each with its installed origin and proof, the leading version first, with the engine it is the version for. When the second cannot stage, the first goes too.
+    public func stage(_ copy: PluginPairCopy) async throws -> [PluginStagedVersion] {
+        let runtimes = Array(runtimes.values)
+        var staged: [PluginStagedVersion] = []
+        do {
+            for version in copy.versions {
+                let package = try await stage { root in
+                    try PluginPackage.stage(copyOf: version.folder, at: root, origin: version.origin, proof: version.proof, runtimes: runtimes)
+                }
+                staged.append(PluginStagedVersion(package: package, engine: version.engine))
+            }
+        } catch {
+            staged.forEach { discard($0.package) }
+            throw error
+        }
+        return staged
+    }
+
+    /// Why the two staged versions of a pair cannot install together in this Persona: a plugin of either's identifier is installed here already, which the copy would update rather than add, or an engine that runs them does not run its version; nil otherwise.
+    public func pairInstallRefusal(for versions: [PluginStagedVersion]) -> String? {
+        guard versions.count == 2, let lead = versions.first else { return localized("Only the two versions of a pair install together.") }
+        if let installed = versions.lazy.compactMap({ version in self.plugins.first { $0.manifest.id == version.package.manifest.id || $0.id == version.package.manifest.id } }).first {
+            return localized("\u{201C}\(installed.manifest.name)\u{201D} is installed in this Persona already. Remove it first to install both versions here.")
+        }
+        for version in versions where version.package.kind == .webExtension && !version.package.engineChecks.isEmpty {
+            if case let .refused(reason)? = version.package.engineChecks[version.engine] { return reason }
+        }
+        return lead.package.kind == .webExtension ? nil : localized("Only the two versions of a pair install together.")
+    }
+
+    /// Installs both staged versions of a pair as one new plugin with the parts of `grant` that each manifest asks for: the first as a new plugin, then the second as its version for its engine (`install(_:grant:isEnabled:asVersionOf:for:)`). When the second fails, the first is removed again, and the second's package stays staged, so that the review can try again or discard both. Throws `PluginError.invalidPackage` with `pairInstallRefusal(for:)`'s reason, and as `install(_:grant:isEnabled:asVersionOf:for:)` throws.
+    @discardableResult
+    public func installPair(_ versions: [PluginStagedVersion], grant: PluginGrant, isEnabled: Bool) throws -> PluginID {
+        if let refusal = pairInstallRefusal(for: versions) { throw PluginError.invalidPackage(refusal) }
+        let lead = try install(versions[0].package, grant: grant, isEnabled: isEnabled)
+        do {
+            try install(versions[1].package, grant: grant, isEnabled: isEnabled, asVersionOf: lead, for: versions[1].engine)
+        } catch {
+            try? remove(lead)
+            throw error
+        }
+        return lead
+    }
+
     /// Installs a staged package in the Persona with the part of `grant` that its manifest asks for, enabled or not as `isEnabled` says, and returns the plugin's identifier. With `asVersionOf` and `engine`, the package joins that plugin as its version for the engine, on or off as the plugin is. Otherwise a package with an installed plugin's identifier updates `package.updates`, or the first plugin with the identifier: the new package replaces the old one, the plugin keeps its place, storage, secrets, pair, and dismissed notes, and its running instance stops, so that its next use starts the new code. A new plugin that could have joined its counterpart as a version has, as has the counterpart, the note asking for a version dismissed for the engines the other runs on. A new plugin takes nothing from an install entry or a pair record with its identifier that the list leaves out, as a removal whose write failed leaves them: its entry goes after the others without the old dismissed notes, and the records go, so that it joins a pair only as the user chooses. Throws `PluginError.invalidPackage` for a version that cannot join (see `versionJoin(_:joining:for:)`) and for an update that would leave a version of a pair on no engine (`updateRefusal(for:updating:)`), `PluginError.closed` once the manager is closed, as for a review whose Persona the user deleted while it asked for Touch ID, and the file system's error when the package cannot move or `plugins.json` cannot record the install, as on a full disk. In the last case the staged package goes back to staging, the package it replaced back to its place, and the lists back to how they were, so that the review can install it again or discard it.
     @discardableResult
     public func install(_ package: PluginPackage, grant: PluginGrant, isEnabled: Bool, asVersionOf version: PluginID? = nil, for engine: EngineKind? = nil) throws -> PluginID {
@@ -1314,14 +1368,14 @@ public final class PluginManager: ObservableObject {
 
     // MARK: Events
 
-    /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. A plugin never receives the events its own calls caused, such as the title change of its rename, and receives at most 10 events for one subject and 60 in all within a minute, so a listener that reacts to another plugin's or a hook's changes cannot keep them going without end. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
+    /// Hands a browser event of the Persona to each enabled plugin whose manifest lists its kind, starting the plugin first if it has not started, in the view its grant allows: addresses with `tabs` or on the pages its granted sites cover, and a download's identifiers only. A plugin receives the tab events of its own calls, as a web extension hears of the tabs its own calls create, update, select, move, and remove: the opening, selection, first address, and first load of a tab it opens, and the events of its closes, selections, and moves. Only the title change of its own rename stays away (`isOwnRename(_:of:)`). A plugin receives at most 10 events for one subject and 60 in all within a minute, so a listener that reacts to its own, another plugin's, or a hook's changes cannot keep them going without end. What a plugin's listener throws goes nowhere; a background script that hangs counts as a failure, as for commands.
     /// A plugin with `ai` receives its events through the shared hook scheduler instead (`hookStep(for:view:)`): one step for each, which joins the event's chain at `hookOrder`.
     private func deliver(_ event: BrowserEvent) {
         guard !isClosed else { return }
         endSiteAccess(after: event)
         var steps: [AIHookStep] = []
         for installed in plugins where installed.isEnabled && installed.unavailability == nil && installed.manifest.events.contains(event.kind) {
-            if event.cause?.origin == .plugin(id: installed.id.rawValue) { continue }
+            if Self.isOwnRename(event, of: installed.id) { continue }
             let grant = installed.grant
             // Only a plugin that reaches its sites `whenInvoked` needs the tab, whose access its addresses need.
             let tab = grant.siteAccess == .whenInvoked ? eventTab(event) : nil
@@ -1336,6 +1390,11 @@ public final class PluginManager: ObservableObject {
         guard let ai, !steps.isEmpty else { return }
         ai.hooks.scheduler.post(steps, kind: event.kind.rawValue, subject: event.subject, event: event.id, document: Self.document(of: event),
                                 documentID: event.tab?.documentID, urls: event.urls, causes: Self.owners(causing: event))
+    }
+
+    /// Whether the event is a title change that the plugin's own rename caused, its suggested name or its removal, which the plugin does not hear: a web extension sets no tab's title, so no extension hears of one it set, and a listener that renames a tab on each title change would otherwise answer itself. A page's own title comes later, without the plugin's cause, also in a tab that the plugin opened.
+    private static func isOwnRename(_ event: BrowserEvent, of id: PluginID) -> Bool {
+        event.kind == .titleChanged && event.cause?.origin == .plugin(id: id.rawValue)
     }
 
     /// The step that runs the plugin's listeners for one event under the plugin's feature, so that the scheduler applies the feature's checks: it is on and automatic, has a model of its own, the event's addresses are not excluded from AI, and the daily limit for automatic requests and the monthly spending limit leave room. It runs while the plugin is still enabled with `ai`, after the plugin's earlier steps, within the scheduler's 30-second timeout; what the listener throws goes nowhere. `tab` and `document` are the event's tab and, for a page, address, or title event, its address, to which the step's renames of that tab apply.
@@ -1545,6 +1604,16 @@ public final class PluginManager: ObservableObject {
         browserHost?.renameDownload(id, to: name, in: persona) ?? false
     }
 
+    /// A plugin's history search gives at most this many entries.
+    static let historyLimit = 100
+
+    /// The Persona's history pages that match the text, at most `limit`, for a plugin with the grant: for a plugin with `ai`, none on a site excluded from AI, which its code could send to a model as text, as the sites excluded when the search starts give them. Without the host, none.
+    fileprivate func history(matching text: String, limit: Int, for grant: PluginGrant) async -> [PluginHistoryEntry] {
+        guard let browserHost else { return [] }
+        let excluded = grant.permissions.contains(.ai) ? ai?.settings.excludedSites : nil
+        return await browserHost.history(matching: text, limit: limit, in: persona) { url in excluded.map { AISitePattern.allowsAI(on: url, excluding: $0) } ?? true }
+    }
+
     /// Posts a notification for an enabled plugin, at most once every ten seconds, with at most 100 characters of title and 500 of body.
     fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
         let now = Date()
@@ -1638,7 +1707,13 @@ public final class PluginManager: ObservableObject {
         return try browserHost?.moveTab(id, to: place, cause: Self.cause(plugin)) ?? false
     }
 
-    /// The cause of a change that the plugin's call makes, by which the plugin hears of none of the events it posts.
+    /// Pins or unpins one of the Persona's tabs that `personaTabs()` lists, with the plugin as the cause of its events. Throws `PluginError.notGranted` for any other tab.
+    fileprivate func setPinned(_ isPinned: Bool, tab id: UUID, by plugin: PluginID) throws -> Bool {
+        guard personaTabs().contains(where: { $0.id == id }) else { throw PluginError.notGranted(id) }
+        return browserHost?.setPinned(isPinned, tab: id, cause: Self.cause(plugin)) ?? false
+    }
+
+    /// The cause of a change that the plugin's call makes, by which the plugin tells the title changes of its own renames (`isOwnRename(_:of:)`).
     private static func cause(_ plugin: PluginID) -> BrowserEventCause {
         BrowserEventCause(origin: .plugin(id: plugin.rawValue))
     }
@@ -1952,6 +2027,16 @@ final class ScopedPluginContext: PluginPanelContext {
         return manager.renameDownload(id, to: name)
     }
 
+    /// A limit past `PluginManager.historyLimit` gives that many, and one below 1 none.
+    func history(matching text: String, limit: Int) async throws -> [PluginHistoryEntry] {
+        guard !hasEnded else { throw PluginError.stopped }
+        try require(.history)
+        guard let manager else { return [] }
+        let entries = await manager.history(matching: text, limit: min(max(limit, 0), PluginManager.historyLimit), for: grant)
+        guard !hasEnded else { throw PluginError.stopped }
+        return entries
+    }
+
     func notify(title: String, body: String) throws {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.notifications)
@@ -1988,7 +2073,7 @@ final class ScopedPluginContext: PluginPanelContext {
         return manager.shown(tab, to: grant, of: pluginID)
     }
 
-    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, selecting, and moving do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes, selects, and moves its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
+    /// Only a web page opens, so no plugin opens a file, an internal page, or a script address. Opening, closing, selecting, moving, and pinning do not belong to the running hook step: they act on the tab as it is when the call arrives, except that once the scheduler has stopped the step, its listener closes, selects, moves, and pins its event's tab no more, as it renames it no more, since by then the tab can show the user's next document.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)
@@ -2023,7 +2108,15 @@ final class ScopedPluginContext: PluginPanelContext {
         try manageTab(id, inStep: false) { try $0.moveTab(id, to: place, by: pluginID) }
     }
 
-    /// A close, a selection, or a move of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
+    func setPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool {
+        try manageTab(id, inStep: true) { try $0.setPinned(isPinned, tab: id, by: pluginID) }
+    }
+
+    func panelSetPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool {
+        try manageTab(id, inStep: false) { try $0.setPinned(isPinned, tab: id, by: pluginID) }
+    }
+
+    /// A close, a selection, a move, or a pin of the tab, which throws `PluginError.stopped` for the running hook step's tab once the scheduler has stopped the step, unless `inStep` is false, as for a panel's call.
     private func manageTab<Value>(_ id: PluginTab.ID, inStep: Bool, _ change: (PluginManager) throws -> Value) throws -> Value {
         guard !hasEnded else { throw PluginError.stopped }
         try require(.manageTabs)

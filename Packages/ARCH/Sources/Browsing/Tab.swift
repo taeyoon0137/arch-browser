@@ -5,7 +5,6 @@ import ARCHEngine
 import Combine
 import Events
 import Foundation
-import LiveFolders
 
 /// A tab's engine contents, sidebar state, page prompts, and navigation reports.
 @MainActor public final class Tab: ObservableObject, Identifiable {
@@ -43,10 +42,6 @@ import LiveFolders
     @Published public internal(set) var savedPage: SavedPage?
     /// The folder that holds the tab, always one in the tab's space and pinned or open list. The session sets it and clears it when the tab leaves that list.
     @Published public internal(set) var folderID: UUID?
-    /// The ID of the live folder item whose tab this is, in the live folder `folderID` (live folder rule 4), or nil for every other tab. The session sets it as it adds the item's tab and clears it when the tab leaves the folder, which makes it an ordinary tab.
-    @Published var liveItemID: String?
-    /// The item as its folder last listed it, for the row's state symbol and tooltip, or nil before the folder's stored items name it and once the source no longer lists it. The session sets it; `session.json` keeps only `liveItemID`.
-    @Published var liveItem: LiveItem?
     /// The window that selects the tab updates this, and so does a window that stops showing it. Archiving closes unpinned tabs whose dates are too old, and automatic unloading unloads tabs that no window shows (`TabUnloading.tabsToUnload`).
     var lastActivatedAt = Date()
     @Published public private(set) var title: String
@@ -67,7 +62,7 @@ import LiveFolders
     private(set) var hasTypedInput = false
     /// Set by the session while an automatic unload asks the page to leave, until the page answers, the user asks it to leave, or another web contents takes its place: a Chromium page's leave-page question then gets Stay without a card, which keeps the page (bookmark rule 5).
     var answersBeforeUnloadWithStay = false
-    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets it, and the window that selects the tab clears it. A live folder item's tab follows its item's read state instead (live folder rule 5).
+    /// Set for a tab that a page opened behind the selected tab, until the user selects it, for a dot on its row. The session sets it, and the window that selects the tab clears it.
     @Published public internal(set) var isUnread = false
     /// Set when the page's process quit and nothing has loaded since. The window covers such a page with a notice and a Reload button.
     @Published public private(set) var hasCrashed = false
@@ -103,8 +98,8 @@ import LiveFolders
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
     /// The session sets this callback to name the web extension of the tab's Persona whose page is at an address (`BrowserSession.extensionName(ofPageAt:in:)`), which the tab's prompts name in place of the identifier that the address has as its host (`PromptSiteIdentity`), `shownTitle` and `shownPageTitle` put in place of a title that only repeats such a page's address, and Now Playing names as the page's site. Without it they show the identifier, or the address that Chromium reports as the title. The session has a tab on such a page announce a change when its extension's name changes (`BrowserSession.extensionNamesDidChange(from:to:in:)`).
     var extensionName: ((URL) -> String?)?
-    /// Opens a link in a new tab, optionally selecting it in the source window.
-    var openURLInNewTab: ((URL, Bool) -> Void)?
+    /// Opens a link from the context menu in a new tab behind the selected one.
+    var openURLInNewTab: ((URL) -> Void)?
     /// The session sets this callback to show the search engine's results for text selected in the page in a new tab, for the context menu's Search with.
     var searchInNewTab: ((String) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
@@ -206,16 +201,15 @@ import LiveFolders
         restoreEngine(engine, state: state, at: unloaded.url)
     }
 
-    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, its saved page, its folder, `folderID` being the record's folder while that folder exists, and its live folder item while it is in that folder. The tab counts as restored, and loading its saved page does not count as a visit, apart from an item's tab, which the user opens as a new page: its first load is a visit, and a file it points at downloads (`docs/bookmarks.md`, Items as tabs).
+    /// Takes what a saved tab's record keeps besides its page and place, as relaunching reopens the tab: when it was last active, its names, its saved page, and its folder, `folderID` being the record's folder while that folder exists. The tab counts as restored, and loading its saved page does not count as a visit.
     func restore(_ record: SessionSnapshot.TabRecord, folderID: UUID?) {
         lastActivatedAt = record.lastActivatedAt ?? Date()
         customTitle = record.customTitle
         suggestedTitle = record.suggestedTitle
         savedPage = record.savedPage
         self.folderID = folderID
-        liveItemID = folderID == nil ? nil : record.liveItemID
-        isRestored = liveItemID == nil
-        recordedURL = isRestored ? record.url?.withoutCredentials : nil
+        isRestored = true
+        recordedURL = record.url?.withoutCredentials
     }
 
     /// Takes what a closed tab's record keeps besides its page and place, as ⌘Z reopens the tab: the user's name for it, its saved page, and its folder, `folderID` being the record's folder while that folder exists.
@@ -232,13 +226,13 @@ import LiveFolders
         savedPage = SavedPage(url: pinned.url, title: pinned.title)
     }
 
-    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, live folder item, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
+    /// Sends with each change to what `session.json` keeps of the tab: its page, engine, space, pin, saved page, folder, title, and names. The page's loading state, icon, sound, and crash notice are left out, because each save reads every tab's restorable page state.
     var persistedChanges: AnyPublisher<Void, Never> {
         func changes<Value>(_ publisher: Published<Value>.Publisher) -> AnyPublisher<Void, Never> {
             // A published value also sends its current value to each new subscriber, which is no change.
             publisher.dropFirst().map { _ in () }.eraseToAnyPublisher()
         }
-        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($savedPage), changes($folderID), changes($liveItemID), changes($url),
+        return Publishers.MergeMany(changes($webContents), changes($spaceID), changes($isPinned), changes($savedPage), changes($folderID), changes($url),
                                     changes($title), changes($customTitle), changes($suggestedTitle), changes($fallbackPreference))
             .eraseToAnyPublisher()
     }
@@ -246,16 +240,16 @@ import LiveFolders
     /// Whether its space's list shows the tab. Everything that lists, picks, or closes a space's tabs, such as the sidebar, ⌘-numbers, the tab switcher, the palette, Close Other Tabs, the selection after a tab closes, and archiving, passes over a tab it does not show.
     var isListedInSidebar: Bool { !isInSmallWindow }
 
-    /// The user's name for the tab, a hook's name for its page, or the page's title. A live folder item's tab shows its item's title, which its saved page keeps, while it is on the saved page, and takes no hook's name.
-    public var displayTitle: String { Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: url, livePage: liveItemID == nil ? nil : savedPage) }
+    /// The user's name for the tab, a hook's name for its page, or the page's title.
+    public var displayTitle: String { Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: title, url: url) }
 
     /// The page's title, or its host if it has no title.
     public var pageTitle: String { Self.pageTitle(title: title, url: url) }
 
-    /// `displayTitle`, with the name of the web extension whose own page the tab shows (`extensionName`), as its options page in a tab, in place of a page title that only repeats the address (`titleRepeatsAddress(_:of:)`), which would show the extension's identifier. A user's name, a hook's name, a live folder item's title, and a page's own title stay. The sidebar's rows, the window's title, the tab switcher, the palette's tab rows, the pane of a tab shown in another window, the Bookmarks menu, floating developer tools, Edit Saved Address…, a new favorite, the print job, and the file names of Export as PDF and a capture show it; plugins, hooks, agents, scripts, and the tab close log read `displayTitle`.
+    /// `displayTitle`, with the name of the web extension whose own page the tab shows (`extensionName`), as its options page in a tab, in place of a page title that only repeats the address (`titleRepeatsAddress(_:of:)`), which would show the extension's identifier. A user's name, a hook's name, and a page's own title stay. The sidebar's rows, the window's title, the tab switcher, the palette's tab rows, the pane of a tab shown in another window, the Bookmarks menu, floating developer tools, Edit Saved Address…, a new favorite, the print job, and the file names of Export as PDF and a capture show it; plugins, hooks, agents, scripts, and the tab close log read `displayTitle`.
     var shownTitle: String {
         guard let name = extensionPageName else { return displayTitle }
-        return Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: name, url: url, livePage: liveItemID == nil ? nil : savedPage)
+        return Self.displayTitle(customTitle: customTitle, suggestedTitle: suggestedTitle, title: name, url: url)
     }
 
     /// `pageTitle` as `shownTitle` names the page: the extension's name in place of a title that only repeats the address of the extension's page. Renaming the tab to it restores the page's title, as renaming it to `pageTitle` does for any other page (`BrowserWindowModel.renameTab(_:to:)`). Sharing the page, Now Playing without the page's media metadata, and Use Current Page as Saved Page take it.
@@ -277,11 +271,9 @@ import LiveFolders
     }
 
     /// The name a tab with these inputs shows, which the event source computes from a change's new value before the tab publishes it.
-    nonisolated static func displayTitle(customTitle: String?, suggestedTitle: SuggestedTitle?, title: String, url: URL?, livePage: SavedPage?) -> String {
+    nonisolated static func displayTitle(customTitle: String?, suggestedTitle: SuggestedTitle?, title: String, url: URL?) -> String {
         if let customTitle { return customTitle }
-        if let livePage {
-            if !livePage.title.isEmpty, url.map({ $0.isSamePage(as: livePage.url) }) ?? true { return livePage.title }
-        } else if let name = suggestedTitle?.title { return name }
+        if let name = suggestedTitle?.title { return name }
         return pageTitle(title: title, url: url)
     }
 
@@ -368,7 +360,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
             didFinishLoad?()
         }
         if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
-        // Record a page when it finishes loading, when its title is usually known. An agent's tab records none (Persona rule 6).
+        // Record a page when it finishes loading, when its title is usually known, in the tab's Persona. An agent's tab records none (`docs/agents.md`, agent decision 10), so an agent's pages enter no Persona's suggestions.
         if !isLoading, !isDownloadOnly, agentOwnerID == nil, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)
@@ -417,7 +409,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         requestPermission(request, completion)
     }
 
-    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again, and a tab that a plugin or a web extension opened onto a file, or that a page of such a tab opened onto one, before the user acted in it or loaded an address there, downloads nothing and closes at once (`PageDownloadGate.isHeldUntilUserActs`). An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
+    /// A tab that opened straight onto a file closes once its download starts. A restored tab like that does not fetch the file again, and a tab that a script plugin opened onto a file, or that a page of such a tab opened onto one, before the user acted in it or loaded an address there, downloads nothing and closes at once (`PageDownloadGate.isHeldUntilUserActs`). An agent's tab downloads only what the user allowed (rule P6): any other download stops, and the user's card about it asks for the address again after Allow.
     public func webContents(_ webContents: any EngineWebContents, shouldDownload url: URL, hasPage: Bool) -> Bool {
         if let owner = agentOwnerID {
             guard agentMonitor?.agentTab(self, owner: owner, mayDownload: url) == true else {
@@ -571,7 +563,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// Only web addresses open in a tab; a link for another app offers just Copy Link.
     private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
-        return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url, false) }
+        return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
     }
 
     /// Offers an explicit download for an HTTP link or image in the context menu.
@@ -701,17 +693,13 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 // MARK: Navigation checks and link previews
 
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
-    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rules P13 and P16), whoever started the navigation; a link or window that opens elsewhere is asked about as a popup, not as a hop of the tab's navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
+    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rules P13 and P16), whoever started the navigation; a link or window that opens elsewhere is asked about as a popup, not as a hop of the tab's navigation. A web or file link clicked with Command or the middle button goes back to the engine, which opens it in a new web contents with the page's referrer and reports it as the page's new tab (`openNewTab`), on both engines; an agent's tab opens none. A Shift-clicked web link opens a preview after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
         let kind: AgentLoadKind = action.disposition != .currentTab ? .popup : action.isRedirect ? .redirect : .navigation
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url, kind: kind) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
-           ["http", "https", "file"].contains(scheme), let openURLInNewTab {
-            guard agentOwnerID == nil else { return .cancel }
-            if webContents.engineKind == .webKit { return .openLinkInNewTab }
-            let foreground = action.disposition == .newForegroundTab
-            DispatchQueue.main.async { openURLInNewTab(action.url, foreground) }
-            return .cancel
+           ["http", "https", "file"].contains(scheme), openNewTab != nil {
+            return agentOwnerID == nil ? .openLinkInNewTab : .cancel
         }
         guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }

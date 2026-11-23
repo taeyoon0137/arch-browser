@@ -26,15 +26,10 @@ public enum SidebarRecords {
             fields["homeURL"] = space.homeURL.map { .text($0.absoluteString) }
             append(.space, space.id.uuidString, fields)
         }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
         for folder in state.folders {
             var fields: [String: SyncValue] = ["persona": .reference(personaName(folder.personaID)),
                                                "space": .reference(folder.spaceID.uuidString), "name": .text(folder.name)]
             fields["parent"] = folder.parentID.map { .reference($0.uuidString) }
-            if let live = folder.live {
-                fields["live"] = .text(String(decoding: try encoder.encode(live), as: UTF8.self))
-            }
             append(.folder, folder.id.uuidString, fields)
         }
         for favorite in state.favorites {

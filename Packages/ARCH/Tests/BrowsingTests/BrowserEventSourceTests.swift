@@ -73,20 +73,6 @@ import Testing
         #expect(BrowserEventSource.kind(of: tab) == .open)
     }
 
-    @Test func liveFolderRefreshesDoNotOpenOrRenameTheItemsTabs() throws {
-        let (tab, _) = makeTab(space: space, pinned: true)
-        let url = try #require(tab.url)
-        tab.liveItemID = "item-1"
-        tab.savedPage = SavedPage(url: url, title: "Feed title")
-        source.follow(tabs: [tab], postingNewTabs: true)
-        #expect(recorder.events.isEmpty)
-        #expect(!BrowserHooks.suggest("A different name", for: url, to: tab, applying: true))
-        #expect(tab.displayTitle == "Feed title")
-        tab.savedPage = SavedPage(url: url, title: "Edited feed title")
-        #expect(tab.displayTitle == "Edited feed title")
-        #expect(recorder.events.map(\.kind) == [.titleChanged])
-    }
-
     @Test func closesPostEachReasonWithTheTabsLastAddress() {
         let (tab, _) = makeTab("https://example.org/last", space: space, pinned: true)
         source.follow(tabs: [tab], postingNewTabs: false)

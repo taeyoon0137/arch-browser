@@ -194,7 +194,7 @@ import Testing
         let research = try #require(browser.openAgentTab(url: address, engine: nil, owner: UUID(), folderName: "Research", in: space.id))
         browser.keepTabs(ofFolder: try #require(research.folderID))
         main.selectTab(pin.id)
-        pin.openURLInNewTab?(address, false)
+        pin.openURLInNewTab?(address)
         let backgroundLink = try #require(browser.tabs.last)
         #expect(backgroundLink.isUnread && main.selectedTab === pin)
         pin.searchInNewTab?("daily browser")
@@ -221,7 +221,10 @@ import Testing
         try browser.saveNow().get()
         chromium.unavailableStorageID = nil
         let reopened = try launch()
-        for tab in requested + [popup] {
+        // Small windows' tabs are not saved (`docs/windows-personas.md`, open decision 4).
+        let small = [externalTab, agentLink].filter(\.isInSmallWindow)
+        #expect(small.allSatisfy { tab in !reopened.tabs.contains { $0.id == tab.id } })
+        for tab in requested + [popup] where !small.contains(where: { $0 === tab }) {
             let restored = try #require(reopened.tabs.first { $0.id == tab.id })
             reopened.loadPage(of: restored)
             #expect(restored.engineKind == .chromium)

@@ -13,7 +13,7 @@ public struct AgentSettings: Codable, Equatable, Sendable {
     public var agentsPersonaID: UUID?
     /// New sessions start in: the mode of an in-app session the user starts, and the ceiling of one that `arch-cli task` starts.
     public var newSessionMode = AgentAccessLevel.askBeforeActing
-    /// Let In-App Agents Search History: whether in-app sessions may call `search_history`, over the history every Persona shares.
+    /// Let In-App Agents Search History: whether in-app sessions may call `search_history`, over the history of the session's Persona.
     public var inAppAgentsSearchHistory = false
     /// Keep Codex's Copy of Agent Conversations: deleting a session then leaves its thread in Codex's folder.
     public var keepsCodexCopy = false
@@ -97,7 +97,7 @@ public struct AgentGrant: Codable, Identifiable, Equatable, Sendable {
 
 /// The grant sheet's extra scopes, all off by default.
 public struct AgentGrantScopes: Codable, Equatable, Sendable {
-    /// `search_history`, over the history every Persona shares (Persona rule 6).
+    /// `search_history`, over the history of the grant's Persona (Persona rule 6).
     public var searchHistory = false
     /// `task/start` and `agent/run`: in-app sessions and agent runs on the user's AI subscription.
     public var startTasks = false

@@ -154,7 +154,6 @@ import Terminal
         session.showAgentModelSettings = { PreferencesWindowController.shared.showAgentModelSettings($0) }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
-        session.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.openTerminalTyping = { TerminalWindowController.shared.show(typing: $0) }
         PreferencesWindowController.session = session
         // Before the windows open. It checks the seal of `agent.json`, keeps the session's agent-only Persona in line with it, and listens only once Allow Outside Clients is on.
@@ -512,6 +511,7 @@ import Terminal
         spacesMenu.addItem(withTitle: localized("New Persona\u{2026}"), action: #selector(newPersona), keyEquivalent: "")
         spacesMenu.addItem(withTitle: localized("Rename Persona\u{2026}"), action: #selector(renamePersona), keyEquivalent: "")
         spacesMenu.addItem(withTitle: localized("Delete Persona\u{2026}"), action: #selector(deletePersona), keyEquivalent: "")
+        spacesMenu.addItem(withTitle: localized("Merge Persona Into\u{2026}"), action: #selector(mergePersona), keyEquivalent: "")
         mainMenu.addItem(submenu(spacesMenu, title: localized("Spaces")))
 
         // Filled each time it opens (`menuWillOpen(_:)`). Until then it holds only No Bookmarks, so Settings ▸ Shortcuts, which lists the menu bar at launch, lists none of its items.
@@ -668,18 +668,23 @@ import Terminal
     @objc private func goBack() { session.activeWindow?.goBack() }
     @objc private func goForward() { session.activeWindow?.goForward() }
     @objc private func goHome() { session.activeWindow?.goHome() }
-    /// Asks for the range to clear in the History window's sheet, as its own Clear History… does.
-    @objc private func clearHistory() { historyWindow.showClearHistory() }
+    /// Asks for the range to clear in the History window's sheet, as its own Clear History… does, on the active window's Persona.
+    @objc private func clearHistory() { historyWindow.showClearHistory(persona: historyPersona) }
     @objc private func clearSiteData() { session.activeWindow?.confirmClearSiteData() }
 
-    @objc private func showHistory() { historyWindow.show() }
+    @objc private func showHistory() { historyWindow.show(persona: historyPersona) }
 
-    /// The History window, made on first use. Its pages open as new tabs in the sidebar target, which comes to the front.
+    /// The Persona whose history the History menu shows: the active window's, or the default one while no browser window is open, as for the Plugins menu.
+    private var historyPersona: UUID { session.activeWindow?.personaID ?? Persona.defaultID }
+
+    /// The History window, made on first use. Its pages open as new tabs of the shown Persona, in the space where a new tab of the Persona goes, selected in the sidebar target, which comes to the front.
     private lazy var historyWindow: HistoryWindowController = {
-        let history = HistoryWindowController(store: session.history)
-        history.openURL = { [weak self] url in
+        let history = HistoryWindowController(store: session.history) { [weak self] in
+            self?.session.personas.map { HistoryPersona(id: $0.id, name: $0.name) } ?? []
+        }
+        history.openURL = { [weak self] url, persona in
             guard let session = self?.session else { return }
-            session.openTab(url: url)
+            session.openTab(url: url, in: session.preferredSpace(in: persona).id)
             session.sidebarTarget().nsWindow?.makeKeyAndOrderFront(nil)
         }
         return history
@@ -753,20 +758,12 @@ import Terminal
                 menu.addItem(.sectionHeader(title: title))
             case .favorite(let id, let title, let url):
                 menu.addItem(bookmarkItem(title: title, url: url, choice: .favorite(id)))
-            case .tab(let id, let title, let url, let isUnread):
-                let item = bookmarkItem(title: title, url: url, choice: .tab(id))
-                // A live folder's unread item shows a dot where a checkmark would.
-                if isUnread {
-                    item.onStateImage = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: localized("Unread"))?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular))
-                    item.state = .on
-                }
-                menu.addItem(item)
-            case .submenu(let title, let entries, let unreadCount):
+            case .tab(let id, let title, let url):
+                menu.addItem(bookmarkItem(title: title, url: url, choice: .tab(id)))
+            case .submenu(let title, let entries):
                 let folderMenu = NSMenu(title: title)
                 fillBookmarks(folderMenu, with: entries)
-                let item = submenu(folderMenu, title: title)
-                if unreadCount > 0 { item.badge = NSMenuItemBadge(count: unreadCount) }
-                menu.addItem(item)
+                menu.addItem(submenu(folderMenu, title: title))
             case .divider:
                 menu.addItem(.separator())
             case .noBookmarks:
@@ -806,6 +803,10 @@ import Terminal
     @objc private func deletePersona() {
         let target = frontSidebarTarget()
         target.confirmDeletePersona(ofSpace: target.currentSpace)
+    }
+    @objc private func mergePersona() {
+        let target = frontSidebarTarget()
+        target.confirmMergePersona(ofSpace: target.currentSpace)
     }
     @objc private func moveToMainWindow() {
         guard let window = session.activeWindow, window.kind == .small else { return }
@@ -911,6 +912,10 @@ import Terminal
         if item.action == #selector(deletePersona) {
             guard let session, let window = session.lastMainWindow else { return false }
             return window.canShowPersonaSheet && session.canDeletePersona(window.personaID)
+        }
+        if item.action == #selector(mergePersona) {
+            guard let session, let window = session.lastMainWindow else { return false }
+            return window.canShowPersonaSheet && !session.personaMergeTargets(for: window.personaID).isEmpty
         }
         if item.action == #selector(openInSplitView) {
             return session?.lastMainWindow?.canOpenSelectedTabInSplitView == true
@@ -1106,7 +1111,7 @@ import Terminal
 
     // MARK: Tab close log
 
-    private lazy var closeLogWindow = TabCloseLogWindowController(log: session.closeLog)
+    private lazy var closeLogWindow = TabCloseLogWindowController(log: session.closeLog, startLog: session.engineStartLog)
 
     @objc private func showTabCloseLog() { closeLogWindow.show() }
 

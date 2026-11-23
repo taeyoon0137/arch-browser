@@ -76,18 +76,22 @@ public protocol PluginContext: AnyObject {
     func downloads() throws -> [PluginDownload]
     /// Needs `downloads.rename`; returns false when the completed file cannot take the suggested name.
     func renameDownload(_ id: UUID, to name: String) throws -> Bool
+    /// Needs `history`. The pages that the plugin's Persona visited whose address or title contains the text, ignoring the spaces at either end and the case of ASCII letters, or all of them for empty text, most visited first, each with its title, visit count, and last visit in that Persona, so that nothing of other Personas' visits shows. At most `limit` entries, and never more than 100 (`PluginManager.historyLimit`). A plugin with `ai` gets none on a site excluded from AI, and still up to `limit` of the others. Throws `PluginError.stopped` once the instance stops, also while the search runs.
+    func history(matching text: String, limit: Int) async throws -> [PluginHistoryEntry]
     /// Posts a local notification under this plugin's name. Needs `notifications`.
     func notify(title: String, body: String) throws
     /// Sends one bounded HTTPS request to a host in the `network` grant, without browser cookies or credentials.
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
-    /// Needs `tabs.manage`. Opens a tab at the web address, `http` or `https`, in the space the options name, which must be one of the Persona's, or else in the last main window's space while it is the Persona's, or the Persona's first space, in the engine they name or the default engine, where a new tab that the user opens goes, and selects it unless they say not to, as `selectTab(_:)` does. Returns its identifier. The tab's opening, its selection with the space switch that the selection brings, and its first address and first load come with the plugin as their cause, so the plugin does not hear of them. Until the user acts in the tab's page, as with a click there, or loads an address in it, it downloads no file without asking, and at a file's address it closes without downloading. Throws `PluginError.invalidAddress` for any other address, `notGranted` for a space that is not the Persona's, `tooManyTabs` once the plugin has opened 10 tabs within the last minute, and `closed` once the Persona is gone.
+    /// Needs `tabs.manage`. Opens a tab at the web address, `http` or `https`, in the space the options name, which must be one of the Persona's, or else in the last main window's space while it is the Persona's, or the Persona's first space, in the engine they name or the default engine, where a new tab that the user opens goes, and selects it unless they say not to, as `selectTab(_:)` does. Returns its identifier. The tab's opening, its selection with the space switch that the selection brings, and its first address and first load come with the plugin as their cause, and the plugin hears of them, as a web extension hears of the tabs it creates. Until the user acts in the tab's page, as with a click there, or loads an address in it, it downloads no file without asking, and at a file's address it closes without downloading. Throws `PluginError.invalidAddress` for any other address, `notGranted` for a space that is not the Persona's, `tooManyTabs` once the plugin has opened 10 tabs within the last minute, and `closed` once the Persona is gone.
     func openTab(_ url: URL, _ options: PluginOpenTabOptions) throws -> PluginTab.ID
-    /// Needs `tabs.manage`. Closes one of the tabs the plugin reaches without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads and keeps its place, a favorite's tab ends, a live folder item's tab is dismissed, and any other tab joins the closed list, from which Reopen Last Closed Tab and the Library reopen it; ⌘Z then reopens none of the tabs that the user closed before it, as after a page's own close. The close, and the selection of another tab in each window that had the tab selected, come with the plugin as their cause, so the plugin does not hear of them. Throws `PluginError.notGranted` for any other tab, and `stopped` for the event's tab of a hook step of the plugin once the scheduler has stopped the step, since the tab can show another document by then; a script plugin's panel closes outside any step.
+    /// Needs `tabs.manage`. Closes one of the tabs the plugin reaches without asking its page, as a web extension's `tabs.remove` does: a pinned tab unloads and keeps its place, a favorite's tab ends, and any other tab joins the closed list, from which Reopen Last Closed Tab and the Library reopen it; ⌘Z then reopens none of the tabs that the user closed before it, as after a page's own close. The close, and the selection of another tab in each window that had the tab selected, come with the plugin as their cause, and the plugin hears of them. Throws `PluginError.notGranted` for any other tab, and `stopped` for the event's tab of a hook step of the plugin once the scheduler has stopped the step, since the tab can show another document by then; a script plugin's panel closes outside any step.
     func closeTab(_ id: PluginTab.ID) throws
-    /// Needs `tabs.manage`. Selects one of the tabs the plugin reaches in a browser window of its Persona: the window that shows the tab, else the front main window on its space, else the front main window of its Persona, which then shows its space. A window of another Persona keeps its Persona / Space, so without a main window of the Persona nothing changes, and no window or the app comes forward. A window that has the tab selected already stays as it is, with the internal page over it, if any, while selecting another tab ends the window's internal page, palette, and find bar, as any selection of another tab does. The selection, and the space switch that it brings, come with the plugin as their cause, so the plugin does not hear of them. Throws `PluginError.notGranted` for any other tab, and `stopped` as `closeTab(_:)` does for a stopped hook step's tab.
+    /// Needs `tabs.manage`. Selects one of the tabs the plugin reaches in a browser window of its Persona: the window that shows the tab, else the front main window on its space, else the front main window of its Persona, which then shows its space. A window of another Persona keeps its Persona / Space, so without a main window of the Persona nothing changes, and no window or the app comes forward. A window that has the tab selected already stays as it is, with the internal page over it, if any, while selecting another tab ends the window's internal page, palette, and find bar, as any selection of another tab does. The selection, and the space switch that it brings, come with the plugin as their cause, and the plugin hears of them. Throws `PluginError.notGranted` for any other tab, and `stopped` as `closeTab(_:)` does for a stopped hook step's tab.
     func selectTab(_ id: PluginTab.ID) throws
-    /// Needs `tabs.manage`. Moves one of the tabs the plugin reaches to the place, as a drag in the sidebar or a drop on a space's symbol moves it, within the spaces of its Persona. The tab stays pinned or open, so a plugin, whose close only unloads a pinned tab, can neither drop a pinned tab's saved page by moving it among the open tabs nor pin one. A move to another space takes the tab out of its split view, and each window that has it selected follows it to that space. Returns whether the tab is at the place afterwards, also when it was there already; false where it cannot go there: a favorite's tab and a small window's tab, which have no place in a space's list, a live folder item's tab, which stays in its folder, a place next to such a tab or to the tab itself, and a place next to a tab of the other list. The space switch that a move brings comes with the plugin as its cause, so the plugin does not hear of it. Throws `PluginError.notGranted` for a tab the plugin does not reach, the tab moved or the one it goes next to, and for a space that is not the Persona's, and `stopped` as `closeTab(_:)` does for a stopped hook step's tab.
+    /// Needs `tabs.manage`. Moves one of the tabs the plugin reaches to the place, as a drag in the sidebar or a drop on a space's symbol moves it, within the spaces of its Persona. The tab stays pinned or open; `setPinned(_:tab:)` pins and unpins it. A move to another space takes the tab out of its split view, and each window that has it selected follows it to that space. Returns whether the tab is at the place afterwards, also when it was there already; false where it cannot go there: a favorite's tab and a small window's tab, which have no place in a space's list, a place next to such a tab or to the tab itself, and a place next to a tab of the other list. The space switch that a move brings comes with the plugin as its cause, and the plugin hears of it. Throws `PluginError.notGranted` for a tab the plugin does not reach, the tab moved or the one it goes next to, and for a space that is not the Persona's, and `stopped` as `closeTab(_:)` does for a stopped hook step's tab.
     func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool
+    /// Needs `tabs.manage`. Pins or unpins one of the tabs the plugin reaches, as a web extension's `tabs.update` with `pinned` does and as Pin Tab and Unpin Tab do: a pinned tab saves the page it shows as its saved page, and an unpinned one forgets it (bookmark rule 2), so that the plugin's close of it then removes it rather than unloading it; a tab in a folder leaves it. Returns whether the tab is pinned as asked afterwards, also when it was already; false for a favorite's tab and a small window's tab, which have no place in a space's lists. Throws `PluginError.notGranted` for any other tab and `stopped` as `closeTab(_:)` does for a stopped hook step's tab.
+    func setPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool
     /// Needs `tabs.rename`, which `tabs.manage` includes. Sets the tab's suggested name, or with nil removes it, under the rules of `PluginBrowserHost.renameTab(_:to:showing:cause:applying:)`, for the document the tab shows when the call arrives; while a hook step of the plugin runs, a rename of its event's tab is for its event's document, and once the scheduler has stopped the step, the tab does not take it; a script plugin's panel renames outside any step. Returns whether the tab took the change. Throws `PluginError.notGranted` for a tab the plugin does not reach.
     func renameTab(_ id: PluginTab.ID, to name: String?) throws -> Bool
     /// Needs `ai`. The AI interface under the plugin's own feature, `plugin.<id>`, whose requests carry text only: each request goes out under that feature and its route, whatever feature, route, or model it names. The client belongs to the plugin's hook step that runs at this call, if any, and a script plugin's panel's to none: its requests count toward the scheduler's pause, end with `cancelled` when the scheduler stops the step, and end at once after that, so a plugin asks for a client for each request. Every request stops when the instance stops.
@@ -105,6 +109,8 @@ extension PluginContext {
     public func selectedTab() throws -> PluginTab? { nil }
     public func downloads() throws -> [PluginDownload] { throw PluginError.permissionDenied(.downloads) }
     public func renameDownload(_ id: UUID, to name: String) throws -> Bool { throw PluginError.permissionDenied(.renameDownloads) }
+    /// A context that searches no history, such as a hook script's, refuses it.
+    public func history(matching text: String, limit: Int) async throws -> [PluginHistoryEntry] { throw PluginError.permissionDenied(.history) }
     public func notify(title: String, body: String) throws { throw PluginError.permissionDenied(.notifications) }
     public func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw PluginError.permissionDenied(.network) }
 
@@ -122,6 +128,10 @@ extension PluginContext {
     }
 
     public func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool {
+        throw PluginError.permissionDenied(.manageTabs)
+    }
+
+    public func setPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool {
         throw PluginError.permissionDenied(.manageTabs)
     }
 
@@ -162,6 +172,8 @@ public protocol PluginBrowserHost: AnyObject {
     func tabs(in persona: PersonaID) -> [PluginTab]
     func downloads(in persona: PersonaID) -> [PluginDownload]
     func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool
+    /// The Persona's history pages as `PluginContext.history(matching:limit:)` describes, at most `limit` of those whose address `isIncluded` accepts, which runs off the main actor.
+    func history(matching text: String, limit: Int, in persona: PersonaID, where isIncluded: @escaping @Sendable (URL) -> Bool) async -> [PluginHistoryEntry]
     func postNotification(pluginName: String, title: String, body: String)
     /// Sets the tab's suggested name under the AI hooks' rules (`docs/hooks.md`, hook decision 13): the name's first line, trimmed and cut to `PluginTab.maximumNameLength` characters, while the tab still shows `document`, ignoring the fragment, the user has not named it, and the user has not turned down a suggested name for that document. Nil removes a suggested name for the document. A nil `document` stands for the tab's committed address now. The change's events carry `cause`. With `applying` false, nothing changes and the answer says whether the tab would take it. False for a favorite's tab, which goes by its favorite's name, for an agent tab, and for a tab that is gone.
     func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool
@@ -177,12 +189,17 @@ public protocol PluginBrowserHost: AnyObject {
     func selectTab(_ id: UUID, cause: BrowserEventCause)
     /// Moves a tab that `tabs(in:)` lists as `PluginContext.moveTab(_:to:)` describes, next to another such tab of its Persona or to a space, with the space switch it brings carrying `cause`, and returns whether the tab is at the place afterwards. Throws `PluginError.notGranted` for a space that is not the tab's Persona's; false for an agent tab and a tab that is gone, also as the one to go next to.
     func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool
+    /// Pins or unpins a tab that `tabs(in:)` lists as `PluginContext.setPinned(_:tab:)` describes, with the changes it brings carrying `cause`, and returns whether the tab is pinned as asked afterwards; false for an agent tab and a tab that is gone.
+    func setPinned(_ isPinned: Bool, tab id: UUID, cause: BrowserEventCause) -> Bool
 }
 
 extension PluginBrowserHost {
     public func downloads(in persona: PersonaID) -> [PluginDownload] { [] }
     public func renameDownload(_ id: UUID, to name: String, in persona: PersonaID) -> Bool { false }
+    public func history(matching text: String, limit: Int, in persona: PersonaID, where isIncluded: @escaping @Sendable (URL) -> Bool) async -> [PluginHistoryEntry] { [] }
     public func postNotification(pluginName: String, title: String, body: String) {}
+    /// A host that keeps no pinned tabs, such as a test's, pins none.
+    public func setPinned(_ isPinned: Bool, tab id: UUID, cause: BrowserEventCause) -> Bool { false }
 }
 
 /// A Persona's download metadata exposed to a plugin.
@@ -205,6 +222,28 @@ public struct PluginDownload: Identifiable, Hashable, Sendable {
     public var scriptValue: PluginValue {
         .object(["id": .string(id.uuidString), "name": .string(name), "state": .string(state),
                  "completedBytes": .number(Double(completedBytes)), "totalBytes": .number(Double(totalBytes))])
+    }
+}
+
+/// A page of a Persona's browsing history as a plugin sees it: what that Persona's visits of the page recorded.
+public struct PluginHistoryEntry: Hashable, Sendable {
+    public let url: URL
+    /// The page's title at the Persona's last visit that had one; empty without one.
+    public let title: String
+    public let lastVisit: Date
+    public let visitCount: Int
+
+    public init(url: URL, title: String, lastVisit: Date, visitCount: Int) {
+        self.url = url
+        self.title = title
+        self.lastVisit = lastVisit
+        self.visitCount = visitCount
+    }
+
+    /// The page as `arch.history.search` gives it: `{url, title, lastVisit, visitCount}`, with the last visit in ISO 8601, as events give their dates.
+    public var scriptValue: PluginValue {
+        .object(["url": .string(url.absoluteString), "title": .string(title), "lastVisit": .string(ISO8601DateFormatter().string(from: lastVisit)),
+                 "visitCount": .number(Double(visitCount))])
     }
 }
 

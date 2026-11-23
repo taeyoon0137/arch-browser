@@ -1,13 +1,24 @@
-// History window that lists visited pages by day, searches them, and deletes single pages or a time range.
+// History window that lists one Persona's visited pages by day, searches them, and deletes single pages or a time range in that Persona or in every Persona.
 import AppKit
 import Combine
 import SwiftUI
 
-/// Owns the History window of one store, which stays in memory when closed and reloads the store each time it becomes key. The store answers off the main thread, so the list fills in once the read is done. The app makes one for the session's store.
+/// A Persona as the History window lists it: a surface without a space, so it names the Persona alone (`docs/windows-personas.md`, Persona rule 7).
+public struct HistoryPersona: Hashable, Identifiable {
+    public let id: UUID
+    public let name: String
+
+    public init(id: UUID, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+/// Owns the History window of one store, which stays in memory when closed and reloads the store each time it becomes key. The window shows one Persona's pages, with a picker once there are two Personas. The store answers off the main thread, so the list fills in once the read is done. The app makes one for the session's store.
 public final class HistoryWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSToolbarItemValidation {
 
-    /// Opens a page from the window in a new browser tab.
-    public var openURL: ((URL) -> Void)? {
+    /// Opens a page from the window in a new browser tab of the shown Persona, which it passes.
+    public var openURL: ((URL, UUID) -> Void)? {
         get { model.openURL }
         set { model.openURL = newValue }
     }
@@ -20,8 +31,9 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
     /// Validates the toolbar again when rows arrive, which they do off any user event.
     private var daysSubscription: AnyCancellable?
 
-    public init(store: HistoryStore) {
-        let model = HistoryModel(store: store)
+    /// `personas` gives the session's Personas in their order, which the window reads each time it reloads.
+    public init(store: HistoryStore, personas: @escaping () -> [HistoryPersona]) {
+        let model = HistoryModel(store: store, personas: personas)
         self.model = model
         let window = NSWindow(contentViewController: NSHostingController(rootView: HistoryList(model: model)))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -44,16 +56,17 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         return nil
     }
 
-    /// Brings the History window to the front with the store's current entries. Becoming key loads them; a window that is key already, or that does not become key while the app is in the background, loads here.
-    public func show() {
+    /// Brings the History window to the front with the Persona's current entries, as the History menu does for the active window's Persona. Becoming key loads them; a window that is key already, or that does not become key while the app is in the background, loads here. While the Clear History sheet shows, the window keeps the Persona that the sheet clears.
+    public func show(persona: UUID) {
+        if window?.attachedSheet == nil { model.persona = persona }
         if window?.isKeyWindow == true || !NSApp.isActive { model.reload() }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Brings the History window to the front and asks for a time range to clear, unless it shows that sheet already.
-    public func showClearHistory() {
-        show()
+    /// Brings the History window to the front on the Persona and asks for a time range to clear, unless it shows that sheet already.
+    public func showClearHistory(persona: UUID) {
+        show(persona: persona)
         if window?.attachedSheet == nil { chooseRangeToClear() }
     }
 
@@ -100,30 +113,49 @@ public final class HistoryWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    /// Clear History… waits for pages to clear. A search that shows none leaves it enabled, since it clears by time.
+    /// Clear History… waits for pages to clear. A search that shows none leaves it enabled, since it clears by time, and so do two Personas, since it can clear every Persona's.
     public func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
-        item.itemIdentifier != Self.clearItem || model.hasEntries
+        item.itemIdentifier != Self.clearItem || model.hasEntries || model.personas.count > 1
     }
 
     @objc private func search(_ sender: NSSearchField) {
         model.query = sender.stringValue
     }
 
-    /// Asks for a time range in a sheet, as the system's own browser does, then clears it.
+    /// Asks for a time range in a sheet, as the system's own browser does, and once there are two Personas also whether to clear the shown Persona's history or every Persona's, then clears it. The shown Persona comes first, so the default choice clears only what the window shows.
     @objc private func chooseRangeToClear() {
         guard let window else { return }
         let ranges = HistoryClearRange.allCases
         let rangeButton = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26), pullsDown: false)
         rangeButton.addItems(withTitles: ranges.map(\.title))
+        let persona = model.persona
         let alert = NSAlert()
         alert.messageText = localized("Clear History")
+        if model.personas.count > 1 {
+            let personaButton = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 26), pullsDown: false)
+            personaButton.addItems(withTitles: [localized("In \u{201C}\(model.personaName)\u{201D}"), localized("In Every Persona")])
+            let stack = NSStackView(views: [rangeButton, personaButton])
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.frame = NSRect(x: 0, y: 0, width: 220, height: 60)
+            alert.accessoryView = stack
+            alert.informativeText = localized("Clearing removes the pages last visited in this range from the History window and address suggestions, in the Persona you choose or in every Persona.")
+            alert.addButton(withTitle: localized("Clear History"))
+            alert.addButton(withTitle: localized("Cancel"))
+            alert.beginSheetModal(for: window) { [weak self] response in
+                guard response == .alertFirstButtonReturn else { return }
+                self?.model.clear(ranges[rangeButton.indexOfSelectedItem], in: personaButton.indexOfSelectedItem == 0 ? persona : nil)
+            }
+            return
+        }
         alert.informativeText = localized("Clearing removes the pages last visited in this range from the History window and address suggestions.")
         alert.accessoryView = rangeButton
         alert.addButton(withTitle: localized("Clear History"))
         alert.addButton(withTitle: localized("Cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
-            self?.model.clear(ranges[rangeButton.indexOfSelectedItem])
+            // With one Persona, the range clears every Persona's visits, those of Personas deleted since launch among them, whose removal waits for the next launch.
+            self?.model.clear(ranges[rangeButton.indexOfSelectedItem], in: nil)
         }
     }
 }
@@ -162,28 +194,52 @@ private struct HistoryDay: Identifiable {
     var entries: [HistoryEntry]
 }
 
-/// Holds every entry in the store and the filtered, grouped list the window shows.
+/// Holds every entry of the shown Persona and the filtered, grouped list the window shows.
 private final class HistoryModel: ObservableObject {
     @Published private(set) var days: [HistoryDay] = []
     @Published var selection: Set<URL> = []
+    /// The session's Personas as the last reload read them.
+    @Published private(set) var personas: [HistoryPersona] = []
+    /// The Persona whose pages the window shows. Choosing another one loads its pages.
+    @Published var persona = UUID() {
+        didSet {
+            guard persona != oldValue else { return }
+            selection = []
+            entries = []
+            regroup()
+            reload()
+        }
+    }
     var query = "" {
         didSet { regroup() }
     }
-    var openURL: ((URL) -> Void)?
+    var openURL: ((URL, UUID) -> Void)?
 
     private let store: HistoryStore
+    private let readPersonas: () -> [HistoryPersona]
     private var entries: [HistoryEntry] = []
     /// Counts reloads and deletions. A read's rows apply only while no later reload or deletion has come, so that an earlier read neither puts back rows a deletion removed nor replaces a later read's rows.
     private var generation = 0
 
-    init(store: HistoryStore) {
+    init(store: HistoryStore, personas: @escaping () -> [HistoryPersona]) {
         self.store = store
+        readPersonas = personas
     }
 
+    var personaName: String {
+        personas.first { $0.id == persona }?.name ?? ""
+    }
+
+    /// Reads the Personas again, and the shown Persona's pages. A shown Persona that the user deleted gives way to the first one.
     func reload() {
+        personas = readPersonas()
+        if !personas.contains(where: { $0.id == persona }), let first = personas.first {
+            // Setting the Persona reloads.
+            return persona = first.id
+        }
         generation += 1
         let generation = generation
-        store.entries(since: .distantPast) { [weak self] entries in
+        store.entries(since: .distantPast, in: persona) { [weak self] entries in
             guard let self, self.generation == generation else { return }
             self.entries = entries
             self.regroup()
@@ -192,7 +248,7 @@ private final class HistoryModel: ObservableObject {
 
     /// Opens the pages newest first, so the oldest ends up selected.
     func open(_ urls: Set<URL>) {
-        ordered(urls).forEach { openURL?($0) }
+        ordered(urls).forEach { openURL?($0, persona) }
     }
 
     /// Whether the store has pages, whatever the search shows.
@@ -220,17 +276,17 @@ private final class HistoryModel: ObservableObject {
     /// The rows leave the list at once; a read that started before the removal is dropped.
     func delete(_ urls: Set<URL>) {
         generation += 1
-        store.remove(urls)
+        store.remove(urls, in: persona)
         entries.removeAll { urls.contains($0.url) }
         regroup()
     }
 
-    /// The store runs its queries in order, so the reload sees the removal.
-    func clear(_ range: HistoryClearRange) {
+    /// Clears the range in the Persona, or in every Persona for nil. The store runs its queries in order, so the reload sees the removal.
+    func clear(_ range: HistoryClearRange, in persona: UUID?) {
         if let start = range.start(now: Date(), calendar: .current) {
-            store.removeEntries(since: start)
+            store.removeEntries(since: start, in: persona)
         } else {
-            store.clear()
+            store.clear(persona: persona)
         }
         reload()
     }
@@ -263,6 +319,23 @@ private struct HistoryList: View {
     @ObservedObject var model: HistoryModel
 
     var body: some View {
+        VStack(spacing: 0) {
+            if model.personas.count > 1 {
+                Picker(localized("Persona"), selection: $model.persona) {
+                    ForEach(model.personas) { Text($0.name).tag($0.id) }
+                }
+                .fixedSize()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                Divider()
+            }
+            list
+        }
+        .frame(minWidth: 420, minHeight: 300)
+    }
+
+    private var list: some View {
         Group {
             if model.days.isEmpty {
                 Text(model.query.isEmpty ? localized("No History") : localized("No Results"))
@@ -295,7 +368,6 @@ private struct HistoryList: View {
                 .onCopyCommand(perform: model.selection.isEmpty ? nil : { model.copyItems(model.selection) })
             }
         }
-        .frame(minWidth: 420, minHeight: 300)
     }
 
     private static func title(for day: Date) -> String {

@@ -108,7 +108,7 @@ public enum FirstSyncMerge {
     /// The hierarchy and values used to match an unshared local record to a server record.
     private enum MatchKey: Hashable {
         case space(persona: String, name: String)
-        case folder(persona: String, space: String, parent: SyncValue?, name: String, live: SyncValue?)
+        case folder(persona: String, space: String, parent: SyncValue?, name: String)
         case favorite(persona: String, address: String)
         case tab(persona: String, space: String, folder: SyncValue?)
     }
@@ -123,7 +123,7 @@ public enum FirstSyncMerge {
         case .folder:
             guard case .reference(let space) = record[.space], case .text(let name) = record[.name],
                   isOptionalReference(record[.parent]) else { return nil }
-            return .folder(persona: persona, space: space, parent: record[.parent], name: name, live: record[.live])
+            return .folder(persona: persona, space: space, parent: record[.parent], name: name)
         case .favorite:
             guard case .text(let url) = record[.url], address(of: record) != nil else { return nil }
             return .favorite(persona: persona, address: url)

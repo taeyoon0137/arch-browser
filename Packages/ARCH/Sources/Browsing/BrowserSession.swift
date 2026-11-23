@@ -1,6 +1,6 @@
 // The session owns each engine application and one runtime per engine for each Persona: its profile and browser. A runtime starts when a tab first needs it, so both engines can run beside each other.
 // It also owns each Persona's plugins and sidebar state: Personas, spaces, favorites and their tabs, open tabs, folders, split views, and closed tabs.
-// App-wide stores in its folder hold history, remembered site permissions, site search, and live-folder items (`LiveFolderTabs.swift`).
+// Stores in its folder hold history and remembered site permissions, both kept per Persona, and site search.
 // A timer archives inactive tabs and unloads inactive pinned tabs and favorites. Memory pressure unloads tabs no window shows.
 // The session opens main windows with a sidebar and small windows for links from other apps, then tracks which becomes main or closes.
 // Each window's state and commands live in `BrowserWindowModel`. Views, menus, and scripts reach them through `activeWindow` or `sidebarTarget()`.
@@ -13,7 +13,6 @@ import Events
 import Extensions
 import Foundation
 import History
-import LiveFolders
 import Plugins
 
 /// One engine's running pieces for one Persona: the Persona's profile in the engine and the browser that owns the web contents of the Persona's tabs in that engine. The session keeps the engine's application.
@@ -39,22 +38,14 @@ final class EngineRuntime {
     public private(set) var needsFullSidebarSync: Bool
     /// The folder that holds every file the session keeps: `session.json`, Chromium's profiles in `Cache/Chromium`, the plugins, the browser import's record, and the files of `history`, `sitePermissions`, and `siteSearch`. WebKit keeps its website data where the system puts it for the app.
     public let userDataDirectory: URL
-    /// The pages visited in every Persona. The tabs record their pages there, and the palette, the History window, and imports read and add pages.
+    /// The pages visited in each Persona, apart. The tabs record their pages in their own Persona, and the palette, the History window, agents, plugins, and imports read and add pages of one Persona.
     public let history: HistoryStore
-    /// The remembered answers to websites' permission requests in every Persona, which Settings ▸ Websites changes.
+    /// The remembered answers to websites' permission requests, each Persona's own (Persona rule 6), which Settings ▸ Websites changes.
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
     /// Whether macOS lets Arch show notifications, which the download notifier, the permission card, and Settings ▸ Websites share.
     public let notificationAuthorization = NotificationAuthorization()
-    /// Keeps the live folders up to date: `live-folders.json`, the private feed addresses in the Keychain, the refresh schedule, and the fetches. The session registers its live folders and applies each refresh to their tabs (`LiveFolderTabs.swift`).
-    let liveFolderService: LiveFolderService
-    /// Each live folder's unread count, refresh, failure, and dismissed items, which its row and menu show.
-    let liveFolderStatuses = LiveFolderStatuses()
-    /// Each feed folder's icon, the `/favicon.ico` of its feed's host, which the rows of its items' tabs show until their pages load, and the icon address it came from, loaded once per folder and launch.
-    var liveFolderIcons: [UUID: (url: URL, image: NSImage?)] = [:]
-    /// The live folders' subscriptions to the folders, the app's activation, and the windows' spaces.
-    var liveFolderObservers: Set<AnyCancellable> = []
     /// Each running engine's application, started once.
     private var applications: [EngineKind: any EngineApplication] = [:]
     /// The engines whose application did not start the last time the session tried, which run no web extensions meanwhile.
@@ -98,8 +89,6 @@ final class EngineRuntime {
     public let webStore: WebStoreInstaller
     /// `NativeMessagingHosts/` in `userDataDirectory`, which every Persona's web extensions reach native apps through, with Arch's links to the host manifests that native app vendors install for other browsers, and the proof gate on them (`docs/password-managers.md`).
     public let nativeMessagingHosts: NativeMessagingHostLinks
-    /// The app sets this to open the built-in terminal, where the New Live Folder sheet sends the user to install `gh` and sign in (live folder rule 3).
-    public var openTerminal: (() -> Void)?
     /// The last `SessionSnapshot.maximumClosedTabs` closed or archived tabs, oldest first. The newest reopens first.
     @Published private var closedTabs: [SessionSnapshot.TabRecord] = []
     /// Archives inactive tabs and unloads inactive bookmarks every 30 minutes.
@@ -155,12 +144,12 @@ final class EngineRuntime {
                             chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil) throws {
         try self.init(registry: registry, userDataDirectory: userDataDirectory, builtInPlugins: builtInPlugins, cefVersion: cefVersion,
                       nativeMessagingHostFolders: nativeMessagingHostFolders, chromiumNativeMessagingHosts: chromiumNativeMessagingHosts, agentOnlyPersonaID: agentOnlyPersonaID,
-                      sessionSeal: .keychain, liveFolderAddresses: LiveFolderKeychain())
+                      sessionSeal: .keychain, removeLiveFolderKeychainItems: RemovedLiveFolders.removeKeychainItems)
     }
 
-    /// Restores browser state, starts an available engine, and attaches the session's feature hosts.
+    /// Restores browser state, starts an available engine, and attaches the session's feature hosts. `removeLiveFolderKeychainItems` deletes the removed live folders' Keychain items (`RemovedLiveFolders`); tests pass one that touches no Keychain.
     init(registry: EngineRegistry, userDataDirectory: URL, builtInPlugins: [any BuiltInPlugin.Type], cefVersion: String?, nativeMessagingHostFolders: [URL] = [],
-         chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil, sessionSeal: SessionStateSeal, liveFolderAddresses: any LiveFolderAddressStore) throws {
+         chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil, sessionSeal: SessionStateSeal, removeLiveFolderKeychainItems: @escaping @Sendable () -> Void) throws {
         self.registry = registry
         self.userDataDirectory = userDataDirectory
         self.builtInPlugins = builtInPlugins
@@ -168,7 +157,8 @@ final class EngineRuntime {
         nativeMessagingHosts = NativeMessagingHostLinks(directory: userDataDirectory.appendingPathComponent("NativeMessagingHosts", isDirectory: true), folders: nativeMessagingHostFolders,
                                      chromiumFolder: chromiumNativeMessagingHosts)
         store = SessionStore(directory: userDataDirectory, seal: sessionSeal)
-        history = HistoryStore(directory: userDataDirectory)
+        let history = HistoryStore(directory: userDataDirectory, legacyPersona: Persona.defaultID)
+        self.history = history
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
         permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization, agentOnlyPersonaID: Self.agentOnly(agentOnlyPersonaID))
@@ -177,27 +167,41 @@ final class EngineRuntime {
         let loaded = store.load()
         needsFullSidebarSync = loaded?.needsFullSidebarSync == true || loaded == nil
         let snapshot = loaded ?? SessionSnapshot.empty.normalized()
-        // The session is created on the main thread, where the live folders' service runs. The live folders of a file that did not decode and is set aside, and those of a newer build's `session-v<version>.json` copy, keep their entries and Keychain items for that file or copy.
-        let keptLiveFolders = store.keptLiveFolders
-        liveFolderService = LiveFolderService(store: LiveFolderStore(fileURL: userDataDirectory.appendingPathComponent(LiveFolderStore.fileName)),
-                                              addresses: liveFolderAddresses, keepsUnknownFolders: keptLiveFolders == nil, keptFolders: keptLiveFolders ?? [])
+        // Live folders were removed: once `session.json` holds a loaded file's live folders as ordinary folders without their item tabs, their stored items and Keychain items go (`RemovedLiveFolders`). The save comes at the end of startup.
+        let removesLiveFolderData = store.loadedLiveFolders || RemovedLiveFolders.hasStoredFiles(in: userDataDirectory)
+        if removesLiveFolderData {
+            store.runAfterNextWrite {
+                RemovedLiveFolders.removeFiles(in: userDataDirectory)
+                removeLiveFolderKeychainItems()
+            }
+        }
         // An engine cannot remove the storage of a profile it has loaded, so the removal comes before any engine starts.
+        let permissions = sitePermissions
         personaDataRemoval = PersonaDataRemoval(ids: snapshot.removedPersonaIDs ?? [], registry: registry,
                                                 configuration: Self.engineConfiguration(userDataDirectory: userDataDirectory)) {
             let pluginDataRemoved = PluginManager.removeData(ofPersona: $0, in: userDataDirectory)
             let cookieRecordRemoved = CookieSync.removeRecord(ofPersona: $0, in: userDataDirectory)
-            return pluginDataRemoved && cookieRecordRemoved
+            let permissionsRemoved = permissions.removeAnswers(ofPersona: $0)
+            // The store removes the visits on its queue and logs a failure; the Persona's pages show nowhere once it is gone.
+            history.clear(persona: $0)
+            return pluginDataRemoved && cookieRecordRemoved && permissionsRemoved
         }
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
         var primary: (any EngineApplication)?
         for kind in candidates where primary == nil {
-            primary = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
+            do {
+                primary = try Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
+            } catch {
+                engineStartLog.record(EngineStartFailure(engine: kind, persona: nil, error: error))
+            }
             if primary == nil { enginesThatDidNotStart.insert(kind) }
         }
         guard let primary else { throw SessionError.noEngineStarted }
         // The windows open once the app has built its menus (`restoreWindows()`). Normalizing gives every snapshot a window.
         windowsToReopen = snapshot.windows ?? []
         personas = snapshot.personas ?? []
+        // A `permissions.json` from before Personas kept their own answers gives its app-wide answers to every Persona but the Agents Persona once, before any profile starts (Persona rule 6).
+        permissions.adoptAppWideAnswers(into: (snapshot.personas.map { $0.map(\.id) } ?? [Persona.defaultID]).filter { $0 != Self.agentOnly(agentOnlyPersonaID) })
         spaces = snapshot.spaces
         favorites = snapshot.favorites
         folders = snapshot.folders?.filter { folder in snapshot.spaces.contains { $0.id == folder.spaceID } } ?? []
@@ -222,12 +226,12 @@ final class EngineRuntime {
         pageAssistant.attach(to: self)
         pluginPages.attach(to: self)
         hooks.attach(to: self)
-        startLiveFolders()
         pluginBrowserHost.attach(to: self)
         eventSource.documentDidChange = { tab, address, documentID in
             AIService.shared.hooks.scheduler.cancel(subject: tab, otherThan: address, documentID: documentID)
         }
         eventSource.attach(to: self)
+        if removesLiveFolderData { scheduleSave() }
     }
 
     /// An error that prevents a browser session from starting.
@@ -352,28 +356,20 @@ final class EngineRuntime {
         windows.first { $0.shows(tab) }
     }
 
-    /// Whether a window shows the tab or, while no main window is open, a main window that reopens from `windowsToReopen` will show it, as its saved tab or a pane of that tab's split view. A live folder's plan keeps such an item tab, also at launch before the saved session's windows open.
-    func windowShowsOrWillShow(_ tab: Tab) -> Bool {
-        if window(showing: tab) != nil { return true }
-        guard lastMainWindow == nil else { return false }
-        return windowsToReopen.contains { record in
-            guard let selectedID = record.selectedTabID else { return false }
-            return selectedID == tab.id || splitTabIDs.values.contains { $0.contains(selectedID) && $0.contains(tab.id) }
-        }
-    }
-
     /// The browser window whose AppKit window is `nsWindow`, or nil for any other window, such as Settings or the developer tools.
     public func window(for nsWindow: NSWindow?) -> BrowserWindowModel? {
         guard let nsWindow else { return nil }
         return windows.first { $0.nsWindow === nsWindow }
     }
 
-    /// Window rule 2: before `window` shows the tab it selected, every other window that shows the tab gives it up (`BrowserWindowModel.giveUp(_:)`). The panes that no window shows any longer, the ones given up and the ones `window` left, then show again in the windows whose split views have them (window rule 1).
+    /// Window rule 2: before `window` shows the tab it selected, every other window that shows the tab gives it up (`BrowserWindowModel.giveUp(_:)`). Then every window updates its panes: `window` shows the tab, and the panes that no window shows any longer, the ones `window` left among them, show again in the windows whose split views or selections have them (window rule 1).
     func release(_ tab: Tab?, except window: BrowserWindowModel) {
         if let tab {
             for other in windows where other !== window && other.shows(tab) { other.giveUp(tab) }
         }
-        windows.forEach { $0.updateShownTabs() }
+        // `window` first, so that a window that gave the tab up and keeps it selected does not take it straight back.
+        window.updateShownTabs()
+        windows.forEach { if $0 !== window { $0.updateShownTabs() } }
     }
 
     /// The tab of `focusedTabID`.
@@ -494,6 +490,25 @@ final class EngineRuntime {
         target.focusPage()
     }
 
+    /// The space a small window's tab moves to when the window switches to the Persona `personaID` (open decision 6): the current space of the Persona's front main window, or the Persona's first space.
+    func smallWindowDestination(in personaID: Persona.ID) -> Space {
+        windows.first { $0.kind == .main && $0.personaID == personaID }?.currentSpace ?? spaces(in: personaID).first ?? preferredSpace(in: personaID)
+    }
+
+    /// The small window's Persona menu: the window's page moves to the Persona `personaID`, in a new tab of that Persona at the same address and engine, whose space is `smallWindowDestination(in:)`. A tab's pages keep their Persona's storage, so the page loads again in the Persona's profile, without the old page's back and forward list or sign-in. The old tab ends without joining the closed list, and the window stays open on the new tab.
+    public func moveSmallWindow(_ window: BrowserWindowModel, toPersona personaID: Persona.ID) {
+        guard window.kind == .small, let old = window.selectedTab, old.personaID != personaID, personas.contains(where: { $0.id == personaID }) else { return }
+        let space = smallWindowDestination(in: personaID)
+        let engine = old.preferredEngine
+        let tab = makeTab(makeWebContents(url: old.url, engine: engine, state: nil, in: personaID), id: UUID(), spaceID: space.id, personaID: personaID, pinned: false)
+        tab.preferredEngine = engine
+        tab.isInSmallWindow = true
+        tabs.append(tab)
+        window.selectTab(tab.id)
+        removeTab(old, closedRecord: nil, reason: .user)
+        window.focusPage()
+    }
+
     // MARK: Engines
 
     /// The engines a tab can use.
@@ -513,10 +528,10 @@ final class EngineRuntime {
         EngineApplicationConfiguration(userDataDirectory: userDataDirectory, cacheDirectory: userDataDirectory.appendingPathComponent("Cache"))
     }
 
-    /// Creates an engine's application. Returns nil when the engine cannot start.
-    private static func makeApplication(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) -> (any EngineApplication)? {
+    /// Creates an engine's application, or nil for an engine that is not registered. Throws the engine's reason when it cannot start.
+    private static func makeApplication(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) throws -> (any EngineApplication)? {
         guard let engine = registry.engine(for: kind) else { return nil }
-        return try? engine.makeApplication(configuration: engineConfiguration(userDataDirectory: userDataDirectory))
+        return try engine.makeApplication(configuration: engineConfiguration(userDataDirectory: userDataDirectory))
     }
 
     /// Makes the session the application's delegate and keeps the application for the engine's runtimes.
@@ -525,10 +540,16 @@ final class EngineRuntime {
         applications[application.engineKind] = application
     }
 
-    /// The engine's application, started on first use. Returns nil when the engine cannot start.
+    /// The engine's application, started on first use. Returns nil when the engine cannot start, and the engine start log keeps its reason.
     private func application(for kind: EngineKind) -> (any EngineApplication)? {
         if let application = applications[kind] { return application }
-        guard let application = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory) else {
+        var started: (any EngineApplication)?
+        do {
+            started = try Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
+        } catch {
+            engineStartLog.record(EngineStartFailure(engine: kind, persona: nil, error: error))
+        }
+        guard let application = started else {
             enginesThatDidNotStart.insert(kind)
             return nil
         }
@@ -555,13 +576,14 @@ final class EngineRuntime {
         return nil
     }
 
-    /// Creates the Persona's profile and browser in the engine and connects them to the session: the Persona's web extensions, their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed.
+    /// Creates the Persona's profile and browser in the engine and connects them to the session: the Persona's web extensions, their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed; the engine start log keeps the reason of a profile that did not open.
     private func startRuntime(_ kind: EngineKind, in engines: PersonaEngines) -> EngineRuntime? {
         guard let application = application(for: kind), let persona = personas.first(where: { $0.id == engines.personaID }) else { return nil }
         // Both engines create a profile before `createBrowserContext` returns.
-        var created: (any EngineBrowserContext)?
-        application.createBrowserContext(storageIdentifier: persona.storageIdentifier) { created = try? $0.get() }
-        guard let context = created else { return nil }
+        var created: Result<any EngineBrowserContext, any Error>?
+        application.createBrowserContext(storageIdentifier: persona.storageIdentifier) { created = $0 }
+        if case .failure(let error)? = created { engineStartLog.record(EngineStartFailure(engine: kind, persona: persona, error: error)) }
+        guard let context = try? created?.get() else { return nil }
         let browser = application.createBrowser(context: context)
         let runtime = EngineRuntime(kind: kind, personaID: persona.id, context: context, browser: browser)
         engines.runtimes[kind] = runtime
@@ -641,10 +663,20 @@ final class EngineRuntime {
 
     /// Removes a space, unless it is its Persona's last. Its tabs and nested folders move to the space before it in its Persona's group, or to the next one for the group's first space, so no tab closes or leaves its Persona, and every window on the space switches there.
     public func deleteSpace(_ id: UUID) {
-        guard canDeleteSpace(id), let space = spaces.first(where: { $0.id == id }) else { return }
+        guard canDeleteSpace(id), let destination = neighbor(ofSpace: id) else { return }
+        removeSpace(id, movingContentsTo: destination)
+    }
+
+    /// The space before `id` in its Persona's group, or the next one for the group's first space; nil for a Persona's only space.
+    private func neighbor(ofSpace id: UUID) -> UUID? {
+        guard let space = spaces.first(where: { $0.id == id }) else { return nil }
         let group = spaces(in: space.resolvedPersonaID)
-        guard let index = group.firstIndex(where: { $0.id == id }) else { return }
-        let destination = group[index == 0 ? 1 : index - 1].id
+        guard group.count > 1, let index = group.firstIndex(where: { $0.id == id }) else { return nil }
+        return group[index == 0 ? 1 : index - 1].id
+    }
+
+    /// Removes the space `id` after moving its tabs and folders, with their folders and parents, after those of `destination`, a space of the same Persona, and switching every window on it there.
+    private func removeSpace(_ id: UUID, movingContentsTo destination: UUID) {
         // The space's split view goes with it; its tabs join the destination as separate tabs.
         splitTabIDs[id] = nil
         // The moved tabs and folders go after the destination's own instead of among them. The tabs keep their folders, and the folders their parents, so the tree moves whole.
@@ -699,7 +731,7 @@ final class EngineRuntime {
     }
 
     /// The space a tab of the Persona joins when no space of the Persona is given: the last main window's current space while it belongs to the Persona, else the Persona's first space. Every listed Persona has a space; for one that is gone, the first space.
-    func preferredSpace(in personaID: Persona.ID) -> Space {
+    public func preferredSpace(in personaID: Persona.ID) -> Space {
         if let space = lastMainWindow?.currentSpace, space.resolvedPersonaID == personaID { return space }
         return spaces.first { $0.resolvedPersonaID == personaID } ?? spaces[0]
     }
@@ -798,9 +830,9 @@ final class EngineRuntime {
         tab.isPinned ? tab.savedPage?.url ?? tab.url : tab.url
     }
 
-    /// Whether Add to Favorites moves the tab itself into the favorites: the user's own tab in a space's list. A small window's tab, a live folder item's tab, an agent's tab, and a favorite's own tab keep their place, and the favorite gets a copy of the page.
+    /// Whether Add to Favorites moves the tab itself into the favorites: the user's own tab in a space's list. A small window's tab, an agent's tab, and a favorite's own tab keep their place, and the favorite gets a copy of the page.
     private func movesIntoFavorites(_ tab: Tab) -> Bool {
-        tab.spaceID != nil && tab.isListedInSidebar && tab.agentOwnerID == nil && !folderTree.isLive(tab.folderID) && tabs.contains { $0 === tab }
+        tab.spaceID != nil && tab.isListedInSidebar && tab.agentOwnerID == nil && tabs.contains { $0 === tab }
     }
 
     /// Whether the tab's page, a pinned tab's saved page, is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
@@ -871,7 +903,9 @@ final class EngineRuntime {
     func openTab(for favorite: Favorite) -> Tab {
         if let tab = favoriteTabs[favorite.id] { return tab }
         let saved = savedFavoriteTabs.removeValue(forKey: favorite.id)
-        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: saved?.id ?? UUID(), spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
+        // A pin that sync added since launch can carry the saved tab's ID, as when this Mac's data came from the Mac that pinned the tab; the favorite's tab then takes a new one, so no two tabs share an ID.
+        let id = saved?.id.flatMap { id in allTabs.contains { $0.id == id } ? nil : id } ?? UUID()
+        let tab = makeTab(makeWebContents(url: saved?.url ?? favorite.url, engine: saved?.engine, state: saved?.state, in: favorite.resolvedPersonaID), id: id, spaceID: nil, personaID: favorite.resolvedPersonaID, pinned: false)
         tab.restoreEngine(saved?.engine ?? defaultEngine, state: saved?.state, at: saved?.url)
         if let saved {
             tab.isRestored = true
@@ -976,7 +1010,7 @@ final class EngineRuntime {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
-        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space. A page of a tab that a plugin or a web extension opened, before the user acted in it, opens its tab held as theirs (`PageDownloadGate.holdUntilUserActs()`), so that their own pages cannot download through the tabs they open.
+        // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space. A page of a tab that a script plugin opened, before the user acted in it, opens its tab held as theirs (`PageDownloadGate.holdUntilUserActs()`), so that their own pages cannot download through the tabs they open.
         tab.openNewTab = { [weak self, weak tab] popup, targetURL, disposition in
             guard let self, let tab else { return }
             // A Persona without a profile, such as one a synced deletion removed, cannot own the popup, which no tab then takes.
@@ -1055,7 +1089,7 @@ final class EngineRuntime {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
-            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), inEveryPersona: self.remembersAnswersInSeveralPersonas, ask: { makeContent, response in
+            self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), persona: self.permissionCardPersonaName(for: tab), ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
@@ -1063,7 +1097,8 @@ final class EngineRuntime {
             guard let self, let tab else { return completion(false) }
             self.permissionAnswers.denyWithoutAsking(request, personaID: tab.personaID, in: self.runtime(of: tab)?.context, completion: completion)
         }
-        tab.recordVisit = { [weak self] url, title in self?.history.record(url, title: title) }
+        // A tab keeps its Persona for its whole life, so its visits go to that Persona's history.
+        tab.recordVisit = { [weak self, personaID = tab.personaID] url, title in self?.history.record(url, title: title, persona: personaID) }
         // The page fills the window that shows it. A page that no window shows leaves fullscreen; the engine is still in its callback, so that happens on the next turn of the run loop.
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
             guard let self, let tab else { return }
@@ -1073,17 +1108,11 @@ final class EngineRuntime {
                 DispatchQueue.main.async { [weak tab] in tab?.webContents.exitFullscreen() }
             }
         }
-        // A modified link or a context-menu link stays in the source Persona and engine. Only a requested foreground tab selects a new page.
-        tab.openURLInNewTab = { [weak self, weak tab] url, foreground in
+        // A context-menu link opens behind, marked unread, in the source Persona and engine. A link clicked with Command or the middle button opens through `openNewTab`.
+        tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
-            let window = self.window(showing: tab)
-            if foreground, let window {
-                let page = self.makeWebContents(url: url, engine: tab.preferredEngine, state: nil, in: tab.personaID)
-                window.showOpenedPage(page, personaID: tab.personaID, preferredEngine: tab.preferredEngine)
-            } else {
-                let spaceID = tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: tab.personaID).id
-                self.openTab(url: url, in: spaceID, select: false, engine: tab.preferredEngine).isUnread = true
-            }
+            let spaceID = tab.spaceID ?? self.window(showing: tab)?.currentSpaceID ?? self.preferredSpace(in: tab.personaID).id
+            self.openTab(url: url, in: spaceID, select: false, engine: tab.preferredEngine).isUnread = true
         }
         // Search with in a page's context menu shows the results for the page's selection as a page the tab opens: in a new tab that the window showing the page selects, in the page's engine and Persona, or behind, marked unread, when no window shows the page.
         tab.searchInNewTab = { [weak self, weak tab] text in
@@ -1187,9 +1216,9 @@ final class EngineRuntime {
         }
     }
 
-    /// Delete Tab: takes a pinned tab out of its list into the closed list once its page agrees, where closing it only unloads it (bookmark rule 4). ⌘Z reopens it pinned in its folder with its saved page. A favorite's tab has no row to delete, and a live folder item's tab, which never joins the closed list, is dismissed instead.
+    /// Delete Tab: takes a pinned tab out of its list into the closed list once its page agrees, where closing it only unloads it (bookmark rule 4). ⌘Z reopens it pinned in its folder with its saved page. A favorite's tab has no row to delete.
     public func requestDeleteTab(_ tab: Tab) {
-        guard tab.spaceID != nil, tab.liveItemID == nil else { return }
+        guard tab.spaceID != nil else { return }
         whenPageAgreesToLeave(tab) { [weak self] tab in
             guard let self, self.perform(.close(remember: true), on: tab, reason: .user) else { return }
             self.undoableCloseCount += 1
@@ -1211,7 +1240,7 @@ final class EngineRuntime {
         }
     }
 
-    /// Closes a tab without asking its page, as `TabCloseAction.of(_:reason:)` decides for the tab and `reason`, and returns whether the tab was still open: a pinned tab unloads, a favorite's tab ends, an agent tab is forgotten, a live folder item's tab is dismissed, and any other tab leaves its list, into the closed list unless it only pointed at a file. Every path that closes a tab comes here: the user's closes once the page agrees, the page's own `window.close()` and a crashed page that the engine closes, an extension's `tabs.remove`, a plugin's `closeTab(_:)`, a tab that only pointed at a file, Delete Persona, and archiving. The one other entry is `closeAgentTab(_:reason:)`, which forgets an agent's own tab, as `TabCloseAction.forget` does, and posts the `agent` reason. `reason` goes to the tab close log when the tab leaves its list.
+    /// Closes a tab without asking its page, as `TabCloseAction.of(_:reason:)` decides for the tab and `reason`, and returns whether the tab was still open: a pinned tab unloads, a favorite's tab ends, an agent tab is forgotten, and any other tab leaves its list, into the closed list unless it only pointed at a file. Every path that closes a tab comes here: the user's closes once the page agrees, the page's own `window.close()` and a crashed page that the engine closes, an extension's `tabs.remove`, a plugin's `closeTab(_:)`, a tab that only pointed at a file, Delete Persona, and archiving. The one other entry is `closeAgentTab(_:reason:)`, which forgets an agent's own tab, as `TabCloseAction.forget` does, and posts the `agent` reason. `reason` goes to the tab close log when the tab leaves its list.
     @discardableResult
     public func closeTab(_ tab: Tab, reason: TabCloseReason = .user) -> Bool {
         perform(TabCloseAction.of(tab, reason: reason), on: tab, reason: reason)
@@ -1223,7 +1252,6 @@ final class EngineRuntime {
         switch action {
         case .unload: return unloadToSavedPage(tab, reason: reason)
         case .end, .close, .forget: return removeTab(tab, closedRecord: action.closedRecord(of: tab), reason: reason)
-        case .dismiss: return dismissItem(tab, reason: reason)
         }
     }
 
@@ -1263,19 +1291,7 @@ final class EngineRuntime {
         return true
     }
 
-    /// Takes the list that a live folder's plan gives (`LiveFolderTabs.applying`) and drops the tabs that the plan removed: tabs without their pages that no window shows (`LiveFolderReconciler`), so no page closes and nothing joins the closed list or the tab close log. Each leaves its split view, the windows' switcher order, and the prompts that wait for it.
-    func replaceTabs(with tabs: [Tab], removing removed: [Tab]) {
-        self.tabs = tabs
-        for tab in removed {
-            tabObservers[tab.id] = nil
-            downloadOnlyTabIDs.remove(tab.id)
-            prompts.dismiss(tabID: tab.id)
-            leaveSplitView(tab)
-            windows.forEach { $0.forgetActivation(of: tab.id) }
-        }
-    }
-
-    /// Closing a pinned tab (bookmark rule 4), which returns whether the tab was still listed: its page closes as a closed tab's does, but the tab keeps its place, folder, and ID with a stand-in at its saved page, without page state, that shows the site's icon, or a live folder item's its folder's. A window that shows its page in fullscreen leaves it, its prompts end, and it leaves its split view; each window that selected it selects another tab before the stand-in takes its place, so that no window loads the page again. Nothing joins the closed list or the tab close log.
+    /// Closing a pinned tab (bookmark rule 4), which returns whether the tab was still listed: its page closes as a closed tab's does, but the tab keeps its place, folder, and ID with a stand-in at its saved page, without page state, that shows the site's icon. A window that shows its page in fullscreen leaves it, its prompts end, and it leaves its split view; each window that selected it selects another tab before the stand-in takes its place, so that no window loads the page again. Nothing joins the closed list or the tab close log.
     @discardableResult
     private func unloadToSavedPage(_ tab: Tab, reason: TabCloseReason) -> Bool {
         guard tabs.contains(where: { $0 === tab }) else { return false }
@@ -1286,10 +1302,7 @@ final class EngineRuntime {
         downloadOnlyTabIDs.remove(tab.id)
         moveSelections(awayFrom: tab, reason: reason)
         retire(tab.unloadToSavedPage(), of: tab.personaID)
-        if let standIn = tab.webContents as? UnloadedWebContents {
-            standIn.loadSiteIcon()
-            if tab.liveItemID != nil, let icon = tab.folderID.flatMap({ liveFolderIcons[$0]?.image }) { standIn.showIcon(icon) }
-        }
+        (tab.webContents as? UnloadedWebContents)?.loadSiteIcon()
         loadPageIfShown(tab)
         return true
     }
@@ -1359,14 +1372,12 @@ final class EngineRuntime {
         let id = record.id ?? UUID()
         let idInUse = allTabs.contains { $0.id == id } || savedFavoriteTabs.values.contains { $0.id == id }
         let tab = adopt(makeWebContents(url: record.url, engine: record.engine, state: nil, in: personaID), id: idInUse ? UUID() : id, spaceID: spaceID, personaID: personaID, pinned: record.isPinned, select: true, preferredEngine: record.engine ?? defaultEngine)
-        // Nothing else enters a live folder (live folder rule 4).
-        let folderID = existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned)
-        tab.reopen(record, folderID: folderTree.isLive(folderID) ? nil : folderID)
+        tab.reopen(record, folderID: existingFolderID(record.folderID, spaceID: spaceID, pinned: record.isPinned))
     }
 
-    /// Duplicate: opens a copy of a space's tab right after it, in its list and folder, at its current address in its engine, and returns it for the window to select. A copy of an agent tab goes outside its agent folder as the user's own tab. A pinned copy keeps the original's saved page (bookmark rule 2). A favorite's tab and a small window's tab have no row to duplicate, and a live folder item's tab none whose copy could enter its folder.
+    /// Duplicate: opens a copy of a space's tab right after it, in its list and folder, at its current address in its engine, and returns it for the window to select. A copy of an agent tab goes outside its agent folder as the user's own tab. A pinned copy keeps the original's saved page (bookmark rule 2). A favorite's tab and a small window's tab have no row to duplicate.
     func duplicateTab(_ tab: Tab) -> Tab? {
-        guard let spaceID = tab.spaceID, tab.isListedInSidebar, tab.liveItemID == nil, let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
+        guard let spaceID = tab.spaceID, tab.isListedInSidebar, let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return nil }
         let copy = makeTab(makeWebContents(url: tab.url, engine: tab.preferredEngine, state: nil, in: tab.personaID), id: UUID(), spaceID: spaceID, personaID: tab.personaID, pinned: tab.isPinned)
         copy.preferredEngine = tab.preferredEngine
         copy.folderID = tab.agentOwnerID == nil ? tab.folderID : nil
@@ -1393,9 +1404,9 @@ final class EngineRuntime {
         return true
     }
 
-    /// Swaps a space's tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders. A live folder's tabs keep their source's order (live folder rule 4).
+    /// Swaps a space's tab with its neighbor in its folder, or among its space's pinned or open tabs outside folders.
     func moveTab(_ tab: Tab, up: Bool) {
-        guard let spaceID = tab.spaceID, !folderTree.isLive(tab.folderID), let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard let spaceID = tab.spaceID, let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         let siblings = tab.folderID == nil ? tabsOutsideFolders(in: spaceID, pinned: tab.isPinned) : tabs.filter { $0.folderID == tab.folderID }
         guard let position = siblings.firstIndex(where: { $0.id == tab.id }) else { return }
         let target = up ? position - 1 : position + 1
@@ -1403,9 +1414,9 @@ final class EngineRuntime {
         tabs.swapAt(index, neighborIndex)
     }
 
-    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona, in a live folder, which nothing else enters and whose tabs keep their source's order (live folder rule 4), or in an agent folder that does not already hold the tab, since a tab reaches an agent only when the agent opens it, leaves the tab where it is. A live folder item's tab dragged out becomes an ordinary tab.
+    /// Moves a dragged tab to `target`'s place and adopts its space, pinned state, and folder, allowing moves between pinned and open lists and into and out of folders. An explicit side places the tab at its previewed slot. Otherwise, within a list, dragging from above places the tab below the target. A target in a space of another Persona or in an agent folder that does not already hold the tab, since a tab reaches an agent only when the agent opens it, leaves the tab where it is.
     public func moveTab(_ id: UUID, to target: Tab, after: Bool? = nil) {
-        guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID), !folders.contains(where: { $0.id == target.folderID && $0.live != nil }),
+        guard id != target.id, let spaceID = target.spaceID, canMoveTab(id, toSpace: spaceID),
               let from = tabs.firstIndex(where: { $0.id == id }), let to = tabs.firstIndex(where: { $0.id == target.id }) else { return }
         let tab = tabs[from]
         if target.agentOwnerID != nil, tab.folderID != target.folderID { return }
@@ -1413,7 +1424,7 @@ final class EngineRuntime {
         var reordered = tabs
         reordered.remove(at: from)
         guard let targetIndex = reordered.firstIndex(where: { $0.id == target.id }) else { return }
-        movingItemTabs {
+        movingTabs {
             tab.spaceID = spaceID
             tab.isPinned = target.isPinned
             tab.folderID = target.folderID
@@ -1422,10 +1433,9 @@ final class EngineRuntime {
         }
     }
 
-    /// Runs a change of tabs' places, then makes each live folder item's tab that the change took out of its folder an ordinary tab, and gives the folder a new tab for the item, marked read (live folder rule 4). Every move of a tab goes through here, so a tab leaves its live folder the same way whether it is dragged, moved to another folder or space, or unpinned. It then removes each agent folder that the change emptied.
-    private func movingItemTabs(_ change: () -> Void) {
-        let left = LiveFolderTabs.itemTabsLeaving(tabs, during: change)
-        if !left.isEmpty { itemTabsDidLeave(left) }
+    /// Runs a change of tabs' places, then removes each agent folder that the change emptied. Every move of a tab goes through here, whether it is dragged, moved to another folder or space, or unpinned.
+    private func movingTabs(_ change: () -> Void) {
+        change()
         removeEmptyAgentFolders()
     }
 
@@ -1458,10 +1468,10 @@ final class EngineRuntime {
         return now.addingTimeInterval(-TimeInterval(hours) * 3600)
     }
 
-    /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it. A tab in a folder leaves it, because the folder stays in the other list; a live folder item's tab becomes an ordinary tab without its saved page.
+    /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it. A tab in a folder leaves it, because the folder stays in the other list.
     public func togglePinned(_ tab: Tab) {
         objectWillChange.send()
-        movingItemTabs {
+        movingTabs {
             tab.folderID = nil
             tab.isPinned.toggle()
         }
@@ -1610,7 +1620,7 @@ final class EngineRuntime {
 
     // MARK: Site permissions
 
-    /// Answers the tabs' permission requests from `sitePermissions` or with a card on the tab, and keeps each profile's own kept answers in line with `sitePermissions`.
+    /// Answers the tabs' permission requests from their Persona's answers in `sitePermissions` or with a card on the tab, and keeps each profile's own kept answers in line with its Persona's answers.
     let permissionAnswers: SitePermissionAnswers
 
     /// The Agents Persona, which the session takes from `agent.json` when it is created and the agents' service then names through `BrowserAgentHost`: its profiles get no remembered answers, and its requests are denied without a card (agent decision 9). Never the default Persona, whose profile follows the answers from launch.
@@ -1619,9 +1629,28 @@ final class EngineRuntime {
         set { permissionAnswers.agentOnlyPersonaID = Self.agentOnly(newValue) }
     }
 
-    /// Whether a remembered site answer holds in several Personas, which the permission card and Settings ▸ Websites then say. The Agents Persona does not count.
+    /// Whether several Personas keep remembered site answers of their own, so that the permission card and Settings ▸ Websites name the Persona. The Agents Persona does not count.
     public var remembersAnswersInSeveralPersonas: Bool {
         permissionAnswers.holdsInSeveralPersonas(personas)
+    }
+
+    /// The Personas whose remembered answers Settings ▸ Websites shows: every Persona but the Agents Persona, which remembers none.
+    public var personasWithRememberedAnswers: [Persona] {
+        personas.filter { $0.id != agentOnlyPersonaID }
+    }
+
+    /// The Persona whose answers Settings ▸ Websites shows first: the active window's, unless it is the Agents Persona, else the default Persona.
+    public var personaForWebsiteSettings: Persona.ID {
+        let id = activeWindow?.currentSpace.resolvedPersonaID ?? Persona.defaultID
+        return personasWithRememberedAnswers.contains { $0.id == id } ? id : Persona.defaultID
+    }
+
+    /// How a tab's permission card names the Persona that remembers its answer (Persona rule 7), as "the Persona of “Work / Research”", or nil while only one Persona keeps answers.
+    private func permissionCardPersonaName(for tab: Tab) -> String? {
+        guard remembersAnswersInSeveralPersonas else { return nil }
+        let space = BrowserWindowModel.sheetSpace(ofTabIn: tab.spaceID, personaID: tab.personaID, spaces: spaces,
+                                                  currentSpace: window(showing: tab)?.currentSpace ?? preferredSpace(in: tab.personaID))
+        return BrowserWindowModel.sheetName(ofPersona: tab.personaID, space: space, among: personas)
     }
 
     /// The rule of `agentOnlyPersonaID`: the default Persona is never agent-only.
@@ -1670,6 +1699,8 @@ final class EngineRuntime {
 
     /// Why each tab closed this launch, for the tab close log window.
     public let closeLog = TabCloseLog()
+    /// Which engines and profiles did not start this launch, and why, which the same window shows.
+    public let engineStartLog = EngineStartLog()
 
     /// Drops a closing tab from each window's switcher order and, when `logs` holds, logs it with its crash count and the engines' total.
     private func recordClose(of tab: Tab, reason: TabCloseReason, logs: Bool) {
@@ -1746,7 +1777,7 @@ final class EngineRuntime {
         guard let index = tabs.firstIndex(where: { $0 === moving }) else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
-        movingItemTabs {
+        movingTabs {
             tab.spaceID = spaceID
             tab.folderID = nil
             reordered.append(tab)
@@ -1761,7 +1792,7 @@ final class EngineRuntime {
               tabsOutsideFolders(in: spaceID, pinned: pinned).last?.id != id else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
-        movingItemTabs {
+        movingTabs {
             tab.isPinned = pinned
             tab.folderID = nil
             reordered.append(tab)
@@ -1794,13 +1825,13 @@ final class EngineRuntime {
         tabs.filter { $0.spaceID == spaceID && $0.isPinned == pinned && $0.folderID == nil && $0.isListedInSidebar }
     }
 
-    /// Moves a tab into an ordinary folder of its space, at any level, after the folder's own tabs. The tab joins the folder's pinned or open list. Nothing else enters a live folder (live folder rule 4).
+    /// Moves a tab into an ordinary folder of its space, at any level, after the folder's own tabs. The tab joins the folder's pinned or open list.
     public func moveTab(_ id: UUID, toFolder folderID: UUID) {
-        guard let folder = folders.first(where: { $0.id == folderID }), folder.live == nil, !folder.isAgentFolder else { return }
+        guard let folder = folders.first(where: { $0.id == folderID }), !folder.isAgentFolder else { return }
         guard let index = tabs.firstIndex(where: { $0.id == id }), tabs[index].spaceID == folder.spaceID, tabs[index].folderID != folder.id else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
-        movingItemTabs {
+        movingTabs {
             tab.isPinned = folder.isPinned
             tab.folderID = folderID
             reordered.append(tab)
@@ -1861,10 +1892,9 @@ final class EngineRuntime {
         }
     }
 
-    /// Delete Folder: removes a folder and keeps what it holds. Its folders take its place in its parent, or at the top of its list, and its tabs go first among the tabs there. A live folder's item tabs close instead (`deleteLiveFolder(_:)`).
+    /// Delete Folder: removes a folder and keeps what it holds. Its folders take its place in its parent, or at the top of its list, and its tabs go first among the tabs there.
     public func deleteFolder(_ id: UUID) {
-        guard let folder = folders.first(where: { $0.id == id }) else { return }
-        if folder.live != nil { return deleteLiveFolder(id) }
+        guard folders.contains(where: { $0.id == id }) else { return }
         changeFolderTree { $0.deleteFolder(id) }
         windows.forEach { $0.endRenamingFolder(id) }
     }
@@ -1896,15 +1926,15 @@ final class EngineRuntime {
         return folder
     }
 
-    /// Appends a folder made elsewhere, such as New Live Folder…'s, which then follows its space's other folders in its list.
+    /// Appends a folder made elsewhere, such as one that sync brings, which then follows its space's other folders in its list.
     func appendFolder(_ folder: TabFolder) {
         folders.append(folder)
     }
 
-    /// Applies a change of the folder tree to the session's folders and tabs. Both are set, so that the session publishes a change even when only a tab's folder changed. A live folder item's tab that the change takes out of its folder becomes an ordinary tab.
+    /// Applies a change of the folder tree to the session's folders and tabs. Both are set, so that the session publishes a change even when only a tab's folder changed.
     func changeFolderTree(_ change: (inout FolderTree) -> Void) {
         // The tree's changes set the moved tabs' folders as they run.
-        movingItemTabs {
+        movingTabs {
             var tree = folderTree
             change(&tree)
             folders = tree.folders
@@ -2156,9 +2186,8 @@ final class EngineRuntime {
         if case .failure = saveNow() { needsFullSidebarSync = true }
     }
 
-    /// Stops live folders, writes the session again now that the quit is going ahead, and flushes each Persona's cookie record.
+    /// Writes the session again now that the quit is going ahead, and flushes each Persona's cookie record.
     public func finishWritesAtQuit() {
-        liveFolderService.stop()
         // A failure is logged, and the previous file stays.
         saveNow()
         personaEngines.values.forEach { $0.cookieSync.saveAtQuit() }
@@ -2215,7 +2244,9 @@ extension BrowserSession {
         let oldFolders = Dictionary(before.folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for (old, new) in replacements.folders {
             guard old != new, let source = oldFolders[old], let target = state.folders.first(where: { $0.id == new }),
-                  target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder && SidebarSyncState.canShare($0.live) }) else { continue }
+                  target.personaID == source.personaID, folders.contains(where: { $0.id == new && !$0.isAgentFolder }),
+                  // A server folder that this Mac keeps inside the local one would become its own parent.
+                  !folderTree.ancestors(of: new).contains(where: { $0.id == old }) else { continue }
             for index in folders.indices where folders[index].parentID == old { folders[index].parentID = new }
             for tab in tabs where tab.folderID == old { tab.folderID = new }
             folders.removeAll { $0.id == old }
@@ -2231,7 +2262,7 @@ extension BrowserSession {
         var replacedTabs: [UUID: UUID] = [:]
         for (old, new) in replacements.tabs {
             guard old != new, oldPins.contains(old), let local = tabs.first(where: { $0.id == old }),
-                  let remote = tabs.first(where: { $0.id == new && $0.isPinned && $0.agentOwnerID == nil && $0.liveItemID == nil }),
+                  let remote = tabs.first(where: { $0.id == new && $0.isPinned && $0.agentOwnerID == nil }),
                   remote.personaID == local.personaID else { continue }
             replacedTabs[old] = new
         }
@@ -2265,6 +2296,7 @@ extension BrowserSession {
     public func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) {
         let state = state.withFirstCopies
         let current = sidebarSyncState
+        yieldIDs(to: state, current: current)
         guard state != current || !deletions.personas.isDisjoint(with: personas.map(\.id))
                 || !deletions.spaces.isDisjoint(with: current.spaces.map(\.id))
                 || !deletions.folders.isDisjoint(with: current.folders.map(\.id))
@@ -2300,20 +2332,19 @@ extension BrowserSession {
         var appliedFolders = Set<UUID>()
         for incoming in state.folders {
             guard spaces.contains(where: { $0.id == incoming.spaceID && $0.resolvedPersonaID == incoming.personaID }),
-                  incoming.parentID.map(appliedFolders.contains) ?? true, SidebarSyncState.canShare(incoming.live) else { continue }
+                  incoming.parentID.map(appliedFolders.contains) ?? true else { continue }
             if let old = folders.first(where: { $0.id == incoming.id }) {
                 guard eligibleFolders.contains(old.id), spaces.first(where: { $0.id == old.spaceID })?.resolvedPersonaID == incoming.personaID else { continue }
-                // A folder that moves to another space takes along what it holds that does not sync, such as a live folder's item tabs and a private feed folder, as a drop on the space's symbol does. A synced folder inside it that stays behind moves back when its own record comes.
+                // A folder that moves to another space takes along what it holds that does not sync, as a drop on the space's symbol does. A synced folder inside it that stays behind moves back when its own record comes.
                 if old.spaceID != incoming.spaceID { carryFolder(old.id, toSpace: incoming.spaceID) }
                 guard let moved = folders.first(where: { $0.id == incoming.id }) else { continue }
                 var updated = moved
                 updated.name = incoming.name
                 updated.parentID = incoming.parentID
-                updated.live = incoming.live
                 if moved != updated { updateFolder(moved.id) { $0 = updated } }
             } else {
                 appendFolder(TabFolder(id: incoming.id, spaceID: incoming.spaceID, name: incoming.name, isPinned: true,
-                                       parentID: incoming.parentID, live: incoming.live))
+                                       parentID: incoming.parentID))
             }
             appliedFolders.insert(incoming.id)
         }
@@ -2373,6 +2404,48 @@ extension BrowserSession {
         applyPendingSyncEngines()
     }
 
+    /// An open tab or open folder of this Mac whose ID an incoming pinned tab or pinned folder carries, as when this Mac's data came from the Mac that pinned it, is another item, which never syncs: it takes a new ID and keeps its page, place, contents, and selection, so the pin joins beside it and no comparison takes the pin for one deleted here (`docs/sync.md`, Mapping the session store to records ▸ IDs listed twice). Agent tabs and folders, which `session.json` never keeps, are left alone.
+    private func yieldIDs(to state: SidebarSyncState, current: SidebarSyncState) {
+        let pinIDs = Set(state.pinnedTabs.map(\.id)).subtracting(current.pinnedTabs.map(\.id))
+        for old in allTabs where pinIDs.contains(old.id) && !old.isPinned && old.agentOwnerID == nil {
+            let page = old.webContents
+            old.replaceWebContents(with: UnloadedWebContents(url: old.url, title: old.title, engine: old.engineKind, state: nil))
+            let copy = makeTab(page, id: UUID(), spaceID: old.spaceID, personaID: old.personaID, pinned: false)
+            copy.webContentsDidChangeFavicon(page)
+            copy.folderID = old.folderID
+            copy.customTitle = old.customTitle
+            copy.suggestedTitle = old.suggestedTitle
+            copy.preferredEngine = old.preferredEngine
+            copy.lastActivatedAt = old.lastActivatedAt
+            copy.isInSmallWindow = old.isInSmallWindow
+            for (space, panes) in splitTabIDs where panes.contains(old.id) { splitTabIDs[space] = panes.map { $0 == old.id ? copy.id : $0 } }
+            for index in windowsToReopen.indices where windowsToReopen[index].selectedTabID == old.id { windowsToReopen[index].selectedTabID = copy.id }
+            let showing = windows.filter { $0.selectedTabID == old.id }
+            if let favorite = favoriteTabs.first(where: { $0.value === old })?.key {
+                favoriteTabs[favorite] = copy
+                showing.forEach { $0.selectTab(copy.id) }
+                prompts.dismiss(tabID: old.id)
+                tabObservers[old.id] = nil
+                retire(old.webContents, of: old.personaID)
+            } else if let index = tabs.firstIndex(where: { $0 === old }) {
+                // It joins as a restored tab does, so the hooks post no new tab for it.
+                copy.isRestored = true
+                tabs.insert(copy, at: index)
+                copy.isRestored = false
+                showing.forEach { $0.selectTab(copy.id) }
+                _ = removeTab(old, closedRecord: nil, reason: .sync)
+            }
+        }
+        let pinnedFolderIDs = Set(state.folders.map(\.id)).subtracting(current.folders.map(\.id))
+        for index in folders.indices where pinnedFolderIDs.contains(folders[index].id) && !folders[index].isPinned && !folders[index].isAgentFolder {
+            let old = folders[index].id, new = UUID()
+            folders[index].id = new
+            for child in folders.indices where folders[child].parentID == old { folders[child].parentID = new }
+            for tab in tabs where tab.folderID == old { tab.folderID = new }
+            windows.forEach { $0.endRenamingFolder(old) }
+        }
+    }
+
     /// Reorders only items named by synced IDs while preserving all other positions.
     private static func orderedSynced<Item: Identifiable>(_ items: [Item], by ids: [Item.ID]) -> [Item]? {
         let target = Set(ids)
@@ -2400,6 +2473,113 @@ extension BrowserSession {
     }
 }
 
+// MARK: Merge Into…
+
+extension BrowserSession {
+    /// The spaces that Merge Space Into… offers for the space `id`, in switcher order: every other space outside the Agents Persona. None for a Persona's only space, since every Persona keeps one (merging it is Merge Persona Into…), or for a space of the Agents Persona (`docs/windows-personas.md`, Merge Into…).
+    public func spaceMergeTargets(for id: UUID) -> [Space] {
+        guard canDeleteSpace(id), let source = spaces.first(where: { $0.id == id }), source.resolvedPersonaID != agentOnlyPersonaID else { return [] }
+        return spaces.filter { $0.id != id && $0.resolvedPersonaID != agentOnlyPersonaID }
+    }
+
+    /// The Personas that Merge Persona Into… offers for `id`, in order: every other Persona but the Agents Persona. None for the default Persona or the Agents Persona, which cannot be merged away.
+    public func personaMergeTargets(for id: Persona.ID) -> [Persona] {
+        guard canDeletePersona(id), id != agentOnlyPersonaID else { return [] }
+        return personas.filter { $0.id != id && $0.id != agentOnlyPersonaID }
+    }
+
+    /// Merge Space Into…: moves the space's pinned tabs, folders with their tree, and open tabs after those of `targetID`, pinned tabs staying pinned, then removes the space. Within one Persona they keep their IDs, as Delete Space moves them. Into another Persona's space they take new IDs and reload in that Persona's profile (`carryContents(ofSpace:toSpace:persona:)`), while agents' folders and small windows' tabs, which stay with their Persona, go to the space's neighbor, as Delete Space moves them.
+    public func mergeSpace(_ id: UUID, into targetID: UUID) {
+        guard let target = spaceMergeTargets(for: id).first(where: { $0.id == targetID }), let source = spaces.first(where: { $0.id == id }),
+              let neighbor = neighbor(ofSpace: id) else { return }
+        guard source.resolvedPersonaID != target.resolvedPersonaID else { return removeSpace(id, movingContentsTo: targetID) }
+        carryContents(ofSpace: id, toSpace: targetID, persona: target.resolvedPersonaID)
+        for window in windows where window.currentSpaceID == id { window.switchToSpace(targetID) }
+        removeSpace(id, movingContentsTo: neighbor)
+    }
+
+    /// Merge Persona Into…: installs in `targetID` the Persona's plugins and extensions that it lacks, moves each of its spaces, with the space's name, symbol, tint, and home page and with its tabs and folders, to the end of the target's spaces, and its favorites whose addresses the target lacks after the target's, all under new IDs, moves its history and remembered site permissions to the target, then removes the Persona as Delete Persona does, with its cookies and website data. Its tabs reload in the target's profile. Its agents' tabs and small windows' tabs close with it. A plugin that cannot install stops the merge before anything moves, with its error.
+    public func mergePersona(_ id: Persona.ID, into targetID: Persona.ID) async throws {
+        guard personaMergeTargets(for: id).contains(where: { $0.id == targetID }) else { return }
+        try await copyPlugins(from: id, to: targetID)
+        // The install awaited, so the Personas are checked again.
+        guard personaMergeTargets(for: id).contains(where: { $0.id == targetID }) else { return }
+        for space in spaces(in: id) {
+            var moved = space
+            moved.id = UUID()
+            moved.personaID = targetID
+            insert(moved)
+            carryContents(ofSpace: space.id, toSpace: moved.id, persona: targetID)
+            for window in windows where window.currentSpaceID == space.id { window.switchToSpace(moved.id) }
+            for index in windowsToReopen.indices where windowsToReopen[index].currentSpaceID == space.id { windowsToReopen[index].currentSpaceID = moved.id }
+        }
+        let addresses = Set(favorites(in: targetID).map(\.url))
+        var joining: [Favorite] = []
+        for favorite in favorites(in: id) {
+            if let tab = favoriteTabs[favorite.id] { _ = removeTab(tab, closedRecord: nil, reason: .persona) }
+            savedFavoriteTabs[favorite.id] = nil
+            guard !addresses.contains(favorite.url), !joining.contains(where: { $0.url == favorite.url }) else { continue }
+            joining.append(Favorite(url: favorite.url, title: favorite.title, personaID: targetID))
+        }
+        favorites.removeAll { $0.resolvedPersonaID == id }
+        favorites += joining
+        // History and remembered site permissions are kept per Persona (Persona rule 6), so they join the target's before the Persona's data goes.
+        history.moveVisits(from: id, to: targetID)
+        sitePermissions.moveAnswers(from: id, to: targetID)
+        deletePersona(id)
+    }
+
+    /// Installs in `target` each plugin and extension of `source` that another Persona can install from its package (`PluginManager.packageFolderForCopy(of:)`) and that `target` has none of by identifier, with the grant and the on or off choice it has in `source`. Its storage and secrets stay behind. Bundled plugins are in every Persona already, and those that AI wrote or that pair two engines' versions cannot be copied from their package, so they go with the source.
+    private func copyPlugins(from source: Persona.ID, to target: Persona.ID) async throws {
+        let from = plugins(in: source), into = plugins(in: target)
+        for plugin in from.plugins where !into.plugins.contains(where: { $0.manifest.id == plugin.manifest.id }) {
+            guard let folder = from.packageFolderForCopy(of: plugin.id) else { continue }
+            let package = try await into.stage(folder)
+            do {
+                try into.install(package, grant: plugin.grant, isEnabled: plugin.isEnabled)
+            } catch {
+                into.discard(package)
+                throw error
+            }
+        }
+    }
+
+    /// Moves the pinned and open tabs and the folders of the space `sourceID`, except agents' folders and tabs and small windows' tabs, to `spaceID` of the Persona `personaID`, after its own, as other items: each folder takes a new ID with its tree, and each tab a new ID with a stand-in at its address in that Persona, which loads in the Persona's profile once a window shows it, so a tab's page and its back and forward list stay behind. A tab keeps its saved page, name, folder, and engine, and a window that selected it selects its new tab. A tab's Persona never changes (risk R11 of `docs/windows-personas.md`), and new IDs make the move a sync's new records and deletions.
+    private func carryContents(ofSpace sourceID: UUID, toSpace spaceID: UUID, persona personaID: Persona.ID) {
+        let movedFolders = folders.filter { $0.spaceID == sourceID && !$0.isAgentFolder }
+        var folderIDs: [UUID: UUID] = [:]
+        for folder in movedFolders { folderIDs[folder.id] = UUID() }
+        let carriedFolders = movedFolders.map { folder in
+            var carried = folder
+            carried.id = folderIDs[folder.id] ?? UUID()
+            carried.spaceID = spaceID
+            carried.parentID = folder.parentID.flatMap { folderIDs[$0] }
+            return carried
+        }
+        folders = folders.filter { folderIDs[$0.id] == nil } + carriedFolders
+        let moving = tabs.filter { $0.spaceID == sourceID && $0.agentOwnerID == nil && !$0.isInSmallWindow }
+        let carried = moving.map { old in
+            _ = leaveSplitView(old)
+            let tab = makeTab(UnloadedWebContents(url: old.url, title: old.title, engine: old.preferredEngine, state: nil), id: UUID(), spaceID: spaceID, personaID: personaID, pinned: old.isPinned)
+            tab.folderID = old.folderID.flatMap { folderIDs[$0] }
+            tab.savedPage = old.savedPage
+            tab.customTitle = old.customTitle
+            tab.suggestedTitle = old.suggestedTitle
+            tab.lastActivatedAt = old.lastActivatedAt
+            return (old: old, new: tab)
+        }
+        // They join as restored tabs do, so the hooks post no new tab for them.
+        carried.forEach { $0.new.isRestored = true }
+        tabs.append(contentsOf: carried.map(\.new))
+        carried.forEach { $0.new.isRestored = false }
+        for (old, new) in carried {
+            for window in windows where window.selectedTabID == old.id { window.selectTab(new.id) }
+            for index in windowsToReopen.indices where windowsToReopen[index].selectedTabID == old.id { windowsToReopen[index].selectedTabID = new.id }
+            _ = removeTab(old, closedRecord: nil, reason: .persona)
+        }
+    }
+}
+
 // MARK: Unloading
 
 extension BrowserSession {
@@ -2421,7 +2601,7 @@ extension BrowserSession {
         if page.isInPictureInPicture { exclusions.insert(.pictureInPicture) }
         if tab.webContents.isCapturingMedia { exclusions.insert(.capture) }
         if tab.hasTypedInput { exclusions.insert(.typedInput) }
-        if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin) == .allow {
+        if let origin = tab.url.flatMap(SitePermissionStore.origin(of:)), sitePermissions.decision(for: .notifications, origin: origin, in: tab.personaID) == .allow {
             exclusions.insert(.notifications)
         }
         if prompts.hasPrompt(for: tab.id) { exclusions.insert(.prompt) }

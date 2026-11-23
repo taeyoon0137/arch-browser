@@ -159,13 +159,15 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
     case notifications
     /// Send requests to the listed HTTPS hosts without Persona cookies.
     case network
+    /// Search the pages that the plugin's Persona visited (`PluginContext.history(matching:limit:)`).
+    case history
 
     /// What the permission lets a plugin do, as a sentence that Settings shows.
     public var summary: String {
         switch self {
         case .tabs: return localized("Read the titles and addresses of your tabs")
         case .renameTabs: return localized("Suggest names for your tabs")
-        case .manageTabs: return localized("Open any website in your tabs, signed in as you, and close, select, move, and suggest names for your tabs")
+        case .manageTabs: return localized("Open any website in your tabs, signed in as you, and close, select, move, pin, and suggest names for your tabs")
         case .clipboard: return localized("Write text to the clipboard")
         case .nativeMessaging: return localized("Exchange messages with apps on this Mac")
         case .ai: return localized("Send text to the AI models you connected")
@@ -173,6 +175,7 @@ public enum PluginPermission: String, Hashable, Codable, Sendable, CaseIterable 
         case .renameDownloads: return localized("Rename completed downloads in this Persona")
         case .notifications: return localized("Show notifications under the plugin's name")
         case .network: return localized("Send requests to the listed hosts")
+        case .history: return localized("Search your browsing history in this Persona")
         }
     }
 }

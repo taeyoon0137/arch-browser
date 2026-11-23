@@ -11,16 +11,6 @@
         }
       }
     },
-    "%@\nNext attempt: %@" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@\n다음 시도: %2$@"
-          }
-        }
-      }
-    },
     "%@ input and %@ output tokens" : {
       "localizations" : {
         "ko" : {
@@ -67,16 +57,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@, %2$@"
-          }
-        }
-      }
-    },
-    "%@, %lld unread" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@, 읽지 않음 %2$lld개"
           }
         }
       }
@@ -211,16 +191,6 @@
         }
       }
     },
-    "Add" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "추가"
-          }
-        }
-      }
-    },
     "Add to Favorites" : {
       "localizations" : {
         "ko" : {
@@ -247,16 +217,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "주소"
-          }
-        }
-      }
-    },
-    "Address:" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "주소:"
           }
         }
       }
@@ -481,16 +441,6 @@
         }
       }
     },
-    "Approved" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "승인됨"
-          }
-        }
-      }
-    },
     "Arch asks for Touch ID or your password next." : {
       "localizations" : {
         "ko" : {
@@ -511,32 +461,12 @@
         }
       }
     },
-    "Arch keeps this address in the Keychain on this Mac, and the folder does not sync." : {
+    "Arch remembers your answer for this website in %@. You can change it in Settings ▸ Websites." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Arch는 이 주소를 이 Mac의 키체인에 보관하며, 이 폴더는 동기화되지 않습니다."
-          }
-        }
-      }
-    },
-    "Arch keeps up to %lld live folders." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Arch는 라이브 폴더를 최대 %lld개까지 보관합니다."
-          }
-        }
-      }
-    },
-    "Arch remembers your answer for this website in every Persona. You can change it in Settings ▸ Websites." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Arch는 모든 페르소나에서 이 웹사이트에 대한 응답을 기억합니다. 설정 ▸ 웹사이트에서 변경할 수 있습니다."
+            "value" : "Arch는 %@에서 이 웹사이트에 대한 응답을 기억합니다. 설정 ▸ 웹사이트에서 변경할 수 있습니다."
           }
         }
       }
@@ -681,16 +611,6 @@
         }
       }
     },
-    "Assigned Issues" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "할당된 이슈"
-          }
-        }
-      }
-    },
     "Automatic" : {
       "localizations" : {
         "ko" : {
@@ -811,16 +731,6 @@
         }
       }
     },
-    "Changes requested" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "변경 요청됨"
-          }
-        }
-      }
-    },
     "Changes you made may not be saved." : {
       "localizations" : {
         "ko" : {
@@ -831,62 +741,12 @@
         }
       }
     },
-    "Check Again" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "다시 확인"
-          }
-        }
-      }
-    },
-    "Checking the GitHub CLI…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GitHub CLI 확인 중…"
-          }
-        }
-      }
-    },
     "Checking…" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "확인 중…"
-          }
-        }
-      }
-    },
-    "Checks failed" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "검사 실패"
-          }
-        }
-      }
-    },
-    "Checks passed" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "검사 통과"
-          }
-        }
-      }
-    },
-    "Checks running" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "검사 진행 중"
           }
         }
       }
@@ -1081,26 +941,6 @@
         }
       }
     },
-    "Closed Issue" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "닫힌 이슈"
-          }
-        }
-      }
-    },
-    "Closed Pull Request" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "닫힌 풀 리퀘스트"
-          }
-        }
-      }
-    },
     "Closed because it only pointed at a file" : {
       "localizations" : {
         "ko" : {
@@ -1197,16 +1037,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "에이전트 작업으로 계속"
-          }
-        }
-      }
-    },
-    "Convert to Folder" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "폴더로 변환"
           }
         }
       }
@@ -1571,16 +1401,6 @@
         }
       }
     },
-    "Draft Pull Request" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "초안 풀 리퀘스트"
-          }
-        }
-      }
-    },
     "Drag across the page to capture a region. Press Escape to cancel." : {
       "localizations" : {
         "ko" : {
@@ -1641,26 +1461,6 @@
         }
       }
     },
-    "Edit Live Folder in %@" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@의 라이브 폴더 편집"
-          }
-        }
-      }
-    },
-    "Edit Live Folder…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "라이브 폴더 편집…"
-          }
-        }
-      }
-    },
     "Edit Saved Address" : {
       "localizations" : {
         "ko" : {
@@ -1711,12 +1511,12 @@
         }
       }
     },
-    "Enter a GitHub host, such as github.com." : {
+    "Engines That Did Not Start" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "github.com과 같은 GitHub 호스트를 입력하세요."
+            "value" : "시작하지 못한 엔진"
           }
         }
       }
@@ -1731,32 +1531,12 @@
         }
       }
     },
-    "Every %lld Hours" : {
+    "Every Persona" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld시간마다"
-          }
-        }
-      }
-    },
-    "Every %lld Minutes" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld분마다"
-          }
-        }
-      }
-    },
-    "Every Hour" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "매시간"
+            "value" : "모든 페르소나"
           }
         }
       }
@@ -1851,36 +1631,6 @@
         }
       }
     },
-    "Feed" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "피드"
-          }
-        }
-      }
-    },
-    "Feed Title" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "피드 제목"
-          }
-        }
-      }
-    },
-    "Feed:" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "피드:"
-          }
-        }
-      }
-    },
     "File not found" : {
       "localizations" : {
         "ko" : {
@@ -1907,16 +1657,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "플래그"
-          }
-        }
-      }
-    },
-    "Folder" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "폴더"
           }
         }
       }
@@ -2041,16 +1781,6 @@
         }
       }
     },
-    "Has conflicts" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "충돌 있음"
-          }
-        }
-      }
-    },
     "Heart" : {
       "localizations" : {
         "ko" : {
@@ -2091,16 +1821,6 @@
         }
       }
     },
-    "Host:" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "호스트:"
-          }
-        }
-      }
-    },
     "House" : {
       "localizations" : {
         "ko" : {
@@ -2127,6 +1847,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "철자 무시"
+          }
+        }
+      }
+    },
+    "In use in another window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 윈도우에서 사용 중"
+          }
+        }
+      }
+    },
+    "In a space of another Persona, they reload in that Persona’s profile, without their pages’ sign-ins and back and forward history." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 페르소나의 스페이스로 옮기면 탭이 해당 페르소나의 프로필에서 다시 로드되며, 페이지의 로그인과 뒤로·앞으로 기록은 유지되지 않습니다."
           }
         }
       }
@@ -2181,16 +1921,6 @@
         }
       }
     },
-    "Install the GitHub CLI in the built-in terminal, for example with `brew install gh`." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "내장 터미널에서 GitHub CLI를 설치하세요. 예: `brew install gh`"
-          }
-        }
-      }
-    },
     "Installed" : {
       "localizations" : {
         "ko" : {
@@ -2207,16 +1937,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iCloud로 동기화하는 다른 Mac에서도 삭제되며, 해당 Mac에서도 쿠키와 웹사이트 데이터가 제거됩니다."
-          }
-        }
-      }
-    },
-    "Items" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "항목"
           }
         }
       }
@@ -2331,6 +2051,16 @@
         }
       }
     },
+    "Its pinned tabs, folders, and open tabs move to the space you choose, after that space’s own, and “%@” is removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정된 탭, 폴더, 열린 탭이 선택한 스페이스의 기존 항목 뒤로 옮겨지고, “%@” 스페이스는 제거됩니다."
+          }
+        }
+      }
+    },
     "Its space and %lld favorites are removed" : {
       "localizations" : {
         "ko" : {
@@ -2387,6 +2117,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "스페이스가 제거됩니다."
+          }
+        }
+      }
+    },
+    "Its spaces move to the Persona you choose with their names, and its favorites follow that Persona’s. Its tabs reload in that Persona’s profile, and plugins and extensions it lacks are installed there with the permissions you gave them." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스는 이름을 유지한 채 선택한 페르소나로 옮겨지고, 즐겨찾기는 해당 페르소나의 즐겨찾기 뒤에 추가됩니다. 탭은 해당 페르소나의 프로필에서 다시 로드되며, 해당 페르소나에 없는 플러그인과 확장 프로그램은 허용한 권한 그대로 설치됩니다."
           }
         }
       }
@@ -2457,16 +2197,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "이 페이지에서 나가겠습니까?"
-          }
-        }
-      }
-    },
-    "Live Folder" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "라이브 폴더"
           }
         }
       }
@@ -2571,42 +2301,52 @@
         }
       }
     },
-    "Mark All as Read" : {
+    "Merge" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "모두 읽음으로 표시"
+            "value" : "합치기"
           }
         }
       }
     },
-    "Mark as Read" : {
+    "Merge %@ into another Persona?" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "읽음으로 표시"
+            "value" : "%@를 다른 페르소나에 합치겠습니까?"
           }
         }
       }
     },
-    "Mark as Unread" : {
+    "Merge Persona Into…" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "읽지 않음으로 표시"
+            "value" : "다른 페르소나에 합치기…"
           }
         }
       }
     },
-    "Merged Pull Request" : {
+    "Merge Space Into…" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "병합된 풀 리퀘스트"
+            "value" : "다른 스페이스에 합치기…"
+          }
+        }
+      }
+    },
+    "Merge “%@” into another space?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” 스페이스를 다른 스페이스에 합치겠습니까?"
           }
         }
       }
@@ -2701,16 +2441,6 @@
         }
       }
     },
-    "My Pull Requests" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "내 풀 리퀘스트"
-          }
-        }
-      }
-    },
     "Name" : {
       "localizations" : {
         "ko" : {
@@ -2757,26 +2487,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "안에 새 폴더"
-          }
-        }
-      }
-    },
-    "New Live Folder in %@" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@에 새 라이브 폴더"
-          }
-        }
-      }
-    },
-    "New Live Folder…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "새 라이브 폴더…"
           }
         }
       }
@@ -2887,16 +2597,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "아직 비공개 API를 사용하는 기능이 없습니다."
-          }
-        }
-      }
-    },
-    "No feed found at this address." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 주소에서 피드를 찾을 수 없습니다."
           }
         }
       }
@@ -3021,16 +2721,6 @@
         }
       }
     },
-    "Open Issue" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "열린 이슈"
-          }
-        }
-      }
-    },
     "Open Link in New Tab" : {
       "localizations" : {
         "ko" : {
@@ -3041,32 +2731,12 @@
         }
       }
     },
-    "Open Pull Request" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "열린 풀 리퀘스트"
-          }
-        }
-      }
-    },
     "Open System Settings" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "시스템 설정 열기"
-          }
-        }
-      }
-    },
-    "Open Terminal" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "터미널 열기"
           }
         }
       }
@@ -3411,46 +3081,6 @@
         }
       }
     },
-    "Refresh" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "새로고침"
-          }
-        }
-      }
-    },
-    "Refresh Failed" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "새로고침 실패"
-          }
-        }
-      }
-    },
-    "Refresh Now" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "지금 새로고침"
-          }
-        }
-      }
-    },
-    "Refreshing" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "새로고침 중"
-          }
-        }
-      }
-    },
     "Reload" : {
       "localizations" : {
         "ko" : {
@@ -3681,26 +3311,6 @@
         }
       }
     },
-    "Review Requests" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "리뷰 요청"
-          }
-        }
-      }
-    },
-    "Review required" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "리뷰 필요"
-          }
-        }
-      }
-    },
     "Review the request" : {
       "localizations" : {
         "ko" : {
@@ -3727,16 +3337,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "화면 녹화"
-          }
-        }
-      }
-    },
-    "Search" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "검색"
           }
         }
       }
@@ -3797,16 +3397,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@에서 검색"
-          }
-        }
-      }
-    },
-    "Search:" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "검색:"
           }
         }
       }
@@ -3881,16 +3471,6 @@
         }
       }
     },
-    "Show Dismissed Items (%lld)" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "닫은 항목 보기(%lld)"
-          }
-        }
-      }
-    },
     "Show Folder" : {
       "localizations" : {
         "ko" : {
@@ -3917,6 +3497,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "보관함 보기"
+          }
+        }
+      }
+    },
+    "Show Other Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 윈도우 보기"
           }
         }
       }
@@ -3951,36 +3541,6 @@
         }
       }
     },
-    "Show:" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "보기:"
-          }
-        }
-      }
-    },
-    "Sign in with `%@` in the built-in terminal." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "내장 터미널에서 `%@` 명령으로 로그인하세요."
-          }
-        }
-      }
-    },
-    "Signed in to %@." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@에 로그인되어 있습니다."
-          }
-        }
-      }
-    },
     "Site Data" : {
       "localizations" : {
         "ko" : {
@@ -4007,16 +3567,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 사용을 허용한 사이트는 Chromium에서 실행되는 에이전트 탭에서도 그 권한을 유지합니다."
-          }
-        }
-      }
-    },
-    "Source" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "소스"
           }
         }
       }
@@ -4067,16 +3617,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "처음부터 다시"
-          }
-        }
-      }
-    },
-    "Status:" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "상태:"
           }
         }
       }
@@ -4167,6 +3707,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "요약"
+          }
+        }
+      }
+    },
+    "Switch Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나 전환"
           }
         }
       }
@@ -4277,6 +3827,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "PDF를 저장할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The Persona could not be merged." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나를 합칠 수 없습니다."
           }
         }
       }
@@ -4401,6 +3961,16 @@
         }
       }
     },
+    "Then the Persona is removed. Its cookies and sign-ins are not carried over: Arch deletes them and its website data from this Mac the next time it opens." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그런 다음 페르소나가 제거됩니다. 쿠키와 로그인은 옮겨지지 않으며, Arch를 다음에 열 때 이 Mac에서 웹사이트 데이터와 함께 삭제됩니다."
+          }
+        }
+      }
+    },
     "This Tab" : {
       "localizations" : {
         "ko" : {
@@ -4417,16 +3987,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "이 Arch는 앱 번들 없이 실행 중이므로 알림을 표시할 수 없습니다."
-          }
-        }
-      }
-    },
-    "This is not a web address." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "웹 주소가 아닙니다."
           }
         }
       }
@@ -4701,6 +4261,16 @@
         }
       }
     },
+    "Your other Macs that sync with iCloud make the same change." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud로 동기화하는 다른 Mac에도 같은 변경이 적용됩니다."
+          }
+        }
+      }
+    },
     "a page on “%@”" : {
       "localizations" : {
         "ko" : {
@@ -4741,42 +4311,12 @@
         }
       }
     },
-    "github.com" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "github.com"
-          }
-        }
-      }
-    },
-    "https://example.com/feed.xml" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "https://example.com/feed.xml"
-          }
-        }
-      }
-    },
     "in %@" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 내"
-          }
-        }
-      }
-    },
-    "is:pr is:open review-requested:@me" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "is:pr is:open review-requested:@me"
           }
         }
       }

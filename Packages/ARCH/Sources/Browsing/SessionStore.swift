@@ -5,7 +5,7 @@ import Foundation
 import os
 
 struct SessionSnapshot: Codable {
-    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, version 12 each open tab's suggested title, version 13 seals the page state (`SessionStateSeal`), version 14 adds each pinned tab's saved page, version 15 each folder's parent folder, and version 16 each live folder's configuration and each item tab's item. Files without a version are version 1.
+    /// Version 2 adds each tab's engine, version 3 its restorable page state, version 4 each space's home page, version 5 the favorites' tabs, version 6 tab folders, version 7 each space's split view, version 8 each tab's ID, version 9 the Personas with the Persona of each space, favorite, and tab, version 10 the deleted Personas whose stored data the engines still have to remove, version 11 the main windows, version 12 each open tab's suggested title, version 13 seals the page state (`SessionStateSeal`), version 14 adds each pinned tab's saved page, version 15 each folder's parent folder, and version 16 each live folder's configuration and each item tab's item, which this build no longer writes since live folders were removed: it reads a live folder as an ordinary folder and drops its item tabs (`docs/bookmarks.md`, Live sources). Files without a version are version 1.
     static let currentVersion = 16
 
     struct TabRecord: Codable, Equatable {
@@ -33,10 +33,10 @@ struct SessionSnapshot: Codable {
         var suggestedTitle: SuggestedTitle?
         /// A pinned tab's saved page (bookmark rule 2), which open and closed records keep, so that a reopened pinned tab returns with it. `nil` for unpinned tabs and in files before version 14; `normalized()` gives a pinned record, open or closed, its address and title.
         var savedPage: SavedPage?
-        /// The ID of the live folder item whose tab this is (live folder rule 4), in the live folder `folderID`. `nil` for every other tab, in closed records, since an item's tab never joins the closed list, and in files before version 16; `normalized()` drops one outside a live folder.
+        /// The ID of a removed live folder's item, which version 16 files give the item tabs that the folder's source made. It is only read: `normalized()` drops every open record that has one, and the closed list keeps none, so the file never writes it again (`docs/bookmarks.md`, Live sources).
         var liveItemID: String?
 
-        /// The record as the closed list keeps it: without the activation date, page state, hook's name, and live folder item, which a reopened tab does not use.
+        /// The record as the closed list keeps it: without the activation date, page state, and hook's name, which a reopened tab does not use.
         var closed: TabRecord {
             var record = self
             record.lastActivatedAt = nil
@@ -96,7 +96,7 @@ struct SessionSnapshot: Codable {
     var currentSpaceID: UUID
     var favorites: [Favorite]
     var tabs: [TabRecord]
-    /// Every space's folders, in sidebar order among the folders of each parent and list, each with its parent from version 15 and a live folder's configuration from version 16. Optional so files before version 6 still decode.
+    /// Every space's folders, in sidebar order among the folders of each parent and list, each with its parent from version 15. Optional so files before version 6 still decode.
     var folders: [TabFolder]?
     /// The index in `tabs` of the front main window's selected tab, written for builds before version 11. `normalized()` reads it, when `selectedFavoriteID` names no favorite tab, to select the tab of the window it makes for a file without `windows`.
     var selectedTabIndex: Int?
@@ -137,8 +137,8 @@ struct SessionSnapshot: Codable {
         }
         // Earlier builds kept an archived tab's page state and activation date in its closed record, and more records than the list keeps.
         snapshot.closedTabs = snapshot.closedTabs.map { $0.suffix(Self.maximumClosedTabs).map(\.closed) }
-        snapshot.folders = folders.map { LiveFolderTabs.repairingLiveFolders(FolderTree.repairingParents(of: LiveFolderTabs.pinningLiveFolders(SidebarSyncState.firstCopies($0)))) }
-        snapshot.tabs = LiveFolderTabs.repairingItems(of: snapshot.tabs, in: snapshot.folders ?? [])
+        snapshot.folders = folders.map { FolderTree.repairingParents(of: SidebarSyncState.firstCopies($0)) }
+        snapshot.dropLiveItemTabs()
         snapshot.tabs = snapshot.tabs.map { $0.repairingSavedPage() }
         snapshot.closedTabs = snapshot.closedTabs.map { $0.map { $0.repairingSavedPage() } }
         snapshot.assignPersonas()
@@ -215,6 +215,18 @@ struct SessionSnapshot: Codable {
 }
 
 extension SessionSnapshot {
+    /// Live folders were removed on November 23 (`docs/bookmarks.md`, Live sources). A version 16 file's live folder loads as an ordinary folder with the tabs the user put in it, and the item tabs its source made, the records with a `liveItemID`, go. The split views and the selected tab index of older files point at records by index, so they follow the records that stay, and a split view left with fewer than two tabs goes.
+    mutating func dropLiveItemTabs() {
+        let kept = tabs.indices.filter { tabs[$0].liveItemID == nil }
+        guard kept.count != tabs.count else { return }
+        let newIndex = Dictionary(uniqueKeysWithValues: kept.enumerated().map { ($0.element, $0.offset) })
+        tabs = kept.map { tabs[$0] }
+        splitViews = splitViews?.map { $0.compactMap { newIndex[$0] } }.filter { $0.count > 1 }
+        selectedTabIndex = selectedTabIndex.flatMap { newIndex[$0] }
+    }
+}
+
+extension SessionSnapshot {
     /// The snapshot with the page state of each open tab and favorite's tab passed through `transform`, which leaves out a state it returns nil for.
     func mappingPageState(_ transform: (Data) -> Data?) -> SessionSnapshot {
         var snapshot = self
@@ -231,10 +243,10 @@ extension SessionSnapshot {
         return snapshot
     }
 
-    /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch. A folder whose tabs the user kept is an ordinary folder.
+    /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch, and so does a small window's tab, which goes with its window (`docs/windows-personas.md`, open decision 4) unless it moves to a main window first. A folder whose tabs the user kept is an ordinary folder.
     @MainActor static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
         let agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
-        return (tabs.filter { $0.folderID.map { !agentFolderIDs.contains($0) } ?? true }, folders.filter { !$0.isAgentFolder })
+        return (tabs.filter { $0.isListedInSidebar && ($0.folderID.map { !agentFolderIDs.contains($0) } ?? true) }, folders.filter { !$0.isAgentFolder })
     }
 }
 
@@ -242,8 +254,7 @@ extension SessionSnapshot.TabRecord {
     /// An open tab as `session.json` keeps it, in the space `spaceID` and active last at `lastActivatedAt`. A tab without its page writes what its stand-in keeps of its saved record (`UnloadedWebContents`).
     @MainActor init(_ tab: Tab, spaceID: UUID, lastActivatedAt: Date) {
         self.init(id: tab.id, spaceID: spaceID, url: tab.url, title: tab.title, customTitle: tab.customTitle, isPinned: tab.isPinned, folderID: tab.folderID, lastActivatedAt: lastActivatedAt,
-                  engine: tab.preferredEngine, state: tab.restorableStateForPreferredEngine, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle, savedPage: tab.savedPage,
-                  liveItemID: tab.liveItemID)
+                  engine: tab.preferredEngine, state: tab.restorableStateForPreferredEngine, personaID: tab.personaID, suggestedTitle: tab.suggestedTitle, savedPage: tab.savedPage)
         pendingSyncEngine = tab.pendingSyncEngine
     }
 }
@@ -271,59 +282,43 @@ final class SessionStore {
         self.seal = seal
     }
 
-    /// Where `load()` sets aside a file that does not decode. While a file is there, the live folders' service keeps the entries and Keychain items of the folders it may hold (`keptLiveFolders`).
+    /// Where `load()` sets aside a file that does not decode.
     private var unreadableFileURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("session.unreadable.json") }
 
-    /// Read at startup, after `load()`: the folders whose entries and Keychain items the live folders' service keeps while no register lists them (`LiveFolderService(keptFolders:)`), or nil for every such folder (`keepsUnknownFolders`). Every folder counts while a file awaits its backup or is set aside, and while the data folder's names or a copy cannot be read, since a Keychain item that a file needs cannot be brought back. Otherwise the folders are those that a `session-v<version>.json` copy has as live folders, whatever the versions of the copy and the file: this build, when it cannot read a newer build's live configuration, and an older build, which saves over the file without it, leave such a folder ordinary in `session.json`, and the copy brings it back once it is put back as `session.json`. They count for as long as the copy is there.
-    var keptLiveFolders: Set<UUID>? {
-        guard pendingBackup == nil, !FileManager.default.fileExists(atPath: unreadableFileURL.path) else { return nil }
-        let directory = fileURL.deletingLastPathComponent()
-        let names: [String]
-        do {
-            names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            return []
-        } catch {
-            return nil
-        }
-        var folders: Set<UUID> = []
-        for name in names where Self.isCopy(named: name) {
-            guard let data = try? Data(contentsOf: directory.appendingPathComponent(name)),
-                  let copy = try? JSONDecoder().decode(CopiedFolders.self, from: data) else { return nil }
-            folders.formUnion(copy.liveFolderIDs)
-        }
-        return folders
+    /// Whether the file that `load()` read held live folders or their item tabs, which loading turns into ordinary folders and drops since live folders were removed (`docs/bookmarks.md`, Live sources).
+    private(set) var loadedLiveFolders = false
+    /// Runs once on the write queue, after the next write of `session.json` that succeeds. Only the write queue reads and sets it.
+    private var afterNextWrite: (@Sendable () -> Void)?
+
+    /// Runs `body` once, away from the main thread, after the next write of `session.json` that succeeds, as when the removed live folders' stored data goes once the file holds the folders without their sources.
+    func runAfterNextWrite(_ body: @escaping @Sendable () -> Void) {
+        writeQueue.async { self.afterNextWrite = body }
     }
 
-    /// Whether `name` is a copy's, `session-v<version>.json`.
-    private static func isCopy(named name: String) -> Bool {
-        let prefix = "session-v", suffix = ".json"
-        guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return false }
-        let digits = name.dropFirst(prefix.count).dropLast(suffix.count)
-        return !digits.isEmpty && digits.allSatisfy { $0.isASCII && $0.isNumber }
-    }
-
-    /// The folders of a copy, which a newer build wrote, read without the rest of the file: a folder counts as live when it has a `live` value, also one that this build cannot decode.
-    private struct CopiedFolders: Decodable {
+    /// The parts of a file that show it held live folders: a folder with a `live` value, also one that this build cannot decode, or a tab record with a live folder item.
+    private struct LiveFolderMarks: Decodable {
         struct Folder: Decodable {
-            var id: UUID
             var isLive: Bool
 
             private enum CodingKeys: String, CodingKey {
-                case id, live
+                case live
             }
 
             init(from decoder: any Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                id = try container.decode(UUID.self, forKey: .id)
                 isLive = try container.contains(.live) && !container.decodeNil(forKey: .live)
             }
         }
 
+        struct Tab: Decodable {
+            var liveItemID: String?
+        }
+
         /// Optional, as in the snapshot.
         var folders: [Folder]?
+        var tabs: [Tab]?
 
-        var liveFolderIDs: Set<UUID> { Set((folders ?? []).filter(\.isLive).map(\.id)) }
+        var hasLiveFolders: Bool { (folders ?? []).contains(where: \.isLive) || (tabs ?? []).contains { $0.liveItemID != nil } }
     }
 
     /// The saved session, or nil when there is none or it cannot be read. A file from a newer build first leaves a copy, `session-v<version>.json`, which keeps that build's fields once this build saves without them. A file that cannot be read or does not decode moves to `session.unreadable.json`, so the fresh session never overwrites it. Either copy replaces an older one.
@@ -361,6 +356,7 @@ final class SessionStore {
             }
             return nil
         }
+        loadedLiveFolders = (try? JSONDecoder().decode(LiveFolderMarks.self, from: data))?.hasLiveFolders == true
         return snapshot.mappingPageState(seal.open).normalized()
     }
 
@@ -440,6 +436,10 @@ final class SessionStore {
                 pendingBackup = nil
             }
             try Self.write(data, to: fileURL)
+            if let body = afterNextWrite {
+                afterNextWrite = nil
+                body()
+            }
             return .success(())
         } catch {
             let error = error as NSError

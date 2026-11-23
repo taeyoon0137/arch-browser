@@ -38,10 +38,11 @@ import Testing
     @Test func aSecondIdenticalImportBringsNothing() async throws {
         let folder = try TemporaryFolder()
         defer { folder.remove() }
-        let history = HistoryStore(directory: folder.url)
-        func importPages(_ entries: [HistoryEntry], summary: ImportSummary = ImportSummary()) async -> ImportSummary {
+        let persona = UUID()
+        let history = HistoryStore(directory: folder.url, legacyPersona: persona)
+        func importPages(_ entries: [HistoryEntry], into personas: [UUID] = [persona], summary: ImportSummary = ImportSummary()) async -> ImportSummary {
             await withCheckedContinuation { continuation in
-                summary.importHistory(entries, into: history) { continuation.resume(returning: $0) }
+                summary.importHistory(personas.map { ($0, entries) }, into: history) { continuation.resume(returning: $0) }
             }
         }
         let page = HistoryEntry(url: URL(string: "https://a.example/")!, title: "A", visitCount: 2, lastVisit: Date(timeIntervalSince1970: 100))
@@ -62,5 +63,8 @@ import Testing
         #expect(await importPages([HistoryEntry(url: other.url, title: "B", visitCount: 1, lastVisit: other.lastVisit)]).historyPages == 1)
         summary.searchEngine = .bing
         #expect(summary.hasAdditions)
+        // Each Persona keeps its own pages, so the same pages count again in another Persona, and not again in the first.
+        #expect(await importPages(entries, into: [persona, UUID()]).historyPages == 2)
+        #expect(await importPages([], into: []).historyPages == 0)
     }
 }

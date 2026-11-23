@@ -2,20 +2,18 @@ import ARCHEngine
 @testable import Browsing
 import CloudKit
 import Foundation
-import LiveFolders
 import Sync
 import Testing
 
 @Suite struct SidebarRecordsTests {
-    @Test func mapsTheSavedSidebarInSiblingOrderWithEncryptedLiveConfiguration() throws {
+    @Test func mapsTheSavedSidebarInSiblingOrder() throws {
         let personal = Persona(id: Persona.defaultID, name: "Home"), work = Persona(name: "Work")
         var first = Space(name: "One", symbol: "star", tint: .green, personaID: work.id)
         let second = Space(name: "Two", personaID: work.id)
         let saved = URL(string: "https://example.test/bookmark")!
         first.homeURL = saved
         let ordinary = TabFolder(spaceID: first.id, name: "Outer", isPinned: true)
-        let live = LiveFolderConfiguration(source: .feed(address: saved, isPrivate: false), itemLimit: 10, refreshMinutes: 60)
-        let nested = TabFolder(spaceID: first.id, name: "News", isPinned: true, parentID: ordinary.id, live: live)
+        let nested = TabFolder(spaceID: first.id, name: "News", isPinned: true, parentID: ordinary.id)
         let favorite = Favorite(url: saved, title: "Favorite", personaID: personal.id)
         let tab = SessionSnapshot.TabRecord(id: UUID(), spaceID: first.id, url: URL(string: "https://example.test/current"),
             title: "Current title", customTitle: "My tab", isPinned: true, folderID: ordinary.id, engine: .chromium,
@@ -43,13 +41,34 @@ import Testing
         #expect(item.schemaVersion == 2)
         #expect(item[.parent] == .reference(ordinary.id.uuidString))
         #expect(item[.order] == .number(1))
-        let cloud = SyncCloudKitRecords.ckRecord(from: item)
-        let liveText = try #require(cloud.encryptedValues["live"] as? String)
-        #expect(cloud["live"] == nil)
-        #expect(try JSONDecoder().decode(LiveFolderConfiguration.self, from: Data(liveText.utf8)) == live)
+        #expect(item.fields["live"] == nil)
         let later = date.addingTimeInterval(90)
         let same = try SidebarRecords.records(from: state, foundAt: later)
         let changes = SyncDiff.changes(local: same, scope: { $0.recordType != .setting }, mirror: records, pending: [], foundAt: later)
         #expect(changes.saves.isEmpty && changes.deletions.isEmpty)
+    }
+
+    /// Live folders were removed, so this build neither writes nor clears a folder's `live` field: an older Mac's live folder keeps it on the server through this Mac's edits (`docs/sync.md`, Schema versions).
+    @Test func aFoldersLiveFieldFromAnOlderMacStaysThroughEdits() throws {
+        let space = Space(name: "One")
+        var folder = TabFolder(spaceID: space.id, name: "News", isPinned: true)
+        func records(_ folder: TabFolder, at date: Date) throws -> [SyncRecord] {
+            let snapshot = SessionSnapshot(spaces: [space], currentSpaceID: space.id, favorites: [], tabs: [], folders: [folder])
+            return try SidebarRecords.records(from: SidebarSyncState(snapshot: snapshot, defaultEngine: .webKit), foundAt: date)
+        }
+        let date = Date(timeIntervalSinceReferenceDate: 30)
+        var mirror = try records(folder, at: date)
+        let index = try #require(mirror.firstIndex { $0.recordName == folder.id.uuidString })
+        mirror[index].fields["live"] = .text("older configuration")
+        mirror[index].fieldModifiedAt["live"] = date
+        let later = date.addingTimeInterval(90)
+        let same = SyncDiff.changes(local: try records(folder, at: later), scope: { $0.recordType != .setting }, mirror: mirror, pending: [], foundAt: later)
+        #expect(same.saves.isEmpty && same.deletions.isEmpty)
+        folder.name = "Reading"
+        let renamed = SyncDiff.changes(local: try records(folder, at: later), scope: { $0.recordType != .setting }, mirror: mirror, pending: [], foundAt: later)
+        let save = try #require(renamed.saves.first)
+        #expect(renamed.saves.count == 1 && save[.name] == .text("Reading") && save.fields["live"] == .text("older configuration"))
+        let cloud = SyncCloudKitRecords.ckRecord(from: save, base: SyncCloudKitRecords.ckRecord(from: mirror[index]))
+        #expect(cloud.encryptedValues["live"] as? String == "older configuration")
     }
 }

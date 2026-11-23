@@ -11,10 +11,8 @@ final class UnloadedWebContents: EngineWebContents {
     let engineKind: EngineKind
     private(set) var url: URL?
     private(set) var title: String
-    /// The icon of the page that unloaded, the site's usual icon once `loadSiteIcon()` finds one, or a live folder's icon (`showIcon(_:)`).
+    /// The icon of the page that unloaded, or the site's usual icon once `loadSiteIcon()` finds one.
     private(set) var favicon: NSImage?
-    /// False for a live folder item's tab, whose row shows its folder's icon, so that a folder of links to many sites contacts none of them until the user opens an item (`docs/bookmarks.md`, Items as tabs): `loadSiteIcon()` requests nothing, and a load keeps the icon.
-    let requestsSiteIcon: Bool
     /// The engine's saved state, which the page restores when it loads, or nil after a load replaced the saved page.
     private(set) var restorableState: Data?
     /// Kept for the page, which takes its host's remembered zoom once it loads.
@@ -37,24 +35,23 @@ final class UnloadedWebContents: EngineWebContents {
     func download(_ url: URL) {}
     var devTools: (any EngineDevTools)? { nil }
 
-    /// `icon` is the icon of the page that unloaded, which the tab's row keeps showing, or a live folder's icon.
-    init(url: URL?, title: String, engine: EngineKind, state: Data?, icon: NSImage? = nil, requestsSiteIcon: Bool = true) {
+    /// `icon` is the icon of the page that unloaded, which the tab's row keeps showing.
+    init(url: URL?, title: String, engine: EngineKind, state: Data?, icon: NSImage? = nil) {
         self.url = url
         self.title = title
         engineKind = engine
         restorableState = state
         favicon = icon
-        self.requestsSiteIcon = requestsSiteIcon
     }
 
-    /// The stand-in for the page of a saved tab, as relaunching reopens it: the record's address, title, engine, or `defaultEngine` for a record without one, and page state. A live folder item's stand-in requests no site icon.
+    /// The stand-in for the page of a saved tab, as relaunching reopens it: the record's address, title, engine, or `defaultEngine` for a record without one, and page state.
     convenience init(record: SessionSnapshot.TabRecord, defaultEngine: EngineKind) {
-        self.init(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state, requestsSiteIcon: record.liveItemID == nil)
+        self.init(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state)
     }
 
-    /// Shows the site's usual icon, its `/favicon.ico`, until the page loads and reports its own, so that the tab's row keeps an icon meanwhile. The icon loads as the engines load theirs, without cookies (`FaviconLoader`). A live folder item's stand-in requests none.
+    /// Shows the site's usual icon, its `/favicon.ico`, until the page loads and reports its own, so that the tab's row keeps an icon meanwhile. The icon loads as the engines load theirs, without cookies (`FaviconLoader`).
     func loadSiteIcon() {
-        guard requestsSiteIcon, let pageURL = url, let iconURL = FaviconLoader.defaultIconURL(for: pageURL) else { return }
+        guard let pageURL = url, let iconURL = FaviconLoader.defaultIconURL(for: pageURL) else { return }
         FaviconLoader.load(iconURL) { [weak self] image in
             guard let self, let image, self.url == pageURL else { return }
             self.favicon = image
@@ -62,17 +59,11 @@ final class UnloadedWebContents: EngineWebContents {
         }
     }
 
-    /// Shows a live folder's icon in an item's row until the item's page loads and reports its own.
-    func showIcon(_ icon: NSImage) {
-        favicon = icon
-        uiDelegate?.webContentsDidChangeFavicon(self)
-    }
-
-    /// Replaces the saved page with `url`, which the tab then loads from the start, without the saved state, title, or icon. A live folder item's stand-in keeps its folder's icon.
+    /// Replaces the saved page with `url`, which the tab then loads from the start, without the saved state, title, or icon.
     fileprivate func replacePage(with url: URL?) {
         self.url = url
         title = ""
-        if requestsSiteIcon { favicon = nil }
+        favicon = nil
         restorableState = nil
         uiDelegate?.webContentsDidChangeURL(self)
         uiDelegate?.webContentsDidChangeTitle(self)

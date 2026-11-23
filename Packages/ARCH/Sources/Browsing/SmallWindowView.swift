@@ -116,6 +116,9 @@ private struct SmallWindowTopRow: View {
             SidebarIconButton(symbol: "square.and.arrow.up", label: localized("Share"), action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))
+            if session.personas.count > 1 {
+                SmallWindowPersonaMenu(session: session, tab: tab)
+            }
             SidebarIconButton(symbol: "arrow.up.left.and.arrow.down.right", label: localized("Move to Main Window"), shortcut: session.menuShortcut("moveToMainWindow")) {
                 session.moveToMainWindow(windowModel)
             }
@@ -124,5 +127,37 @@ private struct SmallWindowTopRow: View {
         .padding(.leading, (windowButtons.trailingEdge ?? 0) + BrowserWindowView.pageMargin)
         .padding(.trailing, BrowserWindowView.pageMargin)
         .padding(.top, SidebarTopRow.topPadding(below: windowButtons))
+    }
+}
+
+/// The small window's Persona menu, shown while there is more than one Persona: each Persona by "Persona / Space", with the space the tab would move to (`BrowserSession.smallWindowDestination(in:)`), and the tab's own Persona checked. Choosing another moves the window's page there, loading it again in that Persona's profile (`BrowserSession.moveSmallWindow(_:toPersona:)`). Its button has the row's icon buttons' size, weight, and colors (`SidebarIconButton`).
+private struct SmallWindowPersonaMenu: View {
+    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    let tab: Tab
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            ForEach(session.personas) { persona in
+                let place = BrowserSession.displayedPlace(ofPersona: persona.id, space: session.smallWindowDestination(in: persona.id), among: session.personas) ?? persona.name
+                Toggle(place, isOn: Binding(get: { persona.id == tab.personaID }, set: { if $0 { session.moveSmallWindow(windowModel, toPersona: persona.id) } }))
+            }
+        } label: {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 30, height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(.secondary)
+        .onHover { isHovering = $0 }
+        .help(localized("Switch Persona"))
+        .accessibilityLabel(localized("Switch Persona"))
     }
 }

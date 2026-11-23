@@ -31,6 +31,36 @@ import Testing
         #expect(ChromiumBrowser.bridgeCookie(EngineCookie(name: "id", value: "1", domain: ".example.org", isSecure: true, sameSite: .noRestriction)).sameSite == .noRestriction)
     }
 
+    // MARK: Start
+
+    /// The app's debug window shows why the engine or a Persona's profile did not start, in the interface's language.
+    @Test func aStartErrorNamesItsReason() {
+        #expect(ChromiumEngine.StartError.initializationFailed.localizedDescription == catalogText("CEF did not initialize."))
+        #expect(ChromiumEngine.StartError.profileUnavailable.localizedDescription == catalogText("CEF refused the Persona's profile folder."))
+    }
+
+    // MARK: Links opened in a new tab
+
+    /// The navigation delegate hears of a modified link as the WebKit adapter reports it: a background tab for Command or the middle button, a foreground tab with Shift as well, and a new window with Shift alone, which is no request for a tab.
+    @Test func aModifiedLinkReachesTheDelegateAsOnWebKit() throws {
+        let link = try #require(URL(string: "https://example.org/next"))
+        let cases: [(ARCHCEFPopupDisposition, EngineNavigationDisposition, Bool)] = [(.backgroundTab, .newBackgroundTab, true), (.foregroundTab, .newForegroundTab, true),
+                                                                                     (.window, .newWindow, false), (.popup, .newWindow, false)]
+        for (cef, disposition, opensTab) in cases {
+            let action = ChromiumWebContents.linkAction(to: link, disposition: cef)
+            #expect(action.url == link && action.disposition == disposition && action.opensLinkInNewTab == opensTab && action.isUserInitiated && !action.isRedirect)
+        }
+    }
+
+    /// The new tab's request names the frame the link is in, without its fragment and credentials, and only a web frame; the bridge applies Chromium's default policy to it.
+    @Test func aLinkOpenedInANewTabSendsItsWebFramesAddressAsReferrer() {
+        #expect(ChromiumWebContents.linkReferrer(fromFrameAt: "https://user:secret@news.example/story?id=1#top") == URL(string: "https://news.example/story?id=1"))
+        #expect(ChromiumWebContents.linkReferrer(fromFrameAt: "http://127.0.0.1:8080/") == URL(string: "http://127.0.0.1:8080/"))
+        for frame in ["", "about:blank", "file:///private/tmp/page.html", "data:text/html,a", "chrome://version/"] {
+            #expect(ChromiumWebContents.linkReferrer(fromFrameAt: frame) == nil)
+        }
+    }
+
     // MARK: Crashes
 
     /// A page that crashes again within a minute of its reload stays blank, so that it cannot reload in a loop, and a crash later than that, or of another page, reloads it.

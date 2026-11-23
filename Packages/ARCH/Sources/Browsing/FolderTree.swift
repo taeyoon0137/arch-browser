@@ -19,8 +19,19 @@ import Foundation
     init(folders: [TabFolder], tabs: [Tab]) {
         self.folders = folders
         self.tabs = tabs
-        foldersByID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        subfoldersByParent = Dictionary(grouping: folders.filter { $0.parentID != nil }) { $0.parentID! }
+        let foldersByID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        self.foldersByID = foldersByID
+        // `repairingParents` leaves no cycle in a loaded file, and no change makes one. A folder whose parents lead back into a cycle all the same would make every walk down the tree recurse without end, which stops the app as the sidebar draws, so it is left out of its parent's folders and no row shows it.
+        let linked = folders.filter { folder in
+            var seen: Set<UUID> = [folder.id]
+            var current = folder.parentID
+            while let id = current {
+                guard seen.insert(id).inserted else { return false }
+                current = foldersByID[id]?.parentID
+            }
+            return folder.parentID != nil
+        }
+        subfoldersByParent = Dictionary(grouping: linked) { $0.parentID! }
         tabsByFolder = Dictionary(grouping: tabs.filter { $0.folderID != nil }) { $0.folderID! }
     }
 
@@ -87,11 +98,6 @@ import Foundation
         1 + (subfolders(of: id).map { height(of: $0.id) }.max() ?? 0)
     }
 
-    /// Whether `id` names a live folder, which holds only its items' tabs, in its source's order (live folder rule 4): nothing else enters it, and nothing inside it moves.
-    func isLive(_ id: UUID?) -> Bool {
-        folder(id)?.live != nil
-    }
-
     /// Whether a tab sits in a collapsed folder or in a folder that a collapsed folder holds, which shows it in the sidebar only while it is selected.
     func isInCollapsedFolder(_ tab: Tab) -> Bool {
         guard let folder = folder(tab.folderID) else { return false }
@@ -138,11 +144,11 @@ import Foundation
 
     // MARK: Moves
 
-    /// Whether a new folder can go inside `id`, as New Folder Inside and Add to New Folder put it: in an ordinary folder below the fourth level, or at the top of a list for nil. Live folders and agent folders hold no folders (bookmark rule 6).
+    /// Whether a new folder can go inside `id`, as New Folder Inside and Add to New Folder put it: in an ordinary folder below the fourth level, or at the top of a list for nil. Agent folders hold no folders (bookmark rule 6).
     func canAddFolder(inside id: UUID?) -> Bool {
         guard let id else { return true }
         guard let parent = folder(id) else { return false }
-        return !parent.isAgentFolder && parent.live == nil && level(of: id) < Self.maximumLevel
+        return !parent.isAgentFolder && level(of: id) < Self.maximumLevel
     }
 
     /// Whether Move to Folder can move a folder into `parentID`: another ordinary folder of its space and list that is not its parent, itself, or a folder inside it, where the folder and the folders it holds stay within the fourth level. An agent folder always stays at the top of its open list.
@@ -155,14 +161,14 @@ import Foundation
     private func canHold(_ id: UUID, in parentID: UUID?) -> Bool {
         guard let moved = folder(id), !moved.isAgentFolder else { return false }
         guard let parentID else { return true }
-        guard let parent = folder(parentID), !parent.isAgentFolder, parent.live == nil, parentID != id, parent.spaceID == moved.spaceID, parent.isPinned == moved.isPinned,
+        guard let parent = folder(parentID), !parent.isAgentFolder, parentID != id, parent.spaceID == moved.spaceID, parent.isPinned == moved.isPinned,
               !ancestors(of: parentID).contains(where: { $0.id == id }) else { return false }
         return level(of: parentID) + height(of: id) <= Self.maximumLevel
     }
 
-    /// Whether Move to Folder or a drop on a folder's row can move a tab into a folder: an ordinary folder of the tab's space, in either list, other than its own. The tab takes the folder's list. Only the source of a live folder or the owner of an agent folder adds tabs to it.
+    /// Whether Move to Folder or a drop on a folder's row can move a tab into a folder: an ordinary folder of the tab's space, in either list, other than its own. The tab takes the folder's list. Only the owner of an agent folder adds tabs to it.
     func canMoveTab(_ tab: Tab, into folderID: UUID) -> Bool {
-        guard let target = folder(folderID), !target.isAgentFolder, target.live == nil else { return false }
+        guard let target = folder(folderID), !target.isAgentFolder else { return false }
         return target.spaceID == tab.spaceID && tab.folderID != folderID
     }
 
@@ -218,7 +224,7 @@ import Foundation
         case between(parentID: UUID?, beforeID: UUID?)
     }
 
-    /// Where a folder dragged to `position` goes, or nil where the drop is refused or would leave the folder where it is, so that nothing moves and its row returns to its slot on release. Above a folder's row, it goes before that folder, at that folder's level; on a folder's row, into that folder; on a tab's row, last among the folders of the tab's folder, or at the top of the list for a tab outside folders, since a folder lists its folders before its tabs; on the row that ends its list, last at the top of the list. A folder stays in its space's list (another space takes it through its symbol, which the session decides), never goes into itself or a folder inside it, never takes the folders it holds past the fourth level, never goes into a live folder, and never goes where a collapsed folder would hide its row. An agent folder takes no drops and stays in its own space.
+    /// Where a folder dragged to `position` goes, or nil where the drop is refused or would leave the folder where it is, so that nothing moves and its row returns to its slot on release. Above a folder's row, it goes before that folder, at that folder's level; on a folder's row, into that folder; on a tab's row, last among the folders of the tab's folder, or at the top of the list for a tab outside folders, since a folder lists its folders before its tabs; on the row that ends its list, last at the top of the list. A folder stays in its space's list (another space takes it through its symbol, which the session decides), never goes into itself or a folder inside it, never takes the folders it holds past the fourth level, and never goes where a collapsed folder would hide its row. An agent folder takes no drops and stays in its own space.
     func dropTarget(for id: UUID, at position: DropPosition) -> DropTarget? {
         guard let moved = folder(id) else { return nil }
         let target: DropTarget

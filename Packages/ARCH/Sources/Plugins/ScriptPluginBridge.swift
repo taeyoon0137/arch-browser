@@ -112,12 +112,15 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
             close: (id) => call("tabs.close", [id]),
             select: (id) => call("tabs.select", [id]),
             move: (id, place) => call("tabs.move", [id, ...given(place)]),
+            pin: (id) => call("tabs.pin", [id]),
+            unpin: (id) => call("tabs.unpin", [id]),
             rename: (id, name) => call("tabs.rename", [id, ...given(name)]),
           }),
           downloads: Object.freeze({
             list: () => call("downloads.list", []),
             rename: (id, name) => call("downloads.rename", [id, name]),
           }),
+          history: Object.freeze({ search: (text, limit) => call("history.search", [text, ...given(limit)]) }),
           storage: Object.freeze({
             get: (key) => call("storage.get", [key]),
             set: (key, value) => call("storage.set", [key, ...given(value)]),
@@ -178,7 +181,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
-    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, an AI reply's call once its reply has come, a stream's `ai.next` call once text arrives or the reply ends, and `pages.run` once the page has run the script. The other calls reply before the handler returns.
+    /// A secret's call waits for the Keychain off the main thread and replies once it is done, after the secret calls before it, an AI reply's call once its reply has come, a stream's `ai.next` call once text arrives or the reply ends, `pages.run` once the page has run the script, and `history.search` once the history store has read the pages. The other calls reply before the handler returns.
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
                                replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard !hasEnded else { return replyHandler(nil, PluginError.stopped.bridgeName) }
@@ -252,6 +255,24 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
                 do { Self.reply(.success(try await context.runPageScript(.file(file), in: id)), to: replyHandler) }
                 catch { Self.reply(.failure(error), to: replyHandler) }
             }
+        case "history.search":
+            // `{url, title, lastVisit, visitCount}` for each page. The limit is a whole number from 1, of which the context gives at most `PluginManager.historyLimit`, as it does without one or with null.
+            let text: String
+            let limit: Int
+            do {
+                guard call.args.count <= 2 else { throw BridgeFailure.invalidCall }
+                text = try call.text(0)
+                limit = call.value(1) == nil || call.value(1) == .null ? PluginManager.historyLimit : try call.wholeNumber(1)
+                guard limit >= 1 else { throw BridgeFailure.invalidCall }
+            } catch {
+                return replyHandler(nil, BridgeFailure.invalidCall.rawValue)
+            }
+            waitsForArch?(true)
+            Task {
+                defer { waitsForArch?(false) }
+                do { Self.reply(.success(.array(try await context.history(matching: text, limit: limit).map(\.scriptValue))), to: replyHandler) }
+                catch { Self.reply(.failure(error), to: replyHandler) }
+            }
         case "ai.next":
             guard let number = try? call.wholeNumber(0), let stream = streams[number], stream.waiting == nil else { return replyHandler(nil, BridgeFailure.invalidCall.rawValue) }
             if let piece = takePiece(of: number) { return Self.reply(piece, to: replyHandler) }
@@ -311,6 +332,12 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     private func moveTab(_ id: PluginTab.ID, to place: PluginTabPlace) throws -> Bool {
         if role == .panel, let context = context as? any PluginPanelContext { return try context.panelMoveTab(id, to: place) }
         return try context.moveTab(id, to: place)
+    }
+
+    /// Pins or unpins the tab for a call of the document: a panel's call belongs to no hook step of the plugin.
+    private func setPinned(_ isPinned: Bool, tab id: PluginTab.ID) throws -> Bool {
+        if role == .panel, let context = context as? any PluginPanelContext { return try context.panelSetPinned(isPinned, tab: id) }
+        return try context.setPinned(isPinned, tab: id)
     }
 
     /// Starts reading the reply of an `arch.ai.stream` call and returns the stream's number, with which the script asks for its text.
@@ -514,6 +541,9 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "tabs.move":
             guard call.args.count <= 2, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try moveTab(id, to: try Self.tabPlace(call.value(1))))
+        case "tabs.pin", "tabs.unpin":
+            guard call.args.count == 1, let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
+            return .bool(try setPinned(call.call == "tabs.pin", tab: id))
         case "tabs.rename":
             guard let id = UUID(uuidString: try call.text(0)) else { throw BridgeFailure.invalidCall }
             return .bool(try renameTab(id, to: try call.optionalText(1)))

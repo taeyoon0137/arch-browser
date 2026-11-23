@@ -2,7 +2,7 @@
 // Actions on a card or another overlay do not count as page actions (`BrowserWindowModel.tabOnScreen(at:)` and `tabOnScreen(activatedBy:)`).
 // Later downloads wait for approval, so a page cannot fill the downloads folder on its own. Allow lasts until the tab commits another document.
 // A denial and first-download state reset only for a user-requested document or a different site. Same-site automatic loads keep them, so a page cannot reload for another first download.
-// A tab opened by a plugin, or by that tab's page before user action, gets no first download until the user acts in it or asks Arch to load an address there.
+// A tab opened by a script plugin, or by that tab's page before user action, gets no first download until the user acts in it or asks Arch to load an address there.
 // A tab opened straight onto a file uses its opener's gate (`BrowserSession`), so opening files in new tabs cannot bypass approval.
 
 /// One tab's downloads from its current documents. `BrowserSession` admits each download through it and asks with a card over the tab when it says so. The gate returns the decisions for the caller to run, so that none runs while the gate changes.
@@ -30,7 +30,7 @@ struct PageDownloadGate {
     private var answer: Bool?
     /// The decisions of the downloads that wait for the answer.
     private var waiting: [(Bool) -> Void] = []
-    /// Set when a plugin opened the tab, as a web extension's `tabs.create` and `windows.create` do, or a page of such a tab opened it, until the user acts in its page or Arch loads an address in it for the user: each document starts over with its first download used, and an address that only points at a file downloads nothing (`Tab.webContents(_:shouldDownload:hasPage:)`).
+    /// Set when a script plugin opened the tab with `tabs.manage`, or a page of such a tab opened it, until the user acts in its page or Arch loads an address in it for the user: each document starts over with its first download used, and an address that only points at a file downloads nothing (`Tab.webContents(_:shouldDownload:hasPage:)`).
     private(set) var isHeldUntilUserActs = false
     /// Counts the times the gate started over, so that an answer to a question asked before decides only the downloads that wait for it.
     private var start = 0
@@ -75,7 +75,7 @@ struct PageDownloadGate {
         isHeldUntilUserActs = false
     }
 
-    /// A plugin, such as a web extension, opened the tab, or a page of a tab that one opened did before the user acted in it, so every download of its pages asks until the user acts in a page of the tab or loads an address in it.
+    /// A script plugin opened the tab, which a web extension's `tabs.create` and `windows.create` do not hold (`SessionWebExtensionHost`), or a page of a tab that one opened did before the user acted in it, so every download of its pages asks until the user acts in a page of the tab or loads an address in it.
     mutating func holdUntilUserActs() {
         isHeldUntilUserActs = true
         hasDownloaded = true

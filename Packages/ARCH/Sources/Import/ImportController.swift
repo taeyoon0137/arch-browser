@@ -53,7 +53,7 @@ import SwiftUI
         }
     }
 
-    /// Adds the favorites and history pages the files held, the favorites to the Persona of the sidebar target's current space, then, once the history store has taken the pages, sums them up in a sheet on `window`.
+    /// Adds the favorites and history pages the files held to the Persona of the sidebar target's current space, then, once the history store has taken the pages, sums them up in a sheet on `window`.
     private func add(_ results: [Result<ImportedFile, Error>], in window: NSWindow) {
         let personaID = session.sidebarTarget().personaID
         var summary = ImportSummary()
@@ -73,7 +73,7 @@ import SwiftUI
         if summary.lines.isEmpty && summary.failures.count < results.count {
             emptyLine = pages.isEmpty ? localized("No bookmarks or history pages with web addresses were found.") : localized("No history pages were added or updated.")
         }
-        summary.importHistory(pages, into: history) { [weak self] summary in
+        summary.importHistory([(personaID, pages)], into: history) { [weak self] summary in
             self?.show(summary, emptyLine: emptyLine, in: window)
         }
     }
@@ -137,12 +137,14 @@ import SwiftUI
         isImporting = false
     }
 
-    /// Applies the selection in one turn of the run loop, as `docs/import-browsers.md` describes: each profile's sidebar items to its destination, then the shortcuts, the search engine, the record of what the profiles brought, and the history pages. The session saves through its usual debounce. The summary follows once the history store has taken the pages, since it counts those that the store added or changed.
+    /// Applies the selection in one turn of the run loop, as `docs/import-browsers.md` describes: each profile's sidebar items to its destination, then the shortcuts, the search engine, the record of what the profiles brought, and each profile's history pages, to the Persona its row went to, which a profile that brings only history makes when its destination is a new Persona. The session saves through its usual debounce. The summary follows once the history store has taken the pages, since it counts those that the store added or changed.
     private func add(_ selection: BrowserImportModel.Selection, record: SidebarImport.Record, in window: NSWindow) {
         var record = record
         var summary = ImportSummary()
-        for (row, destination) in selection.rows {
+        var history: [(persona: UUID, pages: [HistoryEntry])] = []
+        for (row, destination, pages) in selection.rows {
             summary.add(session.addImport(row, to: destination, record: &record))
+            if !pages.isEmpty, let persona = record.personaID(for: row.profile) { history.append((persona, pages)) }
         }
         let addedShortcutCount = siteSearch.add(selection.shortcuts)
         summary.shortcuts = addedShortcutCount
@@ -153,7 +155,7 @@ import SwiftUI
         }
         if !selection.rows.isEmpty { record.write() }
         summary.failures = selection.failures
-        summary.importHistory(selection.history, into: history) { [weak self] summary in
+        summary.importHistory(history, into: self.history) { [weak self] summary in
             self?.show(summary, emptyLine: localized("Everything checked was in Arch already."), in: window)
         }
     }
@@ -194,11 +196,13 @@ struct ImportSummary {
     /// Why files, browsers, or items could not be read.
     var failures: [String] = []
 
-    func importHistory(_ pages: [HistoryEntry], into history: HistoryStore, completion: @escaping (ImportSummary) -> Void) {
-        history.importEntries(pages) { changed in
+    /// Imports each Persona's pages, one import after another, and completes with the pages the store added or changed, counting an address once in each Persona.
+    func importHistory(_ pages: [(persona: UUID, pages: [HistoryEntry])], into history: HistoryStore, completion: @escaping (ImportSummary) -> Void) {
+        guard let (persona, first) = pages.first else { return completion(self) }
+        history.importEntries(first, into: persona) { changed in
             var summary = self
-            summary.historyPages = changed
-            completion(summary)
+            summary.historyPages += changed
+            summary.importHistory(Array(pages.dropFirst()), into: history, completion: completion)
         }
     }
 

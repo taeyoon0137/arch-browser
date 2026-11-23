@@ -1,10 +1,10 @@
-// Settings ▸ Websites lists sites with remembered permission answers. The user can change or remove each answer.
+// Settings ▸ Websites lists the sites with remembered permission answers of one Persona, the active window's at first, with a picker for another while several Personas keep answers. The user can change or remove each answer.
 // It also shows whether macOS permits Arch to display notifications from sites allowed to send them.
 import ARCHEngine
 import Browsing
 import SwiftUI
 
-/// One group per website with its remembered answers, each with a menu to change it and a button to remove it. A website asks again for a permission whose answer is removed. While a website may send notifications and macOS does not let Arch show them, a group at the top says so and offers the way to turn them on.
+/// One group per website with the shown Persona's remembered answers, each with a menu to change it and a button to remove it. With several Personas that keep answers, a picker names the shown Persona alone, since Settings has no space (Persona rule 7), and lists every Persona but the Agents Persona, which remembers none. A website asks again for a permission whose answer is removed. While a website may send notifications and macOS does not let Arch show them, a group at the top says so and offers the way to turn them on.
 struct WebsitesSection: View {
     /// The session's remembered answers.
     @ObservedObject var store: SitePermissionStore
@@ -30,13 +30,24 @@ struct WebsitesSection: View {
     }
 
     let session: BrowserSession
-    /// Whether a remembered answer holds in several Personas. The section follows only the session's Personas, not every change of the session.
-    @State private var hasSeveralPersonas = false
+    /// The Personas that keep answers. The section follows only the session's Personas, not every change of the session.
+    @State private var personas: [Persona] = []
+    @State private var personaID = Persona.defaultID
 
     var body: some View {
-        let origins = store.decisions.keys.sorted { Self.siteTitle(for: $0).localizedStandardCompare(Self.siteTitle(for: $1)) == .orderedAscending }
-        let hasAllowedSite = store.decisions.values.contains { $0[.notifications] == .allow }
+        let personaID = shownPersonaID
+        let decisions = store.decisions(in: personaID)
+        let origins = decisions.keys.sorted { Self.siteTitle(for: $0).localizedStandardCompare(Self.siteTitle(for: $1)) == .orderedAscending }
+        // macOS's permission is the app's, so any Persona's allowed site needs it.
+        let hasAllowedSite = store.answers.values.contains { $0.decisions.values.contains { $0[.notifications] == .allow } }
         Form {
+            if personas.count > 1 {
+                Section {
+                    Picker(localized("Persona"), selection: $personaID) {
+                        ForEach(personas) { Text($0.name).tag($0.id) }
+                    }
+                }
+            }
             if let notice = Self.notificationNotice(for: notifications.status, hasAllowedSite: hasAllowedSite) {
                 Section {
                     noticeRow(notice)
@@ -52,8 +63,8 @@ struct WebsitesSection: View {
             }
             ForEach(origins, id: \.self) { origin in
                 Section {
-                    ForEach(types(of: origin), id: \.self) { type in
-                        row(for: type, origin: origin)
+                    ForEach(types(of: origin, in: decisions), id: \.self) { type in
+                        row(for: type, origin: origin, in: personaID)
                     }
                 } header: {
                     Text(Self.siteTitle(for: origin))
@@ -65,17 +76,24 @@ struct WebsitesSection: View {
         .formStyle(.grouped)
         // A fixed height keeps the window still while answers come and go; the list scrolls instead.
         .frame(width: sectionWidth, height: 360)
-        // The Agents Persona is named agent-only after it joins the Personas, so the flag is read on the next turn.
-        .onReceive(session.$personas) { _ in DispatchQueue.main.async { hasSeveralPersonas = session.remembersAnswersInSeveralPersonas } }
+        // The Agents Persona is named agent-only after it joins the Personas, so the list is read on the next turn.
+        .onReceive(session.$personas) { _ in DispatchQueue.main.async { personas = session.personasWithRememberedAnswers } }
+        // Each time the section shows, it starts at the active window's Persona.
+        .onAppear { self.personaID = session.personaForWebsiteSettings }
     }
 
-    private func row(for type: EnginePermissionType, origin: String) -> some View {
+    /// The chosen Persona while it keeps answers, else the default one.
+    private var shownPersonaID: Persona.ID {
+        personas.contains { $0.id == personaID } ? personaID : Persona.defaultID
+    }
+
+    private func row(for type: EnginePermissionType, origin: String, in personaID: Persona.ID) -> some View {
         LabeledContent(Self.permissionTitle(for: type)) {
             HStack(spacing: 8) {
                 Picker(Self.permissionTitle(for: type), selection: Binding(
-                    get: { store.decision(for: type, origin: origin) ?? .deny },
+                    get: { store.decision(for: type, origin: origin, in: personaID) ?? .deny },
                     set: { decision in
-                        store.set(decision, for: [type], origin: origin)
+                        store.set(decision, for: [type], origin: origin, in: personaID)
                         // Allowing a website's notifications here asks macOS too, as Allow on the permission card does.
                         if type == .notifications, decision == .allow { notifications.request { _ in } }
                     }
@@ -87,7 +105,7 @@ struct WebsitesSection: View {
                 .accessibilityLabel(Self.permissionTitle(for: type))
                 .fixedSize()
                 Button {
-                    store.set(nil, for: [type], origin: origin)
+                    store.set(nil, for: [type], origin: origin, in: personaID)
                 } label: {
                     Image(systemName: "minus.circle")
                 }
@@ -119,14 +137,14 @@ struct WebsitesSection: View {
     }
 
     private var footer: some View {
-        formFootnote(hasSeveralPersonas
-            ? localized("Arch remembers your answer in every Persona when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs.")
+        formFootnote(personas.count > 1
+            ? localized("Each Persona remembers its own answers when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs.")
             : localized("Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can\u{2019}t show notifications in WebKit tabs."))
     }
 
     /// The origin's permission types in the order of their titles.
-    private func types(of origin: String) -> [EnginePermissionType] {
-        let types = store.decisions[origin].map { Array($0.keys) } ?? []
+    private func types(of origin: String, in decisions: [String: [EnginePermissionType: SitePermissionStore.Decision]]) -> [EnginePermissionType] {
+        let types = decisions[origin].map { Array($0.keys) } ?? []
         return types.sorted { Self.permissionTitle(for: $0).localizedStandardCompare(Self.permissionTitle(for: $1)) == .orderedAscending }
     }
 

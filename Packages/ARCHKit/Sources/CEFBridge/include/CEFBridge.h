@@ -353,8 +353,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url userGesture:(BOOL)userGesture;
 /// Asks whether a main frame navigation to `url` may go ahead: each one that does not belong to another app, and again before the request of each server redirect, with `isRedirect` set and the redirect's address. Return NO to stop it before its request. `userGesture` is true when the user clicked a link.
 - (BOOL)cefBrowserShouldBrowseToURL:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture;
-/// Asks the app to handle a modified link before Alloy loads it in place. Return NO once the app handles it.
-- (BOOL)cefBrowserShouldOpenURL:(NSString *)url disposition:(ARCHCEFPopupDisposition)disposition;
+/// Asks the app to handle a modified link before Alloy loads it in place. `frameURL` is the address of the frame the link is in. Return NO once the app handles it.
+- (BOOL)cefBrowserShouldOpenURL:(NSString *)url disposition:(ARCHCEFPopupDisposition)disposition frameURL:(NSString *)frameURL;
 /// Reports that the browser closed, or that its page closed itself with `window.close()` while one of its downloads needs the browser. The browser then stays open, so the download goes on, until `close` or `tryCloseWithCompletion:`.
 - (void)cefBrowserDidClose;
 /// Asks whether a download from `url` may start. `hasDocument` is false when the browser never showed a page.
@@ -457,6 +457,13 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 /// Creates the browser in `requestContext`, whose profile the page loads in. The renderer runs `pageScripts` from the first document on.
 - (instancetype)initWithParentView:(NSView *)parentView
                                url:(NSString *)url
+                    requestContext:(ARCHCEFRequestContext *)requestContext
+                       pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
+                          delegate:(id<ARCHCEFBrowserDelegate>)delegate;
+/// Creates the browser as above, and its first main frame request sends `referrer`, an http or https address, as its `Referer` under Chromium's default policy: the whole address to the same origin, only its origin to another, and nothing from https to http. Chromium's own `document.referrer` stays empty, since the referrer joins the request and not the navigation.
+- (instancetype)initWithParentView:(NSView *)parentView
+                               url:(NSString *)url
+                          referrer:(nullable NSString *)referrer
                     requestContext:(ARCHCEFRequestContext *)requestContext
                        pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate;

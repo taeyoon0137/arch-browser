@@ -1,4 +1,4 @@
-// Engine versions of one web extension plugin: the pairing rule at staging, the review's choice, update targets, entry identifiers of versions that share an identifier, pairs made from the review and by hand, their switch, failures, actions, and palette command, separation, removal of one version, a version installed again after a removal that `plugins.json` missed, records the build ignores, when a plugin asks for another engine's version, and the name an extension's page shows. A recording engine stands in for Chromium.
+// Engine versions of one web extension plugin: the pairing rule at staging, the review's choice, update targets, entry identifiers of versions that share an identifier, pairs made from the review and by hand, their switch, failures, actions, and palette command, separation, removal of one version, a version installed again after a removal that `plugins.json` missed, records the build ignores, copies of a pair to another Persona, when a plugin asks for another engine's version, and the name an extension's page shows. A recording engine stands in for Chromium.
 import AppKit
 import ARCHEngine
 @testable import Extensions
@@ -67,6 +67,59 @@ struct EngineVersionsTests {
         #expect(other.counterpart == reader.id && other.joinableEngines == [.chromium] && other.suggestedEngine == .chromium && other.updates == reader.id)
         let id = try manager.install(other, grant: PluginGrant(requestedBy: other.manifest), isEnabled: false, asVersionOf: reader.id, for: .chromium)
         return (reader.id, id)
+    }
+
+    // MARK: Copies to another Persona
+
+    /// A `.crx` file of an extension with the name and host permissions, signed by the test's developer key, so that its package has the developer's proof.
+    private func signedPackage(_ name: String, hosts: [String]) throws -> URL {
+        let manifest: [String: Any] = ["manifest_version": 3, "name": name, "version": "1", "host_permissions": hosts]
+        let source = try folder.package("crx-" + name, ["manifest.json": String(decoding: try JSONSerialization.data(withJSONObject: manifest), as: UTF8.self)])
+        let archive = folder.url.appendingPathComponent("\(name).zip")
+        try compress(source, to: archive)
+        let file = folder.url.appendingPathComponent("\(name).crx")
+        try CRXFile.data(archive: Data(contentsOf: archive)).write(to: file)
+        return file
+    }
+
+    /// Install in Another Persona stages both versions of a pair, each with its origin and proof, for one review whose grant is the union of their permissions and sites; installing it pairs them in the other Persona, each with the part of the grant that its manifest asks for. A Persona that has either already refuses the pair, and an unpaired plugin offers no pair.
+    @Test func copiesBothVersionsOfAPairToAnotherPersonaWithTheirProofs() async throws {
+        chromium.refusedNames.insert("Reader")
+        webKit.refusedNames.insert("Reader for Chromium")
+        let (source, _) = launch()
+        let webKitFile = try signedPackage("Reader", hosts: ["https://a.example/*"])
+        let reader = try await source.installEverything(from: webKitFile)
+        let chromiumFile = try signedPackage("Reader for Chromium", hosts: ["https://b.example/*", "https://c.example/*"])
+        let other = try await source.stage(chromiumFile)
+        let version = try source.install(other, grant: PluginGrant(requestedBy: other.manifest), isEnabled: true, asVersionOf: reader.id, for: .chromium)
+        #expect(source.pairForCopy(of: version)?.engines == [.webKit, .chromium] && source.pairForCopy(of: reader.id)?.engines == [.webKit, .chromium])
+
+        let otherPersona = UUID()
+        let runtime = WebExtensionRuntime(persona: otherPersona, host: host, nativeMessagingHosts: folder.url)
+        let target = PluginManager(persona: otherPersona, directory: folder.url, builtIns: [], runtimes: [runtime], secretStore: NoSecrets())
+        let copy = try #require(source.pairForCopy(of: reader.id))
+        let staged = try await target.stage(copy)
+        #expect(staged.map(\.engine) == [.webKit, .chromium])
+        #expect(staged.map(\.package.proof) == [.developer, .developer])
+        #expect(staged.map(\.package.origin) == [.file(webKitFile.absoluteURL), .file(chromiumFile.absoluteURL)])
+        #expect(target.pairInstallRefusal(for: staged) == nil)
+        let sites = try ["https://a.example/*", "https://b.example/*"].map { try MatchPattern($0) }
+        let lead = try target.installPair(staged, grant: PluginGrant(permissions: [], sites: sites), isEnabled: true)
+        #expect(lead == reader.id && target.engineVersions.count == 1)
+        let installed = try target.engineVersions[0].plugins.map { try plugin($0, in: target) }
+        #expect(Set(installed.map(\.proof)) == [.developer] && installed.allSatisfy(\.isEnabled))
+        #expect(try plugin(reader.id, in: target).grant.sites == [try MatchPattern("https://a.example/*")])
+        #expect(try #require(installed.first { $0.id != reader.id }).grant.sites == [try MatchPattern("https://b.example/*")])
+
+        // The Persona has the pair now, so another copy is refused and stages nothing that stays.
+        let again = try await target.stage(copy)
+        #expect(target.pairInstallRefusal(for: again) != nil)
+        #expect(throws: PluginError.self) { try target.installPair(again, grant: PluginGrant(permissions: [], sites: []), isEnabled: false) }
+        again.forEach { target.discard($0.package) }
+        #expect(target.plugins.count == 2)
+        let unpaired = try await source.installEverything(from: package("tool", name: "Tool"))
+        #expect(source.pairForCopy(of: unpaired.id) == nil)
+        target.close()
     }
 
     // MARK: Pairing rule

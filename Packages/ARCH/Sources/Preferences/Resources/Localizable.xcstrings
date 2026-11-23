@@ -1441,16 +1441,6 @@
         }
       }
     },
-    "Arch remembers your answer in every Persona when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can’t show notifications in WebKit tabs." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "웹사이트가 카메라 같은 권한을 요청하면 Arch는 모든 페르소나에서 사용자의 응답을 기억합니다. 응답을 제거하면 웹사이트가 다시 묻습니다. 화면 기록은 항상 묻습니다. WebKit 탭에서는 웹사이트가 알림을 표시할 수 없습니다."
-          }
-        }
-      }
-    },
     "Arch remembers your answer when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can’t show notifications in WebKit tabs." : {
       "localizations" : {
         "ko" : {
@@ -2391,6 +2381,16 @@
         }
       }
     },
+    "Each Persona remembers its own answers when a website asks for a permission such as the camera. A website asks again once you remove its answer. Screen recording always asks. Websites can’t show notifications in WebKit tabs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "웹사이트가 카메라 같은 권한을 요청하면 페르소나마다 사용자의 응답을 따로 기억합니다. 응답을 제거하면 웹사이트가 다시 묻습니다. 화면 기록은 항상 묻습니다. WebKit 탭에서는 웹사이트가 알림을 표시할 수 없습니다."
+          }
+        }
+      }
+    },
     "Each line is a JSON object. Enter the dotted path of each field the tool prints; a number picks an array element. Lines that are not JSON are skipped, and the final text is used when no delta arrives." : {
       "localizations" : {
         "ko" : {
@@ -2677,6 +2677,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "파일"
+          }
+        }
+      }
+    },
+    "Files of the %@ Version" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전의 파일"
           }
         }
       }
@@ -2971,6 +2981,16 @@
         }
       }
     },
+    "Install Both Versions of “%@”?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”의 두 버전을 모두 설치하겠습니까?"
+          }
+        }
+      }
+    },
     "Install Command-Line Tools?" : {
       "localizations" : {
         "ko" : {
@@ -3177,6 +3197,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@”에 설치되어 모든 스페이스에서 사용됩니다."
+          }
+        }
+      }
+    },
+    "Installs the %@ versions together as one plugin." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 버전을 하나의 플러그인으로 함께 설치합니다."
           }
         }
       }

@@ -571,6 +571,16 @@
         }
       }
     },
+    "Merge Persona Into…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 페르소나에 합치기…"
+          }
+        }
+      }
+    },
     "Minimize" : {
       "localizations" : {
         "ko" : {
@@ -1187,16 +1197,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "탭 고정 해제"
-          }
-        }
-      }
-    },
-    "Unread" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "읽지 않음"
           }
         }
       }

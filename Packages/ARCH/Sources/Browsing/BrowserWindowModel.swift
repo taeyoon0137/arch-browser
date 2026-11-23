@@ -7,7 +7,6 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
-import LiveFolders
 import PDFKit
 import Plugins
 import SwiftUI
@@ -42,9 +41,10 @@ public enum BrowserWindowKind {
     @Published public private(set) var selectedTabID: UUID?
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
     private var selectedTabObserver: AnyCancellable?
-    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes. Each change marks the live folder items whose tabs start or stop showing as viewed (live folder rule 5).
+    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes.
     @Published private(set) var shownTabIDs: [UUID] = [] {
-        didSet { session.windowDidChangeShownTabs(from: oldValue, to: shownTabIDs) }
+        // Every window's sidebar dims the rows of the tabs that another window shows, so the session announces the change too.
+        willSet { session.objectWillChange.send() }
     }
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
@@ -153,8 +153,8 @@ public enum BrowserWindowKind {
 
     /// Selects the tab `id`, or the empty page for nil, and does what a selection does, in this order (`docs/windows-personas.md`, `BrowserWindowModel`). Selecting the tab already selected runs every step except the end of step 2.
     ///
-    /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
-    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), follows its space, and, while the agent panel shows an outside client, switches it to the client that owns the newly selected agent tab. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
+    /// 1. Every other window that shows the tab gives it up (window rule 2): a main window keeps it selected behind a placeholder (open decision 5), and a small window closes. Then the window shows the tab. Selecting the tab already selected behind a placeholder takes it back so.
+    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot, follows its space, and, while the agent panel shows an outside client, switches it to the client that owns the newly selected agent tab. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
     /// 3. The session updates the focused tab.
     /// 4. The docked developer tools follow the tab.
     /// 5. The window republishes the tab's changes, and keyboard focus leaves another pane of the split view.
@@ -163,8 +163,7 @@ public enum BrowserWindowKind {
     public func selectTab(_ id: UUID?) {
         let previousID = selectedTabID
         selectedTabID = id
-        // 1. The window shows its selected tab, and another window that shows the tab lets go of its page fullscreen and docked tools before this window takes them.
-        updateShownTabs()
+        // 1. Another window that shows the tab lets go of its page fullscreen and docked tools, then the window shows its selected tab (`release` updates every window's panes, this one's too).
         session.release(selectedTab, except: self)
         // 2. Selecting a tab, even the one under the page, leaves an internal page.
         internalPage = nil
@@ -175,8 +174,7 @@ public enum BrowserWindowKind {
         if previousID != selectedTabID, case .client = agentPanel, let owner = selectedTab?.agentOwnerID, session.agents?.panel.owners[owner] != nil {
             showClientPanel(owner)
         }
-        // An item tab's dot follows its item's read state, which a window marks viewed as it starts showing the tab (`BrowserSession.windowDidChangeShownTabs(from:to:)`), so selecting the tab it shows already keeps a dot from Mark as Unread.
-        if let tab = selectedTab, tab.isUnread, tab.liveItemID == nil { tab.isUnread = false }
+        if let tab = selectedTab, tab.isUnread { tab.isUnread = false }
         // A favorite can be shown in any space of its Persona, including when a session in another Persona links to it.
         if let tab = selectedTab {
             if let spaceID = tab.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
@@ -343,6 +341,72 @@ public enum BrowserWindowKind {
         return (localized("Delete \(persona)?"), information)
     }
 
+    /// Merge Space Into…: a sheet on the window lists the spaces the space can merge into (`BrowserSession.spaceMergeTargets(for:)`), each as "Persona / Space" (Persona rule 7), says what moves and what is removed, and merges into the chosen space on Merge.
+    public func confirmMergeSpace(_ space: Space) {
+        let targets = session.spaceMergeTargets(for: space.id)
+        guard canShowPersonaSheet, !targets.isEmpty else { return }
+        let name = { (space: Space) in BrowserSession.displayedPlace(ofPersona: space.resolvedPersonaID, space: space, among: self.session.personas) ?? space.name }
+        let texts = Self.mergeSpaceTexts(space: name(space), isSyncing: session.isSyncing)
+        askForMergeTarget(message: texts.message, information: texts.information, targets: targets.map { ($0.id, name($0)) }) { [weak self] target in
+            self?.session.mergeSpace(space.id, into: target)
+        }
+    }
+
+    /// Merge Persona Into…: a sheet on the window lists the Personas that the Persona of `space` can merge into (`BrowserSession.personaMergeTargets(for:)`), says what moves and that its cookies and sign-ins are deleted, and merges on Merge. A failed plugin install stops the merge and shows its error.
+    public func confirmMergePersona(ofSpace space: Space) {
+        let id = space.resolvedPersonaID
+        let targets = session.personaMergeTargets(for: id)
+        guard canShowPersonaSheet, !targets.isEmpty, let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas) else { return }
+        let texts = Self.mergePersonaTexts(persona: persona, isSyncing: session.isSyncing)
+        askForMergeTarget(message: texts.message, information: texts.information, targets: targets.map { ($0.id, $0.name) }) { [weak self] target in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do { try await self.session.mergePersona(id, into: target) } catch {
+                    guard let nsWindow = self.nsWindow else { return }
+                    let alert = NSAlert()
+                    alert.messageText = localized("The Persona could not be merged.")
+                    alert.informativeText = error.localizedDescription
+                    alert.beginSheetModal(for: nsWindow, completionHandler: nil)
+                }
+            }
+        }
+    }
+
+    /// The Merge Space Into… sheet's question and explanation, for the space as "Persona / Space" names it.
+    nonisolated static func mergeSpaceTexts(space: String, isSyncing: Bool = false) -> (message: String, information: String) {
+        var information = localized("Its pinned tabs, folders, and open tabs move to the space you choose, after that space’s own, and \u{201C}\(space)\u{201D} is removed.")
+            + " " + localized("In a space of another Persona, they reload in that Persona’s profile, without their pages’ sign-ins and back and forward history.")
+        if isSyncing { information += " " + localized("Your other Macs that sync with iCloud make the same change.") }
+        return (localized("Merge \u{201C}\(space)\u{201D} into another space?"), information)
+    }
+
+    /// The Merge Persona Into… sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it.
+    nonisolated static func mergePersonaTexts(persona: String, isSyncing: Bool = false) -> (message: String, information: String) {
+        var information = localized("Its spaces move to the Persona you choose with their names, and its favorites follow that Persona’s. Its tabs reload in that Persona’s profile, and plugins and extensions it lacks are installed there with the permissions you gave them.")
+            + " " + localized("Then the Persona is removed. Its cookies and sign-ins are not carried over: Arch deletes them and its website data from this Mac the next time it opens.")
+        if isSyncing { information += " " + localized("Your other Macs that sync with iCloud make the same change.") }
+        return (localized("Merge \(persona) into another Persona?"), information)
+    }
+
+    /// Asks in a sheet on the window which of `targets` to merge into, with a pop-up button that starts at the first, and passes the chosen ID to `merge` on Merge.
+    private func askForMergeTarget(message: String, information: String, targets: [(id: UUID, name: String)], then merge: @escaping (UUID) -> Void) {
+        guard let nsWindow else { return }
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = information
+        alert.addButton(withTitle: localized("Merge"))
+        alert.addButton(withTitle: localized("Cancel"))
+        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26), pullsDown: false)
+        // Items added one by one keep two targets of the same name, which `addItems(withTitles:)` would join.
+        for target in targets { picker.menu?.addItem(NSMenuItem(title: target.name, action: nil, keyEquivalent: "")) }
+        alert.accessoryView = picker
+        alert.beginSheetModal(for: nsWindow) { response in
+            let index = picker.indexOfSelectedItem
+            guard response == .alertFirstButtonReturn, targets.indices.contains(index) else { return }
+            merge(targets[index].id)
+        }
+    }
+
     /// How a sheet or a card about a whole Persona names it from where it starts (Persona rule 7): "the Persona of “Work / Research”" from a place with a space, "the Persona “Work”" without one, or nil while the default Persona is the only one. A favorite's tab takes the window's current space (`sheetSpace(ofTabIn:personaID:spaces:currentSpace:)`), so the Persona alone remains only as a guard for a tab shown outside every space of its Persona.
     nonisolated static func sheetName(ofPersona id: Persona.ID, space: Space?, among personas: [Persona]) -> String? {
         guard let place = BrowserSession.displayedPlace(ofPersona: id, space: space, among: personas) else { return nil }
@@ -439,9 +503,9 @@ public enum BrowserWindowKind {
         selectedTab.map(session.useCurrentPageAsSavedPage)
     }
 
-    /// Tab ▸ Edit Saved Address…: the selected tab is pinned and not a live folder item's tab, whose source owns its saved page, and the window shows no other sheet, which this one would wait behind. A favorite's tile has Edit Favorite… instead.
+    /// Tab ▸ Edit Saved Address…: the selected tab is pinned and the window shows no other sheet, which this one would wait behind. A favorite's tile has Edit Favorite… instead.
     public var canEditSavedAddress: Bool {
-        selectedTab?.isPinned == true && selectedTab?.liveItemID == nil && nsWindow?.attachedSheet == nil
+        selectedTab?.isPinned == true && nsWindow?.attachedSheet == nil
     }
 
     /// Opens the saved address sheet for the selected pinned tab when available.
@@ -452,7 +516,7 @@ public enum BrowserWindowKind {
 
     /// Edit Saved Address…: asks for a pinned tab's saved address in a sheet on the window, prefilled with it. Text that is no address beeps and changes nothing.
     func promptToEditSavedAddress(of tab: Tab) {
-        guard tab.isPinned, tab.liveItemID == nil else { return }
+        guard tab.isPinned else { return }
         let address = (tab.savedPage?.url ?? tab.url)?.absoluteString ?? ""
         askForText(title: localized("Edit Saved Address"), message: localized("Go Back to Saved Page returns \u{201C}\(tab.shownTitle)\u{201D} to this address."), fields: [(localized("Address"), address)], button: localized("Save")) { [weak tab] texts in
             if tab?.setSavedAddress(fromInput: texts[0]) != true { NSSound.beep() }
@@ -866,7 +930,7 @@ public enum BrowserWindowKind {
     /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
     func sidebarAgentDraft(for tab: Tab, settings: AISettingsStore? = nil) -> AgentComposerContext? {
         let settings = settings ?? AIService.shared.settings
-        guard kind == .main, session.agents != nil, settings.route(for: .agent).isEnabled, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
+        guard kind == .main, session.agents != nil, settings.route(for: .agent).isEnabled, tab.personaID == personaID, tab.isLoaded,
               session.allTabs.contains(where: { $0 === tab }) else { return nil }
         return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas, allowsAI: settings.allowsAI(on:))
     }
@@ -1608,62 +1672,6 @@ public enum BrowserWindowKind {
         if renamingFolderID == id { renamingFolderID = nil }
     }
 
-    // MARK: Live folders
-
-    /// New Live Folder…: the sheet that makes a live folder in the space (`docs/bookmarks.md`, Live folders ▸ Interface), with the Address field prefilled with the selected tab's address when it shows a web page. Add puts the folder in the space and shows the space. Nothing shows while the window shows another sheet.
-    public func showNewLiveFolderSheet(inSpace spaceID: UUID) {
-        guard nsWindow?.attachedSheet == nil, let space = session.spaces.first(where: { $0.id == spaceID }) else { return }
-        let address = selectedTab?.url.flatMap { url in ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? url : nil }
-        let model = LiveFolderSheetModel(newIn: space, personas: session.personas, liveFolderCount: session.liveFolderCount, address: address,
-                                         openTerminal: session.openTerminal) { [weak self] submission in
-            guard let self, try await self.session.addLiveFolder(submission, toSpace: spaceID) != nil else { return }
-            self.switchToSpace(spaceID)
-        }
-        presentLiveFolderSheet(model)
-    }
-
-    /// Edit Live Folder…: the same sheet with the folder's values, a private feed's whole address read from the Keychain first (live folder rule 8).
-    func showEditLiveFolderSheet(_ folderID: UUID) {
-        guard nsWindow?.attachedSheet == nil, let live = session.folders.first(where: { $0.id == folderID })?.live else { return }
-        guard case .feed(_, isPrivate: true) = live.source else { return presentEditLiveFolderSheet(folderID, wholeAddress: nil, keychainReadError: nil) }
-        let addresses = session.liveFolderService.addresses
-        Task { @MainActor [weak self] in
-            var whole: URL?
-            var failure: String?
-            do {
-                whole = try await addresses.address(for: folderID)
-            } catch {
-                failure = LiveFolderSheetModel.message(for: error)
-            }
-            self?.presentEditLiveFolderSheet(folderID, wholeAddress: whole, keychainReadError: failure)
-        }
-    }
-
-    /// Builds the edit sheet from a live folder's current configuration and private address, if any.
-    private func presentEditLiveFolderSheet(_ folderID: UUID, wholeAddress: URL?, keychainReadError: String?) {
-        guard let folder = session.folders.first(where: { $0.id == folderID }), let live = folder.live,
-              let space = session.spaces.first(where: { $0.id == folder.spaceID }) else { return }
-        let model = LiveFolderSheetModel(editing: folder, configuration: live, in: space, personas: session.personas, wholeAddress: wholeAddress,
-                                         keychainReadError: keychainReadError, openTerminal: session.openTerminal) { [weak self] submission in
-            try await self?.session.editLiveFolder(folderID, with: submission)
-        }
-        presentLiveFolderSheet(model)
-    }
-
-    /// Shows the sheet on the window. Its Add, Save, and Cancel end it; closing the window from code ends it too (`close()`). The form's size pins the sheet's, so the sheet grows and shrinks with the form, as when a page's feeds appear.
-    private func presentLiveFolderSheet(_ model: LiveFolderSheetModel) {
-        guard let nsWindow, nsWindow.attachedSheet == nil else { return }
-        let controller = NSHostingController(rootView: LiveFolderSheetView(model: model))
-        controller.sizingOptions = [.minSize, .maxSize]
-        let sheet = NSWindow(contentViewController: controller)
-        sheet.isReleasedWhenClosed = false
-        model.dismiss = { [weak sheet] in
-            guard let sheet, let parent = sheet.sheetParent else { return }
-            parent.endSheet(sheet)
-        }
-        nsWindow.beginSheet(sheet)
-    }
-
     // MARK: Panes and split view
 
     // The page area shows one pane or a split view of up to four. The session keeps each space's split view (`BrowserSession.splitTabIDs`), and these names tell the window's lists of panes apart:
@@ -1702,35 +1710,43 @@ public enum BrowserWindowKind {
 
     /// Follows a change of the selection or of the split views: the window keeps its selected tab and the panes it shows already, and takes each other pane that no other window shows. A tab without its page gets it before the window shows it (`BrowserSession.loadPage(of:)`). A tab that leaves the window was in view until now, as archiving and automatic unloading count it.
     func updateShownTabs() {
-        let shown = Self.panesToShow(paneTabs, selectedTabID: selectedTabID, shownTabIDs: shownTabIDs, isShownInAnotherWindow: isShownInAnotherWindow)
+        let shown = Self.panesToShow(paneTabs, shownTabIDs: shownTabIDs, isShownInAnotherWindow: isShownInAnotherWindow)
         shown.forEach(session.loadPage(of:))
         let ids = shown.map(\.id)
         guard ids != shownTabIDs else { return }
         let now = Date()
         for tab in session.allTabs where shownTabIDs.contains(tab.id) && !ids.contains(tab.id) { tab.lastActivatedAt = now }
+        let showedSelected = selectedTabID.map(shownTabIDs.contains) == true
         shownTabIDs = ids
+        // A selected tab that comes back, as when the window that took it closes, brings its docked tools back.
+        if let selected = selectedTab, !showedSelected, ids.contains(selected.id) { devToolsDock.track(selected) }
         session.applyPendingSyncEngines()
     }
 
-    /// The panes of `panes` that a window shows, and so loads, after a change: its selected tab, the panes it shows already (`shownTabIDs`), and each other pane that no other window shows.
-    static func panesToShow(_ panes: [Tab], selectedTabID: UUID?, shownTabIDs: [UUID], isShownInAnotherWindow: (Tab) -> Bool) -> [Tab] {
-        panes.filter { $0.id == selectedTabID || shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }
+    /// The panes of `panes` that a window shows, and so loads, after a change: the panes it shows already (`shownTabIDs`) and each other pane that no other window shows, its selected tab among them. A selected tab that another window took stays out until the user takes it back or the other window lets it go (open decision 5).
+    static func panesToShow(_ panes: [Tab], shownTabIDs: [UUID], isShownInAnotherWindow: (Tab) -> Bool) -> [Tab] {
+        panes.filter { shownTabIDs.contains($0.id) || !isShownInAnotherWindow($0) }
     }
 
-    /// Lets another window take `tab` (window rule 2). A main window selects its fallback when `tab` is its selected tab, and a small window, which shows only its tab, closes, letting go of the page's fullscreen and docked tools as it does. When `tab` is another pane of its split view, the window keeps its selection and leaves the pane to the other window, ending the page's fullscreen here first. The tab's prompt goes with it.
+    /// Lets another window take `tab` (window rule 2). A small window, which shows only its tab, closes, letting go of the page's fullscreen and docked tools as it does. A main window keeps its selection, as for another pane of its split view (open decision 5): it ends the page's fullscreen here first, and for its selected tab lets go of the docked tools and closes the find bar and the question popover, which belong to the page. Its page area then shows a placeholder in the pane, and its sidebar dims the tab's row, until the user takes the tab back. The tab's prompt goes with it.
     func giveUp(_ tab: Tab) {
         shownTabIDs.removeAll { $0 == tab.id }
-        if tab.id == selectedTabID {
-            guard kind == .main else { return close() }
-            selectTab(fallbackTab(excluding: tab.id)?.id)
-        } else if fullscreenTabID == tab.id {
-            exitPageFullscreen()
+        if tab.id == selectedTabID, kind == .small { return close() }
+        if fullscreenTabID == tab.id { exitPageFullscreen() }
+        guard tab.id == selectedTabID else { return }
+        devToolsDock.track(nil)
+        if isFindBarVisible {
+            tab.webContents.stopFind()
+            isFindBarVisible = false
+            findResult = nil
         }
+        closePageQuestion(ofTab: tab.id)
     }
 
-    /// The tab the window selects when another window takes its tab: the most recent of `recentTabs` other than `excluding` that no other window shows, or nil for the empty page.
-    func fallbackTab(excluding id: UUID) -> Tab? {
-        recentTabs.first { $0.id != id && !isShownInAnotherWindow($0) }
+    /// Brings forward the window that shows `tab` in place of this one, as the placeholder's Show Other Window does.
+    func showWindowShowing(_ tab: Tab) {
+        guard let other = session.window(showing: tab), other !== self else { return }
+        other.nsWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// The tabs whose pages the window shows now, the selected tab first: the panes of its split view that it shows, or the selected tab alone while its page fills the window. Their prompts show as cards over their panes. None once the window has let go of its tabs as it closes.
