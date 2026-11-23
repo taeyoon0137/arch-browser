@@ -225,6 +225,26 @@ std::optional<CefString> EvaluateString(CefRefPtr<CefFrame> frame, const CefStri
     return result;
 }
 
+// Whether the engine makes named isolated worlds (`CefFrame::GetV8ContextForWorld`, Arch's engine change for VI.6). The bridge builds against engines with it and without it, so the check is on the type, at compile time.
+template <typename Frame>
+constexpr bool kHasIsolatedWorlds = requires(Frame &frame) { frame.GetV8ContextForWorld(CefString()); };
+
+// The context in which the frame's current document runs the scripts of `world`: the world's own isolated world where the engine makes them, otherwise the page's main world.
+template <typename Frame>
+CefRefPtr<CefV8Context> WorldContext(Frame *frame, const std::string &world) {
+    if constexpr (kHasIsolatedWorlds<Frame>) {
+        return frame->GetV8ContextForWorld(world);
+    } else {
+        return frame->GetV8Context();
+    }
+}
+
+// Whether `context` is the page's main world context of the frame's document.
+bool IsMainWorld(CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) {
+    CefRefPtr<CefV8Context> main = frame->GetV8Context();
+    return main && main->IsSame(context);
+}
+
 // Calls the function a world's endpoint holds under `name`, in the context the caller entered.
 void CallEndpoint(CefRefPtr<CefV8Value> endpoint, const char *name, const CefV8ValueList &arguments) {
     CefRefPtr<CefV8Value> function = endpoint->GetValue(name);
@@ -248,9 +268,10 @@ public:
         std::erase_if(pageScripts_, [&](const BrowserScripts &entry) { return entry.browser->IsSame(browser); });
     }
 
-    // Every frame's document reports its audible state and its media, through functions pages can call but not replace. Then the document gets its opener of page script endpoints, and the page scripts run, before the page's own scripts.
+    // Every frame's document reports its audible state and its media, through functions pages can call but not replace. Then the page scripts run, before the page's own scripts: each in its world's isolated world where the engine makes them, otherwise in the main world, which then gets its opener of page script endpoints first.
+    // CEF calls this for the context of every world, also the extensions' content script worlds, the worlds DevTools makes, and the page script worlds that the scripts below create, so only the page's main world starts this.
     void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
-        if (!context->Enter()) {
+        if (!IsMainWorld(frame, context) || !context->Enter()) {
             return;
         }
         context->GetGlobal()->SetValue("__archReportAudible", CefV8Value::CreateFunction("__archReportAudible", new AudibleReporter()),
@@ -260,11 +281,11 @@ public:
                                        static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
                                                                                V8_PROPERTY_ATTRIBUTE_DONTDELETE));
         Evaluate(context, kAudibleScript);
-        if (CefRefPtr<CefV8Value> open = Evaluate(context, kPageScriptEndpointOpener); open && open->IsFunction()) {
-            openers_.push_back({context, open});
+        if (!kHasIsolatedWorlds<CefFrame>) {
+            AddOpener(context);
         }
-        RunPageScripts(browser, frame, context);
         context->Exit();
+        RunPageScripts(browser, frame);
     }
 
     void OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
@@ -344,8 +365,8 @@ private:
         pageScripts_.push_back({browser, std::move(scripts)});
     }
 
-    // Runs the browser's page scripts that apply to the frame in its new document, in the context the caller entered. A script can run code that creates another frame's context and runs these again, so the loop goes over its own copy.
-    void RunPageScripts(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) {
+    // Runs the browser's page scripts that apply to the frame in its new document, each in its world's context. A script can run code that creates another frame's context and runs these again, so the loop goes over its own copy.
+    void RunPageScripts(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
         auto found = std::find_if(pageScripts_.begin(), pageScripts_.end(), [&](const BrowserScripts &entry) { return entry.browser->IsSame(browser); });
         if (found == pageScripts_.end()) {
             return;
@@ -355,12 +376,27 @@ private:
             if (script.mainFrameOnly && !frame->IsMain()) {
                 continue;
             }
+            CefRefPtr<CefV8Context> context = WorldContext(frame.get(), script.world);
+            if (!context || !context->Enter()) {
+                continue;
+            }
             CefRefPtr<CefV8Value> endpoint = OpenEndpoint(context, script.world);
             CefRefPtr<CefV8Value> function = EvaluateFunction(context, script.source);
             if (endpoint && function) {
                 CallEndpoint(endpoint, "run", {function, CefV8Value::CreateBool(script.atDocumentEnd)});
             }
+            context->Exit();
         }
+    }
+
+    // Makes the opener of world endpoints in the document of `context`, which the caller entered. Returns it, or nullptr when the opener script fails.
+    CefRefPtr<CefV8Value> AddOpener(CefRefPtr<CefV8Context> context) {
+        CefRefPtr<CefV8Value> open = Evaluate(context, kPageScriptEndpointOpener);
+        if (!open || !open->IsFunction()) {
+            return nullptr;
+        }
+        openers_.push_back({context, open});
+        return open;
     }
 
     // The world's endpoint in the document of `context`, or nullptr when the document has none.
@@ -373,16 +409,17 @@ private:
         return nullptr;
     }
 
-    // The world's endpoint in the document of `context`, which the caller entered, opened there with the document's opener if the document has none. nullptr when the document has no opener or the opener fails.
+    // The world's endpoint in the document of `context`, which the caller entered, opened there with the document's opener if the document has none. An isolated world's context gets its opener with its first endpoint, since the page cannot change that world's built-ins; the main world has one only from before the page's scripts ran. nullptr when the document has no opener or the opener fails.
     CefRefPtr<CefV8Value> OpenEndpoint(CefRefPtr<CefV8Context> context, const std::string &world) {
         if (CefRefPtr<CefV8Value> endpoint = FindEndpoint(context, world)) {
             return endpoint;
         }
         auto opener = std::find_if(openers_.begin(), openers_.end(), [&](const EndpointOpener &entry) { return entry.context->IsSame(context); });
-        if (opener == openers_.end()) {
+        CefRefPtr<CefV8Value> open = opener != openers_.end() ? opener->open : kHasIsolatedWorlds<CefFrame> ? AddOpener(context) : nullptr;
+        if (!open) {
             return nullptr;
         }
-        CefRefPtr<CefV8Value> endpoint = opener->open->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("send", new PageScriptSender(world))});
+        CefRefPtr<CefV8Value> endpoint = open->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("send", new PageScriptSender(world))});
         if (!endpoint || !endpoint->IsObject()) {
             return nullptr;
         }
@@ -392,7 +429,7 @@ private:
 
     // Calls `function`, a function expression, with the world's channel in the frame's current document. Returns whether it ran without throwing, with the string it returned in `result`.
     bool CallWithChannel(CefRefPtr<CefFrame> frame, const std::string &world, const std::string &function, std::optional<CefString> &result) {
-        CefRefPtr<CefV8Context> context = frame->GetV8Context();
+        CefRefPtr<CefV8Context> context = WorldContext(frame.get(), world);
         if (!context || !context->Enter()) {
             return false;
         }
@@ -409,7 +446,7 @@ private:
     // Calls a function of the world's endpoint in the frame's current document with the arguments `makeArguments` creates there. Nothing happens when the document has no endpoint for the world.
     template <typename MakeArguments>
     void Deliver(CefRefPtr<CefFrame> frame, const std::string &world, const char *name, MakeArguments makeArguments) {
-        CefRefPtr<CefV8Context> context = frame->GetV8Context();
+        CefRefPtr<CefV8Context> context = WorldContext(frame.get(), world);
         if (!context || !context->Enter()) {
             return;
         }

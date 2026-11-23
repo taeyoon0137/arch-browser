@@ -293,7 +293,7 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
     ARCHCEFMediaActionNextTrack,
 };
 
-/// A script the helper's renderer runs in each new document of a browser, in the page's main world. The scripts of one world share one channel to the app.
+/// A script the helper's renderer runs in each new document of a browser, in its world's isolated world where the engine makes them, otherwise in the page's main world. The scripts of one world share one channel to the app.
 @interface ARCHCEFPageScript : NSObject
 - (instancetype)initWithWorld:(NSString *)world source:(NSString *)source runsAtDocumentEnd:(BOOL)runsAtDocumentEnd mainFrameOnly:(BOOL)mainFrameOnly NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
