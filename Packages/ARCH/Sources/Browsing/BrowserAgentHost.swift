@@ -12,7 +12,7 @@ import Foundation
 
 /// Adapts a browser session's Personas, tabs, pages, and windows to the agent service.
 @MainActor public final class BrowserAgentHost: AgentBrowserHost {
-    static let agentsPersonaName = "Agents"
+    static let agentsPersonaName = localized("Agents")
 
     private unowned let session: BrowserSession
     public var personasDidChange: (() -> Void)?

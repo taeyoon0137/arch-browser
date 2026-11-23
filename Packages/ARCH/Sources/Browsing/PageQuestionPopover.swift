@@ -34,10 +34,10 @@ private struct PageQuestionPopover: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                Text(question.selection == nil ? "Ask About This Page" : "Ask About Selection")
+                Text(question.selection == nil ? localized("Ask About This Page") : localized("Ask About Selection"))
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Close Question", action: dismiss)
+                SidebarIconButton(symbol: "xmark", label: localized("Close Question"), action: dismiss)
             }
             if let selection = question.selection {
                 SelectionQuote(text: selection.text)
@@ -76,7 +76,7 @@ private struct PageQuestionPopover: View {
 
     private var questionField: some View {
         HStack(spacing: 4) {
-            TextField(question.selection == nil ? "Ask a question about this page" : "Ask a question about the selection", text: $draft)
+            TextField(question.selection == nil ? localized("Ask a question about this page") : localized("Ask a question about the selection"), text: $draft)
                 .textFieldStyle(.roundedBorder)
                 .focused($isFieldFocused)
                 .reportsFocus(of: .question, isFocused: isFieldFocused)
@@ -85,9 +85,9 @@ private struct PageQuestionPopover: View {
             ContinueAsAgentTaskButton(source: .init(tab: tab, documentID: question.documentID, questionID: question.id),
                                       draft: draft, exchanges: conversation.exchanges, selection: question.selection)
             if conversation.isAnswering {
-                SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
+                SidebarIconButton(symbol: "stop.circle", label: localized("Stop Answering"), action: conversation.cancel)
             } else {
-                SidebarIconButton(symbol: "arrow.up.circle", label: "Ask", action: send)
+                SidebarIconButton(symbol: "arrow.up.circle", label: localized("Ask"), action: send)
                     .disabled(text.isEmpty)
             }
         }

@@ -7,7 +7,18 @@ extension SpaceTint {
     static let colors = allCases.filter { $0 != .automatic }
 
     /// The name the space menu shows.
-    var title: String { self == .automatic ? "Automatic" : rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .automatic: return localized("Automatic")
+        case .blue: return localized("Blue")
+        case .purple: return localized("Purple")
+        case .pink: return localized("Pink")
+        case .orange: return localized("Orange")
+        case .green: return localized("Green")
+        case .teal: return localized("Teal")
+        case .gray: return localized("Gray")
+        }
+    }
 
     /// A system color that adapts to the appearance it is drawn in.
     var nsColor: NSColor {

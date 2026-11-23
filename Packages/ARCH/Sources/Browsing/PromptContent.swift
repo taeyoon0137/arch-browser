@@ -21,17 +21,17 @@ enum PromptKind: Equatable {
     /// The first words VoiceOver reads for the card.
     var accessibilityName: String {
         switch self {
-        case .sitePermission: "Website Permission"
-        case .pageAlert, .pageConfirm, .pageTextInput: "Page Message"
-        case .leavePage: "Leave Page"
-        case .signIn: "Log In"
-        case .openInApp: "Open in Another App"
-        case .extensionAccess: "Extension Access"
-        case .extensionReload: "Reload Page"
-        case .clearSiteData: "Clear Site Data"
-        case .pageDownloads: "Multiple Downloads"
-        case .notice: "Notice"
-        case .fileChooser: "Choose Files"
+        case .sitePermission: localized("Website Permission")
+        case .pageAlert, .pageConfirm, .pageTextInput: localized("Page Message")
+        case .leavePage: localized("Leave Page")
+        case .signIn: localized("Log In")
+        case .openInApp: localized("Open in Another App")
+        case .extensionAccess: localized("Extension Access")
+        case .extensionReload: localized("Reload Page")
+        case .clearSiteData: localized("Clear Site Data")
+        case .pageDownloads: localized("Multiple Downloads")
+        case .notice: localized("Notice")
+        case .fileChooser: localized("Choose Files")
         }
     }
 }

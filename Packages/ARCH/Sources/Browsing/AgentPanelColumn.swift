@@ -64,9 +64,9 @@ private struct AgentPanelFrame: View {
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if case .session = content {
-                    SidebarIconButton(symbol: "square.and.pencil", label: "New Agent Task") { windowModel.showAgentComposer() }
+                    SidebarIconButton(symbol: "square.and.pencil", label: localized("New Agent Task")) { windowModel.showAgentComposer() }
                 }
-                SidebarIconButton(symbol: "xmark", label: "Close Agent Panel", action: windowModel.hideAgentPanel)
+                SidebarIconButton(symbol: "xmark", label: localized("Close Agent Panel"), action: windowModel.hideAgentPanel)
             }
             .padding(.leading, 14)
             .padding(.trailing, 6)
@@ -187,13 +187,13 @@ private struct AgentsIndicatorMenu: View {
             Menu {
                 ForEach(agents.sessions.filter(\.isTurnRunning)) { session in
                     let title = "\(session.title) \u{2014} \(agents.place(of: session))"
-                    Button(session.state == .waitingForUser ? "\(title) \u{2014} Waiting for You" : title) {
+                    Button(session.state == .waitingForUser ? localized("\(title) \u{2014} Waiting for You") : title) {
                         windowModel.showAgentSession(session.id)
                     }
                 }
                 ForEach(agents.connectedGrants) { grant in
                     let waits = approvals.pending.contains { $0.ownerID == grant.id }
-                    Button(waits ? "\(grant.client.displayName) \u{2014} Waiting for You" : grant.client.displayName) { windowModel.showClientPanel(grant.id) }
+                    Button(waits ? localized("\(grant.client.displayName) \u{2014} Waiting for You") : grant.client.displayName) { windowModel.showClientPanel(grant.id) }
                 }
                 Divider()
                 Button(localized("Stop All Agents"), action: agents.stopAllAgents)
@@ -205,7 +205,7 @@ private struct AgentsIndicatorMenu: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help(approvals.pending.isEmpty ? "Agents are working" : "An agent is waiting for you")
+            .help(approvals.pending.isEmpty ? localized("Agents are working") : localized("An agent is waiting for you"))
             .accessibilityLabel(localized("Agents"))
         }
     }
@@ -247,7 +247,7 @@ struct AgentWaitingDot: ViewModifier {
                             .allowsHitTesting(false)
                     }
                 }
-                .accessibilityValue(isWaiting ? "An agent is waiting" : "")
+                .accessibilityValue(isWaiting ? localized("An agent is waiting") : "")
         }
     }
 }

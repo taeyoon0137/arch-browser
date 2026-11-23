@@ -59,15 +59,15 @@ struct CommandPaletteView: View {
 
     private var actionLabel: String {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return mode == .newTab ? "Open a new tab" : "Enter an address or search" }
-        if let page = InternalPage(address: trimmed) { return "Open \(page.address)" }
+        guard !trimmed.isEmpty else { return mode == .newTab ? localized("Open a new tab") : localized("Enter an address or search") }
+        if let page = InternalPage(address: trimmed) { return localized("Open \(page.address)") }
         // The session reads the untrimmed text the same way, so a keyword and a space are enough, and searches the web for a keyword whose template makes no web address.
         if let search = session.siteSearch.match(text), search.shortcut.resultsURL(for: search.query) != nil {
-            return search.query.isEmpty ? "Search \(search.shortcut.name)" : "Search \(search.shortcut.name) for \u{201C}\(search.query)\u{201D}"
+            return search.query.isEmpty ? localized("Search \(search.shortcut.name)") : localized("Search \(search.shortcut.name) for \u{201C}\(search.query)\u{201D}")
         }
         // The site as the address pill names it, an extension's page by the extension's name in the window's Persona, so the current address that ⌘L starts with reads as the pill does.
-        if let url = BrowserSession.url(forInput: trimmed) { return "Go to \(extensionName(ofPageAt: url) ?? AddressPillView.siteName(of: url))" }
-        return "Search for \u{201C}\(trimmed)\u{201D}"
+        if let url = BrowserSession.url(forInput: trimmed) { return localized("Go to \(extensionName(ofPageAt: url) ?? AddressPillView.siteName(of: url))") }
+        return localized("Search for \u{201C}\(trimmed)\u{201D}")
     }
 
     /// The primary row's symbol while another row has the selection, so that the Return symbol marks only the row Return runs: the address pill's symbol for an internal page or an address, else the search's.
@@ -87,7 +87,7 @@ struct CommandPaletteView: View {
     /// Ask About This Page appears once the typed words begin its name, while the selected tab's page can be asked about.
     private var offersAskAboutPage: Bool {
         let words = text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return !words.isEmpty && "ask about this page".hasPrefix(words) && windowModel.canAskAboutPage
+        return !words.isEmpty && ("ask about this page".hasPrefix(words) || localized("Ask About This Page").lowercased().hasPrefix(words)) && windowModel.canAskAboutPage
     }
 
     /// The Web Store rows for the text and the selected tab's page, which no internal page or preview panel covers, while the app shell can start a store install.
@@ -219,7 +219,7 @@ struct CommandPaletteView: View {
         case .command(let command):
             PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName, isSelected: isSelected)
         case .askAboutPage:
-            PaletteRow(symbol: "sparkles", title: "Ask About This Page\u{2026}", isSelected: isSelected)
+            PaletteRow(symbol: "sparkles", title: localized("Ask About This Page\u{2026}"), isSelected: isSelected)
         case .pageStore:
             PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.pageTitle, isSelected: isSelected)
         case .tab(let tab):
@@ -247,7 +247,7 @@ struct CommandPaletteView: View {
                         .padding(6)
                         .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
                 }
-                TextField(argumentCommand == nil ? (mode == .newTab ? "Search or enter address for a new tab" : "Search or enter address") : "Command argument", text: $text)
+                TextField(argumentCommand == nil ? (mode == .newTab ? localized("Search or enter address for a new tab") : localized("Search or enter address")) : localized("Command argument"), text: $text)
                     .textFieldStyle(.plain)
                     .font(.system(size: 22))
                     .focused($isFocused)
@@ -378,8 +378,8 @@ private struct PaletteArrowKeys: NSViewRepresentable {
 /// The palette's Web Store rows (`docs/web-store.md`, Entry points), each with the identifier of the extension it installs, which name no Persona.
 struct PaletteWebStoreRows: Equatable {
     /// With an ellipsis, as both rows open the store sheet and its review before anything installs.
-    static let pageTitle = "Install Extension from This Page\u{2026}"
-    static let typedTitle = "Install from the Web Store\u{2026}"
+    static var pageTitle: String { localized("Install Extension from This Page\u{2026}") }
+    static var typedTitle: String { localized("Install from the Web Store\u{2026}") }
     /// Install Extension from This Page: the extension of the store page that the selected tab shows, once the typed words begin the row's name or the text names that extension, as the page's address does, which the palette starts with when it edits the current address.
     var pageExtension: String?
     /// Install from the Web Store, below the primary row: another extension that the text names, as a store page's address or a bare identifier.
@@ -394,7 +394,7 @@ struct PaletteWebStoreRows: Equatable {
     init(text: String, pageURL: URL?, reader: WebStoreReader = .store) {
         let typed = reader.text(text)
         let words = text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        if let page = pageURL.flatMap(reader.page), typed == page || (!words.isEmpty && Self.pageTitle.lowercased().hasPrefix(words)) {
+        if let page = pageURL.flatMap(reader.page), typed == page || (!words.isEmpty && (Self.pageTitle.lowercased().hasPrefix(words) || "install extension from this page".hasPrefix(words))) {
             pageExtension = page
         }
         typedExtension = typed == pageExtension ? nil : typed
@@ -424,8 +424,8 @@ struct PaletteWebStoreRows: Equatable {
         sharedTitle = context.attachableTab(allowsAI: allowsAI)?.title
     }
 
-    var title: String { "Ask Agent: \u{201C}\(task)\u{201D}" }
-    var sharingDetail: String { sharedTitle.map { "Shares \($0)" } ?? "No page shared" }
+    var title: String { localized("Ask Agent: \u{201C}\(task)\u{201D}") }
+    var sharingDetail: String { sharedTitle.map { localized("Shares \($0)") } ?? localized("No page shared") }
 
     func matches(_ context: AgentComposerContext, allowsAI: (URL) -> Bool) -> Bool {
         context.personaID == personaID && context.spaceID == spaceID && context.tab?.id == tabID &&

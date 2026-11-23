@@ -77,9 +77,9 @@ final class LiveFolderSheetModel: ObservableObject {
         private static let sheetFeedFetcher = FeedFetcher()
     }
 
-    nonisolated static let noFeedMessage = "No feed found at this address."
-    nonisolated static let keychainNote = "Arch keeps this address in the Keychain on this Mac, and the folder does not sync."
-    nonisolated static let folderLimitMessage = "Arch keeps up to \(LiveFolderConfiguration.maximumFolders) live folders."
+    nonisolated static let noFeedMessage = localized("No feed found at this address.")
+    nonisolated static let keychainNote = localized("Arch keeps this address in the Keychain on this Mac, and the folder does not sync.")
+    nonisolated static let folderLimitMessage = localized("Arch keeps up to \(LiveFolderConfiguration.maximumFolders) live folders.")
 
     let purpose: Purpose
     let title: String
@@ -192,11 +192,11 @@ final class LiveFolderSheetModel: ObservableObject {
 
     /// "New Live Folder in Research", or "New Live Folder in Work / Research" with two or more Personas (Persona rule 7).
     static func title(newIn space: Space, among personas: [Persona]) -> String {
-        "New Live Folder in \(BrowserSession.displayedPlace(ofPersona: space.resolvedPersonaID, space: space, among: personas) ?? space.name)"
+        localized("New Live Folder in \(BrowserSession.displayedPlace(ofPersona: space.resolvedPersonaID, space: space, among: personas) ?? space.name)")
     }
 
     static func title(editingIn space: Space, among personas: [Persona]) -> String {
-        "Edit Live Folder in \(BrowserSession.displayedPlace(ofPersona: space.resolvedPersonaID, space: space, among: personas) ?? space.name)"
+        localized("Edit Live Folder in \(BrowserSession.displayedPlace(ofPersona: space.resolvedPersonaID, space: space, among: personas) ?? space.name)")
     }
 
     var isNew: Bool {
@@ -216,14 +216,14 @@ final class LiveFolderSheetModel: ObservableObject {
         guard !text.isEmpty else { return nil }
         let hasScheme = text.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) != nil
         guard !text.contains(where: \.isWhitespace), let url = URL(string: hasScheme ? text : "https://" + text) else {
-            throw LiveFolderError.invalidAddress("This is not a web address.")
+            throw LiveFolderError.invalidAddress(localized("This is not a web address."))
         }
         return try feedAddress(url)
     }
 
     static func feedAddress(_ url: URL) throws -> FeedAddress {
         let (source, keychainAddress) = try LiveFolderSource.makeFeed(address: url)
-        guard case .feed(let address, _) = source else { throw LiveFolderError.invalidAddress("This is not a web address.") }
+        guard case .feed(let address, _) = source else { throw LiveFolderError.invalidAddress(localized("This is not a web address.")) }
         return FeedAddress(source: source, keychainAddress: keychainAddress, url: keychainAddress ?? address)
     }
 
@@ -281,16 +281,16 @@ final class LiveFolderSheetModel: ObservableObject {
     var gitHubMessage: String {
         switch gitHubState {
         case .checking:
-            return "Checking the GitHub CLI\u{2026}"
+            return localized("Checking the GitHub CLI\u{2026}")
         case .invalidHost:
-            return "Enter a GitHub host, such as github.com."
+            return localized("Enter a GitHub host, such as github.com.")
         case .checked(.notInstalled, _):
-            return "Install the GitHub CLI in the built-in terminal, for example with `brew install gh`."
+            return localized("Install the GitHub CLI in the built-in terminal, for example with `brew install gh`.")
         case .checked(.signedOut, let host):
             let command = host == "github.com" ? "gh auth login" : "gh auth login --hostname \(host)"
-            return "Sign in with `\(command)` in the built-in terminal."
+            return localized("Sign in with `\(command)` in the built-in terminal.")
         case .checked(.signedIn, let host):
-            return "Signed in to \(host)."
+            return localized("Signed in to \(host).")
         }
     }
 
@@ -311,10 +311,10 @@ final class LiveFolderSheetModel: ObservableObject {
 
     static func title(of kind: GitHubSearch.Kind) -> String {
         switch kind {
-        case .myPullRequests: return "My Pull Requests"
-        case .reviewRequests: return "Review Requests"
-        case .assignedIssues: return "Assigned Issues"
-        case .search: return "Search"
+        case .myPullRequests: return localized("My Pull Requests")
+        case .reviewRequests: return localized("Review Requests")
+        case .assignedIssues: return localized("Assigned Issues")
+        case .search: return localized("Search")
         }
     }
 
@@ -323,7 +323,7 @@ final class LiveFolderSheetModel: ObservableObject {
     /// The Name field's placeholder: the name an empty field gives, as far as the sheet knows it before Add.
     var namePlaceholder: String {
         switch sourceKind {
-        case .feed: return isUnchangedFeed ? original?.name ?? "Name" : "Feed Title"
+        case .feed: return isUnchangedFeed ? original?.name ?? localized("Name") : localized("Feed Title")
         case .gitHub: return GitHubSearch(kind: gitHubKind).defaultName
         }
     }
@@ -333,7 +333,7 @@ final class LiveFolderSheetModel: ObservableObject {
         let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !typed.isEmpty { return typed }
         if let defaultName = defaultName?.trimmingCharacters(in: .whitespacesAndNewlines), !defaultName.isEmpty { return defaultName }
-        return original?.name ?? "Live Folder"
+        return original?.name ?? localized("Live Folder")
     }
 
     private func configuration(_ source: LiveFolderSource) -> LiveFolderConfiguration {
@@ -503,8 +503,8 @@ struct LiveFolderSheetView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(model.title)
                 .font(.headline)
-            SiteSettingsGroup("Folder") {
-                SiteSettingsRow(symbol: "square.stack", title: "Source") {
+            SiteSettingsGroup(localized("Folder")) {
+                SiteSettingsRow(symbol: "square.stack", title: localized("Source")) {
                     Picker(localized("Source"), selection: $model.sourceKind) {
                         Text("Feed", bundle: .module).tag(LiveFolderSheetModel.SourceKind.feed)
                         Text("GitHub", bundle: .module).tag(LiveFolderSheetModel.SourceKind.gitHub)
@@ -514,17 +514,17 @@ struct LiveFolderSheetView: View {
                     .accessibilityLabel(localized("Source"))
                 }
                 SiteSettingsDivider()
-                SiteSettingsRow(symbol: "textformat", title: "Name") {
+                SiteSettingsRow(symbol: "textformat", title: localized("Name")) {
                     TextField(localized("Name"), text: $model.name, prompt: Text(model.namePlaceholder))
                 }
                 SiteSettingsDivider()
-                SiteSettingsRow(symbol: "number", title: "Items") {
+                SiteSettingsRow(symbol: "number", title: localized("Items")) {
                     Picker(localized("Items"), selection: $model.itemLimit) {
                         ForEach(LiveFolderConfiguration.itemLimits, id: \.self) { Text("\($0)").tag($0) }
                     }.labelsHidden().accessibilityLabel(localized("Items")).fixedSize()
                 }
                 SiteSettingsDivider()
-                SiteSettingsRow(symbol: "arrow.clockwise", title: "Refresh") {
+                SiteSettingsRow(symbol: "arrow.clockwise", title: localized("Refresh")) {
                     Picker(localized("Refresh"), selection: Binding(get: { model.refreshMinutes }, set: { model.chosenRefreshMinutes = $0 })) {
                         ForEach(LiveFolderConfiguration.refreshIntervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
                     }.labelsHidden().accessibilityLabel(localized("Refresh")).fixedSize()
@@ -554,7 +554,7 @@ struct LiveFolderSheetView: View {
                 Button(localized("Cancel"), action: model.cancel)
                     .keyboardShortcut(.cancelAction)
                     .disabled(model.isSaving)
-                Button(model.isNew ? "Add" : "Save", action: model.startAdding)
+                Button(model.isNew ? localized("Add") : localized("Save"), action: model.startAdding)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!model.canAdd)
             }
@@ -642,7 +642,7 @@ struct LiveFolderSheetView: View {
         LabeledContent {
             content()
         } label: {
-            Text("")
+            Text(verbatim: "")
         }
     }
 
@@ -661,9 +661,9 @@ struct LiveFolderSheetView: View {
 
     static func intervalTitle(_ minutes: Int) -> String {
         switch minutes {
-        case 60: return "Every Hour"
-        case let minutes where minutes % 60 == 0: return "Every \(minutes / 60) Hours"
-        default: return "Every \(minutes) Minutes"
+        case 60: return localized("Every Hour")
+        case let minutes where minutes % 60 == 0: return localized("Every \(minutes / 60) Hours")
+        default: return localized("Every \(minutes) Minutes")
         }
     }
 }

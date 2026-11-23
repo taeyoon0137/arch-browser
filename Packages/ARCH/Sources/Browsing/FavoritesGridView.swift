@@ -198,7 +198,7 @@ struct FavoriteTileView: View {
             // One element for VoiceOver, whose value says whether its page is open and whether a prompt waits.
             .accessibilityElement()
             .accessibilityLabel(favorite.title)
-            .accessibilityValue([isOpen ? "Open" : nil, prompts.hasPrompt(for: tabID) ? "Waiting for your answer" : nil].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityValue([isOpen ? localized("Open") : nil, prompts.hasPrompt(for: tabID) ? localized("Waiting for your answer") : nil].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
             .onAppear(perform: loadIcon)
             // Use Current Page as Saved Page and Edit Favorite… can move the favorite to another site.

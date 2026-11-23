@@ -7,7 +7,7 @@ struct FindBarView: View {
 
     private var resultLabel: String {
         guard !windowModel.findText.isEmpty, let result = windowModel.findResult else { return "" }
-        return result.numberOfMatches == 0 ? "Not found" : "\(result.activeMatchOrdinal) of \(result.numberOfMatches)"
+        return result.numberOfMatches == 0 ? localized("Not found") : localized("\(result.activeMatchOrdinal) of \(result.numberOfMatches)")
     }
 
     var body: some View {
@@ -32,9 +32,9 @@ struct FindBarView: View {
                 .lineLimit(1)
                 // A narrow pane shortens the field, not the count.
                 .fixedSize()
-            SidebarIconButton(symbol: "chevron.up", label: "Previous Match", shortcut: windowModel.session.menuShortcut("findPrevious"), action: windowModel.findPrevious)
-            SidebarIconButton(symbol: "chevron.down", label: "Next Match", shortcut: windowModel.session.menuShortcut("findNext"), action: windowModel.findNext)
-            SidebarIconButton(symbol: "xmark", label: "Close Find Bar", action: windowModel.hideFindBar)
+            SidebarIconButton(symbol: "chevron.up", label: localized("Previous Match"), shortcut: windowModel.session.menuShortcut("findPrevious"), action: windowModel.findPrevious)
+            SidebarIconButton(symbol: "chevron.down", label: localized("Next Match"), shortcut: windowModel.session.menuShortcut("findNext"), action: windowModel.findNext)
+            SidebarIconButton(symbol: "xmark", label: localized("Close Find Bar"), action: windowModel.hideFindBar)
         }
         .padding(.horizontal, 12)
         // The question popover's width, or less in a narrow pane.

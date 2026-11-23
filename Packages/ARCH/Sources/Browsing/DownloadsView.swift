@@ -85,7 +85,7 @@ struct DownloadRowView: View {
 
     private func showIssue(_ issue: DownloadEntry.FileIssue?) {
         fileIssue = issue
-        if let issue { AccessibilityNotification.Announcement(issue.rawValue).post() }
+        if let issue { AccessibilityNotification.Announcement(issue.message).post() }
     }
 
     private func openFile() {
@@ -109,12 +109,12 @@ struct DownloadRowView: View {
         let formatter = ByteCountFormatter()
         switch entry.state {
         case .inProgress:
-            let total = entry.totalBytes > 0 ? " of \(formatter.string(fromByteCount: entry.totalBytes))" : ""
-            return formatter.string(fromByteCount: entry.completedBytes) + total
-        case .paused: return "Paused"
+            let completed = formatter.string(fromByteCount: entry.completedBytes)
+            return entry.totalBytes > 0 ? localized("\(completed) of \(formatter.string(fromByteCount: entry.totalBytes))") : completed
+        case .paused: return localized("Paused")
         case .completed: return formatter.string(fromByteCount: entry.totalBytes > 0 ? entry.totalBytes : entry.completedBytes)
-        case .cancelled: return "Cancelled"
-        case .failed: return entry.canRetry ? "Failed" : "Failed — start again from the page"
+        case .cancelled: return localized("Cancelled")
+        case .failed: return entry.canRetry ? localized("Failed") : localized("Failed — start again from the page")
         }
     }
 
@@ -143,7 +143,7 @@ struct DownloadRowView: View {
                         }
                         .progressViewStyle(.linear)
                     }
-                    Text(fileIssue?.rawValue ?? status)
+                    Text(fileIssue?.message ?? status)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         // The instruction on a failed download without buttons gets a second line at the default sidebar width.
@@ -168,21 +168,21 @@ struct DownloadRowView: View {
             // A pair of buttons touches, as the address pill's do. A failed download starts a new attempt, which may begin again from the start, so it offers Retry rather than Resume.
             if entry.state == .inProgress {
                 HStack(spacing: 0) {
-                    SidebarIconButton(symbol: "pause.circle", label: "Pause", action: entry.item.pause)
-                    SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
+                    SidebarIconButton(symbol: "pause.circle", label: localized("Pause"), action: entry.item.pause)
+                    SidebarIconButton(symbol: "xmark.circle", label: localized("Cancel"), action: entry.item.cancel)
                 }
             } else if entry.state == .paused {
                 HStack(spacing: 0) {
-                    SidebarIconButton(symbol: "play.circle", label: "Resume", action: entry.item.resume)
-                    SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
+                    SidebarIconButton(symbol: "play.circle", label: localized("Resume"), action: entry.item.resume)
+                    SidebarIconButton(symbol: "xmark.circle", label: localized("Cancel"), action: entry.item.cancel)
                 }
             } else if entry.state == .failed, entry.canRetry {
                 HStack(spacing: 0) {
-                    SidebarIconButton(symbol: "arrow.clockwise.circle", label: "Retry", action: entry.item.resume)
-                    SidebarIconButton(symbol: "xmark.circle", label: "Cancel", action: entry.item.cancel)
+                    SidebarIconButton(symbol: "arrow.clockwise.circle", label: localized("Retry"), action: entry.item.resume)
+                    SidebarIconButton(symbol: "xmark.circle", label: localized("Cancel"), action: entry.item.cancel)
                 }
             } else if entry.state == .completed, entry.fileURL != nil {
-                SidebarIconButton(symbol: "magnifyingglass.circle", label: "Show in Finder", action: revealFile)
+                SidebarIconButton(symbol: "magnifyingglass.circle", label: localized("Show in Finder"), action: revealFile)
             }
         }
         .padding(6)

@@ -51,7 +51,7 @@ struct LowPowerModeIndicator: View {
             .help(localized("Low Power Mode is on, so pages may animate more slowly. Click to open its settings."))
             .contextMenu { Button(localized("Low Power Mode Settings…"), action: LowPowerMode.openSettings) }
             .accessibilityLabel(localized("Low Power Mode"))
-            .accessibilityValue("On")
+            .accessibilityValue(localized("On"))
             .accessibilityHint(localized("Opens Low Power Mode settings"))
         }
     }

@@ -104,19 +104,19 @@ private struct SmallWindowTopRow: View {
                 TemporaryEngineLabel(tab: tab)
             }
             Spacer(minLength: 8)
-            SidebarIconButton(symbol: "chevron.left", label: "Back", shortcut: session.menuShortcut("goBack"), action: windowModel.goBack).disabled(!tab.canGoBack)
-            SidebarIconButton(symbol: "chevron.right", label: "Forward", shortcut: session.menuShortcut("goForward"), action: windowModel.goForward).disabled(!tab.canGoForward)
+            SidebarIconButton(symbol: "chevron.left", label: localized("Back"), shortcut: session.menuShortcut("goBack"), action: windowModel.goBack).disabled(!tab.canGoBack)
+            SidebarIconButton(symbol: "chevron.right", label: localized("Forward"), shortcut: session.menuShortcut("goForward"), action: windowModel.goForward).disabled(!tab.canGoForward)
             if tab.isLoading {
-                SidebarIconButton(symbol: "xmark", label: "Stop Loading", shortcut: session.menuShortcut("stopLoading"), action: windowModel.stopLoading)
+                SidebarIconButton(symbol: "xmark", label: localized("Stop Loading"), shortcut: session.menuShortcut("stopLoading"), action: windowModel.stopLoading)
             } else {
-                SidebarIconButton(symbol: "arrow.clockwise", label: "Reload", shortcut: session.menuShortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
+                SidebarIconButton(symbol: "arrow.clockwise", label: localized("Reload"), shortcut: session.menuShortcut("reload"), action: windowModel.reload).disabled(!windowModel.canReload)
             }
             LibraryButton(session: session, activityOnly: true)
             LowPowerModeIndicator()
-            SidebarIconButton(symbol: "square.and.arrow.up", label: "Share", action: windowModel.shareSelectedPage)
+            SidebarIconButton(symbol: "square.and.arrow.up", label: localized("Share"), action: windowModel.shareSelectedPage)
                 .disabled(!windowModel.canShareSelectedPage)
                 .background(SiteControlAnchor(windowModel: windowModel, button: \.shareButtonView))
-            SidebarIconButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Move to Main Window", shortcut: session.menuShortcut("moveToMainWindow")) {
+            SidebarIconButton(symbol: "arrow.up.left.and.arrow.down.right", label: localized("Move to Main Window"), shortcut: session.menuShortcut("moveToMainWindow")) {
                 session.moveToMainWindow(windowModel)
             }
         }

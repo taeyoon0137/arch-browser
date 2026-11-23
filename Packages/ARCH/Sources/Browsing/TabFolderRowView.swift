@@ -53,7 +53,7 @@ struct TabFolderRowView: View {
                 .frame(width: 18, height: 18)
                 .accessibilityHidden(true)
             if isRenaming {
-                SidebarNameField(placeholder: "Folder Name", name: folder.name,
+                SidebarNameField(placeholder: localized("Folder Name"), name: folder.name,
                                  onRename: { windowModel.renameFolder(folder.id, to: $0) }, onEnd: { windowModel.endRenamingFolder(folder.id) })
             } else {
                 if let owner = windowModel.agentSession(of: folder) {
@@ -143,16 +143,16 @@ struct TabFolderRowView: View {
     }
 
     private var accessibilityValue: String {
-        let state = folder.isCollapsed ? "Collapsed" : "Expanded"
+        let state = folder.isCollapsed ? localized("Collapsed") : localized("Expanded")
         guard folder.live != nil, status.unreadCount > 0 else { return state }
-        return "\(state), \(status.unreadCount) unread"
+        return localized("\(state), \(status.unreadCount) unread")
     }
 
     /// The warning symbol's tooltip: the failure and when the timer tries again.
     static func failureHelp(_ error: String, nextAttempt: Date?) -> String {
         guard let nextAttempt else { return error }
         let date = Calendar.current.isDateInToday(nextAttempt) ? Date.FormatStyle.DateStyle.omitted : .abbreviated
-        return "\(error)\nNext attempt: \(nextAttempt.formatted(date: date, time: .shortened))"
+        return localized("\(error)\nNext attempt: \(nextAttempt.formatted(date: date, time: .shortened))")
     }
 
     /// A click in the name field while renaming edits the name instead, and the release that ends a drag of the row leaves the folder as it was.
@@ -207,9 +207,9 @@ private struct SessionFolderCards: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 Spacer(minLength: 0)
-                Button(step.count > 1 ? "Review \(step.count)" : "Review", action: review)
+                Button(step.count > 1 ? localized("Review \(step.count)") : localized("Review"), action: review)
                     .buttonStyle(.link)
-                    .accessibilityLabel(step.count > 1 ? "Review \(step.count) requests" : "Review the request")
+                    .accessibilityLabel(step.count > 1 ? localized("Review \(step.count) requests") : localized("Review the request"))
             }
             .font(.system(size: 11))
             // Under the folder's name, past its symbol.

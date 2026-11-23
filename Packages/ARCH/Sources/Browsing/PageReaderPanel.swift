@@ -35,7 +35,7 @@ private struct PageReaderPanel: View {
                 Text("Page Reader", bundle: .module)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                SidebarIconButton(symbol: "xmark", label: "Hide Page Reader", action: windowModel.togglePageReader)
+                SidebarIconButton(symbol: "xmark", label: localized("Hide Page Reader"), action: windowModel.togglePageReader)
             }
             .padding(.leading, 14)
             .padding(.trailing, 6)
@@ -46,7 +46,7 @@ private struct PageReaderPanel: View {
                     // Each tab has its own draft and scroll position.
                     .id(tab.id)
             } else {
-                PageReaderPlaceholder(text: "Open a page to read it here.")
+                PageReaderPlaceholder(text: localized("Open a page to read it here."))
             }
         }
         // The page's frame beside it, with the same faint shadow.
@@ -77,7 +77,7 @@ private struct PageReaderTabView: View {
                     .frame(maxHeight: .infinity, alignment: .top)
             }
         } else {
-            PageReaderPlaceholder(text: "The page reader reads web pages and local files.")
+            PageReaderPlaceholder(text: localized("The page reader reads web pages and local files."))
         }
     }
 
@@ -114,9 +114,9 @@ private struct PageReaderTabView: View {
                 .padding(.vertical, 6)
             ContinueAsAgentTaskButton(source: .init(tab: tab, documentID: tab.documentID), draft: draft, exchanges: conversation.exchanges)
             if conversation.isAnswering {
-                SidebarIconButton(symbol: "stop.circle", label: "Stop Answering", action: conversation.cancel)
+                SidebarIconButton(symbol: "stop.circle", label: localized("Stop Answering"), action: conversation.cancel)
             } else {
-                SidebarIconButton(symbol: "arrow.up.circle", label: "Ask", action: send)
+                SidebarIconButton(symbol: "arrow.up.circle", label: localized("Ask"), action: send)
                     .disabled(question.isEmpty)
             }
         }
@@ -172,7 +172,7 @@ struct ContinueAsAgentTaskButton: View {
 
     var body: some View {
         if windowModel.canStartAgentTask {
-            SidebarIconButton(symbol: "arrowshape.turn.up.right", label: "Continue as Agent Task") {
+            SidebarIconButton(symbol: "arrowshape.turn.up.right", label: localized("Continue as Agent Task")) {
                 let excerpt = Self.excerpt(tabID: source.tabID, documentID: source.documentID, url: source.url, exchange: exchanges.last, selection: selection)
                 windowModel.continueAsAgentTask(Self.task(draft: draft, exchanges: exchanges), from: source, excerpt: excerpt)
             }
