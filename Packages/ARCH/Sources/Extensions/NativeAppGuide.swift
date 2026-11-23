@@ -46,11 +46,11 @@ public struct ArchInstallation: Equatable, Sendable {
 public enum NativeAppGuide {
     /// The user's step for each vendor's native app that Arch knows, by host name.
     static let guidance: [String: String] = [
-        "com.1password.1password": "1Password connects to a browser it does not list only after you allow it. When 1Password asks about Arch, allow it, or add Arch in 1Password\u{2019}s settings for browsers.",
-        "com.apple.passwordmanager": "iCloud Passwords starts its helper only for the browsers that macOS lists, which come with macOS updates, and for browsers with Apple\u{2019}s browser passkey entitlement.",
+        "com.1password.1password": localized("1Password connects to a browser it does not list only after you allow it. When 1Password asks about Arch, allow it, or add Arch in 1Password\u{2019}s settings for browsers."),
+        "com.apple.passwordmanager": localized("iCloud Passwords starts its helper only for the browsers that macOS lists, which come with macOS updates, and for browsers with Apple\u{2019}s browser passkey entitlement."),
     ]
 
-    static let lookingLine = "Looking for native apps\u{2026}"
+    static let lookingLine = localized("Looking for native apps\u{2026}")
 
     /// Whether the section of a plugin with these versions, one or a pair's two, shows native app lines: while a version is a web extension whose grant has `nativeMessaging`, on or off.
     public static func applies(to versions: [InstalledPlugin]) -> Bool {
@@ -83,17 +83,17 @@ public enum NativeAppGuide {
             let discoveredAllows = discovered.map { !origins.isDisjoint(with: $0.allowedOrigins) } == true
             guard archAllows || discoveredAllows else { continue }
             if let discovered, discovered.held != nil {
-                lines.append("\(discovered.description), which macOS does not start for Arch on this Mac.")
+                lines.append(localized("\(discovered.description), which macOS does not start for Arch on this Mac."))
             } else if archAllows, let host = inArch[name] {
-                lines.append("\(host.description), set up for Arch.")
+                lines.append(localized("\(host.description), set up for Arch."))
             } else if let discovered {
-                lines.append("\(discovered.description), set up for another browser.")
+                lines.append(localized("\(discovered.description), set up for another browser."))
             }
             apps.append(name)
         }
         if apps.isEmpty {
-            lines.append("No native app on this Mac accepts this extension.")
-            if !links.unreadableFolders.isEmpty { lines.append("macOS kept Arch from reading another browser\u{2019}s native app setup.") }
+            lines.append(localized("No native app on this Mac accepts this extension."))
+            if !links.unreadableFolders.isEmpty { lines.append(localized("macOS kept Arch from reading another browser\u{2019}s native app setup.")) }
         } else {
             lines += conditions(of: installation)
             for name in apps {
@@ -101,7 +101,7 @@ public enum NativeAppGuide {
                 lines.append(step)
                 guard HelperLaunchConstraints.constrainedHosts.contains(name), let path = links.userHosts[name]?.path ?? links.hosts[name]?.path,
                       let admits = links.launchConstraintAnswers[path] ?? nil else { continue }
-                lines.append(admits ? "Arch is among them on this Mac." : "Arch is not among them on this Mac.")
+                lines.append(admits ? localized("Arch is among them on this Mac.") : localized("Arch is not among them on this Mac."))
             }
         }
         if let outcome = callers.lazy.compactMap({ outcomes?.outcome(of: $0) }).first { lines.append(outcome.sentence) }
@@ -118,9 +118,9 @@ public enum NativeAppGuide {
         var lines: [String] = []
         if !installation.isInApplications {
             let folder = (installation.folder.path as NSString).abbreviatingWithTildeInPath
-            lines.append("Arch runs from \(folder); some native apps accept only browsers in the Applications folder.")
+            lines.append(localized("Arch runs from \(folder); some native apps accept only browsers in the Applications folder."))
         }
-        if installation.signing != .team { lines.append("Arch is not signed by a developer team; some native apps accept only signed browsers.") }
+        if installation.signing != .team { lines.append(localized("Arch is not signed by a developer team; some native apps accept only signed browsers.")) }
         return lines
     }
 }

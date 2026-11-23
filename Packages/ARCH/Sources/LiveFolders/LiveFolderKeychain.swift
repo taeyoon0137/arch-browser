@@ -111,7 +111,7 @@ public final class LiveFolderKeychain: LiveFolderAddressStore, @unchecked Sendab
 
     /// The system's message for a status. It never contains the address.
     private static func message(_ status: OSStatus) -> String {
-        (SecCopyErrorMessageString(status, nil) as String?) ?? "Keychain error \(status)."
+        (SecCopyErrorMessageString(status, nil) as String?) ?? localized("Keychain error \(status).")
     }
 }
 

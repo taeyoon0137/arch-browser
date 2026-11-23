@@ -48,8 +48,8 @@ import UserNotifications
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
-            content.title = "A program is asking to use Arch"
-            content.body = "Open Arch to allow or deny it."
+            content.title = localized("A program is asking to use Arch")
+            content.body = localized("Open Arch to allow or deny it.")
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
@@ -99,7 +99,7 @@ struct AgentGrantSheetView: View {
                     }
                 }
                 if spaces.isEmpty {
-                    LabeledContent(localized("Space"), value: "A new space")
+                    LabeledContent(localized("Space"), value: localized("A new space"))
                 } else {
                     Picker(localized("Space"), selection: Binding(get: { choice.spaceID ?? spaces.first?.id }, set: { choice.spaceID = $0 })) {
                         ForEach(spaces) { space in Text(space.name).tag(Optional(space.id)) }
@@ -110,11 +110,11 @@ struct AgentGrantSheetView: View {
                 }
                 Toggle(localized("Search history"), isOn: $choice.scopes.searchHistory)
                 Toggle(isOn: $choice.scopes.startTasks) {
-                    labeled("Start agent tasks on your AI subscription",
-                            detail: "Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change.")
+                    labeled(localized("Start agent tasks on your AI subscription"),
+                            detail: localized("Up to \(AgentGrant.defaultRunsPerDay) agent runs a day, which Settings \u{25B8} AI \u{25B8} Agents can change."))
                 }
                 Toggle(isOn: $choice.scopes.watchEvents) {
-                    labeled("Watch browser events", detail: Self.watchSentence(persona: personaName))
+                    labeled(localized("Watch browser events"), detail: Self.watchSentence(persona: personaName))
                 }
                 Picker(localized("Duration"), selection: $choice.duration) {
                     ForEach(AgentGrantChoice.Duration.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -126,8 +126,8 @@ struct AgentGrantSheetView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
-                AgentPointerButton(title: "Don\u{2019}t Allow", keyEquivalent: "\u{1B}", requiresPointer: false) { finish(nil) }
-                AgentPointerButton(title: choice.needsAuthentication ? "Allow\u{2026}" : "Allow", requiresPointer: true) { finish(normalized) }
+                AgentPointerButton(title: localized("Don\u{2019}t Allow"), keyEquivalent: "\u{1B}", requiresPointer: false) { finish(nil) }
+                AgentPointerButton(title: choice.needsAuthentication ? localized("Allow\u{2026}") : localized("Allow"), requiresPointer: true) { finish(normalized) }
             }
         }
         .padding(20)
@@ -148,7 +148,7 @@ struct AgentGrantSheetView: View {
 
     /// What Watch Browser Events shows the client (`docs/hooks.md`, Grants).
     static func watchSentence(persona: String) -> String {
-        "See when tabs open, load, change, and close in \(persona), with their sites. Never their titles or pages."
+        localized("See when tabs open, load, change, and close in \(persona), with their sites. Never their titles or pages.")
     }
 
     /// The choice with the space the picker shows.
@@ -161,15 +161,15 @@ struct AgentGrantSheetView: View {
     private var explanation: String {
         var sentences: [String] = []
         if choice.persona == .agents {
-            sentences.append("The client reads pages in the Agents Persona, which has no sign-ins until you sign in there.")
+            sentences.append(localized("The client reads pages in the Agents Persona, which has no sign-ins until you sign in there."))
         } else {
-            sentences.append("The client can read pages with your sign-ins in the \(personaName) Persona.")
+            sentences.append(localized("The client can read pages with your sign-ins in the \(personaName) Persona."))
         }
-        if choice.scopes.searchHistory { sentences.append("It can search your browsing history, which every Persona shares.") }
-        if choice.scopes.watchEvents { sentences.append("It can follow which sites your tabs in the \(personaName) Persona visit, as they visit them.") }
-        sentences.append("Pages it reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that.")
-        sentences.append("Steps that need you still ask in Arch.")
-        if choice.needsAuthentication { sentences.append("Allowing asks for Touch ID or your login password.") }
+        if choice.scopes.searchHistory { sentences.append(localized("It can search your browsing history, which every Persona shares.")) }
+        if choice.scopes.watchEvents { sentences.append(localized("It can follow which sites your tabs in the \(personaName) Persona visit, as they visit them.")) }
+        sentences.append(localized("Pages it reads may contain text aimed at it. If it can run commands on your Mac, a page could try to make it do so, and Arch cannot prevent that."))
+        sentences.append(localized("Steps that need you still ask in Arch."))
+        if choice.needsAuthentication { sentences.append(localized("Allowing asks for Touch ID or your login password.")) }
         return sentences.joined(separator: " ")
     }
 }

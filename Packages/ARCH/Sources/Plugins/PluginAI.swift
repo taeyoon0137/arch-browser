@@ -7,7 +7,7 @@ extension AIFeature {
     /// The plugin's own feature, named after it, whose requests carry text and the data kinds that come with the plugin's `ai` (`InstalledPlugin.aiDataKinds`). It is automatic while the plugin's events run as hooks, so that neither its hooks nor its other requests run before the user gives it a model of its own, and they count toward the daily limit for automatic requests. Otherwise the user starts its requests, which use the default route until the feature has models of its own.
     static func plugin(_ installed: InstalledPlugin) -> AIFeature {
         AIFeature(id: .plugin(installed.id.rawValue), name: installed.manifest.name,
-                  summary: installed.runsHooks ? "Sends the text this plugin writes, as you use it and as browser events reach it." : "Sends the text this plugin writes, as you use it.",
+                  summary: installed.runsHooks ? localized("Sends the text this plugin writes, as you use it and as browser events reach it.") : localized("Sends the text this plugin writes, as you use it."),
                   trigger: installed.runsHooks ? .automatic : .user, data: AIDataScope(kinds: installed.aiDataKinds))
     }
 }

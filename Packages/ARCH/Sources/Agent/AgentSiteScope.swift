@@ -134,9 +134,9 @@ struct AgentAddressQuestion: Equatable {
     /// The card's sentence, such as "The agent wants to open shop.example/t?d=… — an address no page showed, on a site you did not name."
     var sentence: String {
         var reasons: [String] = []
-        if !unseenParts.isEmpty { reasons.append("an address no page showed") }
-        if isOutsideScope { reasons.append(unseenParts.isEmpty ? "a site you did not name" : "on a site you did not name") }
-        return "The agent wants to open \(url.absoluteString) \u{2014} \(reasons.joined(separator: ", "))."
+        if !unseenParts.isEmpty { reasons.append(localized("an address no page showed")) }
+        if isOutsideScope { reasons.append(unseenParts.isEmpty ? localized("a site you did not name") : localized("on a site you did not name")) }
+        return localized("The agent wants to open \(url.absoluteString) \u{2014} \(reasons.joined(separator: ", ")).")
     }
 }
 

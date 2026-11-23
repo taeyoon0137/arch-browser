@@ -16,7 +16,7 @@ public enum LiveFolderSource: Codable, Hashable, Sendable {
     /// The source for a feed address the user gave and, when the address has a query, which can carry a token, the whole address for the Keychain. Throws `LiveFolderError.invalidAddress` for an address that is not `http` or `https` or that holds a user name or password. An `http` address becomes `https`, since the app's `URLSession` refuses plain HTTP (live folder rule 2).
     public static func makeFeed(address: URL) throws -> (source: LiveFolderSource, keychainAddress: URL?) {
         let whole = try feedAddress(address)
-        guard var components = URLComponents(url: whole, resolvingAgainstBaseURL: false) else { throw LiveFolderError.invalidAddress("This is not a web address.") }
+        guard var components = URLComponents(url: whole, resolvingAgainstBaseURL: false) else { throw LiveFolderError.invalidAddress(localized("This is not a web address.")) }
         components.fragment = nil
         guard let query = components.query, !query.isEmpty else {
             components.query = nil
@@ -32,13 +32,13 @@ public enum LiveFolderSource: Codable, Hashable, Sendable {
         guard var components = URLComponents(url: address, resolvingAgainstBaseURL: false),
               let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = components.host, !host.isEmpty else {
-            throw LiveFolderError.invalidAddress("A feed's address starts with https://.")
+            throw LiveFolderError.invalidAddress(localized("A feed's address starts with https://."))
         }
         guard components.user == nil, components.password == nil else {
-            throw LiveFolderError.invalidAddress("A feed's address cannot hold a user name or password.")
+            throw LiveFolderError.invalidAddress(localized("A feed's address cannot hold a user name or password."))
         }
         components.scheme = "https"
-        guard let url = components.url else { throw LiveFolderError.invalidAddress("This is not a web address.") }
+        guard let url = components.url else { throw LiveFolderError.invalidAddress(localized("This is not a web address.")) }
         return url
     }
 }
@@ -76,10 +76,10 @@ public struct GitHubSearch: Codable, Hashable, Sendable {
     /// The folder's name until the user gives it another.
     public var defaultName: String {
         switch kind {
-        case .myPullRequests: return "Pull Requests"
-        case .reviewRequests: return "Review Requests"
-        case .assignedIssues: return "Issues"
-        case .search: return "GitHub Search"
+        case .myPullRequests: return localized("Pull Requests")
+        case .reviewRequests: return localized("Review Requests")
+        case .assignedIssues: return localized("Issues")
+        case .search: return localized("GitHub Search")
         }
     }
 

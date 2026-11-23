@@ -121,7 +121,7 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         let links = links([locked, vendor])
         let plugin = messenger(extensionID)
         await links.update()
-        #expect(lines(plugin, links, installation: built) == [noApp, "macOS kept Arch from reading another browser\u{2019}s native app setup."])
+        #expect(lines(plugin, links, installation: built) == [noApp, catalogText("macOS kept Arch from reading another browser\u{2019}s native app setup.")])
         try writeHostManifest("org.example.app", into: vendor, app: writeApp(in: folder), allowing: [extensionID])
         await links.update(force: true)
         let place = (built.folder.path as NSString).abbreviatingWithTildeInPath
@@ -140,7 +140,7 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         let plugin = messenger(extensionID)
         let among = links(admitsArch: true)
         await among.update()
-        #expect(lines(plugin, among) == ["1Password BrowserSupport, set up for Arch.", "Helper, set up for Arch.", onePassword, iCloud, "Arch is among them on this Mac."])
+        #expect(lines(plugin, among) == ["1Password BrowserSupport, set up for Arch.", "Helper, set up for Arch.", onePassword, iCloud, catalogText("Arch is among them on this Mac.")])
         let notAmong = links(admitsArch: false)
         await notAmong.update()
         #expect(lines(plugin, notAmong) == ["1Password BrowserSupport, set up for Arch.", "Helper, which macOS does not start for Arch on this Mac.", onePassword, iCloud,
@@ -158,7 +158,7 @@ private func writeScript(_ name: String, _ body: String, in folder: TemporaryFol
         await links.update()
         let iCloud = try #require(NativeAppGuide.guidance[helper])
         #expect(links.launchConstraintAnswers == [script.path: .some(false)] && links.hosts.isEmpty)
-        #expect(lines(messenger(extensionID), links) == ["Helper, set up for Arch.", iCloud, "Arch is not among them on this Mac."])
+        #expect(lines(messenger(extensionID), links) == ["Helper, set up for Arch.", iCloud, catalogText("Arch is not among them on this Mac.")])
     }
 }
 

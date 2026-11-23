@@ -73,11 +73,11 @@ struct EngineCoverageTests {
         let (manager, runtime) = launch()
         let package = try await manager.stage(sampleExtensionFolder)
         #expect(package.engineChecks == [.webKit: .runs, .chromium: .refused("Chromium cannot run this extension: The engine refused it.")])
-        #expect(package.engineNotes == ["Runs on WebKit tabs.", "Chromium cannot run this extension: The engine refused it."])
+        #expect(package.engineNotes == [catalogText("Runs on %@ tabs.", "WebKit", module: "Plugins"), "Chromium cannot run this extension: The engine refused it."])
         try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
         let installed = try #require(manager.plugins.first)
         #expect(installed.engineChecks == [.webKit: true, .chromium: false] && installed.engines == [.webKit])
-        #expect(installed.enginesNote == "Runs on WebKit tabs.")
+        #expect(installed.enginesNote == catalogText("Runs on %@ tabs.", "WebKit", module: "Plugins"))
         #expect(try fileChecks() == ["webKit": "true W1", "chromium": "false C1"])
         await runtime.waitForEngines()
         // The install's answers are current, so the engines check nothing more before loading, and only WebKit loads it.
@@ -107,7 +107,7 @@ struct EngineCoverageTests {
         await secondRuntime.waitForEngines()
         #expect(webKit.checkCount == 1 && chromium.checkCount == 0)
         #expect(webKit.loaded[sampleID] != nil && chromium.loaded[sampleID] != nil)
-        #expect(second.plugins.first?.engineChecks == [.webKit: true, .chromium: true] && second.plugins.first?.enginesNote == "Runs on WebKit and Chromium tabs.")
+        #expect(second.plugins.first?.engineChecks == [.webKit: true, .chromium: true] && second.plugins.first?.enginesNote == catalogText("Runs on %@ tabs.", ListFormatter.localizedString(byJoining: ["WebKit", "Chromium"]), module: "Plugins"))
         #expect(try fileChecks() == ["webKit": "true W2", "chromium": "true C1"])
         // Recording the answer does not load the running copy again.
         #expect(webKit.loadCounts[sampleID] == 1 && chromium.loadCounts[sampleID] == 1)
@@ -159,7 +159,7 @@ struct EngineCoverageTests {
         #expect(second.plugins.first { $0.id == switchedOff.id }?.engineChecks == [.chromium: true])
         await runtime.waitForEngines()
         let plugin = try #require(second.plugins.first { $0.id == switchedOff.id })
-        #expect(!plugin.isEnabled && plugin.engineChecks == [.webKit: true, .chromium: true] && plugin.enginesNote == "Runs on WebKit and Chromium tabs.")
+        #expect(!plugin.isEnabled && plugin.engineChecks == [.webKit: true, .chromium: true] && plugin.enginesNote == catalogText("Runs on %@ tabs.", ListFormatter.localizedString(byJoining: ["WebKit", "Chromium"]), module: "Plugins"))
         #expect(try fileChecks() == ["webKit": "true W2", "chromium": "true C1"])
         #expect(webKit.checkCount == 2 && chromium.checkCount == 0)
         #expect(webKit.loaded[sampleID] == nil && chromium.loaded[sampleID] == nil)
@@ -197,7 +197,7 @@ struct EngineCoverageTests {
         var plugin = try #require(manager.plugins.first)
         #expect(plugin.isEnabled && plugin.failure == nil)
         #expect(plugin.engineFailures == [.chromium: "Arch could not start it on Chromium tabs: The engine refused it."] && plugin.engines == [.webKit])
-        #expect(plugin.enginesNote == "Runs on WebKit tabs.")
+        #expect(plugin.enginesNote == catalogText("Runs on %@ tabs.", "WebKit", module: "Plugins"))
         #expect(webKit.loaded[sampleID] != nil && chromium.loaded[sampleID] == nil)
         // The failure lasts for the run only.
         #expect(try String(contentsOf: listURL, encoding: .utf8).contains("could not start") == false)
@@ -240,7 +240,7 @@ struct EngineCoverageTests {
         await secondRuntime.waitForEngines()
         #expect(secondRuntime.engines == [.webKit: "W1"])
         var plugin = try #require(second.plugins.first)
-        #expect(plugin.engineChecks == [.webKit: true] && plugin.enginesNote == "Runs on WebKit tabs.")
+        #expect(plugin.engineChecks == [.webKit: true] && plugin.enginesNote == catalogText("Runs on %@ tabs.", "WebKit", module: "Plugins"))
         #expect(webKit.loaded[sampleID] != nil && chromium.checkCount == 0 && chromium.loaded.isEmpty)
         // A failure to start on WebKit then leaves it on no engine, which switches it off.
         webKit.refused = [sampleID]
@@ -271,7 +271,7 @@ struct EngineCoverageTests {
         let package = try await manager.stage(sampleExtensionFolder)
         #expect(package.engineChecks.isEmpty && runtime.engines.isEmpty)
         try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
-        #expect(manager.plugins.first?.unavailability == "No engine on this Mac runs web extensions.")
+        #expect(manager.plugins.first?.unavailability == catalogText("No engine on this Mac runs web extensions."))
     }
 
     @Test func isUnavailableOnlyWithoutAnEngine() async throws {
@@ -280,7 +280,7 @@ struct EngineCoverageTests {
         let package = try await without.stage(sampleExtensionFolder)
         #expect(package.engineChecks.isEmpty && package.engineNotes.isEmpty)
         try without.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
-        #expect(without.plugins.first?.unavailability == "No engine on this Mac runs web extensions.")
+        #expect(without.plugins.first?.unavailability == catalogText("No engine on this Mac runs web extensions."))
         #expect(try installEntry()["engineChecks"] == nil)
         without.close()
 
@@ -289,7 +289,7 @@ struct EngineCoverageTests {
         let (withChromium, runtime) = launch()
         #expect(withChromium.plugins.first?.unavailability == nil)
         await runtime.waitForEngines()
-        #expect(chromium.loaded[sampleID] != nil && withChromium.plugins.first?.enginesNote == "Runs on Chromium tabs.")
+        #expect(chromium.loaded[sampleID] != nil && withChromium.plugins.first?.enginesNote == catalogText("Runs on %@ tabs.", "Chromium", module: "Plugins"))
     }
 
     @Test func deletesTheStorageOfARemovalThatAnEngineMissedOnceItAttaches() async throws {

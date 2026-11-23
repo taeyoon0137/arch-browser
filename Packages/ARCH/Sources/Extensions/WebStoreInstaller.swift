@@ -139,7 +139,7 @@ public final class WebStoreInstaller: ObservableObject {
         try await staged(in: plugins) {
             guard !plugins.isClosed else { throw PluginError.closed }
             guard let installed = plugins.plugins.first(where: { $0.id == plugin }), case .webStore = installed.origin else {
-                throw PluginError.invalidPackage("Only an extension installed from the Web Store updates from it.")
+                throw PluginError.invalidPackage(localized("Only an extension installed from the Web Store updates from it."))
             }
             guard let release = update(of: installed, in: plugins) else {
                 throw WebStoreError.alreadyInstalled(name: installed.manifest.name, version: installed.manifest.version)

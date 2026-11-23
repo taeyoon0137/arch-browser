@@ -1,6 +1,876 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ is not a program Arch can run." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch에서 실행할 수 있는 프로그램이 아닙니다: %@"
+          }
+        }
+      }
+    },
+    "%@ is not a regular file." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일반 파일이 아닙니다: %@"
+          }
+        }
+      }
+    },
+    "%@ tier · %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 등급 · %2$@"
+          }
+        }
+      }
+    },
+    "%@ tier, which has no model yet" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 등급(아직 모델 없음)"
+          }
+        }
+      }
+    },
+    "%lld rounds" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld회 라운드"
+          }
+        }
+      }
+    },
+    "%lld tool calls" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 호출 %lld회"
+          }
+        }
+      }
+    },
+    "1 round" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1회 라운드"
+          }
+        }
+      }
+    },
+    "1 tool call" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 호출 1회"
+          }
+        }
+      }
+    },
+    "A program is asking to add a hook in Arch" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로그램이 Arch에 훅 추가를 요청하고 있습니다"
+          }
+        }
+      }
+    },
+    "A test on a tab cannot stand in for a finished download." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭에서의 테스트로는 완료된 다운로드를 대신할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Actions: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동작: %@"
+          }
+        }
+      }
+    },
+    "Agent Instructions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 지침"
+          }
+        }
+      }
+    },
+    "Allow “%@” to add the hook “%@”?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@”에서 훅 “%2$@” 추가를 허용하겠습니까?"
+          }
+        }
+      }
+    },
+    "Allowing asks for Touch ID or your login password. The hook pauses when this program's access ends." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용하려면 Touch ID 또는 로그인 암호가 필요합니다. 이 프로그램의 접근 권한이 끝나면 훅이 일시 정지됩니다."
+          }
+        }
+      }
+    },
+    "Allow…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용…"
+          }
+        }
+      }
+    },
+    "Arch cannot find %@ in the PATH this script gets." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 스크립트가 받는 PATH에서 Arch가 %@ 프로그램을 찾을 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch cannot read %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 다음 파일을 읽을 수 없습니다: %@"
+          }
+        }
+      }
+    },
+    "Arch cannot run this hook." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 이 훅을 실행할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch could not make the run's folder: %@." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 실행 폴더를 만들 수 없습니다: %@."
+          }
+        }
+      }
+    },
+    "Arch could not make the run's ticket, so the script did not start." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 실행 티켓을 만들 수 없어 스크립트가 시작되지 않았습니다."
+          }
+        }
+      }
+    },
+    "Arch could not read the PATH of your login shell, which this script runs with." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 이 스크립트를 실행할 로그인 셸의 PATH를 읽을 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch could not start %@: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 %1$@ 프로그램을 시작할 수 없습니다: %2$@"
+          }
+        }
+      }
+    },
+    "Arch has not read its hooks yet, so it cannot change them." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 아직 훅을 읽지 않아 변경할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Choose an agent model first." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "먼저 에이전트 모델을 선택하세요."
+          }
+        }
+      }
+    },
+    "Commands this script runs by name come from your PATH, and each of them gets this hook's access to Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 스크립트가 이름으로 실행하는 명령은 PATH에서 찾으며, 각 명령은 이 훅의 Arch 접근 권한을 받습니다."
+          }
+        }
+      }
+    },
+    "Deleted Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제된 페르소나"
+          }
+        }
+      }
+    },
+    "Deleted Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제된 스페이스"
+          }
+        }
+      }
+    },
+    "Don’t Allow" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용 안 함"
+          }
+        }
+      }
+    },
+    "Ended by signal %d." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "종료되었습니다(신호 %d)."
+          }
+        }
+      }
+    },
+    "Everywhere" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 곳"
+          }
+        }
+      }
+    },
+    "Exited with status %d." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "종료되었습니다(상태 %d)."
+          }
+        }
+      }
+    },
+    "Exited with status %d: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "종료되었습니다(상태 %1$d): %2$@"
+          }
+        }
+      }
+    },
+    "Hook from a newer Arch" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "최신 Arch에서 만든 훅"
+          }
+        }
+      }
+    },
+    "It can run an agent that sees the event's tab's title and address, never its page, and suggests the tab's name. The agent's reply never reaches the script, and Arch logs each run and tool call." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이벤트 탭의 제목과 주소만 보고(페이지는 보지 않음) 탭 이름을 제안하는 에이전트를 실행할 수 있습니다. 에이전트의 응답은 스크립트에 전달되지 않으며, Arch가 각 실행과 도구 호출을 기록합니다."
+          }
+        }
+      }
+    },
+    "It can suggest a name for the event's tab. Your own names always win." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이벤트 탭의 이름을 제안할 수 있습니다. 직접 지정한 이름이 항상 우선합니다."
+          }
+        }
+      }
+    },
+    "It receives each event of its situation without tab titles or addresses, and reaches only the event's tab." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "해당 상황의 각 이벤트를 탭 제목이나 주소 없이 받으며, 이벤트의 탭에만 접근합니다."
+          }
+        }
+      }
+    },
+    "Its first line must be #! and the absolute path of a program, with at most one option made of the letters e, f, u, v, w, and x, as in -eu, or /usr/bin/env and one program's name." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "첫 줄은 #!와 프로그램의 절대 경로(-eu처럼 e, f, u, v, w, x 문자로 된 옵션 최대 하나 포함) 또는 /usr/bin/env와 프로그램 이름 하나여야 합니다."
+          }
+        }
+      }
+    },
+    "Its interpreter changed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "인터프리터가 변경되었습니다."
+          }
+        }
+      }
+    },
+    "Its script changed outside Arch." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch 외부에서 스크립트가 변경되었습니다."
+          }
+        }
+      }
+    },
+    "Keeps activity only" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "활동만 보관"
+          }
+        }
+      }
+    },
+    "Keeps the session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 보관"
+          }
+        }
+      }
+    },
+    "Limits: %lld seconds, %@, %@, %lld runs a day" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제한: %1$lld초, %2$@, %3$@, 하루 %4$lld회 실행"
+          }
+        }
+      }
+    },
+    "Model: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델: %@"
+          }
+        }
+      }
+    },
+    "Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 훅이 탭에 지정하는 이름은 Arch의 세션 파일에 저장되며, 이 Mac의 다른 프로그램도 이 파일을 읽을 수 있습니다."
+          }
+        }
+      }
+    },
+    "No model" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델 없음"
+          }
+        }
+      }
+    },
+    "None" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "없음"
+          }
+        }
+      }
+    },
+    "Open Arch to allow or deny it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "허용하거나 거부하려면 Arch를 여세요."
+          }
+        }
+      }
+    },
+    "Record: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기록: %@"
+          }
+        }
+      }
+    },
+    "Rename the tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름 변경"
+          }
+        }
+      }
+    },
+    "Runs an agent for this hook with the titles and addresses of the tabs it reaches." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 훅이 접근하는 탭의 제목과 주소로 에이전트를 실행합니다."
+          }
+        }
+      }
+    },
+    "Runs an agent for this hook with the titles, addresses, and text of the tabs it reaches." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 훅이 접근하는 탭의 제목, 주소, 텍스트로 에이전트를 실행합니다."
+          }
+        }
+      }
+    },
+    "Script" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트"
+          }
+        }
+      }
+    },
+    "Shell scripts are off." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "셸 스크립트가 꺼져 있습니다."
+          }
+        }
+      }
+    },
+    "The Keychain did not record this change, so an earlier copy of hooks.json would still open: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인에 이 변경 사항이 기록되지 않아 이전 hooks.json 사본이 계속 열릴 수 있습니다: %@"
+          }
+        }
+      }
+    },
+    "The agent run did not finish." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 실행이 완료되지 않았습니다."
+          }
+        }
+      }
+    },
+    "The script and every command it runs can then read the event's page through agent runs." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그러면 스크립트와 스크립트가 실행하는 모든 명령이 에이전트 실행을 통해 이벤트 페이지를 읽을 수 있습니다."
+          }
+        }
+      }
+    },
+    "The script did not load: %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트를 불러오지 못했습니다: %@"
+          }
+        }
+      }
+    },
+    "The script gets the event as JSON on standard input, and only PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, and ARCH_HOOK_TICKET in its environment. Arch runs its own copy of the file, so later changes to the file take effect only after Update from File." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트는 표준 입력으로 이벤트를 JSON으로 받으며, 환경 변수로는 PATH, HOME, LANG, TMPDIR, ARCH_HOOK_ID, ARCH_HOOK_EVENT, ARCH_HOOK_TICKET만 받습니다. Arch는 파일의 자체 사본을 실행하므로, 이후 파일 변경 사항은 ‘파일에서 업데이트’ 후에만 적용됩니다."
+          }
+        }
+      }
+    },
+    "The script holds a control or formatting character other than tab and line feed, such as a carriage return or a text direction mark, which Arch cannot show as the interpreter reads it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트에 탭과 줄 바꿈 외의 제어 문자나 서식 문자(예: 캐리지 리턴, 텍스트 방향 표시)가 있어 Arch가 인터프리터가 읽는 그대로 표시할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The script is larger than 1 MB." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트가 1MB보다 큽니다."
+          }
+        }
+      }
+    },
+    "The script is not UTF-8 text." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트가 UTF-8 텍스트가 아닙니다."
+          }
+        }
+      }
+    },
+    "The script set no listener for %@ with arch.events.on." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스크립트가 arch.events.on으로 %@ 리스너를 설정하지 않았습니다."
+          }
+        }
+      }
+    },
+    "The tab is no longer open." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭이 더 이상 열려 있지 않습니다."
+          }
+        }
+      }
+    },
+    "This draft is already running a test." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 초안은 이미 테스트를 실행 중입니다."
+          }
+        }
+      }
+    },
+    "This editor tests only your own hooks." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 편집기는 직접 만든 훅만 테스트합니다."
+          }
+        }
+      }
+    },
+    "This hook gets no events from this site, since the site is excluded from AI." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사이트는 AI에서 제외되어 이 훅이 이 사이트의 이벤트를 받지 않습니다."
+          }
+        }
+      }
+    },
+    "This hook's filter does not cover this tab." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 훅의 필터가 이 탭을 포함하지 않습니다."
+          }
+        }
+      }
+    },
+    "This hook's model is not available." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 훅의 모델을 사용할 수 없습니다."
+          }
+        }
+      }
+    },
+    "This hook's script is not a shell script." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 훅의 스크립트는 셸 스크립트가 아닙니다."
+          }
+        }
+      }
+    },
+    "Tidy Tab Names" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이름 정리"
+          }
+        }
+      }
+    },
+    "When a download finishes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다운로드가 완료될 때"
+          }
+        }
+      }
+    },
+    "When a new tab loads its first page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭이 첫 페이지를 불러올 때"
+          }
+        }
+      }
+    },
+    "When a new tab opens" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 탭이 열릴 때"
+          }
+        }
+      }
+    },
+    "When a tab closes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭이 닫힐 때"
+          }
+        }
+      }
+    },
+    "When a tab loads a new address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭이 새 주소를 불러올 때"
+          }
+        }
+      }
+    },
+    "When a tab loads a page" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭이 페이지를 불러올 때"
+          }
+        }
+      }
+    },
+    "When a tab moves to another site" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭이 다른 사이트로 이동할 때"
+          }
+        }
+      }
+    },
+    "When a tab's address changes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭의 주소가 변경될 때"
+          }
+        }
+      }
+    },
+    "When a tab's title changes" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭의 제목이 변경될 때"
+          }
+        }
+      }
+    },
+    "When you close a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭을 닫을 때"
+          }
+        }
+      }
+    },
+    "When you select a tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭을 선택할 때"
+          }
+        }
+      }
+    },
+    "When you switch spaces" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스를 전환할 때"
+          }
+        }
+      }
+    },
+    "When you switch to another Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 페르소나로 전환할 때"
+          }
+        }
+      }
+    },
+    "add the hook “%@” from “%@”" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%2$@”의 훅 “%1$@” 추가"
+          }
+        }
+      }
+    },
+    "all sites" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 사이트"
+          }
+        }
+      }
+    },
+    "all sites except %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 제외 모든 사이트"
+          }
+        }
+      }
+    },
+    "only %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@만"
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }

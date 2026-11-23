@@ -198,7 +198,7 @@ import Testing
         // Each call is a step in the transcript and an entry in the activity log, with the site of the page it opened.
         #expect(await call(tools, "open_tab", ["url": "https://docs.example/"]).status == .ok)
         let step = try #require(session.items.compactMap { item -> AgentStep? in if case .step(let step) = item.kind { return step } else { return nil } }.last)
-        #expect(step.tool == "open_tab" && step.sentence == "Opened a tab" && step.tabHandle == "t2" && step.status == .ok)
+        #expect(step.tool == "open_tab" && step.sentence == catalogText("Opened a tab") && step.tabHandle == "t2" && step.status == .ok)
         let entry = try #require(service.activity.entries.last)
         #expect(entry.sessionID == session.id && entry.tool == "open_tab" && entry.site == "docs.example" && entry.decision == .auto)
 

@@ -460,7 +460,7 @@ struct EngineVersionsTests {
         // A pair whose engine runs no extensions now says so in its version's row.
         host.engines = [.webKit: webKit]
         let (later, _) = launch()
-        #expect(later.engineVersions.count == 1 && later.enginesNote(of: b.id) == "Chromium runs no web extensions on this Mac." && later.enginesNote(of: a.id) == "Runs on WebKit tabs.")
+        #expect(later.engineVersions.count == 1 && later.enginesNote(of: b.id) == "Chromium runs no web extensions on this Mac." && later.enginesNote(of: a.id) == catalogText("Runs on %@ tabs.", "WebKit", module: "Plugins"))
     }
 
     @Test func separatesVersionsButNotThoseThatShareAnIdentifier() async throws {

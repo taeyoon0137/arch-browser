@@ -114,7 +114,7 @@ enum CodexAgent {
             disabled.append(name)
         }
         if let missing = shellFeatures.first(where: { !names.contains($0) }) {
-            throw AIAgentToolError(detail: "Codex does not list the feature \(missing), so Arch cannot confirm that its shell is off. Update Codex in the terminal.")
+            throw AIAgentToolError(detail: localized("Codex does not list the feature \(missing), so Arch cannot confirm that its shell is off. Update Codex in the terminal."))
         }
         return disabled
     }
@@ -140,7 +140,7 @@ enum CodexAgent {
         do {
             try FileManager.default.createDirectory(at: home, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         } catch {
-            throw AIAgentToolError(detail: "\(name) could not be checked: \(error.localizedDescription)")
+            throw AIAgentToolError(detail: localized("\(name) could not be checked: \(error.localizedDescription)"))
         }
         defer { try? FileManager.default.removeItem(at: home) }
         var probeEnvironment = environment
@@ -148,7 +148,7 @@ enum CodexAgent {
 
         let features = try await AIAgentCommand.run(executable, ["--no-daemon", "features", "list"], environment: probeEnvironment)
         guard features.succeeded else {
-            throw AIAgentToolError(detail: "\(name) could not list its features: \(features.errorLine ?? "it exited with an error"). Update Codex in the terminal.")
+            throw AIAgentToolError(detail: localized("\(name) could not list its features: \(features.errorLine ?? localized("it exited with an error")). Update Codex in the terminal."))
         }
         let disabled = try disabledFeatures(fromList: features.output)
         let catalog = try await AIAgentCommand.run(executable, ["--no-daemon", "debug", "models", "--bundled"], environment: probeEnvironment)
@@ -172,14 +172,14 @@ enum CodexAgent {
         let all = try await probe(probeSettings, disabled)
         if all.succeeded { return }
         if let line = all.errorLine, line.contains("Unknown feature") {
-            throw AIAgentToolError(detail: "\(name) refuses Arch's settings: \(line). Update Codex in the terminal.")
+            throw AIAgentToolError(detail: localized("\(name) refuses Arch's settings: \(line). Update Codex in the terminal."))
         }
         for group in settingGroups(probeSettings) {
             if try await !probe(group.settings, []).succeeded {
-                throw AIAgentToolError(detail: "\(name) does not accept `\(group.key)`. Update Codex in the terminal.")
+                throw AIAgentToolError(detail: localized("\(name) does not accept `\(group.key)`. Update Codex in the terminal."))
             }
         }
-        throw AIAgentToolError(detail: "\(name) refuses Arch's settings: \(all.errorLine ?? "the startup configuration is unavailable"). Update Codex in the terminal.")
+        throw AIAgentToolError(detail: localized("\(name) refuses Arch's settings: \(all.errorLine ?? localized("the startup configuration is unavailable")). Update Codex in the terminal."))
     }
 
     /// Each setting alone, named by its key, except the server's settings, which form one group named after the server.
@@ -235,7 +235,7 @@ struct CodexStreamDecoder {
             let usage = (object["usage"] as? [String: Any]).map(Self.usage)
             return (usage.map { [AIAgentStreamEvent.usage($0)] } ?? []) + [.turnEnded(.completed)]
         case "turn.failed":
-            let message = ((object["error"] as? [String: Any])?["message"] as? String) ?? lastError ?? "Codex ended the turn with an error."
+            let message = ((object["error"] as? [String: Any])?["message"] as? String) ?? lastError ?? localized("Codex ended the turn with an error.")
             return [.turnFailed(Self.isUsageLimit(message) ? .rateLimited(provider, until: nil) : .providerUnavailable(provider, detail: message))]
         case "error":
             // Codex can report a retry this way and go on; a turn that then ends without `turn.completed` fails with it.
@@ -252,7 +252,7 @@ struct CodexStreamDecoder {
         guard type == "mcp_tool_call" else { return }
         let server = item["server"] as? String ?? "?"
         guard isSession, server == CodexAgent.serverName else {
-            throw AIError.blockedByPolicy(.agentUsedOwnTools("Codex called a tool of the server \(server), which Arch did not ask for."))
+            throw AIError.blockedByPolicy(.agentUsedOwnTools(localized("Codex called a tool of the server \(server), which Arch did not ask for.")))
         }
     }
 
@@ -275,10 +275,10 @@ struct CodexStreamDecoder {
 
     static func sentence(forItem type: String) -> String {
         switch type {
-        case "command_execution": return "Codex ran a command."
-        case "file_change": return "Codex changed a file."
-        case "web_search": return "Codex searched the web."
-        default: return "Codex used \(type.replacingOccurrences(of: "_", with: " ")), which Arch did not ask for."
+        case "command_execution": return localized("Codex ran a command.")
+        case "file_change": return localized("Codex changed a file.")
+        case "web_search": return localized("Codex searched the web.")
+        default: return localized("Codex used \(type.replacingOccurrences(of: "_", with: " ")), which Arch did not ask for.")
         }
     }
 

@@ -239,9 +239,9 @@ extension AIClient {
         }
         // A stream read by a cancelled task ends without an error.
         if Task.isCancelled { throw AIError.cancelled }
-        guard let model, let finishReason else { throw AIError.malformedReply("The reply ended without finishing.") }
+        guard let model, let finishReason else { throw AIError.malformedReply(localized("The reply ended without finishing.")) }
         if case .json = request.output, (try? JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed)) == nil {
-            throw finishReason == .lengthLimit ? AIError.replyTooLong : AIError.malformedReply("The reply is not valid JSON.")
+            throw finishReason == .lengthLimit ? AIError.replyTooLong : AIError.malformedReply(localized("The reply is not valid JSON."))
         }
         return AIReply(text: text, toolCalls: toolCalls, model: model, usage: usage, finishReason: finishReason)
     }

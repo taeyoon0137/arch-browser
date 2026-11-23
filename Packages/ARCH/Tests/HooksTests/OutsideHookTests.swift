@@ -102,7 +102,7 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
         #expect(review.agent.first == "Model: Fast tier \u{00B7} Test \u{2014} model-a")
         #expect(review.prompt == "Name the tab.")
         #expect(review.permissions.contains { $0.contains("never its page") })
-        #expect(HookProposalReview.tabNamesSentence == "Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read.")
+        #expect(HookProposalReview.tabNamesSentence == catalogText("Names this hook gives your tabs are saved in Arch's session file, which other programs on this Mac can read."))
         #expect(authenticator.count == 1)
         let hook = try #require(registry.hooks.first { $0.id == id })
         #expect(hook.origin == .outsideClient(program.key, name: "agent in Agent"))

@@ -82,7 +82,7 @@ public final class FeedFetcher: Sendable {
         do {
             let (bytes, response) = try await session.bytes(for: request)
             defer { bytes.task.cancel() }
-            guard let response = response as? HTTPURLResponse else { throw LiveFolderError.network("The server's answer is not HTTP.") }
+            guard let response = response as? HTTPURLResponse else { throw LiveFolderError.network(localized("The server's answer is not HTTP.")) }
             switch response.statusCode {
             case 200..<300:
                 break

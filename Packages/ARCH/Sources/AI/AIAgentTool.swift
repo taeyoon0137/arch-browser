@@ -124,14 +124,14 @@ enum AIAgentCommand {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
-            throw AIAgentToolError(detail: "\(name) could not start: \(error.localizedDescription)")
+            throw AIAgentToolError(detail: localized("\(name) could not start: \(error.localizedDescription)"))
         }
         defer { try? FileManager.default.removeItem(at: directory) }
         let process: CommandLineProcess
         do {
             process = try CommandLineProcess(executable: executable, arguments: arguments, environment: environment, directory: directory, input: Data())
         } catch let error as POSIXError {
-            throw AIAgentToolError(detail: "\(name) could not start: \(String(cString: strerror(error.code.rawValue))).")
+            throw AIAgentToolError(detail: localized("\(name) could not start: \(String(cString: strerror(error.code.rawValue)))."))
         }
         let deadline = Task {
             guard (try? await Task.sleep(for: timeout)) != nil else { return false }
@@ -143,7 +143,7 @@ enum AIAgentCommand {
         let status = await process.termination()
         deadline.cancel()
         if await deadline.value {
-            throw AIAgentToolError(detail: "\(name) \(arguments.joined(separator: " ")) did not finish.")
+            throw AIAgentToolError(detail: localized("\(name) \(arguments.joined(separator: " ")) did not finish."))
         }
         return AIAgentCommandResult(status: status, output: String(decoding: output, as: UTF8.self), errorLine: await process.lastErrorLine())
     }
@@ -190,7 +190,7 @@ final class AIAgentProbeStore {
     /// The probe result for the executable as it is now, probing it first when it is new or changed. `environment` is the tool's run environment. Throws `AIAgentToolError` naming what the tool lacks.
     func result(kind: AIAgentKind, executable: URL, environment: [String: String]) async throws -> AIAgentProbeResult {
         guard let identity = AIAgentToolIdentity(executable: executable) else {
-            throw AIAgentToolError(detail: "\(executable.lastPathComponent) could not start: no executable at \(executable.path).")
+            throw AIAgentToolError(detail: localized("\(executable.lastPathComponent) could not start: no executable at \(executable.path)."))
         }
         if let result = results[identity] { return result }
         let task = running[identity] ?? Task {

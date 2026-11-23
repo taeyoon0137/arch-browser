@@ -96,9 +96,8 @@ public struct PluginPackage: Identifiable, Sendable {
     /// "Runs on WebKit tabs." or "Runs on WebKit and Chromium tabs.", in the order of `EngineKind`; nil for no engine.
     public static func runsNote(on engines: Set<EngineKind>) -> String? {
         let names = EngineKind.allCases.filter(engines.contains).map(\.displayName)
-        guard let last = names.last else { return nil }
-        let list = names.count < 3 ? names.joined(separator: " and ") : names.dropLast().joined(separator: ", ") + ", and " + last
-        return "Runs on \(list) tabs."
+        guard !names.isEmpty else { return nil }
+        return localized("Runs on \(ListFormatter.localizedString(byJoining: names)) tabs.")
     }
 
     /// The manifest files that tell a package's kind: `plugin.json`, then the runtimes'.
@@ -111,7 +110,7 @@ public struct PluginPackage: Identifiable, Sendable {
                       publisherKeyDigest: Data = CRXArchive.webStorePublisherKeyDigest) throws -> PluginPackage {
         let origin = origin ?? .file(source.absoluteURL)
         let isCRX = source.pathExtension.lowercased() == "crx" && (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true
-        if case .webStore = origin, !isCRX { throw PluginError.invalidPackage("The package is not signed by the Web Store.") }
+        if case .webStore = origin, !isCRX { throw PluginError.invalidPackage(localized("The package is not signed by the Web Store.")) }
         return try stage(at: root, origin: origin, runtimes: runtimes) {
             if isCRX { return try extractCRX(source, to: root, origin: origin, runtimes: runtimes, publisherKeyDigest: publisherKeyDigest) }
             if (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
@@ -127,13 +126,13 @@ public struct PluginPackage: Identifiable, Sendable {
     private static func extractCRX(_ file: URL, to root: URL, origin: PluginOrigin, runtimes: [any PluginRuntime], publisherKeyDigest: Data) throws -> CRXArchive {
         let crx = try CRXArchive(Data(contentsOf: file), name: file.lastPathComponent, publisherKeyDigest: publisherKeyDigest)
         if case let .webStore(id) = origin {
-            guard crx.proof == .webStore else { throw PluginError.invalidPackage("The package is not signed by the Web Store.") }
-            guard crx.extensionID == id.lowercased() else { throw PluginError.invalidPackage("The Web Store sent the package of another extension.") }
+            guard crx.proof == .webStore else { throw PluginError.invalidPackage(localized("The package is not signed by the Web Store.")) }
+            guard crx.extensionID == id.lowercased() else { throw PluginError.invalidPackage(localized("The Web Store sent the package of another extension.")) }
         }
         let archive = root.appendingPathExtension("zip")
         defer { try? FileManager.default.removeItem(at: archive) }
         try crx.archive.write(to: archive)
-        try extractArchive(archive, to: root, runtimes: runtimes, failure: "\(file.lastPathComponent) holds no .zip archive after its header.")
+        try extractArchive(archive, to: root, runtimes: runtimes, failure: localized("\(file.lastPathComponent) holds no .zip archive after its header."))
         // The package's check, which refuses symbolic links, comes before the write, so that the key never goes into a manifest outside the package, as through an archive whose only entry links to another folder.
         _ = try files(in: root)
         if let manifest = Self.file(crxManifestFileName, in: root) { try writeManifestKey(crx.publicKey, into: manifest, replacingKey: true) }
@@ -173,12 +172,12 @@ public struct PluginPackage: Identifiable, Sendable {
             let crx = try fill()
             let package = try PluginPackage(at: root, origin: origin, proof: crx?.proof, runtimes: runtimes)
             if let crx, package.kind != .webExtension || package.manifest.id.rawValue != webExtensionIDPrefix + crx.extensionID {
-                if case .webStore = origin { throw PluginError.invalidPackage("The Web Store sent the package of another extension.") }
+                if case .webStore = origin { throw PluginError.invalidPackage(localized("The Web Store sent the package of another extension.")) }
                 // A web extension takes the identifier of the key that staging wrote into its manifest, so this guards against a runtime that names it otherwise.
-                throw PluginError.invalidPackage(package.kind == .webExtension ? "\(crx.name) has no key for its extension\u{2019}s identifier." : "\(crx.name) holds no web extension.")
+                throw PluginError.invalidPackage(package.kind == .webExtension ? localized("\(crx.name) has no key for its extension\u{2019}s identifier.") : localized("\(crx.name) holds no web extension."))
             }
             if case .webStore = origin, package.isTheme {
-                throw PluginError.invalidPackage("\u{201C}\(package.manifest.name)\u{201D} is a theme, which Arch does not use.")
+                throw PluginError.invalidPackage(localized("\u{201C}\(package.manifest.name)\u{201D} is a theme, which Arch does not use."))
             }
             return package
         } catch {
@@ -190,7 +189,7 @@ public struct PluginPackage: Identifiable, Sendable {
     /// The review's warning for a package without proof that updates `installed`, whose package had one (`docs/web-store.md`, Package proof); nil otherwise.
     public func proofWarning(updating installed: InstalledPlugin) -> String? {
         guard proof == nil, installed.proof != nil else { return nil }
-        return "The installed version is signed by its developer; this package is not."
+        return localized("The installed version is signed by its developer; this package is not.")
     }
 
     /// The file at a package path such as `scripts/count.js`. Nil for a path that `isPackagePath(_:)` refuses, names no regular file, or leads out of the package through a link.

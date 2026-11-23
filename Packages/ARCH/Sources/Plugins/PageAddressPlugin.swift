@@ -6,23 +6,23 @@ import Foundation
 public final class PageAddressPlugin: BuiltInPlugin {
     public static let manifest = PluginManifest(
         id: PluginID(rawValue: "xyz.taeyoon.arch.page-address")!,
-        name: "Page Address",
+        name: localized("Page Address"),
         version: "1.0",
-        summary: "Copies the address of a tab.",
+        summary: localized("Copies the address of a tab."),
         // `tabs` reveals the tab's title and address to the plugin; `clipboard` lets it copy them.
         permissions: [.tabs, .clipboard],
         contributions: PluginContributions(
             commands: [
                 // The shortcut is valid, so it parses.
-                PluginCommand(id: "copy", title: "Copy Page Address", symbol: "link", keywords: ["url", "link"], shortcut: try! PluginShortcut("shift+cmd+c")),
+                PluginCommand(id: "copy", title: localized("Copy Page Address"), symbol: "link", keywords: ["url", "link"], shortcut: try! PluginShortcut("shift+cmd+c")),
             ],
             menuItems: [
                 PluginMenuItem(command: "copy", location: .pluginsMenu),
                 PluginMenuItem(command: "copy", location: .pageContextMenu([.page])),
-                PluginMenuItem(command: "copy", location: .tabContextMenu, title: "Copy Address"),
+                PluginMenuItem(command: "copy", location: .tabContextMenu, title: localized("Copy Address")),
             ],
             settings: [
-                PluginSetting(key: markdownKey, title: "Copy as a Markdown link", help: "Copies the page\u{2019}s title with its address, such as [Arch](https://example.com/).", kind: .toggle(default: false)),
+                PluginSetting(key: markdownKey, title: localized("Copy as a Markdown link"), help: localized("Copies the page\u{2019}s title with its address, such as [Arch](https://example.com/)."), kind: .toggle(default: false)),
             ]
         )
     )

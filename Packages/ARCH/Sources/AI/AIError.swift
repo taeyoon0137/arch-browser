@@ -81,64 +81,63 @@ extension AIError {
 extension AIError: LocalizedError {
     /// Absolute local dates stay meaningful when a user returns to a saved message.
     static func rateLimitMessage(provider: String, until: Date?) -> String {
-        let message = "\(provider) is limiting requests."
-        guard let until, until > Date() else { return message }
-        return "\(message) Try again after \(until.formatted(date: .abbreviated, time: .standard))."
+        guard let until, until > Date() else { return localized("\(provider) is limiting requests.") }
+        return localized("\(provider) is limiting requests. Try again after \(until.formatted(date: .abbreviated, time: .standard)).")
     }
 
     /// One sentence for the interface. It never contains a key.
     public var errorDescription: String? {
         switch self {
         case .notConfigured(.switchedOff):
-            return "This AI feature is switched off in Settings \u{25B8} AI."
+            return localized("This AI feature is switched off in Settings \u{25B8} AI.")
         case .notConfigured(.noModel):
-            return "Choose a model for this feature in Settings \u{25B8} AI."
+            return localized("Choose a model for this feature in Settings \u{25B8} AI.")
         case .notConfigured(.noUsableModel):
-            return "None of this feature\u{2019}s models can serve it. Choose another in Settings \u{25B8} AI."
+            return localized("None of this feature\u{2019}s models can serve it. Choose another in Settings \u{25B8} AI.")
         case .notConfigured(.unknownFeature):
-            return "This AI feature is not available."
+            return localized("This AI feature is not available.")
         case .notConfigured(.emptyTier(let tier)):
-            return "Assign a model to the \(tier.title) tier in Settings \u{25B8} AI."
+            return localized("Assign a model to the \(tier.title) tier in Settings \u{25B8} AI.")
         case .blockedByPolicy(.siteExcluded(let site)):
-            return "AI is off for \(site)."
+            return localized("AI is off for \(site).")
         case .blockedByPolicy(.dataNotDeclared(let kind)):
-            return "This feature does not declare that it sends \(kind.rawValue) data."
+            return localized("This feature does not declare that it sends \(kind.rawValue) data.")
         case .blockedByPolicy(.commandLineToolWithPageData):
-            return "This command-line tool may run its own tools, so it gets no page data."
+            return localized("This command-line tool may run its own tools, so it gets no page data.")
         case .blockedByPolicy(.agentUsedOwnTools(let detail)):
             return detail
         case .blockedByPolicy(.agentMessageIsCommand):
-            return "Claude Code would run a message that starts with \"/\" as one of its own commands, so Arch does not send it."
+            return localized("Claude Code would run a message that starts with \"/\" as one of its own commands, so Arch does not send it.")
         case .blockedByPolicy(.unknownProvider):
-            return "The provider destination changed. Review it before running this hook."
+            return localized("The provider destination changed. Review it before running this hook.")
         case .blockedByPolicy(.routeNotAllowed):
-            return "This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own."
+            return localized("This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own.")
         case .budgetReached(.automaticRequestsPerDay):
-            return "This feature reached its daily limit of automatic requests."
+            return localized("This feature reached its daily limit of automatic requests.")
         case .budgetReached(.monthlySpending):
-            return "AI requests reached this month\u{2019}s spending limit."
+            return localized("AI requests reached this month\u{2019}s spending limit.")
         case .providerUnavailable(_, let detail):
-            return "The provider is unavailable: \(detail)"
+            return localized("The provider is unavailable: \(detail)")
         case .authentication:
-            return "The provider did not accept the API key."
+            return localized("The provider did not accept the API key.")
         case .rateLimited(_, let until):
-            return Self.rateLimitMessage(provider: "The provider", until: until)
+            return Self.rateLimitMessage(provider: localized("The provider"), until: until)
         case .contextTooLong:
-            return "The request is too long for the model."
+            return localized("The request is too long for the model.")
         case .invalidRequest(let message):
-            return "The provider rejected the request: \(message)"
+            return localized("The provider rejected the request: \(message)")
         case .refused(let message):
-            return message.isEmpty ? "The model declined to answer." : "The model declined to answer: \(message)"
+            return message.isEmpty ? localized("The model declined to answer.") : localized("The model declined to answer: \(message)")
         case .malformedReply(let message):
-            return "The reply could not be read: \(message)"
+            return localized("The reply could not be read: \(message)")
         case .replyTooLong:
-            return "The reply reached its length limit before it was complete."
+            return localized("The reply reached its length limit before it was complete.")
         case .toolCallLimit:
-            return "The run reached its tool call limit."
+            return localized("The run reached its tool call limit.")
         case .toolRoundLimit:
-            return "The model made too many rounds of tool calls."
+            return localized("The model made too many rounds of tool calls.")
         case .cancelled:
-            return "The request was cancelled."
+            return localized("The request was cancelled.")
         }
     }
 }

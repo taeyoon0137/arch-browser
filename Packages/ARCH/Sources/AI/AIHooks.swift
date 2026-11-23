@@ -184,7 +184,7 @@ public enum AIHookError: Error, Sendable {
 extension AIHookError: LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case .timedOut: return "The hook took too long and was stopped."
+        case .timedOut: return localized("The hook took too long and was stopped.")
         }
     }
 }

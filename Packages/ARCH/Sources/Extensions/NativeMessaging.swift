@@ -139,9 +139,9 @@ public enum NativeAppOutcome: Hashable, Sendable {
     /// "On WebKit tabs, 1Password BrowserSupport answered.", and the like.
     public var sentence: String {
         switch self {
-        case let .answered(app): return "On WebKit tabs, \(app) answered."
-        case let .endedWithoutAnswer(app): return "On WebKit tabs, \(app) ended without answering, as a native app does when it does not accept the browser."
-        case let .held(app): return "On WebKit tabs, Arch did not start \(app), which macOS does not start for Arch."
+        case let .answered(app): return localized("On WebKit tabs, \(app) answered.")
+        case let .endedWithoutAnswer(app): return localized("On WebKit tabs, \(app) ended without answering, as a native app does when it does not accept the browser.")
+        case let .held(app): return localized("On WebKit tabs, Arch did not start \(app), which macOS does not start for Arch.")
         case let .failed(message): return message
         }
     }
@@ -202,14 +202,14 @@ enum NativeMessagingError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case let .invalidName(name): return "“\(name)” is not the name of a native app."
-        case let .notFound(name): return "No native app named \(name) is set up for Arch."
-        case let .invalidManifest(name): return "The host manifest of the native app \(name) could not be read."
-        case let .notAllowed(name): return "The native app \(name) does not accept this extension."
+        case let .invalidName(name): return localized("“\(name)” is not the name of a native app.")
+        case let .notFound(name): return localized("No native app named \(name) is set up for Arch.")
+        case let .invalidManifest(name): return localized("The host manifest of the native app \(name) could not be read.")
+        case let .notAllowed(name): return localized("The native app \(name) does not accept this extension.")
         case let .unproven(sentence): return sentence
-        case let .held(app): return "Arch did not start \(app), which macOS does not start for Arch."
-        case .messageTooLarge: return "The native app sent a message larger than 1 MB."
-        case .noReply: return "The native app ended without replying."
+        case let .held(app): return localized("Arch did not start \(app), which macOS does not start for Arch.")
+        case .messageTooLarge: return localized("The native app sent a message larger than 1 MB.")
+        case .noReply: return localized("The native app ended without replying.")
         }
     }
 }

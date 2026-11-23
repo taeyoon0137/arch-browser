@@ -585,7 +585,7 @@ extension PluginValue {
         let unfinished = try #require(HookScriptRunner.problem(in: Data("arch.events.on(".utf8)))
         #expect(unfinished.hasPrefix("The script does not parse: SyntaxError"))
         #expect(HookScriptRunner.problem(in: Data(repeating: 0x20, count: HookScriptRunner.maximumScriptSize + 1)) == "The script is larger than 256 KB.")
-        #expect(HookScriptRunner.problem(in: Data([0xFF, 0xFE])) == "The script is not UTF-8 text.")
+        #expect(HookScriptRunner.problem(in: Data([0xFF, 0xFE])) == catalogText("The script is not UTF-8 text."))
 
         let hook = instantHook("Check", pageLoads)
         let tab = harness.tab("/a", id: Probe.covered)

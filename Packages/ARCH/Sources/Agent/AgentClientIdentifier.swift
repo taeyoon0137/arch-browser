@@ -154,7 +154,7 @@ struct AgentClientIdentifier: Sendable {
         }
         var parent = record.parentID
         for _ in 0 ..< Self.maximumDepth {
-            if parent == archProcessID { return "Arch\u{2019}s terminal" }
+            if parent == archProcessID { return localized("Arch\u{2019}s terminal") }
             guard parent > 1, let ancestor = inspector.record(of: parent), let ancestorCode = inspector.code(of: parent) else { return nil }
             if let app = Self.appName(around: ancestorCode.path) { return app }
             parent = ancestor.parentID

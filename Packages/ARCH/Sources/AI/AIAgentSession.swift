@@ -441,9 +441,9 @@ public final class AIAgentSession {
             try await limiter.acquire(isUser: feature.trigger == .user) { [continuation, name = candidate.provider.name] reason in
                 switch reason {
                 case .rateLimited(let until):
-                    continuation.yield(.notice("\(name) is at its usage limit until \(until.formatted(date: .abbreviated, time: .shortened)). The message starts then; Stop cancels it."))
+                    continuation.yield(.notice(localized("\(name) is at its usage limit until \(until.formatted(date: .abbreviated, time: .shortened)). The message starts then; Stop cancels it.")))
                 case .queued:
-                    continuation.yield(.notice("Waiting for another request to \(name) to finish."))
+                    continuation.yield(.notice(localized("Waiting for another request to \(name) to finish.")))
                 }
             }
         } catch {
@@ -508,13 +508,13 @@ public final class AIAgentSession {
             switch kind {
             case .claudeCode:
                 if request.maxTurns != nil && !probe.supportsRunOption {
-                    return .failed(.providerUnavailable(provider, detail: "Claude Code could not confirm its turn limit. Update Claude Code in the terminal."))
+                    return .failed(.providerUnavailable(provider, detail: localized("Claude Code could not confirm its turn limit. Update Claude Code in the terminal.")))
                 }
                 if process == nil || processKind != .claudeCode { try startClaudeCode(on: candidate, tool: tool, environment: environment) }
                 process?.write(ClaudeCodeAgent.userMessage(messageWithEarlierConversation(message)))
             case .codex:
                 if request.ephemeral && !probe.supportsRunOption {
-                    return .failed(.providerUnavailable(provider, detail: "Codex could not confirm support for one-time runs. Update Codex in the terminal."))
+                    return .failed(.providerUnavailable(provider, detail: localized("Codex could not confirm support for one-time runs. Update Codex in the terminal.")))
                 }
                 try startCodexTurn(message, on: candidate, tool: tool, environment: environment, probe: probe)
             }
@@ -523,7 +523,7 @@ public final class AIAgentSession {
         } catch let error as AIError {
             return .failed(error)
         } catch {
-            return .failed(.providerUnavailable(provider, detail: "\(tool.executable.lastPathComponent) could not start: \(error.localizedDescription)"))
+            return .failed(.providerUnavailable(provider, detail: localized("\(tool.executable.lastPathComponent) could not start: \(error.localizedDescription)")))
         }
         turn.didStartProcess = true
         armIdleTimer(firstOutputTimeout)
@@ -578,7 +578,7 @@ public final class AIAgentSession {
         let configuration = folder.appendingPathComponent("mcp.json")
         let data = try ClaudeCodeAgent.mcpConfiguration(request.toolServer)
         guard FileManager.default.createFile(atPath: configuration.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
-            throw AIError.providerUnavailable(candidate.provider.id, detail: "The session folder could not be written.")
+            throw AIError.providerUnavailable(candidate.provider.id, detail: localized("The session folder could not be written."))
         }
         offeredTools = [currentTools]
         let check = ClaudeCodeStartCheck(session: ClaudeCodeStartCheck.Session(offeredTools: offeredTools, skills: request.skills))
@@ -617,7 +617,7 @@ public final class AIAgentSession {
             process = try CommandLineProcess(executable: executable, arguments: arguments, environment: environment, directory: folder, input: input, keepsInputOpen: keepsInputOpen)
         } catch let error as POSIXError {
             throw AIError.providerUnavailable(turn?.candidate.provider.id ?? AIProviderID(rawValue: ""),
-                                              detail: "\(executable.lastPathComponent) could not start: \(String(cString: strerror(error.code.rawValue))).")
+                                              detail: localized("\(executable.lastPathComponent) could not start: \(String(cString: strerror(error.code.rawValue)))."))
         }
         processRun += 1
         let run = processRun
@@ -760,8 +760,8 @@ public final class AIAgentSession {
         let name = executable.lastPathComponent
         let detail: String
         switch termination {
-        case .exited(let code): detail = codex?.lastError ?? errorLine ?? "\(name) exited with status \(code)."
-        case .signaled(let signal): detail = errorLine ?? "\(name) stopped on signal \(signal)."
+        case .exited(let code): detail = codex?.lastError ?? errorLine ?? localized("\(name) exited with status \(code).")
+        case .signaled(let signal): detail = errorLine ?? localized("\(name) stopped on signal \(signal).")
         }
         complete(.failed(.providerUnavailable(turn.candidate.provider.id, detail: detail)))
     }
@@ -786,7 +786,7 @@ public final class AIAgentSession {
     private func idleTimedOut() {
         guard let turn, turn.outcome == nil else { return }
         endProcess()
-        complete(.failed(.providerUnavailable(turn.candidate.provider.id, detail: "The provider stopped responding.")))
+        complete(.failed(.providerUnavailable(turn.candidate.provider.id, detail: localized("The provider stopped responding."))))
     }
 }
 
@@ -819,7 +819,7 @@ extension AIService {
         do {
             return try AIAgentSession(request: request, feature: feature, candidates: candidates, service: self)
         } catch {
-            throw AIError.providerUnavailable(candidates[0].provider.id, detail: "The session folder could not be made: \(error.localizedDescription)")
+            throw AIError.providerUnavailable(candidates[0].provider.id, detail: localized("The session folder could not be made: \(error.localizedDescription)"))
         }
     }
 
@@ -884,9 +884,9 @@ extension AIService {
         AIAgentProbeStore.shared.removeAll()
         _ = try await AIAgentProbeStore.shared.result(kind: kind, executable: tool.executable, environment: await tool.runEnvironment())
         switch status.isSignedIn {
-        case true?: return "\(name) is signed in and accepts every setting Arch uses."
-        case false?: throw AIAgentToolError(detail: "\(name) is not signed in. Sign in to it in the terminal.")
-        case nil: throw AIAgentToolError(detail: "\(name) did not say whether it is signed in.")
+        case true?: return localized("\(name) is signed in and accepts every setting Arch uses.")
+        case false?: throw AIAgentToolError(detail: localized("\(name) is not signed in. Sign in to it in the terminal."))
+        case nil: throw AIAgentToolError(detail: localized("\(name) did not say whether it is signed in."))
         }
     }
 }

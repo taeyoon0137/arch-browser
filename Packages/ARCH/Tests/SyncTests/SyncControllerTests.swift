@@ -494,7 +494,7 @@ import Testing
         await f.controller.refresh()
         let relaunched = try #require(f.engines.last)
         #expect(f.controller.isEnabled && !f.controller.isDeletingCloudData && !relaunched.pendingChanges.contains(.deleteZone))
-        #expect(f.controller.lastError == "Arch quit before it deleted its iCloud data. Delete it again to remove it.")
+        #expect(f.controller.lastError == catalogText("Arch quit before it deleted its iCloud data. Delete it again to remove it."))
         f.newController()
         await f.controller.refresh()
         #expect(f.controller.lastError == nil)
@@ -548,7 +548,7 @@ import Testing
         #expect(whileSaving == [true] && !f.defaults.bool(forKey: key))
         f.sidebar.failSave = true
         await f.controller.refresh()
-        #expect(f.controller.lastError == "The incoming sidebar could not be applied and saved." && !f.defaults.bool(forKey: key))
+        #expect(f.controller.lastError == catalogText("The incoming sidebar could not be applied and saved.") && !f.defaults.bool(forKey: key))
         f.sidebar.failSave = false
         await f.controller.refresh()
         #expect(f.controller.canSendRecords && whileSaving == [true, true, true])
@@ -583,7 +583,7 @@ import Testing
             if case .saveRecord(let name) = change { return name } else { return nil }
         }.first)
         #expect(f.controller.record(toSave: pending) != nil && !f.defaults.bool(forKey: key))
-        #expect(SyncController.interruptedApplyMessage == "Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again.")
+        #expect(SyncController.interruptedApplyMessage == catalogText("Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again."))
     }
 
     @Test func confirmedDeletionSendsOnlyTheZoneAndTurnsOffOnceTheServerAccepts() async throws {

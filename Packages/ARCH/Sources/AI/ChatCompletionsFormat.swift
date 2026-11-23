@@ -72,7 +72,7 @@ struct ChatCompletionsCodec: AIWireCodec {
                     } else if let text = AIPartText.block(for: file) {
                         content.append(["type": "text", "text": text])
                     } else {
-                        throw AIError.invalidRequest("This model cannot read \(file.name).")
+                        throw AIError.invalidRequest(localized("This model cannot read \(file.name)."))
                     }
                 case .toolCall:
                     break
@@ -116,7 +116,7 @@ struct ChatCompletionsCodec: AIWireCodec {
             return try closingEvents()
         }
         guard let object = try? JSONSerialization.jsonObject(with: Data(event.data.utf8)) as? [String: Any] else {
-            throw AIError.malformedReply("The stream sent data that is not JSON.")
+            throw AIError.malformedReply(localized("The stream sent data that is not JSON."))
         }
         // Some compatible servers send `"error": null` in every chunk.
         if let error = object["error"], !(error is NSNull) {
@@ -146,7 +146,7 @@ struct ChatCompletionsCodec: AIWireCodec {
             switch reason {
             case "length": finishReason = .lengthLimit
             case "tool_calls", "function_call": finishReason = .toolUse
-            case "content_filter": throw AIError.refused("The provider\u{2019}s content filter stopped the reply.")
+            case "content_filter": throw AIError.refused(localized("The provider\u{2019}s content filter stopped the reply."))
             default: finishReason = .completed
             }
             events += try completedToolCalls()
@@ -157,7 +157,7 @@ struct ChatCompletionsCodec: AIWireCodec {
     mutating func finish() throws -> [AIEvent] {
         guard !isDone else { return [] }
         // Some servers end without `[DONE]` once they have sent a finish reason.
-        guard finishReason != nil else { throw AIError.providerUnavailable(provider, detail: "The reply ended before it finished.") }
+        guard finishReason != nil else { throw AIError.providerUnavailable(provider, detail: localized("The reply ended before it finished.")) }
         isDone = true
         return try closingEvents()
     }

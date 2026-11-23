@@ -401,7 +401,7 @@ public final class HookRegistry: ObservableObject {
                 do {
                     try await record.value
                 } catch {
-                    store.didNotSave("The Keychain did not record this change, so an earlier copy of hooks.json would still open: \(error.localizedDescription)")
+                    store.didNotSave(localized("The Keychain did not record this change, so an earlier copy of hooks.json would still open: \(error.localizedDescription)"))
                     notice = store.notice
                 }
             }
@@ -642,8 +642,8 @@ public final class HookRegistry: ObservableObject {
         guard hook.usesAgent else { return ai.unregister(id) }
         let readsPages = hook.grant.agent?.tabAccess == .page
         ai.register(AIFeature(id: id, name: hook.name,
-                              summary: readsPages ? "Runs an agent for this hook with the titles, addresses, and text of the tabs it reaches."
-                                                  : "Runs an agent for this hook with the titles and addresses of the tabs it reaches.",
+                              summary: readsPages ? localized("Runs an agent for this hook with the titles, addresses, and text of the tabs it reaches.")
+                                                  : localized("Runs an agent for this hook with the titles and addresses of the tabs it reaches."),
                               trigger: .automatic, data: AIDataScope(kinds: [.page], pageTextLimit: readsPages ? nil : 0), requirements: [.agent], routing: .perRequest))
     }
 
@@ -868,7 +868,7 @@ public final class HookRegistry: ObservableObject {
         countRun(of: current.id)
         guard let script = store.script(for: current) else {
             pauseHook(current.id, .scriptChanged)
-            run.outcome = .failed(code: "scriptChanged", message: "Its script changed outside Arch.")
+            run.outcome = .failed(code: "scriptChanged", message: localized("Its script changed outside Arch."))
             return
         }
         guard let invocation = invocation(for: current, run: run, script: script, deadline: deadline, applying: true, requestDidEnd: requestDidEnd) else { return }
@@ -994,7 +994,7 @@ public final class HookRegistry: ObservableObject {
         guard let hook = hook(withID: run.hookID) else { return "" }
         do {
             _ = try ai.resolvedModels(for: .agentHook(hook.id), route: hook.agent?.model)
-            return "This hook's model is not available."
+            return localized("This hook's model is not available.")
         } catch {
             return error.localizedDescription
         }
@@ -1004,22 +1004,22 @@ public final class HookRegistry: ObservableObject {
 
     /// Runs the hook once for the tab as if its event had happened: the editor's Test and a row's Run on Current Tab. A tab the hook's filter does not cover, such as an agent tab, is not run. Without `applying`, actions are reported, not applied. A close hook treats the tab as closed without closing it, with the rest of the tabs it reaches as the run's tabs (`docs/hooks.md`, Closed tabs). A test runs at once, outside the scheduler, within the hook's timeout, and counts toward neither the daily count nor the failures; it is logged with `test` at the first two record levels.
     public func test(_ id: UUID, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
-        guard isReady, let hook = hook(withID: id), !store.isUnreadable(id) else { return .notRun("Arch cannot run this hook.") }
-        guard !hook.script.isShell || allowsShellScripts else { return .notRun("Shell scripts are off.") }
+        guard isReady, let hook = hook(withID: id), !store.isUnreadable(id) else { return .notRun(localized("Arch cannot run this hook.")) }
+        guard !hook.script.isShell || allowsShellScripts else { return .notRun(localized("Shell scripts are off.")) }
         guard let script = store.script(for: hook) else {
             pauseHook(id, .scriptChanged)
-            return .notRun("Its script changed outside Arch.")
+            return .notRun(localized("Its script changed outside Arch."))
         }
         return await test(hook, script: script, onTab: tabID, applying: applying)
     }
 
     /// Runs the editor's checked bytes in memory. A separate ID gives the draft its own AI scope while a saved hook remains active.
     public func testDraft(_ draft: Hook, script: Data, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
-        guard isReady, case .javaScript = draft.script, draft.usesAgent, draft.agent != nil else { return .notRun("Choose an agent model first.") }
-        if case .outsideClient = draft.origin { return .notRun("This editor tests only your own hooks.") }
+        guard isReady, case .javaScript = draft.script, draft.usesAgent, draft.agent != nil else { return .notRun(localized("Choose an agent model first.")) }
+        if case .outsideClient = draft.origin { return .notRun(localized("This editor tests only your own hooks.")) }
         var preview = draft
         if hook(withID: preview.id) != nil { preview.id = UUID() }
-        guard draftOwner[preview.id] == nil else { return .notRun("This draft is already running a test.") }
+        guard draftOwner[preview.id] == nil else { return .notRun(localized("This draft is already running a test.")) }
         preview.script = preview.script.withDigest(HookStore.digest(of: script))
         do { preview = try Self.checked(preview) } catch { return .notRun(error.localizedDescription) }
         // Before the first save, the key's generation tells whether the providers in `ai.json` count as the user's.
@@ -1041,14 +1041,14 @@ public final class HookRegistry: ObservableObject {
     /// Tests checked script bytes on a covered tab without charging the hook's daily run count.
     private func test(_ hook: Hook, script: Data, onTab tabID: UUID, applying: Bool) async -> HookRunResult {
         let id = hook.id
-        guard let tab = host.tab(tabID) else { return .notRun("The tab is no longer open.") }
+        guard let tab = host.tab(tabID) else { return .notRun(localized("The tab is no longer open.")) }
         // As for its events, a hook reaches only the tabs its filter covers, never an agent tab (hook decision 16).
-        guard Self.covers(hook.filter, tab) else { return .notRun("This hook's filter does not cover this tab.") }
-        guard let event = Self.testEvent(for: hook.trigger, tab: tab) else { return .notRun("A test on a tab cannot stand in for a finished download.") }
+        guard Self.covers(hook.filter, tab) else { return .notRun(localized("This hook's filter does not cover this tab.")) }
+        guard let event = Self.testEvent(for: hook.trigger, tab: tab) else { return .notRun(localized("A test on a tab cannot stand in for a finished download.")) }
         let run = HookRun(hookID: id, event: event, closedTab: hook.trigger.kind == .tabClosed ? host.closingTab(tabID) : nil, isTest: true)
         let deadline = ContinuousClock.now + hook.timing.timeout
         guard var invocation = invocation(for: hook, run: run, script: script, deadline: deadline, applying: applying, requestDidEnd: { _ in }) else {
-            return .notRun("This hook gets no events from this site, since the site is excluded from AI.")
+            return .notRun(localized("This hook gets no events from this site, since the site is excluded from AI."))
         }
         if draftOwner[id] != nil, !store.hasFile, store.trustsCurrentProviders {
             invocation.knownProviders = Dictionary(ai.settings.providers.map { ($0.id, HookKnownProvider($0).destination) }, uniquingKeysWith: { first, _ in first })
@@ -1418,7 +1418,7 @@ extension HookRegistry: AgentHookRegistrar {
             proposalDeclines[client.key] = now()
             return .declined(Task.isCancelled ? "The program left before you answered." : "You did not allow the hook \u{201C}\(hook.name)\u{201D}.")
         }
-        guard await authenticator.authenticate(reason: "add the hook \u{201C}\(hook.name)\u{201D} from \u{201C}\(client.displayName)\u{201D}") else {
+        guard await authenticator.authenticate(reason: localized("add the hook \u{201C}\(hook.name)\u{201D} from \u{201C}\(client.displayName)\u{201D}")) else {
             proposalDeclines[client.key] = now()
             return .declined("Arch did not add the hook, since Touch ID or the login password did not confirm it.")
         }
@@ -1493,39 +1493,39 @@ extension HookRegistry: AgentHookRegistrar {
         if case .places(let chosen) = hook.filter.scope {
             places = chosen.map { place -> String in
                 switch place {
-                case .persona(let id): return host.places.first { $0.id == id }?.name ?? "Deleted Persona"
+                case .persona(let id): return host.places.first { $0.id == id }?.name ?? localized("Deleted Persona")
                 case .space(let id):
-                    guard let persona = host.places.first(where: { $0.spaces.contains { $0.id == id } }), let space = persona.spaces.first(where: { $0.id == id }) else { return "Deleted Space" }
+                    guard let persona = host.places.first(where: { $0.spaces.contains { $0.id == id } }), let space = persona.spaces.first(where: { $0.id == id }) else { return localized("Deleted Space") }
                     return "\(persona.name) / \(space.name)"
                 }
             }.joined(separator: ", ")
         } else {
-            places = "Everywhere"
+            places = localized("Everywhere")
         }
-        let sites = !hook.filter.sites.isEmpty ? "only " + hook.filter.sites.map(\.value).joined(separator: ", ")
-            : !hook.filter.exceptSites.isEmpty ? "all sites except " + hook.filter.exceptSites.map(\.value).joined(separator: ", ") : "all sites"
-        var permissions: [String] = ["It receives each event of its situation without tab titles or addresses, and reaches only the event's tab."]
-        if hook.grant.permissions.contains(.tabsRename) { permissions.append("It can suggest a name for the event's tab. Your own names always win.") }
+        let sites = !hook.filter.sites.isEmpty ? localized("only \(hook.filter.sites.map(\.value).joined(separator: ", "))")
+            : !hook.filter.exceptSites.isEmpty ? localized("all sites except \(hook.filter.exceptSites.map(\.value).joined(separator: ", "))") : localized("all sites")
+        var permissions: [String] = [localized("It receives each event of its situation without tab titles or addresses, and reaches only the event's tab.")]
+        if hook.grant.permissions.contains(.tabsRename) { permissions.append(localized("It can suggest a name for the event's tab. Your own names always win.")) }
         var agent: [String] = []
         if let options = hook.agent {
-            permissions.append("It can run an agent that sees the event's tab's title and address, never its page, and suggests the tab's name. The agent's reply never reaches the script, and Arch logs each run and tool call.")
+            permissions.append(localized("It can run an agent that sees the event's tab's title and address, never its page, and suggests the tab's name. The agent's reply never reaches the script, and Arch logs each run and tool call."))
             let model: String
             switch options.model {
             case .tier(let tier):
                 let first = ai.settings.route(for: .tier(tier)).models.first.map { ai.settings.title(of: $0) }
-                model = "\(tier.title) tier\(first.map { " \u{00B7} \($0)" } ?? ", which has no model yet")"
+                model = first.map { localized("\(tier.title) tier \u{00B7} \($0)") } ?? localized("\(tier.title) tier, which has no model yet")
             case .models(let models):
-                model = models.first.map { ai.settings.title(of: $0) } ?? "No model"
+                model = models.first.map { ai.settings.title(of: $0) } ?? localized("No model")
             }
             agent = [
-                "Model: \(model)",
-                "Record: \(options.record == .session ? "Keeps the session" : "Keeps activity only")",
-                "Actions: \(options.tools.contains(AgentToolCatalog.renameTab.name) ? "Rename the tab" : "None")",
-                "Limits: \(Int(options.limits.timeout.components.seconds)) seconds, \(options.limits.rounds) \(options.limits.rounds == 1 ? "round" : "rounds"), \(options.limits.toolCalls) tool \(options.limits.toolCalls == 1 ? "call" : "calls"), \(hook.timing.runsPerDay) runs a day",
+                localized("Model: \(model)"),
+                localized("Record: \(options.record == .session ? localized("Keeps the session") : localized("Keeps activity only"))"),
+                localized("Actions: \(options.tools.contains(AgentToolCatalog.renameTab.name) ? localized("Rename the tab") : localized("None"))"),
+                localized("Limits: \(Int(options.limits.timeout.components.seconds)) seconds, \(options.limits.rounds == 1 ? localized("1 round") : localized("\(options.limits.rounds) rounds")), \(options.limits.toolCalls == 1 ? localized("1 tool call") : localized("\(options.limits.toolCalls) tool calls")), \(hook.timing.runsPerDay) runs a day"),
             ]
         }
         return HookProposalReview(clientName: client.displayName, clientPath: client.executablePath, name: hook.name,
-                                  situation: "\(hook.trigger.situationSentence) \u{00B7} \(places) \u{00B7} \(sites)", permissions: permissions, agent: agent,
+                                  situation: "\(hook.trigger.localizedSituationSentence) \u{00B7} \(places) \u{00B7} \(sites)", permissions: permissions, agent: agent,
                                   prompt: hook.agent?.prompt, script: String(decoding: script, as: UTF8.self))
     }
 }

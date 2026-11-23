@@ -1,6 +1,216 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "A sync save failed (%lld)." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화 저장에 실패했습니다(%lld)."
+          }
+        }
+      }
+    },
+    "Arch could not delete its iCloud data (%lld)." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 iCloud 데이터를 삭제할 수 없습니다(%lld)."
+          }
+        }
+      }
+    },
+    "Arch could not delete its iCloud data." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 iCloud 데이터를 삭제할 수 없습니다."
+          }
+        }
+      }
+    },
+    "Arch could not delete its iCloud data. Try again when connected." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 iCloud 데이터를 삭제할 수 없습니다. 연결된 후 다시 시도하세요."
+          }
+        }
+      }
+    },
+    "Arch is waiting to delete its iCloud data." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 iCloud 데이터 삭제를 기다리는 중입니다."
+          }
+        }
+      }
+    },
+    "Arch quit before it deleted its iCloud data. Delete it again to remove it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 iCloud 데이터를 삭제하기 전에 종료되었습니다. 제거하려면 다시 삭제하세요."
+          }
+        }
+      }
+    },
+    "Sign in to iCloud in System Settings to sync." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화하려면 시스템 설정에서 iCloud에 로그인하세요."
+          }
+        }
+      }
+    },
+    "Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch가 iCloud와 동기화를 마치기 전에 종료되어 동기화가 꺼졌습니다. 다시 시도하려면 동기화를 켜세요."
+          }
+        }
+      }
+    },
+    "Sync turned off because Arch’s iCloud data was deleted. Turn it on to upload this Mac’s sidebar again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arch의 iCloud 데이터가 삭제되어 동기화가 꺼졌습니다. 이 Mac의 사이드바를 다시 업로드하려면 동기화를 켜세요."
+          }
+        }
+      }
+    },
+    "Sync turned off because the iCloud account changed. Turn it on to merge this Mac’s sidebar into the current account." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 계정이 변경되어 동기화가 꺼졌습니다. 이 Mac의 사이드바를 현재 계정에 병합하려면 동기화를 켜세요."
+          }
+        }
+      }
+    },
+    "The incoming sidebar could not be applied and saved." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "받은 사이드바를 적용하고 저장할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The pending sidebar changes could not be compared." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대기 중인 사이드바 변경 사항을 비교할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The previous sync state could not be removed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이전 동기화 상태를 제거할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The saved sidebar could not be compared." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장된 사이드바를 비교할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The sync fetch did not finish (%lld)." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화 가져오기가 완료되지 않았습니다(%lld)."
+          }
+        }
+      }
+    },
+    "The sync fetch did not finish." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화 가져오기가 완료되지 않았습니다."
+          }
+        }
+      }
+    },
+    "The sync state could not be saved." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화 상태를 저장할 수 없습니다."
+          }
+        }
+      }
+    },
+    "The sync zone change failed (%lld)." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화 영역 변경에 실패했습니다(%lld)."
+          }
+        }
+      }
+    },
+    "This copy of Arch isn’t signed for iCloud, so it can’t sync." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Arch 사본은 iCloud용으로 서명되지 않아 동기화할 수 없습니다."
+          }
+        }
+      }
+    },
+    "iCloud is restricted on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 Mac에서 iCloud가 제한되어 있습니다."
+          }
+        }
+      }
+    },
+    "iCloud isn’t available right now. Arch checks again when it becomes active." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금은 iCloud를 사용할 수 없습니다. Arch가 활성화되면 다시 확인합니다."
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }

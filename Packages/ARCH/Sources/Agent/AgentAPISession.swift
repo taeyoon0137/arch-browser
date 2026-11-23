@@ -25,7 +25,7 @@ extension AgentSessionTools {
     /// The output tokens each round may use, in place of the interface's 4,096, which a reasoning model can spend on thinking before its first tool call. Current models with tools take at least this many.
     public nonisolated static let outputTokensPerRound = 8192
     /// The notice before `turnFinished` when the message's last reply stopped at `outputTokensPerRound`.
-    public nonisolated static let outputLimitNotice = "The reply reached the output limit."
+    public nonisolated static let outputLimitNotice = localized("The reply reached the output limit.")
 
     /// `ready` with the model before the session's first text or tool call, then each message's text, `outputLimitNotice` when its reply was cut, its usage, and `turnFinished` (`completed`, `stopped`, or `turnLimit` after `roundsPerMessage` rounds) or `turnFailed`. A failed message leaves the session open; the stream ends, without an error, only at `end()`.
     public nonisolated let events: AsyncThrowingStream<AIAgentEvent, any Error>

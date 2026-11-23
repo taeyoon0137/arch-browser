@@ -179,7 +179,7 @@ extension FakeHost: AgentTabNaming {
         // The card is P19's own, not sensitive, with the tab's title and site, and the name as its exact text.
         var (card, call) = try await renameCard(handle, "Mail", service, client)
         #expect(card.kind == .renameSharedTab && card.rules == [.p19] && !card.isSensitive && !card.needsAuthentication(for: .allowOnTab))
-        #expect(card.offers == [.allowOnTab, .deny, .denyAndStop, .reply("")] && AgentApprovalAnswer.allowOnTab.title(site: card.site) == "Allow for This Tab")
+        #expect(card.offers == [.allowOnTab, .deny, .denyAndStop, .reply("")] && AgentApprovalAnswer.allowOnTab.title(site: card.site) == catalogText("Allow for This Tab"))
         #expect(card.action == "Rename your tab \u{201C}Inbox (3)\u{201D} on mail.example" && card.exactText == "Mail")
         #expect(card.tabID == userTab.id && card.tabHandle == handle && card.site == "mail.example")
         // The panel shows it in one group with the client's other cards of the tab's page, here from the client's second connection.
