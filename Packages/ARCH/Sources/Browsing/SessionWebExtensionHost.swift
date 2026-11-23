@@ -141,7 +141,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
         return true
     }
 
-    /// The tab opens among the space's open tabs, a small window's space for a small window, which holds one tab: before the tab at `index` among the space's tabs of the engine when that one is an open tab outside folders and the window is a space, else after the space's active tab when that one is, else at their end. The extensions hear of it at once, before the completion. As a plugin's tab, it downloads nothing without asking until the user acts in its page or loads an address in it, and an address of a file downloads nothing (`PageDownloadGate.holdUntilUserActs()`).
+    /// The tab opens among the space's open tabs, a small window's space for a small window, which holds one tab: before the tab at `index` among the space's tabs of the engine when that one is an open tab outside folders and the window is a space, else after the space's active tab when that one is, else at their end. The extensions hear of it at once, before the completion. It downloads as a tab that the user opens does, as other browsers download what an extension's tabs open: a file at its address downloads as a normal download, and its pages' downloads go through the tab's gate, whose first goes on (`PageDownloadGate`). Arch cannot tell a `tabs.create` that the user's click in the extension's popup or options page starts from the extension's own call, so neither is held as a script plugin's tab is.
     func openTab(_ url: URL?, in engine: EngineKind, persona: PersonaID, window windowID: UUID?, active: Bool, index: Int?, completion: @escaping ((any EngineWebContents)?) -> Void) {
         guard let session, session.personas.contains(where: { $0.id == persona }) else { return completion(nil) }
         let windows = extensionWindows(of: persona, in: session)
@@ -152,7 +152,6 @@ final class SessionWebExtensionHost: WebExtensionHost {
         let index = namesSmallWindow ? nil : index
         let space = window?.space ?? session.preferredSpace(in: persona)
         let tab = session.openTab(url: url, in: space.id, select: false, engine: engine)
-        tab.pageDownloads.holdUntilUserActs()
         let listed = window?.tabs.filter { $0.engineKind == engine } ?? []
         let isPlacedAtIndex = index.map { listed.indices.contains($0) && session.placeTab(tab, nextTo: listed[$0], after: false) } ?? false
         if !isPlacedAtIndex, let activeTab = window?.active {
@@ -169,7 +168,6 @@ final class SessionWebExtensionHost: WebExtensionHost {
         let space = focusedSpace(of: persona, in: session) ?? session.preferredSpace(in: persona)
         let keyWindow = NSApp.keyWindow
         let window = session.openSmallWindow(url: urls.first, engine: engine, spaceID: space.id, personaID: persona)
-        window.selectedTab?.pageDownloads.holdUntilUserActs()
         if !focused { keyWindow?.makeKeyAndOrderFront(nil) }
         reportToEveryPersona()
         completion(window.id)

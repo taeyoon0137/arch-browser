@@ -1,4 +1,4 @@
-// The session's side of the tabs and windows that web extensions open (`SessionWebExtensionHost`, `docs/plugins.md`, Web extensions as plugins), as for a plugin's tabs: a tab that `tabs.create` opens, a small window's tab that `windows.create` opens, and a tab that a page of either opens before the user acts in it, in the background, in a main window, or in a small window, download no file that their address points at, and their pages' downloads ask with a card over the tab until the user acts in them. A tab that a page opens straight onto a file downloads as that page's download, so a page opens no file after file without asking. The small windows' AppKit windows are never ordered in.
+// The session's side of the tabs and windows that web extensions open (`SessionWebExtensionHost`, `docs/plugins.md`, Web extensions as plugins), as a tab that the user opens, unlike a script plugin's tabs, as other browsers do: a tab that `tabs.create` opens, a small window's tab that `windows.create` opens, and a tab that a page of either opens download the file that their address points at as a normal download, and their pages' downloads go through the tab's gate. A tab that a page opens straight onto a file downloads as that page's download, so a page opens no file after file without asking. The small windows' AppKit windows are never ordered in.
 import AppKit
 import ARCHEngine
 import Combine
@@ -69,99 +69,51 @@ import Testing
         return item
     }
 
-    /// An extension's tab whose address turns out to be a file downloads nothing, as a restored tab does not fetch its file again, while the user's own tab downloads it; the extension's tab's page asks with a card before its first download, and an act in the page lets the next one through.
-    @Test func aTabThatAnExtensionOpensDownloadsNothingWithoutTheUser() throws {
+    /// An extension's tab whose address turns out to be a file downloads it as a normal download, as a tab that the user opens does and as other browsers download what an extension's tabs open, and the tab's page downloads through its own gate, whose first goes on without asking and whose next asks with a card.
+    @Test func aTabThatAnExtensionOpensDownloadsAsTheUsersTabDoes() throws {
         try withSession { session, host, persona in
             let onFile = try openTab(file, in: .chromium, with: host, persona: persona, session: session)
-            #expect(onFile.pageDownloads.isHeldUntilUserActs)
-            #expect(!onFile.webContents(onFile.webContents, shouldDownload: file, hasPage: false))
-            let space = try #require(session.spaces.first)
-            let own = session.openTab(url: file, in: space.id, select: false, engine: .chromium)
-            #expect(own.webContents(own.webContents, shouldDownload: file, hasPage: false))
+            #expect(!onFile.pageDownloads.isHeldUntilUserActs)
+            #expect(onFile.webContents(onFile.webContents, shouldDownload: file, hasPage: false))
+            #expect(download(from: onFile, in: session).decision == .allowed)
 
             let page = URL(string: "https://example.org/files")!
             let onPage = try openTab(page, in: .webKit, with: host, persona: persona, session: session)
             onPage.webContents(onPage.webContents, didCommitDocumentAt: page)
+            #expect(download(from: onPage, in: session).decision == .allowed)
             #expect(download(from: onPage, in: session).decision == .waiting)
             #expect(session.prompts.current(for: onPage.id)?.content.kind == .pageDownloads)
-            onPage.userDidActInPage()
-            #expect(!onPage.pageDownloads.isHeldUntilUserActs)
-            #expect(download(from: onPage, in: session).decision == .allowed)
         }
     }
 
-    /// The one tab of a small window that `windows.create` opens downloads no file at its address either, and its page asks before its first download.
-    @Test func aSmallWindowThatAnExtensionOpensDownloadsNothingWithoutTheUser() throws {
+    /// The one tab of a small window that `windows.create` opens downloads the file at its address too.
+    @Test func aSmallWindowThatAnExtensionOpensDownloadsAsTheUsersTabDoes() throws {
         try withSession { session, host, persona in
             let offscreen = OffscreenSmallWindows(session)
             var windowID: UUID?
             host.openWindow(with: [file], in: .webKit, persona: persona, focused: true) { windowID = $0 }
             let window = try #require(session.windows.first { $0.id == windowID })
             let tab = try #require(window.selectedTab)
-            #expect(window.kind == .small && tab.pageDownloads.isHeldUntilUserActs)
-            #expect(!tab.webContents(tab.webContents, shouldDownload: file, hasPage: false))
-
-            var pageWindowID: UUID?
-            host.openWindow(with: [], in: .chromium, persona: persona, focused: true) { pageWindowID = $0 }
-            let pageWindow = try #require(session.windows.first { $0.id == pageWindowID })
-            let pageTab = try #require(pageWindow.selectedTab)
-            pageTab.webContents(pageTab.webContents, didCommitDocumentAt: BrowserSession.newTabURL)
-            #expect(download(from: pageTab, in: session).decision == .waiting)
-            #expect(session.prompts.current(for: pageTab.id)?.content.kind == .pageDownloads)
-            #expect(offscreen.windows.count == 2 && offscreen.windows.allSatisfy { $0.raises == 1 })
+            #expect(window.kind == .small && !tab.pageDownloads.isHeldUntilUserActs)
+            #expect(tab.webContents(tab.webContents, shouldDownload: file, hasPage: false))
+            #expect(offscreen.windows.count == 1 && offscreen.windows.allSatisfy { $0.raises == 1 })
         }
     }
 
-    /// A tab that a page of an extension's tab opens in the background before the user acts in that page downloads no file at its address, while one that the page opens after an act in it downloads its file as the page's download: the act lets one through, and the next file asks with a card over the page's tab.
-    @Test func aTabThatAnExtensionsPageOpensDownloadsNothingWithoutTheUser() throws {
+    /// A tab that a page of an extension's tab opens onto a file, as a link of the extension's popup or options page does, downloads it as that page's download: the first goes through, and the next asks with a card over the page's tab.
+    @Test func aFileThatAnExtensionsPageOpensDownloadsAsThatPagesDownload() throws {
         try withSession { session, host, persona in
             let page = URL(string: "https://example.org/opener")!
             let opener = try openTab(page, in: .webKit, with: host, persona: persona, session: session)
             opener.webContents(opener.webContents, didCommitDocumentAt: page)
-            let before = try popup(from: opener, at: file, in: session)
-            #expect(before.pageDownloads.isHeldUntilUserActs)
-            #expect(!before.webContents(before.webContents, shouldDownload: file, hasPage: false))
-            opener.userDidActInPage()
-            let after = try popup(from: opener, at: file, in: session)
-            #expect(!after.pageDownloads.isHeldUntilUserActs)
-            #expect(after.webContents(after.webContents, shouldDownload: file, hasPage: false))
-            #expect(download(from: after, in: session).decision == .allowed)
-
+            let first = try popup(from: opener, at: file, in: session)
+            #expect(!first.pageDownloads.isHeldUntilUserActs)
+            #expect(first.webContents(first.webContents, shouldDownload: file, hasPage: false))
+            #expect(download(from: first, in: session).decision == .allowed)
             let next = try popup(from: opener, at: file, in: session)
             #expect(next.webContents(next.webContents, shouldDownload: file, hasPage: false))
             #expect(download(from: next, in: session).decision == .waiting)
             #expect(session.prompts.current(for: opener.id)?.content.kind == .pageDownloads)
-            #expect(session.prompts.current(for: next.id) == nil)
-        }
-    }
-
-    /// A tab that a page of an extension's tab opens in the window that shows the page, as the selected tab of a main window or in a small window of its own beside a small window, is held as the extension's too: its page asks before its first download.
-    @Test func aTabThatAnExtensionsPageOpensInAWindowIsHeldToo() throws {
-        try withSession { session, host, persona in
-            let offscreen = OffscreenSmallWindows(session)
-            let space = try #require(session.spaces.first)
-            let main = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
-            let mainWindow = WindowSpy()
-            main.nsWindow = mainWindow
-            let page = URL(string: "https://example.org/opener")!
-            let opener = try openTab(page, in: .webKit, with: host, persona: persona, session: session)
-            main.selectTab(opener.id)
-            let inMain = try popup(from: opener, at: page, disposition: .newForegroundTab, in: session)
-            #expect(main.selectedTab === inMain && inMain.pageDownloads.isHeldUntilUserActs)
-            inMain.webContents(inMain.webContents, didCommitDocumentAt: page)
-            #expect(download(from: inMain, in: session).decision == .waiting)
-            #expect(session.prompts.current(for: inMain.id)?.content.kind == .pageDownloads)
-
-            var windowID: UUID?
-            host.openWindow(with: [page], in: .webKit, persona: persona, focused: true) { windowID = $0 }
-            let small = try #require(session.windows.first { $0.id == windowID })
-            let smallOpener = try #require(small.selectedTab)
-            let inSmall = try popup(from: smallOpener, at: page, disposition: .newForegroundTab, in: session)
-            #expect(inSmall.isInSmallWindow && inSmall !== smallOpener && inSmall.pageDownloads.isHeldUntilUserActs)
-            inSmall.webContents(inSmall.webContents, didCommitDocumentAt: page)
-            #expect(download(from: inSmall, in: session).decision == .waiting)
-            #expect(offscreen.windows.count == 2 && offscreen.windows.allSatisfy { $0.raises == 1 })
-            #expect(mainWindow.raises == 0)
         }
     }
 
