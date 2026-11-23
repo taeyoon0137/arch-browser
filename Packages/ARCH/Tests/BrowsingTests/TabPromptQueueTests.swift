@@ -207,4 +207,31 @@ import Testing
         #expect(kept.content == queued)
         #expect(made.count == 2)
     }
+
+    /// Every queued prompt has its own identifier, also for the same content on one tab, and a prompt keeps one field, note, and button for each identifier, the first of each, also when its maker makes the content again, so that a card's lists and an answer never mix up two parts.
+    @Test func eachQueuedPromptAndEachOfItsPartsHasItsOwnIdentifier() throws {
+        let queue = TabPromptQueue()
+        for _ in 0..<3 { queue.enqueue(Self.content(.pageAlert), for: tab) { _ in } }
+        queue.enqueue(Self.content(.pageAlert), for: otherTab) { _ in }
+        let ids = (queue.waiting[tab] ?? []).map(\.id) + (queue.waiting[otherTab] ?? []).map(\.id)
+        #expect(ids.count == 4 && Set(ids).count == 4)
+
+        let makeContent = { () -> PromptContent in
+            var content = Self.content(.sitePermission)
+            content.fields = [PromptField(id: "text", kind: .text, label: "First", initialValue: "a"), PromptField(id: "text", kind: .text, label: "Second", initialValue: "b")]
+            content.notes = [PromptNote(id: "note", symbol: "info.circle", text: "First", tone: .info), PromptNote(id: "note", symbol: "info.circle", text: "Second", tone: .info)]
+            content.buttons.append(PromptButton(id: "ok", title: "Second"))
+            return content
+        }
+        let duplicateTab = UUID()
+        queue.enqueue(makeContent(), for: duplicateTab, makeContent: makeContent) { _ in }
+        let state = try #require(queue.current(for: duplicateTab))
+        for _ in 0..<2 {
+            #expect(state.content.fields.map(\.label) == ["First"])
+            #expect(state.content.notes.map(\.text) == ["First"])
+            #expect(state.content.buttons.map(\.title) == ["OK"])
+            #expect(state.fieldValues == ["text": "a"])
+            state.remake()
+        }
+    }
 }

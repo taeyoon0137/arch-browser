@@ -144,6 +144,20 @@ struct PromptContent: Equatable {
     var cancelButtonID: String?
     /// Shakes once as it shows, as after a failed login.
     var shakesOnArrival = false
+
+    /// The content with one field, note, and button for each identifier, the first of each. The card lists its parts by identifier and an answer names its button and fields by identifier, so two parts with one identifier would draw as one, share their text, or answer for each other.
+    func keepingFirstOfEachID() -> PromptContent {
+        var content = self
+        content.fields = Self.firstOfEachID(fields)
+        content.notes = Self.firstOfEachID(notes)
+        content.buttons = Self.firstOfEachID(buttons)
+        return content
+    }
+
+    private static func firstOfEachID<Part: Identifiable>(_ parts: [Part]) -> [Part] where Part.ID == String {
+        var seen = Set<String>()
+        return parts.filter { seen.insert($0.id).inserted }
+    }
 }
 
 /// The button the user chose and what the fields held.
