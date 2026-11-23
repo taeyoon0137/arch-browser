@@ -486,6 +486,8 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "ui.setEnabled":
             context.setEnabled(try call.bool(1), command: try call.text(0))
         case "ui.showPanel":
+            // A command reaches only the background script, so a panel's or settings page's call never comes from the user's command.
+            guard role == .background else { break }
             context.showPanel(try call.text(0))
         case "ui.notify":
             try context.notify(title: try call.text(0), body: try call.text(1))
