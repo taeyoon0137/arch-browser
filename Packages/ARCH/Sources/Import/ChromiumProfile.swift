@@ -2,6 +2,7 @@
 import Foundation
 import History
 
+/// One profile that a Chromium-format user data folder lists, as the file header describes.
 struct ChromiumProfile: Equatable {
     /// The profile's folder in the user data folder, such as `Default` or `Profile 2`.
     let folder: URL

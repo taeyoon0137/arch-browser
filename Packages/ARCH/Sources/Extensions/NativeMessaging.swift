@@ -150,6 +150,7 @@ public enum NativeAppOutcome: Hashable, Sendable {
 /// What the native messages and ports of a Persona's plugins last met on WebKit tabs in this run, by plugin, each with the install it came from, so that an update or a reinstall, as one that brings a proof, starts without one.
 @MainActor
 public final class NativeAppOutcomes: ObservableObject {
+    /// A plugin's last outcome with the install time of the install that met it.
     private struct Entry: Equatable {
         let installedAt: Date?
         let outcome: NativeAppOutcome
@@ -188,6 +189,7 @@ struct NativeMessagingHostManifest: Decodable {
     }
 }
 
+/// Why a native message or connection failed, with the sentence that Settings ▸ Plugins shows as the plugin's last outcome.
 enum NativeMessagingError: LocalizedError, Equatable {
     case invalidName(String)
     case notFound(String)

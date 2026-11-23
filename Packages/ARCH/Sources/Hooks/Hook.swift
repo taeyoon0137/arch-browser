@@ -288,6 +288,7 @@ public enum HookOrigin: Codable, Hashable, Sendable {
         case preset, outsideClient
     }
 
+    /// The `outsideClient` object of an outside client's origin.
     private struct Client: Codable {
         var key: AgentClientIdentity.Key
         var name: String

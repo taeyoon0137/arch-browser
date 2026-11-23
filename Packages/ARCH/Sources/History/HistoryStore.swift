@@ -243,6 +243,7 @@ public final class HistoryStore: @unchecked Sendable {
 
     // MARK: SQLite
 
+    /// A value that `prepare(_:bindings:)` binds to a statement's parameter.
     private enum Binding {
         case text(String)
         case integer(Int)

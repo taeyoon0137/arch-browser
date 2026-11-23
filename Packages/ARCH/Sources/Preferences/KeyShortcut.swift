@@ -110,6 +110,7 @@ extension KeyShortcut: Equatable {
 
 /// Counts a shortcut pressed twice within `interval` from the key downs' timestamps. One event seen again with the same timestamp, as WebKit hands back a key its page leaves unhandled through `NSApp.sendEvent`, counts once.
 public struct DoublePressCounter {
+    /// What a key down counts as.
     public enum Press: Equatable {
         /// The event counted last, seen again.
         case seenAgain

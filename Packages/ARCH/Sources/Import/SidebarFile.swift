@@ -4,6 +4,7 @@ import Foundation
 
 /// The sidebar file's spaces and favorites, by profile folder.
 struct SidebarFile: Equatable {
+    /// One profile folder's spaces and favorites in the sidebar file.
     struct Profile: Equatable {
         /// The profile's folder in the user data folder. A space synced from another Mac may name a folder that this Mac lacks.
         var folderName: String

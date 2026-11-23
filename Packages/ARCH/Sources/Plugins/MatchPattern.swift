@@ -189,6 +189,7 @@ extension MatchPattern {
 
     /// The patterns as a JavaScript array for `javaScriptMatcher`. A pattern for every scheme or host has an empty string for that part, so every part is an own property of the pattern's object.
     static func javaScriptLiteral(_ patterns: [MatchPattern]) -> String {
+        /// A pattern's parts as the JavaScript matcher reads them.
         struct Parts: Encodable {
             let scheme: String
             let host: String

@@ -38,10 +38,12 @@ struct ShellTrust: Equatable {
 
 /// What the sheet edits: a new hook, or a hook as stored, with its script's text.
 struct ScriptHookDraft: Identifiable {
+    /// Which sites the hook runs on: all, only the listed ones, or all but the listed ones.
     enum SiteChoice: Hashable {
         case all, only, except
     }
 
+    /// Which engines' tabs the hook runs in.
     enum EngineChoice: Hashable {
         case both, webKit, chromium
     }
@@ -394,6 +396,7 @@ struct ScriptHookDraft: Identifiable {
     }
 }
 
+/// The sheet that adds, edits, or reviews a script hook in Settings ▸ AI ▸ Hooks.
 struct ScriptHookSheet: View {
     @ObservedObject var registry: HookRegistry
     @ObservedObject private var aiSettings = AIService.shared.settings

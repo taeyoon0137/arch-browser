@@ -6,6 +6,7 @@ import AI
 import ARCHEngine
 import WebKit
 
+/// The `arch` message handler of one script plugin web view, as the file header describes.
 @MainActor
 final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The name under which documents reach the handler, `window.webkit.messageHandlers.arch`.
@@ -649,6 +650,7 @@ final class ScriptPluginBridge: NSObject, WKScriptMessageHandlerWithReply {
         var waiting: (@MainActor @Sendable (Any?, String?) -> Void)?
     }
 
+    /// A call whose message or arguments do not have the bridge's form, answered by its raw value.
     private enum BridgeFailure: String, Error {
         case invalidCall
     }

@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 
+/// Runs the user's login shell on a pseudo-terminal and relays its output and exit to the terminal window, as the file header describes.
 final class PseudoTerminal {
     /// Output from the shell and the programs it runs, on the main queue, in batches of what was read since the last call.
     var onOutput: ((Data) -> Void)?

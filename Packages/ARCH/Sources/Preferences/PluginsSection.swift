@@ -16,6 +16,7 @@ import UniformTypeIdentifiers
 
 /// A request to Settings ▸ Plugins from a tab or a window, which the Settings window sets: the open panel for a plugin's version for an engine, from the site settings popover, or the store sheet started for an extension, from a store page or the palette. The review names the Persona with `space`, the tab's or the window's (Persona rule 7 in `docs/windows-personas.md`).
 struct PluginsRequest: Equatable {
+    /// What the request asks Settings ▸ Plugins to show.
     enum Action: Equatable {
         case installVersion(PluginID, EngineKind)
         case installFromWebStore(String)
@@ -472,11 +473,13 @@ private struct PluginSection: View {
     }
 }
 
+/// A plugin's settings page that its row's Settings button shows in a sheet.
 private struct SettingsPageSheet: Identifiable {
     let id = UUID()
     let controller: NSViewController
 }
 
+/// Hosts a plugin's settings page controller in the SwiftUI sheet.
 private struct SettingsPageController: NSViewControllerRepresentable {
     let controller: NSViewController
 
@@ -486,6 +489,7 @@ private struct SettingsPageController: NSViewControllerRepresentable {
 
 /// The commands of a plugin's row at the row's trailing end, each at its ideal width, so that no title is cut, with the system's spacing between neighbors as an `HStack` gives it; a command that does not fit after the others on a line starts the next line, also at the trailing end.
 private struct CommandRowLayout: Layout {
+    /// The commands that one line of the layout holds, with the line's width and height.
     private struct Line {
         var indices: [Int] = []
         var width: CGFloat = 0

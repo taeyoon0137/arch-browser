@@ -3,6 +3,7 @@
 // Input methods compose text at the cursor, including Hangul and other composed input.
 import AppKit
 
+/// Draws a `TerminalScreen` and sends keys and pasted text to the program, as the file header describes.
 final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
     /// Bytes for the program, from typed keys and pasted text.
     var onInput: ((Data) -> Void)?
@@ -459,6 +460,7 @@ final class TerminalView: NSView, NSTextInputClient, NSMenuItemValidation {
         }
     }()
 
+    /// The monospaced system font at one size in its four styles, for the grid's text.
     private struct Fonts {
         let regular: NSFont
         let bold: NSFont

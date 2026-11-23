@@ -5,6 +5,7 @@
 import UniformTypeIdentifiers
 import WebKit
 
+/// The `arch-plugin` scheme, content security policy, and web view configuration that keep a script plugin's documents inside its package, as the file header describes.
 @MainActor
 enum PluginSandbox {
     static let scheme = "arch-plugin"

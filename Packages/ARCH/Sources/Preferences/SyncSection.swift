@@ -2,6 +2,7 @@
 import SwiftUI
 import Sync
 
+/// What Settings ▸ Sync shows and allows, worked out from the sync controller's state.
 struct SyncSectionState: Equatable {
     let isOn: Bool
     let canToggle: Bool
@@ -40,6 +41,7 @@ struct SyncSectionState: Equatable {
     }
 }
 
+/// Settings ▸ Sync: the iCloud sync switch, the account's state, and the deletion of the cloud data.
 struct SyncSection: View {
     @ObservedObject var controller: SyncController
     @State private var confirmsDeletion = false

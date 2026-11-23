@@ -261,6 +261,7 @@ final class PluginNetworkFetch: @unchecked Sendable {
 
     /// One connection to one checked address, on its own queue, which every state change runs on.
     private final class Exchange: @unchecked Sendable {
+        /// The exchange's own failure, which lets the fetcher try the next checked address.
         enum Failure: Error {
             /// The connection ended before it was ready, so another address may still connect.
             case notConnected

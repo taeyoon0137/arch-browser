@@ -1,6 +1,7 @@
 // Splits a program's output into printable characters, control characters, and escape sequences, following the state machine of DEC-compatible terminals. UTF-8 is decoded across reads. Device control, privacy message, and application program command strings are skipped.
 import Foundation
 
+/// One piece of a program's output that `TerminalParser` hands to `TerminalScreen`.
 enum TerminalAction: Equatable {
     case print(Unicode.Scalar)
     /// A C0 control character such as line feed or backspace.
@@ -13,7 +14,9 @@ enum TerminalAction: Equatable {
     case operatingSystemCommand(String)
 }
 
+/// Turns a program's output bytes into `TerminalAction`s, as the file header describes.
 struct TerminalParser {
+    /// Where the parser is in the terminal's state machine.
     private enum State {
         case ground
         case escape

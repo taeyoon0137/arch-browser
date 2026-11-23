@@ -1252,8 +1252,10 @@ final class HookRun {
 /// The registry's concurrency (`docs/hooks.md`, Running, step 5): at most `total` runs at once and `perHook` for one hook. Waiting runs start in arrival order as slots free, a run blocked by its hook's cap letting later ones pass; beyond `waiting` waiting runs, the oldest is dropped.
 @MainActor
 final class HookRunSlots {
+    /// Thrown to a waiting run that a newer one pushed out of the queue.
     struct Dropped: Error {}
 
+    /// A run waiting for a slot, with its hook and the continuation that starts it.
     private struct Waiter {
         let run: UUID
         let hook: UUID

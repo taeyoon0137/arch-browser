@@ -19,11 +19,13 @@ extension SidebarImport.Item {
 
 /// Bookmarks or a sidebar's pinned items as the source nests them.
 struct BookmarkTree: Equatable {
+    /// A bookmark or a folder in the tree.
     enum Node: Equatable {
         case item(SidebarImport.Item)
         case folder(Folder)
     }
 
+    /// A folder of the tree, with its name, kind, and children.
     struct Folder: Equatable {
         /// Where the paths of the folders below a folder start.
         enum Kind {
@@ -117,6 +119,7 @@ struct BookmarkTree: Equatable {
     }
 }
 
+/// Parses bookmark files into favorites or bookmark trees, as the file header describes.
 enum BookmarkFile {
     /// HTML bookmark files, the common export format: each bookmark is an `A` element whose `HREF` holds the address and whose text is the name. Favorites have no folders, so the file's folders are flattened.
     static func netscapeFavorites(from data: Data) -> [Favorite] {

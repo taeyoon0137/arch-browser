@@ -90,6 +90,7 @@ public final class HookProposalSheetPresenter: HookProposalPrompting {
     }
 }
 
+/// The proposal sheet's content: the request's review, with Don't Allow and Allow, which call `finish`.
 struct HookProposalSheetView: View {
     let review: HookProposalReview
     let finish: (Bool) -> Void

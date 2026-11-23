@@ -3,6 +3,7 @@ import Foundation
 import History
 import SQLite3
 
+/// Reads the pages of a browser's history database for the browser import, as the file header describes.
 enum HistoryDatabase {
     /// Chromium counts time in microseconds since 1601-01-01 UTC.
     private static let secondsFrom1601To1970: Double = 11_644_473_600

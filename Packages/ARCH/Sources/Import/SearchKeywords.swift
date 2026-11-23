@@ -3,6 +3,7 @@ import Browsing
 import Foundation
 import SQLite3
 
+/// The search shortcuts and default engine that the browser import reads from a Chromium-format profile.
 struct SearchKeywords {
     var shortcuts: [SiteSearchShortcut]
     /// Shortcuts the user created that Arch cannot use: a keyword with a space, a placeholder other than the search terms and input encoding, or a template that is not a web address.

@@ -9,6 +9,7 @@ import AI
 import AppKit
 import SwiftUI
 
+/// Settings ▸ AI ▸ Agents: the agent sessions, outside clients' access, the command-line tools and skills, the grants, and the activity log.
 struct AgentSettingsPage: View {
     @ObservedObject var service: AgentService
     @ObservedObject var activity: AgentActivityLog
@@ -220,6 +221,7 @@ struct AgentSettingsPage: View {
         }
     }
 
+    /// One day's activity entries, a group of the activity list.
     private struct Day {
         var day: Date
         var entries: [AgentActivityEntry]
@@ -574,6 +576,7 @@ struct AgentSkillPlaces {
         case unresolved(String)
     }
 
+    /// A button that a tool's skill row offers for the skill's folder.
     enum Action: Hashable {
         case install, update, remove
 
