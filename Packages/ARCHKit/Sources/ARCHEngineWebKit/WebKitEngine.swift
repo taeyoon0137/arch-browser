@@ -392,10 +392,12 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         }
     }
 
-    public func startPictureInPicture(completion: @escaping (Bool) -> Void) {
-        Task { @MainActor in
-            let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.start,
-                                                                arguments: [:], in: nil, contentWorld: .page)
+    /// `callAsyncJavaScript` runs with the user's gesture, which the request needs, in the client's world, whose functions the page cannot replace. The script settles within five seconds, so the call keeps the web view no longer.
+    public func togglePictureInPicture(completion: @escaping (Bool) -> Void) {
+        Task { @MainActor [weak self] in
+            guard let webView = self?.webView else { return completion(false) }
+            let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.toggle,
+                                                                arguments: [:], in: nil, contentWorld: .defaultClient)
             completion(result as? Bool == true)
         }
     }
@@ -697,21 +699,24 @@ final class WebKitBackForwardListItem: EngineBackForwardListItem {
     var title: String { item.title ?? "" }
 }
 
-private enum WebKitPictureInPictureAPI {
+enum WebKitPictureInPictureAPI {
     static let apiID = "webkit.pictureInPicturePlayback"
     static let featureID = "webkit.pictureInPicture"
+    // WebKit names the preference with a leading underscore; `setAllowsPictureInPictureMediaPlayback:` does not exist.
+    static let setter = NSSelectorFromString("_setAllowsPictureInPictureMediaPlayback:")
 
     @MainActor static func register() {
         let flags = PrivateAPIFlags.shared
-        flags.register(PrivateAPI(id: apiID, name: "WKPreferences.allowsPictureInPictureMediaPlayback", framework: "WebKit") {
-            WKPreferences.instancesRespond(to: NSSelectorFromString("setAllowsPictureInPictureMediaPlayback:"))
+        flags.register(PrivateAPI(id: apiID, name: "WKPreferences._allowsPictureInPictureMediaPlayback", framework: "WebKit") {
+            WKPreferences.instancesRespond(to: setter)
         })
         flags.register(PrivateAPIFeature(id: featureID, name: "Picture in picture on WebKit", apiIDs: [apiID]))
     }
 
     static func enable(in preferences: WKPreferences) {
         guard MainActor.assumeIsolated({ PrivateAPIFlags.shared.allows(featureID) }),
-              preferences.responds(to: NSSelectorFromString("setAllowsPictureInPictureMediaPlayback:")) else { return }
+              preferences.responds(to: setter) else { return }
+        // Key-value coding finds the underscored setter for the key without its underscore.
         preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
     }
 }

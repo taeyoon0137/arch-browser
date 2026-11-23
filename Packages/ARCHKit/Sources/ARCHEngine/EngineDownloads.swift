@@ -10,6 +10,8 @@ public enum EngineDownloadState: String, Codable, Sendable {
 
 public protocol EngineDownloadItem: AnyObject {
     var sourceURL: URL { get }
+    /// The address the download was requested at, before any redirect, which `sourceURL` can already follow.
+    var requestURL: URL { get }
     /// The address of the page its web contents showed when the download started; nil when they showed none.
     var pageURL: URL? { get }
     /// The web contents that started the download, until they are gone.
@@ -28,6 +30,8 @@ public protocol EngineDownloadItem: AnyObject {
 
 public extension EngineDownloadItem {
     var canRetry: Bool { state == .failed }
+    /// An engine whose source address is the requested one reports it for both.
+    var requestURL: URL { sourceURL }
 }
 
 public protocol EngineDownloadsDelegate: AnyObject {

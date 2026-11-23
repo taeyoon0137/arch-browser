@@ -218,7 +218,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFExtensionPromptKind) {
 /// One download reported by the engine. Values are refreshed before each `cefBrowserDidUpdateDownload:` call.
 @interface ARCHCEFDownload : NSObject
 @property (nonatomic, readonly) uint32_t identifier;
+/// The address after redirects.
 @property (nonatomic, readonly, copy) NSString *url;
+/// The address the download was requested at, before redirects.
+@property (nonatomic, readonly, copy) NSString *originalURL;
 /// The destination after the engine chooses it.
 @property (nonatomic, readonly, copy, nullable) NSString *path;
 @property (nonatomic, readonly) int64_t receivedBytes;
@@ -497,8 +500,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)setPictureInPicturePlaying:(BOOL)playing;
 /// Ends picture in picture for the page's video. `pause` pauses the video, as closing the window does; pass NO when the user returns to the page. CEF reports the end through `cefBrowserDidStopPictureInPicture` before this returns. Does nothing while no video of the page is in picture in picture.
 - (void)closePictureInPicturePausingVideo:(BOOL)pause NS_SWIFT_NAME(closePictureInPicture(pausingVideo:));
-/// Evaluates a page expression with user activation and waits for its boolean result.
-- (void)evaluateWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion;
+/// Evaluates an expression with user activation in an isolated world of the main frame, whose functions the page cannot replace, and waits for its boolean result.
+- (void)evaluateInIsolatedWorldWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion;
 - (void)findText:(NSString *)text forward:(BOOL)forward matchCase:(BOOL)matchCase findNext:(BOOL)findNext;
 /// Ends the search and leaves the active match selected.
 - (void)stopFinding;

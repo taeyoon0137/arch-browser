@@ -99,8 +99,8 @@ public protocol EngineWebContents: AnyObject {
     func exitFullscreen()
     /// Starts a download of the address as if the page had started one, so it reaches the download delegate as any download does.
     func download(_ url: URL)
-    /// Asks the page's video to enter picture in picture as from the user's own act; false when the page has no video or refuses.
-    func startPictureInPicture(completion: @escaping (Bool) -> Void)
+    /// Asks the page's video to enter picture in picture as from the user's own act, or to leave it when one of the page's videos shows there; false when the page has no video, refuses, or does not answer within five seconds. The script runs in a world of the engine's own, apart from the page's scripts, though the page's own event handlers still run while the activation lasts.
+    func togglePictureInPicture(completion: @escaping (Bool) -> Void)
     /// Whether closing this web contents now would stop downloads it started. Only Chromium ties downloads to the page that started them.
     var closingStopsDownloads: Bool { get }
     /// Runs the page's `beforeunload` handlers and reports whether the page agreed to close. An engine that cannot run them reports true at once.
@@ -113,22 +113,37 @@ public protocol EngineWebContents: AnyObject {
 
 public extension EngineWebContents {
     func download(_ url: URL) {}
-    func startPictureInPicture(completion: @escaping (Bool) -> Void) { completion(false) }
+    func togglePictureInPicture(completion: @escaping (Bool) -> Void) { completion(false) }
     /// A web contents without trusted input, such as a stand-in that has no page yet, offers none.
     var input: (any EngineInput)? { nil }
     /// A web contents keeps its own page scripts unless its engine shares them.
     var pageScriptListID: ObjectIdentifier { ObjectIdentifier(self) }
 }
 
+/// The script that `togglePictureInPicture` runs, in an isolated world so that the page cannot replace the functions it calls. It looks in the page and its same-origin frames: a video already in picture in picture leaves it; otherwise the playing video, or else the largest one with data, enters it.
 public enum EnginePictureInPictureScript {
-    public static let start = """
+    public static let toggle = """
     (async () => {
-      const videos = [...document.querySelectorAll('video')].filter(video => video.readyState > 0);
-      const video = videos.find(video => !video.paused && !video.ended) ||
-        videos.sort((a, b) => b.getBoundingClientRect().width * b.getBoundingClientRect().height -
-          a.getBoundingClientRect().width * a.getBoundingClientRect().height)[0];
+      const documents = [];
+      const collect = doc => {
+        documents.push(doc);
+        for (const frame of doc.querySelectorAll('iframe, frame')) {
+          try { if (frame.contentDocument) collect(frame.contentDocument); } catch {}
+        }
+      };
+      collect(document);
+      const settle = request => Promise.race([
+        request.then(() => true, () => false),
+        new Promise(resolve => setTimeout(() => resolve(false), 5000)),
+      ]);
+      const shown = documents.find(doc => doc.pictureInPictureElement);
+      if (shown) return settle(shown.exitPictureInPicture());
+      const videos = documents.flatMap(doc => [...doc.querySelectorAll('video')])
+        .filter(video => video.readyState > 0 && !video.disablePictureInPicture);
+      const area = video => { const box = video.getBoundingClientRect(); return box.width * box.height; };
+      const video = videos.find(video => !video.paused && !video.ended) || videos.sort((a, b) => area(b) - area(a))[0];
       if (!video || !video.requestPictureInPicture) return false;
-      try { await video.requestPictureInPicture(); return true; } catch { return false; }
+      return settle(video.requestPictureInPicture());
     })()
     """
 }

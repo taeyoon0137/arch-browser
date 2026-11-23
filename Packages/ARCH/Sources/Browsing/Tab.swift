@@ -135,6 +135,8 @@ import LiveFolders
     private(set) var isDownloadOnly = false
     /// Whether the page may start downloads without asking (`BrowserSession`'s download delegate).
     var pageDownloads = PageDownloadGate()
+    /// Downloads the user asked for in this tab, from the page's context menu or File ▸ Save Page As…, each until the engine asks for its file name or the tab commits another document. The session admits a matching download outside `pageDownloads`, so that a refusal of the page's own downloads does not stop the user's and the page cannot use the user's up first.
+    private var userDownloadRequests: [(url: URL, savesPage: Bool)] = []
     /// The address of the document the main frame last committed, as the engine reports the commit, or nil before the web contents commits one. A page's dialogs name it as their page: `url` can already be the address of a navigation the page started and has not committed, as WebKit gives it. The tab's events and a hook's name go by `committedURL` instead.
     private var engineCommittedURL: URL?
     /// The session sets this to name the agent whose agent folder has the given ID, or nil for a folder of the user's.
@@ -381,6 +383,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         // The commit can come long before the load ends, and before the engine reports the address as `url`.
         if let url = url?.withoutCredentials { commit(url) }
         pageDownloads.documentDidCommit(site: Self.site(of: url))
+        userDownloadRequests.removeAll()
         didCommitDocument?()
     }
     /// Reports a finished main document to page listeners and an agent owner.
@@ -574,11 +577,20 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// Offers an explicit download for an HTTP link or image in the context menu.
     private func downloadItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
-        return EngineActionMenuItem(title) { [weak self] in
-            guard let self else { return }
-            pageDownloads.userDidAct()
-            webContents.download(url)
-        }
+        return EngineActionMenuItem(title) { [weak self] in self?.download(url, savingPage: false) }
+    }
+
+    /// Downloads the address for the user through the tab's engine. Saving the page always asks where to save it.
+    func download(_ url: URL, savingPage: Bool) {
+        userDownloadRequests.append((url, savingPage))
+        webContents.download(url)
+    }
+
+    /// Takes the user's request that the download answers, matched by the address the download was requested at, and returns whether it saves the page; nil when the user asked for no such download.
+    func takeUserDownloadRequest(for item: any EngineDownloadItem) -> Bool? {
+        guard item.webContents === webContents,
+              let index = userDownloadRequests.firstIndex(where: { $0.url == item.requestURL || $0.url == item.sourceURL }) else { return nil }
+        return userDownloadRequests.remove(at: index).savesPage
     }
 
     /// Puts the address on the pasteboard as a URL and as text, for Copy Link, Copy Image Address, and Copy Address.

@@ -42,7 +42,9 @@ public final class ChromiumDownloads: EngineDownloads {
 
 /// One Chromium download. The item tracks its own pause requests because the bridge does not expose CEF's paused state.
 final class ChromiumDownloadItem: EngineDownloadItem {
+    /// CEF's address after redirects.
     let sourceURL: URL
+    let requestURL: URL
     let pageURL: URL?
     private(set) weak var webContents: (any EngineWebContents)?
     let download: ARCHCEFDownload
@@ -61,6 +63,7 @@ final class ChromiumDownloadItem: EngineDownloadItem {
         self.pageURL = pageURL
         self.owner = owner
         sourceURL = URL(string: download.url) ?? URL(string: "about:blank")!
+        requestURL = URL(string: download.originalURL) ?? sourceURL
     }
 
     func refresh() {

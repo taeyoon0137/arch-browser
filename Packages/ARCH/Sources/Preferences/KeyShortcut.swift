@@ -107,3 +107,32 @@ extension KeyShortcut: Equatable {
         lhs.key == rhs.key && lhs.modifiers == rhs.modifiers
     }
 }
+
+/// Counts a shortcut pressed twice within `interval` from the key downs' timestamps. One event seen again with the same timestamp, as WebKit hands back a key its page leaves unhandled through `NSApp.sendEvent`, counts once.
+public struct DoublePressCounter {
+    public enum Press: Equatable {
+        /// The event counted last, seen again.
+        case seenAgain
+        case first
+        /// The second press within the interval, after which counting starts over.
+        case second
+    }
+
+    public static let interval: TimeInterval = 0.35
+    private var last: TimeInterval?
+
+    public init() {}
+
+    public mutating func press(at timestamp: TimeInterval) -> Press {
+        if last == timestamp { return .seenAgain }
+        if let last, timestamp > last, timestamp - last <= Self.interval {
+            self.last = nil
+            return .second
+        }
+        last = timestamp
+        return .first
+    }
+
+    /// Another key down in between starts over.
+    public mutating func reset() { last = nil }
+}

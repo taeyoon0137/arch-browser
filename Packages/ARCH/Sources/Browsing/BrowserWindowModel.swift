@@ -1305,8 +1305,22 @@ public enum BrowserWindowKind {
     }
 
     public var canSavePageAs: Bool {
-        guard !isSelectedPageCovered, let url = selectedTab?.committedURL, let scheme = url.scheme?.lowercased() else { return false }
+        guard !isSelectedPageCovered, selectedTab?.isLoaded == true, let url = selectedTab?.committedURL, let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
+    }
+
+    /// View ▸ Picture in Picture and a tab row's menu: a loaded tab whose committed page is a web page or a file, and that no internal page covers when it is the selected tab.
+    public func canTogglePictureInPicture(_ tab: Tab) -> Bool {
+        guard tab.isLoaded, ["http", "https", "file"].contains(tab.committedURL?.scheme?.lowercased() ?? "") else { return false }
+        return tab !== selectedTab || !isSelectedPageCovered
+    }
+
+    /// Selects the tab first, so that only a page the user sees gets the user activation the request needs, then asks its video to enter picture in picture, or to leave it when one already shows. A beep reports a page without a video or one that refused.
+    public func togglePictureInPicture(_ tab: Tab) {
+        guard canTogglePictureInPicture(tab) else { return NSSound.beep() }
+        if tab !== selectedTab { selectTab(tab.id) }
+        guard selectedTab === tab, !isSelectedPageCovered else { return NSSound.beep() }
+        tab.webContents.togglePictureInPicture { done in if !done { NSSound.beep() } }
     }
 
     /// Starts saving the selected web page through the session when available.
