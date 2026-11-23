@@ -10,6 +10,10 @@ ICON_SOURCE="$ROOT/resources/assets/sym_arch.png"
 SDEF="$ROOT/Packages/ARCHApp/Sources/Arch/Arch.sdef"
 APP="$ROOT/build/Arch.app"
 VERSION="0.1.0"
+# The build number is the build's time in UTC, as YYYYMMDDHHMM, so it only grows, whatever happens to the git history (a squash or a rebase can lower a commit count). The About window shows it with the build's commit, with + when the tree had uncommitted changes.
+BUILD_NUMBER="$(date -u +%Y%m%d%H%M)"
+BUILD_COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+git -C "$ROOT" diff --quiet HEAD -- 2>/dev/null || BUILD_COMMIT="$BUILD_COMMIT+"
 MIN_MACOS="14.0"
 
 [ -x "$BIN/Arch" ] || { echo "missing $BIN/Arch; run swift build -c $CONFIG first" >&2; exit 1; }
@@ -34,7 +38,8 @@ write_plist() {
 	<key>CFBundleName</key><string>$2</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$VERSION</string>
-	<key>CFBundleVersion</key><string>$VERSION</string>
+	<key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+	<key>ArchBuildCommit</key><string>$BUILD_COMMIT</string>
 	<key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
 	<key>LSEnvironment</key><dict><key>MallocNanoZone</key><string>0</string></dict>
 	<key>LSUIElement</key><string>$4</string>

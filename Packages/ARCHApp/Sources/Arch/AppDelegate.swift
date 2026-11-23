@@ -359,11 +359,18 @@ import Terminal
         return FileManager.default.fileExists(atPath: bundled) ? bundled : nil
     }
 
+    /// The standard About window, whose version line shows the build number, the build's time in UTC as YYYYMMDDHHMM, and its commit, which `scripts/bundle_app.sh` writes into Info.plist, as "Version 0.1.0 (202611231530 · abc1234)".
+    @objc private func showAbout() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let build = [info["CFBundleVersion"], info["ArchBuildCommit"]].compactMap { $0 as? String }.filter { !$0.isEmpty }
+        NSApp.orderFrontStandardAboutPanel(options: build.isEmpty ? [:] : [.applicationVersion: build.joined(separator: " \u{00B7} ")])
+    }
+
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
         // The application menu has the items every Mac app's has, in their order. NSApplication answers and validates About, Hide, Hide Others, and Show All itself.
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: localized("About Arch"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: localized("About Arch"), action: #selector(showAbout), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: localized("Settings\u{2026}"), action: #selector(showSettings), keyEquivalent: ",")
         appMenu.addItem(withTitle: localized("Set as Default Browser\u{2026}"), action: #selector(setAsDefaultBrowser), keyEquivalent: "")
