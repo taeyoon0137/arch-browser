@@ -377,21 +377,14 @@ import Testing
         #expect(environment?["CODEX_HOME"] == "/opt/profile-codex")
     }
 
-    @Test func leavesOutRelativeAndUnsetLiveFolderDirectories() async throws {
-        let shell = try toolScript("""
-            export PATH=/usr/bin:/bin GH_CONFIG_DIR=relative/config
-            unset XDG_CONFIG_HOME
-            exec /bin/sh -c "$4"
-            """)
-        #expect(await LoginShell(executable: shell).variables() == LoginShell.Variables(path: "/usr/bin:/bin"))
-    }
-
     @Test func readsTheVariablesOfALoginShell() async throws {
-        let variables = await LoginShell(executable: URL(fileURLWithPath: "/bin/sh")).variables()
-        #expect(variables?.path.split(separator: ":").contains("/usr/bin") == true)
+        let environment = await LoginShell(executable: URL(fileURLWithPath: "/bin/sh")).environment()
+        #expect(environment?["PATH"]?.split(separator: ":").contains("/usr/bin") == true)
         // A profile's text before the marker and its exported variables, as a login shell's are.
-        let shell = try toolScript("echo 'Welcome back'\nexport PATH=/usr/bin:/bin GH_CONFIG_DIR=/tmp/gh-config XDG_CONFIG_HOME=/tmp/config-home\nexec /bin/sh -c \"$4\"")
-        #expect(await LoginShell(executable: shell).variables() == LoginShell.Variables(path: "/usr/bin:/bin", gitHubConfigDirectory: "/tmp/gh-config", configHome: "/tmp/config-home"))
+        let shell = try toolScript("echo 'Welcome back'\nexport PATH=/usr/bin:/bin XDG_CONFIG_HOME=/tmp/config-home\nexec /bin/sh -c \"$4\"")
+        let profile = await LoginShell(executable: shell).environment()
+        #expect(profile?["PATH"] == "/usr/bin:/bin")
+        #expect(profile?["XDG_CONFIG_HOME"] == "/tmp/config-home")
     }
 
     @Test func locatesExecutablesInTheSearchPath() async throws {

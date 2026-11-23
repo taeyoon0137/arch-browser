@@ -154,7 +154,6 @@ import Terminal
         session.showAgentModelSettings = { PreferencesWindowController.shared.showAgentModelSettings($0) }
         session.pageAssistant.showAISettings = { PreferencesWindowController.shared.showAISection() }
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
-        session.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.openTerminalTyping = { TerminalWindowController.shared.show(typing: $0) }
         PreferencesWindowController.session = session
         // Before the windows open. It checks the seal of `agent.json`, keeps the session's agent-only Persona in line with it, and listens only once Allow Outside Clients is on.
@@ -753,20 +752,12 @@ import Terminal
                 menu.addItem(.sectionHeader(title: title))
             case .favorite(let id, let title, let url):
                 menu.addItem(bookmarkItem(title: title, url: url, choice: .favorite(id)))
-            case .tab(let id, let title, let url, let isUnread):
-                let item = bookmarkItem(title: title, url: url, choice: .tab(id))
-                // A live folder's unread item shows a dot where a checkmark would.
-                if isUnread {
-                    item.onStateImage = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: localized("Unread"))?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular))
-                    item.state = .on
-                }
-                menu.addItem(item)
-            case .submenu(let title, let entries, let unreadCount):
+            case .tab(let id, let title, let url):
+                menu.addItem(bookmarkItem(title: title, url: url, choice: .tab(id)))
+            case .submenu(let title, let entries):
                 let folderMenu = NSMenu(title: title)
                 fillBookmarks(folderMenu, with: entries)
-                let item = submenu(folderMenu, title: title)
-                if unreadCount > 0 { item.badge = NSMenuItemBadge(count: unreadCount) }
-                menu.addItem(item)
+                menu.addItem(submenu(folderMenu, title: title))
             case .divider:
                 menu.addItem(.separator())
             case .noBookmarks:

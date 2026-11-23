@@ -7,7 +7,6 @@ import AppKit
 import ARCHEngine
 import Combine
 import Foundation
-import LiveFolders
 import PDFKit
 import Plugins
 import SwiftUI
@@ -42,10 +41,8 @@ public enum BrowserWindowKind {
     @Published public private(set) var selectedTabID: UUID?
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
     private var selectedTabObserver: AnyCancellable?
-    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes. Each change marks the live folder items whose tabs start or stop showing as viewed (live folder rule 5).
-    @Published private(set) var shownTabIDs: [UUID] = [] {
-        didSet { session.windowDidChangeShownTabs(from: oldValue, to: shownTabIDs) }
-    }
+    /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes.
+    @Published private(set) var shownTabIDs: [UUID] = []
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window. The other panes of a split view leave the screen meanwhile, and their prompts wait until the panes return.
@@ -154,7 +151,7 @@ public enum BrowserWindowKind {
     /// Selects the tab `id`, or the empty page for nil, and does what a selection does, in this order (`docs/windows-personas.md`, `BrowserWindowModel`). Selecting the tab already selected runs every step except the end of step 2.
     ///
     /// 1. The window shows the tab, and every other window that shows it gives it up first (window rule 2): a main window selects another tab, which runs these steps there, and a small window closes.
-    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot unless it is a live folder item's tab, whose dot follows its item (live folder rule 5), follows its space, and, while the agent panel shows an outside client, switches it to the client that owns the newly selected agent tab. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
+    /// 2. The window leaves its internal page and another tab's page fullscreen, stamps the tab's activation, clears its unread dot, follows its space, and, while the agent panel shows an outside client, switches it to the client that owns the newly selected agent tab. Only for another tab, the command palette, the search, and the question popover, which belong to the old tab's page, close.
     /// 3. The session updates the focused tab.
     /// 4. The docked developer tools follow the tab.
     /// 5. The window republishes the tab's changes, and keyboard focus leaves another pane of the split view.
@@ -175,8 +172,7 @@ public enum BrowserWindowKind {
         if previousID != selectedTabID, case .client = agentPanel, let owner = selectedTab?.agentOwnerID, session.agents?.panel.owners[owner] != nil {
             showClientPanel(owner)
         }
-        // An item tab's dot follows its item's read state, which a window marks viewed as it starts showing the tab (`BrowserSession.windowDidChangeShownTabs(from:to:)`), so selecting the tab it shows already keeps a dot from Mark as Unread.
-        if let tab = selectedTab, tab.isUnread, tab.liveItemID == nil { tab.isUnread = false }
+        if let tab = selectedTab, tab.isUnread { tab.isUnread = false }
         // A favorite can be shown in any space of its Persona, including when a session in another Persona links to it.
         if let tab = selectedTab {
             if let spaceID = tab.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
@@ -439,9 +435,9 @@ public enum BrowserWindowKind {
         selectedTab.map(session.useCurrentPageAsSavedPage)
     }
 
-    /// Tab ▸ Edit Saved Address…: the selected tab is pinned and not a live folder item's tab, whose source owns its saved page, and the window shows no other sheet, which this one would wait behind. A favorite's tile has Edit Favorite… instead.
+    /// Tab ▸ Edit Saved Address…: the selected tab is pinned and the window shows no other sheet, which this one would wait behind. A favorite's tile has Edit Favorite… instead.
     public var canEditSavedAddress: Bool {
-        selectedTab?.isPinned == true && selectedTab?.liveItemID == nil && nsWindow?.attachedSheet == nil
+        selectedTab?.isPinned == true && nsWindow?.attachedSheet == nil
     }
 
     /// Opens the saved address sheet for the selected pinned tab when available.
@@ -452,7 +448,7 @@ public enum BrowserWindowKind {
 
     /// Edit Saved Address…: asks for a pinned tab's saved address in a sheet on the window, prefilled with it. Text that is no address beeps and changes nothing.
     func promptToEditSavedAddress(of tab: Tab) {
-        guard tab.isPinned, tab.liveItemID == nil else { return }
+        guard tab.isPinned else { return }
         let address = (tab.savedPage?.url ?? tab.url)?.absoluteString ?? ""
         askForText(title: localized("Edit Saved Address"), message: localized("Go Back to Saved Page returns \u{201C}\(tab.shownTitle)\u{201D} to this address."), fields: [(localized("Address"), address)], button: localized("Save")) { [weak tab] texts in
             if tab?.setSavedAddress(fromInput: texts[0]) != true { NSSound.beep() }
@@ -866,7 +862,7 @@ public enum BrowserWindowKind {
     /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
     func sidebarAgentDraft(for tab: Tab, settings: AISettingsStore? = nil) -> AgentComposerContext? {
         let settings = settings ?? AIService.shared.settings
-        guard kind == .main, session.agents != nil, settings.route(for: .agent).isEnabled, tab.personaID == personaID, tab.isLoaded, tab.liveItemID == nil,
+        guard kind == .main, session.agents != nil, settings.route(for: .agent).isEnabled, tab.personaID == personaID, tab.isLoaded,
               session.allTabs.contains(where: { $0 === tab }) else { return nil }
         return Self.sidebarAgentDraft(for: BrowserAgentHost.info(of: tab), in: currentSpace, personas: session.personas, allowsAI: settings.allowsAI(on:))
     }
@@ -1606,62 +1602,6 @@ public enum BrowserWindowKind {
     /// Does not interrupt renaming another folder that may have started meanwhile.
     public func endRenamingFolder(_ id: UUID) {
         if renamingFolderID == id { renamingFolderID = nil }
-    }
-
-    // MARK: Live folders
-
-    /// New Live Folder…: the sheet that makes a live folder in the space (`docs/bookmarks.md`, Live folders ▸ Interface), with the Address field prefilled with the selected tab's address when it shows a web page. Add puts the folder in the space and shows the space. Nothing shows while the window shows another sheet.
-    public func showNewLiveFolderSheet(inSpace spaceID: UUID) {
-        guard nsWindow?.attachedSheet == nil, let space = session.spaces.first(where: { $0.id == spaceID }) else { return }
-        let address = selectedTab?.url.flatMap { url in ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? url : nil }
-        let model = LiveFolderSheetModel(newIn: space, personas: session.personas, liveFolderCount: session.liveFolderCount, address: address,
-                                         openTerminal: session.openTerminal) { [weak self] submission in
-            guard let self, try await self.session.addLiveFolder(submission, toSpace: spaceID) != nil else { return }
-            self.switchToSpace(spaceID)
-        }
-        presentLiveFolderSheet(model)
-    }
-
-    /// Edit Live Folder…: the same sheet with the folder's values, a private feed's whole address read from the Keychain first (live folder rule 8).
-    func showEditLiveFolderSheet(_ folderID: UUID) {
-        guard nsWindow?.attachedSheet == nil, let live = session.folders.first(where: { $0.id == folderID })?.live else { return }
-        guard case .feed(_, isPrivate: true) = live.source else { return presentEditLiveFolderSheet(folderID, wholeAddress: nil, keychainReadError: nil) }
-        let addresses = session.liveFolderService.addresses
-        Task { @MainActor [weak self] in
-            var whole: URL?
-            var failure: String?
-            do {
-                whole = try await addresses.address(for: folderID)
-            } catch {
-                failure = LiveFolderSheetModel.message(for: error)
-            }
-            self?.presentEditLiveFolderSheet(folderID, wholeAddress: whole, keychainReadError: failure)
-        }
-    }
-
-    /// Builds the edit sheet from a live folder's current configuration and private address, if any.
-    private func presentEditLiveFolderSheet(_ folderID: UUID, wholeAddress: URL?, keychainReadError: String?) {
-        guard let folder = session.folders.first(where: { $0.id == folderID }), let live = folder.live,
-              let space = session.spaces.first(where: { $0.id == folder.spaceID }) else { return }
-        let model = LiveFolderSheetModel(editing: folder, configuration: live, in: space, personas: session.personas, wholeAddress: wholeAddress,
-                                         keychainReadError: keychainReadError, openTerminal: session.openTerminal) { [weak self] submission in
-            try await self?.session.editLiveFolder(folderID, with: submission)
-        }
-        presentLiveFolderSheet(model)
-    }
-
-    /// Shows the sheet on the window. Its Add, Save, and Cancel end it; closing the window from code ends it too (`close()`). The form's size pins the sheet's, so the sheet grows and shrinks with the form, as when a page's feeds appear.
-    private func presentLiveFolderSheet(_ model: LiveFolderSheetModel) {
-        guard let nsWindow, nsWindow.attachedSheet == nil else { return }
-        let controller = NSHostingController(rootView: LiveFolderSheetView(model: model))
-        controller.sizingOptions = [.minSize, .maxSize]
-        let sheet = NSWindow(contentViewController: controller)
-        sheet.isReleasedWhenClosed = false
-        model.dismiss = { [weak sheet] in
-            guard let sheet, let parent = sheet.sheetParent else { return }
-            parent.endSheet(sheet)
-        }
-        nsWindow.beginSheet(sheet)
     }
 
     // MARK: Panes and split view

@@ -341,10 +341,10 @@ import Testing
     }
 
     @Test func eachTypeListsTheFieldsOfTheSchema() {
-        // docs/sync.md, Record types. Deployed record types and fields can never be removed or change type, so these lists only grow.
+        // docs/sync.md, Record types. Deployed record types and fields can never be removed or change type, so these lists only grow, apart from `Folder`'s `live`, which stays in the schema and on the server while this build no longer reads or writes it (live folders were removed).
         #expect(SyncRecordType.persona.fields == [.name, .order])
         #expect(SyncRecordType.space.fields == [.persona, .name, .symbol, .tint, .homeURL, .order])
-        #expect(SyncRecordType.folder.fields == [.persona, .space, .parent, .name, .live, .order])
+        #expect(SyncRecordType.folder.fields == [.persona, .space, .parent, .name, .order])
         #expect(SyncRecordType.favorite.fields == [.persona, .url, .title, .order])
         #expect(SyncRecordType.tab.fields == [.persona, .space, .folder, .url, .title, .customTitle, .engine, .order])
         #expect(SyncRecordType.setting.fields == [.value])

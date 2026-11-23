@@ -4,20 +4,6 @@ import Foundation
 
 /// Reads the user's exported login-shell environment for tool discovery.
 public actor LoginShell {
-    /// What the login shell sets. Only `PATH` reaches every command-line tool; the GitHub CLI also gets the two configuration folders (`docs/bookmarks.md`, GitHub).
-    public struct Variables: Equatable, Sendable {
-        public var path: String
-        /// `GH_CONFIG_DIR`, when the shell sets it to an absolute path.
-        public var gitHubConfigDirectory: String?
-        /// `XDG_CONFIG_HOME`, when the shell sets it to an absolute path.
-        public var configHome: String?
-
-        public init(path: String, gitHubConfigDirectory: String? = nil, configHome: String? = nil) {
-            self.path = path
-            self.gitHubConfigDirectory = gitHubConfigDirectory
-            self.configHome = configHome
-        }
-    }
     public static let shared = LoginShell(executable: userShell)
 
     /// `$SHELL`, else the account's shell, else zsh.
@@ -85,16 +71,6 @@ public actor LoginShell {
         }
         let searchPath = await path() ?? Self.baseEnvironment["PATH"] ?? ""
         return AICommandLineConfiguration.locate(name, searchPath: searchPath)
-    }
-
-    /// The paths used by live folders. Only absolute configuration directories reach the GitHub CLI.
-    public func variables() async -> Variables? {
-        guard let values = await environment(), let path = values["PATH"] else { return nil }
-        func absoluteFolder(_ key: String) -> String? {
-            guard let folder = values[key], folder.hasPrefix("/") else { return nil }
-            return folder
-        }
-        return Variables(path: path, gitHubConfigDirectory: absoluteFolder("GH_CONFIG_DIR"), configHome: absoluteFolder("XDG_CONFIG_HOME"))
     }
 
     /// The environment the read starts the shell with: `baseEnvironment`, and those of `inheritedVariableNames` that `inherited`, this app's environment, holds. Command-line tools still run in `baseEnvironment` with the login shell's PATH.

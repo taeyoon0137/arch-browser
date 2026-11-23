@@ -2,7 +2,6 @@
 import CoreGraphics
 import CryptoKit
 import Foundation
-import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -331,76 +330,79 @@ import Testing
         #expect(try #require(folder.store.load()).folders?.map(\.parentID) == loaded.folders?.map(\.parentID))
     }
 
-    @Test func liveFoldersAndItemTabsLoadAndSaveAndWhatTheFileCannotKeepIsRepaired() throws {
+    /// A version 16 file, as the builds with live folders write it. Live folders were removed (`docs/bookmarks.md`, Live sources): a live folder loads as an ordinary folder in its place, also one whose configuration a later build wrote, the tabs the user put in it stay, the item tabs its source made go, the split views and the selected tab index follow the records that stay, and the file is saved without the folders' sources and the items.
+    @Test func version16LiveFoldersLoadAsOrdinaryFoldersWithoutTheirItemTabs() throws {
         let folder = try SessionFolder()
-        let feed = LiveFolderConfiguration(source: .feed(address: URL(string: "https://blog.example.org/feed.xml")!, isPrivate: false), itemLimit: 10, refreshMinutes: 60)
-        let pulls = LiveFolderConfiguration(source: .gitHub(search: GitHubSearch(kind: .myPullRequests)))
         let work = TabFolder(id: workFolder, spaceID: spaceA, name: "Work", isPinned: true)
-        // News sits in Work; Pulls among the open tabs moves to the pinned list; Docs, inside a live folder, moves to the top.
-        let news = TabFolder(id: docsFolder, spaceID: spaceA, name: "News", isPinned: true, parentID: workFolder, live: feed)
-        let pullsFolder = TabFolder(id: looseFolder, spaceID: spaceA, name: "Pulls", isPinned: false, live: pulls)
-        let inside = TabFolder(id: mixedFolder, spaceID: spaceA, name: "Docs", isPinned: true, parentID: docsFolder)
-        func record(_ id: UUID, space: UUID = spaceA, pinned: Bool = true, folder: UUID?, item: String?) -> SessionSnapshot.TabRecord {
-            SessionSnapshot.TabRecord(id: id, spaceID: space, url: URL(string: "https://blog.example.org/\(id)")!, title: "Post", isPinned: pinned, folderID: folder, liveItemID: item)
+        let news = TabFolder(id: docsFolder, spaceID: spaceA, name: "News", isPinned: true, parentID: workFolder)
+        let pulls = TabFolder(id: looseFolder, spaceID: spaceA, name: "Pulls", isPinned: true)
+        func record(_ id: UUID, folder: UUID?, item: String?) -> SessionSnapshot.TabRecord {
+            var record = SessionSnapshot.TabRecord(id: id, spaceID: spaceA, url: URL(string: "https://blog.example.org/\(id)")!, title: "Post", isPinned: true, folderID: folder)
+            record.liveItemID = item
+            return record
         }
-        let records = [
-            record(tab1, folder: docsFolder, item: "a"),
-            record(tab2, pinned: false, folder: looseFolder, item: "b"),
-            // Not an item: it leaves News for Work, which holds News.
-            record(tab3, folder: docsFolder, item: nil),
-            // An item outside live folders, and one of another space, lose their items.
-            record(favoriteTab, folder: workFolder, item: "c"),
-            record(closedTab, space: spaceB, folder: docsFolder, item: "d"),
-        ]
-        let closed = record(UUID(), folder: docsFolder, item: "e")
-        let snapshot = SessionSnapshot(version: 16, spaces: [Space(id: spaceA, name: "A"), Space(id: spaceB, name: "B")], currentSpaceID: spaceA, favorites: [], tabs: records,
-                                       folders: [work, news, pullsFolder, inside], closedTabs: [closed])
-        folder.store.saveNow(snapshot)
-        let loaded = try #require(folder.store.load())
-        let folders = try #require(loaded.folders)
-        #expect(folders.map(\.live) == [nil, feed, pulls, nil])
-        #expect(folders.map(\.isPinned) == [true, true, true, true])
-        #expect(folders.map(\.parentID) == [nil, workFolder, nil, nil])
-        #expect(loaded.tabs.map(\.liveItemID) == ["a", "b", nil, nil, nil])
-        #expect(loaded.tabs.map(\.folderID) == [docsFolder, looseFolder, workFolder, workFolder, nil])
-        #expect(loaded.tabs[1].isPinned)
-        // A pinned item record gets the saved page that bookmark rule 2 gives it.
-        #expect(loaded.tabs[1].savedPage?.url == records[1].url)
-        #expect(loaded.closedTabs?.map(\.liveItemID) == [nil])
-        // A round trip keeps them.
-        folder.store.saveNow(loaded)
-        let again = try #require(folder.store.load())
-        #expect(again.folders == loaded.folders)
-        #expect(again.tabs == loaded.tabs)
+        let records = [record(tab1, folder: docsFolder, item: "a"), record(tab2, folder: docsFolder, item: nil), record(tab3, folder: looseFolder, item: "b"), record(favoriteTab, folder: nil, item: nil)]
+        let snapshot = SessionSnapshot(version: 16, spaces: [Space(id: spaceA, name: "A")], currentSpaceID: spaceA, favorites: [], tabs: records,
+                                       folders: [work, news, pulls], selectedTabIndex: 3, splitViews: [[0, 1], [1, 3]])
+        var file = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        var folders = try #require(file["folders"] as? [[String: Any]])
+        folders[1]["live"] = ["source": ["feed": ["address": "https://blog.example.org/feed.xml", "isPrivate": true]], "itemLimit": 10, "refreshMinutes": 60]
+        // A source that a later build could add.
+        folders[2]["live"] = ["source": ["laterSource": ["query": "x"]]]
+        file["folders"] = folders
+        file.removeValue(forKey: "windows")
+        try JSONSerialization.data(withJSONObject: file).write(to: folder.store.fileURL)
+
+        let store = folder.store
+        let loaded = try #require(store.load())
+        #expect(store.loadedLiveFolders)
+        #expect(loaded.folders?.map(\.id) == [workFolder, docsFolder, looseFolder])
+        #expect(loaded.folders?.map(\.parentID) == [nil, workFolder, nil] && loaded.folders?.allSatisfy(\.isPinned) == true)
+        #expect(loaded.tabs.map(\.id) == [tab2, favoriteTab] && loaded.tabs.map(\.folderID) == [docsFolder, nil])
+        #expect(loaded.tabs.allSatisfy { $0.liveItemID == nil })
+        #expect(loaded.splitViews == [[0, 1]] && loaded.selectedTabIndex == 1)
+        #expect(loaded.windows?.map(\.selectedTabID) == [favoriteTab])
+        try store.saveNow(loaded).get()
+        let saved = try folder.contents(of: "session.json")
+        #expect(["live", "liveItemID"].allSatisfy { saved.range(of: Data("\"\($0)\"".utf8)) == nil })
+        let next = folder.store
+        #expect(try #require(next.load()).tabs.map(\.id) == [tab2, favoriteTab])
+        #expect(!next.loadedLiveFolders)
     }
 
     @Test func version15FilesLoadWithoutLiveFolders() throws {
         let folder = try SessionFolder()
         try folder.write(version15File)
-        let loaded = try #require(folder.store.load())
-        #expect(loaded.folders?.allSatisfy { $0.live == nil } == true)
+        let store = folder.store
+        let loaded = try #require(store.load())
+        #expect(!store.loadedLiveFolders)
         #expect(loaded.tabs.allSatisfy { $0.liveItemID == nil })
     }
 
-    @Test func aLiveFolderWhoseConfigurationDoesNotDecodeLoadsAsAnOrdinaryFolder() throws {
+    /// What runs after the next write, as the removed live folders' stored data goes, runs once, and only after a write that succeeds.
+    @Test func whatRunsAfterTheNextWriteWaitsForOneThatSucceeds() throws {
+        final class Runs: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            var count: Int { lock.withLock { value } }
+            func record() { lock.withLock { value += 1 } }
+        }
         let folder = try SessionFolder()
-        let feed = LiveFolderConfiguration(source: .feed(address: URL(string: "https://blog.example.org/feed.xml")!, isPrivate: false))
-        let news = TabFolder(id: docsFolder, spaceID: spaceA, name: "News", isPinned: true, live: feed)
-        let record = SessionSnapshot.TabRecord(id: tab1, spaceID: spaceA, url: URL(string: "https://blog.example.org/a")!, title: "Post", isPinned: true, folderID: docsFolder, liveItemID: "a")
-        let snapshot = SessionSnapshot(version: 16, spaces: [Space(id: spaceA, name: "A")], currentSpaceID: spaceA, favorites: [], tabs: [record], folders: [news])
-        // A source that a later build could add.
-        var file = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
-        var folders = try #require(file["folders"] as? [[String: Any]])
-        var live = try #require(folders[0]["live"] as? [String: Any])
-        live["source"] = ["laterSource": ["query": "x"]]
-        folders[0]["live"] = live
-        file["folders"] = folders
-        try JSONSerialization.data(withJSONObject: file).write(to: folder.store.fileURL)
-        let loaded = try #require(folder.store.load())
-        #expect(loaded.folders?.map(\.id) == [docsFolder])
-        #expect(loaded.folders?.map(\.live) == [nil])
-        #expect(loaded.tabs.map(\.id) == [tab1] && loaded.tabs.map(\.folderID) == [docsFolder] && loaded.tabs.map(\.liveItemID) == [nil])
-        #expect(try folder.fileNames() == ["session.json"])
+        let store = folder.store
+        let newer = version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": 99,"#)
+        try folder.write(newer)
+        let backup = folder.url.appendingPathComponent("session-v99.json")
+        try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
+        let snapshot = try #require(store.load())
+        let runs = Runs()
+        store.runAfterNextWrite(runs.record)
+        #expect(throws: (any Error).self) { try store.saveNow(snapshot).get() }
+        #expect(runs.count == 0)
+        try FileManager.default.removeItem(at: backup)
+        try store.saveNow(snapshot).get()
+        #expect(runs.count == 1)
+        try store.saveNow(snapshot).get()
+        #expect(runs.count == 1)
     }
 
     @Test func newerFilesLeaveACopyAndStillLoad() throws {
@@ -441,72 +443,6 @@ import Testing
         try store.saveNow(snapshot).get()
         #expect(try folder.contents(of: "session-v99.json") == Data(newer.utf8))
         #expect(try #require(folder.store.load()).tabs.isEmpty)
-    }
-
-    /// The live folders' service keeps the entries and Keychain items of the folders that the copies beside the file have as live folders, also with a configuration that this build cannot decode, whatever the versions of the copies and the file, a file without a version included; a copy without folders adds none, and names that are no copies count for nothing.
-    @Test(arguments: [SessionSnapshot.currentVersion - 1, SessionSnapshot.currentVersion, nil] as [Int?])
-    func theCopiesKeepTheFoldersTheyHaveAsLiveFolders(file version: Int?) throws {
-        let folder = try SessionFolder()
-        let later = UUID(), current = UUID()
-        try folder.write(copyFile(version: 99, folders: [(later, #"{"source": {"laterSource": {}}}"#), (UUID(), "null"), (UUID(), nil)]), to: "session-v99.json")
-        try folder.write(copyFile(version: SessionSnapshot.currentVersion, folders: [(current, liveConfiguration)]), to: "session-v\(SessionSnapshot.currentVersion).json")
-        try folder.write(#"{"version": 5}"#, to: "session-v5.json")
-        for name in ["session-v.json", "session-v+99.json", "session-v99x.json", "session-vlater.json"] { try folder.write("not a copy", to: name) }
-        try folder.write(version.map { version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#($0),"#) } ?? version1File)
-        let store = folder.store
-        _ = try #require(store.load())
-        #expect(store.keptLiveFolders == [later, current])
-    }
-
-    /// An older build read this build's file, left its copy, and saved over the file without the live folders: the copy keeps them through this build's saves for as long as it is there.
-    @Test func aCopyKeepsItsLiveFoldersThroughThisBuildsSaves() throws {
-        let folder = try SessionFolder()
-        let live = UUID()
-        let copyName = "session-v\(SessionSnapshot.currentVersion).json"
-        try folder.write(copyFile(version: SessionSnapshot.currentVersion, folders: [(live, liveConfiguration)]), to: copyName)
-        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(SessionSnapshot.currentVersion - 1),"#))
-        let store = folder.store
-        var snapshot = try #require(store.load())
-        #expect(store.keptLiveFolders == [live])
-        // As the session's snapshots are.
-        snapshot.version = SessionSnapshot.currentVersion
-        try store.saveNow(snapshot).get()
-        let next = folder.store
-        _ = try #require(next.load())
-        #expect(next.keptLiveFolders == [live])
-        try FileManager.default.removeItem(at: folder.url.appendingPathComponent(copyName))
-        #expect(next.keptLiveFolders == [])
-    }
-
-    /// Without a file, a copy's live folders still count, and without the data folder nothing does.
-    @Test func withoutAFileTheCopiesStillKeepTheirLiveFolders() throws {
-        let folder = try SessionFolder()
-        let live = UUID()
-        try folder.write(copyFile(version: 99, folders: [(live, liveConfiguration)]), to: "session-v99.json")
-        let store = folder.store
-        #expect(store.load() == nil)
-        #expect(store.keptLiveFolders == [live])
-        try FileManager.default.removeItem(at: folder.url)
-        #expect(store.keptLiveFolders == [])
-    }
-
-    /// Every folder keeps its entry and Keychain item while a copy does not decode, since it may have any folder as a live folder, while a file is set aside, and while the data folder's names cannot be read, as with search permission without read permission.
-    @Test func whatCannotBeReadKeepsEveryLiveFolder() throws {
-        let folder = try SessionFolder()
-        try folder.write(version8File.replacingOccurrences(of: #""version": 8,"#, with: #""version": \#(SessionSnapshot.currentVersion),"#))
-        let store = folder.store
-        _ = try #require(store.load())
-        #expect(store.keptLiveFolders == [])
-        for name in ["session-v99.json", "session.unreadable.json"] {
-            try folder.write("unreadable", to: name)
-            #expect(store.keptLiveFolders == nil)
-            try FileManager.default.removeItem(at: folder.url.appendingPathComponent(name))
-        }
-        try FileManager.default.setAttributes([.posixPermissions: 0o300], ofItemAtPath: folder.url.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.url.path) }
-        #expect(store.keptLiveFolders == nil)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.url.path)
-        #expect(store.keptLiveFolders == [])
     }
 
     @Test func unreadableFilesMoveAside() throws {
@@ -711,17 +647,6 @@ private let workFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F51"
 private let docsFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F52")!
 private let looseFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F53")!
 private let mixedFolder = UUID(uuidString: "6A1E0C52-3D7B-4E2A-9F10-5B8C2D4E6F54")!
-
-/// A live folder's configuration as `session.json` keeps it.
-private let liveConfiguration = #"{"source": {"feed": {"address": "https://blog.example.org/feed.xml", "isPrivate": true}}, "itemLimit": 25, "refreshMinutes": 30}"#
-
-/// A copy of a newer build's file, holding only its version and folders, each with the JSON of its `live` value or without one.
-private func copyFile(version: Int, folders: [(id: UUID, live: String?)]) -> String {
-    let folders = folders.map { folder in
-        #"{"id": "\#(folder.id)", "spaceID": "\#(spaceA)", "name": "Folder", "isPinned": true, "isCollapsed": false"# + (folder.live.map { #", "live": \#($0)"# } ?? "") + "}"
-    }
-    return #"{"version": \#(version), "folders": [\#(folders.joined(separator: ", "))]}"#
-}
 
 /// The files without tab IDs, by version.
 private let olderFiles = [1: version1File, 4: version4File, 7: version7File]

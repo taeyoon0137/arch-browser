@@ -1191,16 +1191,6 @@
         }
       }
     },
-    "Unread" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "읽지 않음"
-          }
-        }
-      }
-    },
     "Use Current Page as Saved Page" : {
       "localizations" : {
         "ko" : {

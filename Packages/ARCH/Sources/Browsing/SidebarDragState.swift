@@ -106,7 +106,7 @@ struct SidebarReorderHover {
         return .beside(next.id, folder: nil, pinned: false, after: false)
     }
 
-    /// The slot a dragged tab moves to with the pointer at `point` in the window, and the frame of the row whose place it takes, which then holds the hysteresis (`SidebarReorderHover.moved(into:)`), or nil while the tab keeps `current`: the end of the list whose closing row is under the pointer (`listEnd`), unless the tab already ends that list; beside the tab row under it (`placement`), but not a collapsed folder's tab, a live folder's, or an agent's tab outside the dragged tab's folder; or under the divider where no row takes it (`unpinning`). `rowFrames` holds the frames of the space's tab rows, `divider` and `newTabRow` those of the rows that end the pinned and open lists, and `list` the visible part of the list.
+    /// The slot a dragged tab moves to with the pointer at `point` in the window, and the frame of the row whose place it takes, which then holds the hysteresis (`SidebarReorderHover.moved(into:)`), or nil while the tab keeps `current`: the end of the list whose closing row is under the pointer (`listEnd`), unless the tab already ends that list; beside the tab row under it (`placement`), but not a collapsed folder's tab or an agent's tab outside the dragged tab's folder; or under the divider where no row takes it (`unpinning`). `rowFrames` holds the frames of the space's tab rows, `divider` and `newTabRow` those of the rows that end the pinned and open lists, and `list` the visible part of the list.
     static func next(for tab: Tab, at point: CGPoint, current: SidebarTabSlot?, in spaceID: UUID, tree: FolderTree, rowFrames: [UUID: CGRect],
                      divider: CGRect?, newTabRow: CGRect?, list: CGRect) -> (slot: SidebarTabSlot, holding: CGRect?)? {
         if let pinned = listEnd(at: point, divider: divider, newTabRow: newTabRow, list: list), let endFrame = pinned ? divider : newTabRow {
@@ -114,7 +114,7 @@ struct SidebarReorderHover {
             return (.end(pinned: pinned), endFrame)
         }
         let tabs = tree.tabs(in: spaceID, pinned: true) + tree.tabs(in: spaceID, pinned: false)
-        if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && !tree.isLive($0.folderID) && rowFrames[$0.id]?.contains(point) == true }),
+        if let target = tabs.first(where: { $0.id != tab.id && !tree.isInCollapsedFolder($0) && rowFrames[$0.id]?.contains(point) == true }),
            let rowFrame = rowFrames[target.id], let slot = rowFrames[tab.id],
            let placement = placement(beside: target, rowFrame: rowFrame, dragging: tab, slotFrame: slot, current: current, at: point),
            target.agentOwnerID == nil || target.folderID == tab.folderID {

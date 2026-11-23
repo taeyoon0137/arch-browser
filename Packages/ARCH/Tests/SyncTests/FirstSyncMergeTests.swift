@@ -119,13 +119,14 @@ import Testing
         #expect(result.recordsToUpload == Array(locals.dropFirst()))
     }
 
-    @Test func anImportedOrdinaryFolderDoesNotReplaceASameNamedLiveFolder() throws {
+    /// An older Mac's live folder is an ordinary folder here, since this build does not read `live`, so a local folder of its name and place takes its record, which keeps the field for that Mac.
+    @Test func aLocalFolderMatchesAnOlderMacsLiveFolderOfTheSameName() throws {
         let ordinary = folder("imports", "Reading", space: "s")
         var live = folder("live", "Reading", space: "s")
         live.fields["live"] = .text("public feed configuration")
         let result = try plan([ordinary], [live])
-        #expect(result.replacements.isEmpty)
-        #expect(result.recordsToUpload == [ordinary])
+        #expect(result.replacements.map { "\($0.localName)>\($0.serverName)" } == ["imports>live"])
+        #expect(result.recordsToUpload.isEmpty)
         #expect(result.recordsToApply["live"] == live)
     }
 

@@ -1,6 +1,5 @@
 // The browser import's plan on sidebars built as values: merges by name and address without a record, the record's IDs after the user moved, renamed, or removed what an import brought, new Personas, the default destination, and `imports.json`. Rows hold made-up addresses only.
 import Foundation
-import LiveFolders
 import Testing
 @testable import Browsing
 
@@ -81,27 +80,6 @@ import Testing
         #expect(plan.pinnedTabs.map(\.spaceID).first == work.id)
         // Each pinned tab carries its imported title, which the session saves with its address (`Tab.takeImport(_:)`, `SavedPageTests`).
         #expect(plan.pinnedTabs.map(\.title) == ["d.example", "e.example"])
-    }
-
-    @MainActor @Test func anImportedFolderNamedLikeALiveFolderIsMadeBesideIt() throws {
-        var sidebar = Self.sidebar()
-        let work = Space(name: "Work", personaID: Persona.defaultID)
-        var docs = TabFolder(spaceID: work.id, name: "Docs", isPinned: true)
-        docs.live = LiveFolderConfiguration(source: .feed(address: URL(string: "https://feeds.example/docs.xml")!, isPrivate: false))
-        sidebar.spaces.append(work)
-        sidebar.folders.append(docs)
-        // A live folder item's tab at d's address keeps no imported bookmark out, since it comes and goes with its source.
-        let item = Tab(id: UUID(), webContents: PageStub(engine: .webKit, url: Self.url("d.example")), spaceID: work.id, isPinned: true, personaID: Persona.defaultID)
-        item.folderID = docs.id
-        item.liveItemID = "d"
-        #expect(SidebarImport.Sidebar.TabState(item) == nil)
-
-        let plan = Self.plan(in: sidebar)
-        let imported = try #require(plan.folders.first)
-        #expect(plan.folders.map(\.name) == ["Docs", "Other Bookmarks / Recipes"])
-        #expect(imported.id != docs.id && imported.spaceID == work.id && imported.live == nil)
-        #expect(plan.pinnedTabs.first { $0.url == Self.url("d.example") }?.folderID == imported.id)
-        #expect(plan.entry.items(in: Persona.defaultID).folders["docs"] == imported.id)
     }
 
     @Test func aSecondIdenticalImportAddsNothing() {

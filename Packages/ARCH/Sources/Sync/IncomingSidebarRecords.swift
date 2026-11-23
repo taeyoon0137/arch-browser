@@ -3,7 +3,6 @@ import ARCHEngine
 import Browsing
 import CryptoKit
 import Foundation
-import LiveFolders
 
 /// Merges fetched sidebar records and repairs their graph before applying them locally.
 public enum IncomingSidebarRecords {
@@ -58,7 +57,7 @@ public enum IncomingSidebarRecords {
         try plan(records: records, deleted: deleted, foundAt: foundAt, defaultEngine: defaultEngine, held: heldRecords(server: records, local: []))
     }
 
-    /// The sidebar records that this build leaves alone, by name: a server record whose name or a field it needs this build cannot read, such as a tint, engine, or live folder source of a newer build, a live folder this Mac would not share, or a space's home address that is not http or https; a server record that would move `local`'s row of the same name to another Persona or type; and every record under one of them, since the repairs would otherwise move it. The plans skip them, and the comparisons neither save nor delete them, so sync goes on without them and keeps what another build wrote.
+    /// The sidebar records that this build leaves alone, by name: a server record whose name or a field it needs this build cannot read, such as a tint or engine of a newer build, or a space's home address that is not http or https; a server record that would move `local`'s row of the same name to another Persona or type; and every record under one of them, since the repairs would otherwise move it. The plans skip them, and the comparisons neither save nor delete them, so sync goes on without them and keeps what another build wrote.
     public static func heldOut(server: [SyncRecord], local: [SyncRecord]) -> Set<String> {
         Set(heldRecords(server: server, local: local).keys)
     }
@@ -107,10 +106,8 @@ public enum IncomingSidebarRecords {
             // A home page set here comes only from an http or https page.
             return item[.homeURL] == nil || address(.homeURL).flatMap { $0.scheme?.lowercased() }.map { $0 == "http" || $0 == "https" } == true
         case .folder:
-            guard text(.name) != nil else { return false }
-            guard item[.live] != nil else { return true }
-            let live = text(.live).flatMap { try? JSONDecoder().decode(LiveFolderConfiguration.self, from: Data($0.utf8)) }
-            return live.map { SidebarSyncState.canShare($0) } ?? false
+            // An older build's live folder, whose `live` field this build does not read, applies as an ordinary folder (`docs/sync.md`, Schema versions).
+            return text(.name) != nil
         case .favorite:
             return address(.url) != nil && text(.title) != nil
         case .tab:
@@ -181,7 +178,7 @@ public enum IncomingSidebarRecords {
             let key: SyncField = item.recordType == .folder ? .parent : .folder
             if let parent = item[key] {
                 let folder: SyncRecord? = if case .reference(let id) = parent { all[id] } else { nil }
-                if folder?.recordType != .folder || folder?[.persona] != owner || folder?[.live] != nil { item[key] = nil }
+                if folder?.recordType != .folder || folder?[.persona] != owner { item[key] = nil }
             }
             all[item.recordName] = item
         }
@@ -312,14 +309,9 @@ public enum IncomingSidebarRecords {
             }
         }
         let folderRows = try folders.map { item in
-            var live: LiveFolderConfiguration?
-            if item[.live] != nil {
-                live = try JSONDecoder().decode(LiveFolderConfiguration.self, from: Data(text(item, .live).utf8))
-                guard SidebarSyncState.canShare(live) else { throw InvalidGraph.malformedRecord(item.recordName) }
-            }
-            return try SidebarSyncState.Folder(id: identifier(item.recordName, type: .folder), personaID: owner(item),
+            try SidebarSyncState.Folder(id: identifier(item.recordName, type: .folder), personaID: owner(item),
                 spaceID: identifier(reference(item, .space), type: .space), parentID: optionalParent(item, .parent),
-                name: text(item, .name), live: live)
+                name: text(item, .name))
         }
         let favorites = try SyncOrderKeys.sorted(all.values.filter { $0.recordType == .favorite }).map { item in
             try Favorite(id: identifier(item.recordName, type: .favorite), url: url(item, .url), title: text(item, .title), personaID: owner(item))

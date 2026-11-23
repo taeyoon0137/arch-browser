@@ -1,9 +1,8 @@
-// Sessions in temporary profiles use process-local storage for page state and private feed addresses.
+// Sessions in temporary profiles use process-local storage for page state and touch no Keychain.
 import ARCHEngine
 @testable import Browsing
 import CryptoKit
 import Foundation
-import LiveFolders
 
 extension SessionStateSeal {
     static let fixture: SessionStateSeal = {
@@ -13,8 +12,9 @@ extension SessionStateSeal {
 }
 
 extension BrowserSession {
-    convenience init(testRegistry: EngineRegistry, directory: URL, addresses: any LiveFolderAddressStore = InMemoryLiveFolderKeychain()) throws {
+    /// `removeLiveFolderKeychainItems` stands in for deleting the removed live folders' Keychain items.
+    convenience init(testRegistry: EngineRegistry, directory: URL, removeLiveFolderKeychainItems: @escaping @Sendable () -> Void = {}) throws {
         try self.init(registry: testRegistry, userDataDirectory: directory, builtInPlugins: [], cefVersion: nil,
-                      sessionSeal: .fixture, liveFolderAddresses: addresses)
+                      sessionSeal: .fixture, removeLiveFolderKeychainItems: removeLiveFolderKeychainItems)
     }
 }
