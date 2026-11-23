@@ -22,10 +22,13 @@ public struct AgentPanelActions {
     public var openModelSettings: (AgentModelSettingsPage) -> Void
     /// Opens the built-in terminal with the tool's sign-in typed but not run.
     public var signIn: (AIProviderID) -> Void
+    /// Opens a new task's composer in the window, which an ended session offers; nil where the window has none.
+    public var newTask: (() -> Void)?
 
     public init(formatReply: @escaping (String) -> AttributedString, openLink: @escaping (URL) -> Void, showTab: @escaping (UUID) -> Void,
                 openAISettings: @escaping () -> Void, signIn: @escaping (AIProviderID) -> Void,
-                openModelSettings: ((AgentModelSettingsPage) -> Void)? = nil, showReadTab: ((UUID) -> Void)? = nil) {
+                openModelSettings: ((AgentModelSettingsPage) -> Void)? = nil, showReadTab: ((UUID) -> Void)? = nil, newTask: (() -> Void)? = nil) {
+        self.newTask = newTask
         self.formatReply = formatReply
         self.openLink = openLink
         self.showTab = showTab

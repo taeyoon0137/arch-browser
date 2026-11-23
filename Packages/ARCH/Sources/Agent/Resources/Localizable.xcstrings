@@ -841,6 +841,16 @@
         }
       }
     },
+    "New Agent Task" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 에이전트 작업"
+          }
+        }
+      }
+    },
     "No eligible tabs to share in this Persona." : {
       "localizations" : {
         "ko" : {
@@ -1401,16 +1411,6 @@
         }
       }
     },
-    "Show this tab" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 탭 보기"
-          }
-        }
-      }
-    },
     "Shows the capture larger" : {
       "localizations" : {
         "ko" : {
@@ -1817,6 +1817,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "이 작업이 종료됨"
+          }
+        }
+      }
+    },
+    "This task has ended. Its conversation stays until you delete it." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 작업이 종료되었습니다. 대화는 삭제할 때까지 남아 있습니다."
           }
         }
       }
