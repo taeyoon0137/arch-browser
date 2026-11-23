@@ -389,7 +389,7 @@ struct TabRowButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 10, weight: .bold))
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+                .background(Circle().fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

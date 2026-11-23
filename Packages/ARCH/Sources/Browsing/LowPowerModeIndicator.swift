@@ -43,7 +43,7 @@ struct LowPowerModeIndicator: View {
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(Color.secondary, Color.yellow)
                     .frame(width: 30, height: 28)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

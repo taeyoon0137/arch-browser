@@ -124,13 +124,44 @@ import Testing
         let persona = session.addPersona(named: "Work")
         chromium.unavailableStorageID = persona.id
 
-        let fallback = session.runtime(for: .chromium, in: persona.id)
+        let fallback = try #require(session.runtime(for: .chromium, in: persona.id))
         #expect(fallback.kind == .webKit)
         #expect(fallback.personaID == persona.id)
         #expect(fallback === session.runtime(for: .webKit, in: persona.id))
-        #expect(session.runtime(for: .chromium, in: Persona.defaultID).kind == .chromium)
+        #expect(session.runtime(for: .chromium, in: Persona.defaultID)?.kind == .chromium)
         chromium.unavailableStorageID = nil
-        #expect(session.runtime(for: .chromium, in: persona.id).kind == .chromium)
+        #expect(session.runtime(for: .chromium, in: persona.id)?.kind == .chromium)
+    }
+
+    @Test func aPersonaWithoutAnyProfileKeepsItsTabsUnopenedAndDropsItsPopups() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        let engine = SessionTestEngine()
+        registry.register(engine)
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let persona = session.addPersona(named: "Work")
+        let space = try #require(session.spaces(in: persona.id).first)
+        // No engine opens a profile for the Persona, as when its folder cannot open, and a Persona that is not listed, as after a synced deletion, has none either.
+        engine.unavailableStorageID = persona.id
+        #expect(session.runtime(for: engine.engineKind, in: persona.id) == nil)
+        #expect(session.runtime(for: engine.engineKind, in: UUID()) == nil)
+
+        // Its tab keeps its address in a stand-in instead of stopping the app.
+        let address = try #require(URL(string: "https://example.org/"))
+        let tab = session.openTab(url: address, in: space.id, select: false)
+        #expect(tab.webContents is UnloadedWebContents && tab.url == address && !tab.isLoaded)
+
+        // A popup its page opens joins no list.
+        let count = session.tabs.count
+        let popup = UnloadedWebContents(url: address.appendingPathComponent("popup"), title: "", engine: engine.engineKind, state: nil)
+        tab.openNewTab?(popup, popup.url, .newForegroundTab)
+        #expect(session.tabs.count == count && !session.tabs.contains { $0.webContents === popup })
+
+        // Once a profile opens, the Persona's pages open as before.
+        engine.unavailableStorageID = nil
+        #expect(session.runtime(for: engine.engineKind, in: persona.id) != nil)
     }
 
     @Test func aClosedPinReopensAlongsideItsReinstatedSyncRecordWithDistinctIDs() async throws {

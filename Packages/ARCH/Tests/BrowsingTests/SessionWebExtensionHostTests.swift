@@ -63,7 +63,7 @@ import Testing
 
     /// Starts a download from the tab's page through the session, as the engine asks for its file's name.
     private func download(from tab: Tab, in session: BrowserSession) -> DownloadDouble {
-        let downloads = session.runtime(for: tab.engineKind, in: tab.personaID).context.downloads
+        let downloads = session.runtime(for: tab.engineKind, in: tab.personaID)!.context.downloads
         let item = DownloadDouble(webContents: tab.webContents)
         session.downloads(downloads, determineFilenameFor: item, defaultFilename: "a.bin") { _ in item.isDecided = true }
         return item

@@ -124,6 +124,13 @@ struct SidebarReorderHover {
                          openTabs: tree.tabsOutsideFolders(in: spaceID, pinned: false), rowFrames: rowFrames).map { ($0, nil) }
     }
 
+    /// The frames of the rows that the pointer can reach at `point`: those of the area under it, the pinned area's or the open area's with its New Tab row, since rows scrolled out of an area's sight lie under the divider or the other area; none over the divider, which ends the pinned list itself; and the frame of `slotOf`, the dragged row's slot, wherever it is, which `placement` measures the pointer from.
+    static func reachableFrames(at point: CGPoint, pinnedArea: CGRect, pinnedFrames: [UUID: CGRect], openArea: CGRect, openFrames: [UUID: CGRect], slotOf draggedID: UUID?) -> [UUID: CGRect] {
+        var frames = pinnedArea.contains(point) ? pinnedFrames : openArea.contains(point) ? openFrames : [:]
+        if let draggedID, let slot = pinnedFrames[draggedID] ?? openFrames[draggedID] { frames[draggedID] = slot }
+        return frames
+    }
+
     /// Move only the dragged row in this render's lists. Its identity stays with the gesture.
     func project(_ tab: Tab, pinnedRows: inout [FolderTree.Row], openRows: inout [FolderTree.Row]) {
         var destination = (pinned ? pinnedRows : openRows).filter { $0.id != tab.id }

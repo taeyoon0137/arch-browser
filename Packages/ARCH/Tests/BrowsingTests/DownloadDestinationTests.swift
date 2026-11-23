@@ -200,8 +200,8 @@ import Testing
         registry.register(SessionTestEngine(kind: .webKit))
         let session = try BrowserSession(testRegistry: registry, directory: root)
         let other = session.addPersona(named: "Work")
-        let chromium = session.runtime(for: .chromium, in: Persona.defaultID).context
-        let webKit = session.runtime(for: .webKit, in: other.id).context
+        let chromium = try #require(session.runtime(for: .chromium, in: Persona.defaultID)).context
+        let webKit = try #require(session.runtime(for: .webKit, in: other.id)).context
         for context in [chromium, webKit] { context.preferences = EnginePreferences(downloadFilePath: directory) }
         try body(session, chromium.downloads, webKit.downloads, directory)
     }

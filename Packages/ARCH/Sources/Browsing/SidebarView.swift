@@ -3,12 +3,14 @@
 import AppKit
 import SwiftUI
 
-/// Translucent fills for sidebar controls. They lighten the window material in both appearances instead of covering it with an opaque color.
+/// Translucent fills for sidebar controls. They lighten the window material in both appearances instead of covering it with an opaque color. A row under the pointer takes `hover`; a small borderless button under the pointer takes `buttonHover`, which stays visible on a hovered or selected row, and one that is on, as the Library button while the library is open, `buttonOn`.
 enum SidebarFill {
-    case field, hover, selected
+    case field, hover, selected, buttonHover, buttonOn
 
     func color(in scheme: ColorScheme) -> Color {
         switch (self, scheme) {
+        case (.buttonHover, _): return .primary.opacity(0.08)
+        case (.buttonOn, _): return .primary.opacity(0.1)
         case (.field, .dark): return .white.opacity(0.07)
         case (.field, _): return .black.opacity(0.05)
         case (.hover, .dark): return .white.opacity(0.05)
@@ -319,7 +321,7 @@ struct SidebarIconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .frame(width: 30, height: 28)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering && isEnabled ? SidebarFill.hover.color(in: colorScheme) : .clear))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering && isEnabled ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -545,14 +545,14 @@ final class EngineRuntime {
         return engines
     }
 
-    /// Uses the requested engine when its profile opens, otherwise another registered engine in the same Persona.
-    func runtime(for kind: EngineKind, in personaID: Persona.ID) -> EngineRuntime {
+    /// Uses the requested engine when its profile opens, otherwise another registered engine in the same Persona. Nil when no engine opens a profile for the Persona, as when its profile folder cannot open or a synced deletion has removed the Persona while one of its pages still asks; each caller then leaves the page unopened instead of stopping the app.
+    func runtime(for kind: EngineKind, in personaID: Persona.ID) -> EngineRuntime? {
         let engines = engines(of: personaID)
         if let runtime = engines.runtimes[kind] ?? startRuntime(kind, in: engines) { return runtime }
         for fallback in registry.registeredKinds where fallback != kind {
             if let runtime = engines.runtimes[fallback] ?? startRuntime(fallback, in: engines) { return runtime }
         }
-        preconditionFailure("No engine could open a profile for the Persona \(personaID)")
+        return nil
     }
 
     /// Creates the Persona's profile and browser in the engine and connects them to the session: the Persona's web extensions, their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed.
@@ -784,18 +784,37 @@ final class EngineRuntime {
     /// The favorites' tabs from the last session, by favorite ID. Each opens where it was when its favorite is next opened, so launching loads none of them.
     @Published private var savedFavoriteTabs: [UUID: SessionSnapshot.FavoriteTabRecord] = [:]
 
-    /// Whether the tab shows a page that is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
+    /// Where a tab that Add to Favorites moved came from, so that Remove from Favorites gives it back: its space, and its saved page while it was pinned.
+    private struct MovedFavoriteSource {
+        let spaceID: UUID
+        let savedPage: SavedPage?
+    }
+
+    /// The favorites made by moving a tab into them in this session, by favorite ID.
+    private var movedFavoriteSources: [UUID: MovedFavoriteSource] = [:]
+
+    /// The address a favorite made from the tab takes: a pinned tab's saved page, which the tab may be off, or else the page it shows.
+    private func favoriteAddress(of tab: Tab) -> URL? {
+        tab.isPinned ? tab.savedPage?.url ?? tab.url : tab.url
+    }
+
+    /// Whether Add to Favorites moves the tab itself into the favorites: the user's own tab in a space's list. A small window's tab, a live folder item's tab, an agent's tab, and a favorite's own tab keep their place, and the favorite gets a copy of the page.
+    private func movesIntoFavorites(_ tab: Tab) -> Bool {
+        tab.spaceID != nil && tab.isListedInSidebar && tab.agentOwnerID == nil && !folderTree.isLive(tab.folderID) && tabs.contains { $0 === tab }
+    }
+
+    /// Whether the tab's page, a pinned tab's saved page, is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
     public func canAddFavorite(_ tab: Tab) -> Bool {
-        guard let url = tab.url, tab.spaceID != nil, tab.isListedInSidebar,
-              tab.agentOwnerID == nil, !tab.isInSmallWindow,
-              !folderTree.isLive(tab.folderID), tabs.contains(where: { $0 === tab }) else { return false }
+        guard let url = favoriteAddress(of: tab) else { return false }
         return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
     }
 
-    /// Moves the tab and its live page into the favorites of its Persona.
+    /// Moves the tab and its live page into the favorites of its Persona, at its saved page's address for a pinned tab, or adds a copy of the page for a tab that stays (`movesIntoFavorites`).
     public func addFavorite(_ tab: Tab) {
-        guard canAddFavorite(tab), let url = tab.url else { return }
+        guard canAddFavorite(tab), let url = favoriteAddress(of: tab) else { return }
         let favorite = Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID)
+        guard movesIntoFavorites(tab), let spaceID = tab.spaceID else { return favorites.append(favorite) }
+        movedFavoriteSources[favorite.id] = MovedFavoriteSource(spaceID: spaceID, savedPage: tab.isPinned ? tab.savedPage : nil)
         leaveSplitView(tab)
         tabs.removeAll { $0 === tab }
         tab.spaceID = nil
@@ -803,6 +822,22 @@ final class EngineRuntime {
         tab.isPinned = false
         favoriteTabs[favorite.id] = tab
         favorites.append(favorite)
+    }
+
+    /// Gives a favorite's tab back to the space it was moved from, at the end of the list it left, pinned with its saved page if it was pinned. False when the favorite was not made by a move in this session, has no open tab, or its space has gone or belongs to another Persona.
+    private func returnMovedFavoriteTab(_ favorite: Favorite) -> Bool {
+        guard let source = movedFavoriteSources.removeValue(forKey: favorite.id), let tab = favoriteTabs[favorite.id],
+              spaces.contains(where: { $0.id == source.spaceID && $0.resolvedPersonaID == tab.personaID }) else { return false }
+        favoriteTabs[favorite.id] = nil
+        savedFavoriteTabs[favorite.id] = nil
+        favorites.removeAll { $0.id == favorite.id }
+        tab.spaceID = source.spaceID
+        if let savedPage = source.savedPage {
+            tab.isPinned = true
+            tab.savedPage = savedPage
+        }
+        tabs.append(tab)
+        return true
     }
 
     /// Appends, in order, the favorites whose addresses are not favorites of the Persona yet, as favorites of that Persona, and returns how many it added. Import uses it for bookmarks.
@@ -824,8 +859,9 @@ final class EngineRuntime {
         change(&favorites[index])
     }
 
-    /// Removes a favorite once its tab, if it has one, agrees to close.
+    /// Removes a favorite once its tab, if it has one, agrees to close. A tab that Add to Favorites moved into the favorites in this session goes back to its space instead, so that adding and removing a favorite loses no page.
     public func removeFavorite(_ favorite: Favorite) {
+        if returnMovedFavoriteTab(favorite) { return }
         endFavoriteTab(favorite) { [weak self] in
             self?.favorites.removeAll { $0.id == favorite.id }
         }
@@ -909,7 +945,8 @@ final class EngineRuntime {
     func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID, agentTab: Bool = false) -> any EngineWebContents {
         let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts, inAgentTab: agentTab)
         let requested = engine ?? defaultEngine
-        let runtime = runtime(for: requested, in: personaID)
+        // Without a profile the tab keeps its address in a stand-in, which opens the page once a profile can.
+        guard let runtime = runtime(for: requested, in: personaID) else { return UnloadedWebContents(url: url, title: "", engine: requested, state: state) }
         return runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url ?? Self.newTabURL, restorableState: runtime.kind == requested ? state : nil, pageScripts: pageScripts))
     }
 
@@ -942,7 +979,9 @@ final class EngineRuntime {
         // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space. A page of a tab that a plugin or a web extension opened, before the user acted in it, opens its tab held as theirs (`PageDownloadGate.holdUntilUserActs()`), so that their own pages cannot download through the tabs they open.
         tab.openNewTab = { [weak self, weak tab] popup, targetURL, disposition in
             guard let self, let tab else { return }
-            self.runtime(for: popup.engineKind, in: personaID).browser.takeOwnership(of: popup)
+            // A Persona without a profile, such as one a synced deletion removed, cannot own the popup, which no tab then takes.
+            guard let runtime = self.runtime(for: popup.engineKind, in: personaID) else { return }
+            runtime.browser.takeOwnership(of: popup)
             let isHeld = tab.pageDownloads.isHeldUntilUserActs
             defer { if isHeld { self.tabs.first { $0.webContents === popup }?.pageDownloads.holdUntilUserActs() } }
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
@@ -954,7 +993,8 @@ final class EngineRuntime {
         // A page that the engine loads only in another web contents of the tab's profile, as WebKit loads a web extension's pages, takes the tab's place as on an engine switch. A tab that has closed drops it.
         tab.takeReplacement = { [weak self, weak tab] replacement in
             guard let self, let tab, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
-            self.runtime(for: replacement.engineKind, in: personaID).browser.takeOwnership(of: replacement)
+            guard let runtime = self.runtime(for: replacement.engineKind, in: personaID) else { return }
+            runtime.browser.takeOwnership(of: replacement)
             self.replaceWebContents(of: tab, with: replacement)
         }
         // The user cannot undo a tab closed by its page. A page also reports closing after the user closes its tab, when the tab is no longer in the list.
@@ -1110,8 +1150,7 @@ final class EngineRuntime {
 
     /// Copies cookies, then replaces a still-open tab's page with one from the requested engine.
     private func switchLoadedEngine(of tab: Tab, to kind: EngineKind, source: EngineRuntime, permits: @escaping () -> Bool) {
-        let target = runtime(for: kind, in: tab.personaID)
-        guard target.kind == kind else { return }
+        guard let target = runtime(for: kind, in: tab.personaID), target.kind == kind else { return }
         // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
         engines(of: tab.personaID).cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
             guard let self, let tab, permits(), tab.engineKind != kind, self.allTabs.contains(where: { $0.id == tab.id }) else { return }
