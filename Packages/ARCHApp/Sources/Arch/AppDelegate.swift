@@ -395,7 +395,8 @@ import Terminal
         reopenItem.keyEquivalentModifierMask = [.command, .shift]
         closingItems = [closeTabItem, closeOthersItem, reopenItem]
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "New Agent Task (⌘F twice)", action: #selector(newAgentTask), keyEquivalent: "")
+        // A menu cannot show a double press as its key equivalent, so ⌘F pressed twice (`installDoubleFindShortcut`) is in the tooltip.
+        fileMenu.addItem(withTitle: "New Agent Task", action: #selector(newAgentTask), keyEquivalent: "").toolTip = "Press ⌘F twice to start a task."
         fileMenu.addItem(withTitle: "Stop All Agents", action: #selector(stopAllAgents), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Share\u{2026}", action: #selector(sharePage), keyEquivalent: "")
@@ -422,7 +423,7 @@ import Terminal
         editMenu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Find\u{2026}", action: #selector(showFindBar), keyEquivalent: "f")
+        findItem = editMenu.addItem(withTitle: "Find\u{2026}", action: #selector(showFindBar), keyEquivalent: "f")
         editMenu.addItem(withTitle: "Find Next", action: #selector(findNext), keyEquivalent: "g")
         let findPreviousItem = editMenu.addItem(withTitle: "Find Previous", action: #selector(findPrevious), keyEquivalent: "G")
         findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
@@ -1005,22 +1006,33 @@ import Terminal
         }
     }
 
-    private var lastCommandFindAt: TimeInterval?
+    /// Edit ▸ Find…, whose shortcut Settings ▸ Shortcuts can change.
+    private var findItem: NSMenuItem?
+    private var findPresses = DoublePressCounter()
+    /// A search the user had open before the first press stays open after the second.
+    private var findBarShowedBeforeFirstPress = false
 
+    /// Find's shortcut, ⌘F unless the user changed it, pressed twice within 0.35 seconds opens New Agent Task, and the first press opens Find at once. The press matches as the menu matches it, by the character the keyboard layout gives the key. WebKit hands a key its page leaves unhandled back through `NSApp.sendEvent`, so the monitor can see one press twice; the counter counts it once. Another key down in between starts over.
     private func installDoubleFindShortcut() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            guard event.keyCode == 3, modifiers == .command, !event.isARepeat else { return event }
-            let now = ProcessInfo.processInfo.systemUptime
-            let secondPress = lastCommandFindAt.map { now - $0 <= 0.35 } == true
-            lastCommandFindAt = secondPress ? nil : now
-            if secondPress {
-                session.activeWindow?.hideFindBar()
+            guard let findShortcut = findItem.flatMap(KeyShortcut.init(menuItem:)), KeyShortcut(event: event) == findShortcut else {
+                findPresses.reset()
+                return event
+            }
+            guard !event.isARepeat else { return event }
+            let window = session.activeWindow
+            switch findPresses.press(at: event.timestamp) {
+            case .seenAgain:
+                return event
+            case .first:
+                findBarShowedBeforeFirstPress = window?.isFindBarVisible == true
+                return event
+            case .second:
+                if !findBarShowedBeforeFirstPress { window?.hideFindBar() }
                 newAgentTask()
                 return nil
             }
-            return event
         }
     }
 
