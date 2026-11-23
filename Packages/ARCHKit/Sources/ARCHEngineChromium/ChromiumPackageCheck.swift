@@ -24,31 +24,31 @@ struct ChromiumManifest {
 enum ChromiumPackageCheck {
     /// Throws with why Chromium cannot run the package in the folder at `root`.
     static func check(_ root: URL) throws {
-        guard let manifest = ChromiumManifest(packageAt: root) else { throw ChromiumPackageError("Its manifest.json is missing or is not a JSON object.") }
+        guard let manifest = ChromiumManifest(packageAt: root) else { throw ChromiumPackageError(localized("Its manifest.json is missing or is not a JSON object.")) }
         let fields = manifest.fields
-        guard fields["manifest_version"] as? Int == 3 else { throw ChromiumPackageError("Arch runs Manifest V3 extensions only.") }
+        guard fields["manifest_version"] as? Int == 3 else { throw ChromiumPackageError(localized("Arch runs Manifest V3 extensions only.")) }
         if let background = fields["background"] as? [String: Any] {
             // Chromium leaves out a Manifest V3 package's `background.scripts` and `background.page`, so the extension would run without its background.
             guard let worker = background["service_worker"] as? String else {
-                throw ChromiumPackageError("Its background runs as background.scripts or background.page, which Chromium runs for Manifest V2 only; Chromium needs background.service_worker.")
+                throw ChromiumPackageError(localized("Its background runs as background.scripts or background.page, which Chromium runs for Manifest V2 only; Chromium needs background.service_worker."))
             }
-            try requireFile(worker, in: root, for: "the background service worker")
+            try requireFile(worker, in: root, for: localized("the background service worker"))
         }
         for script in fields["content_scripts"] as? [[String: Any]] ?? [] {
             for file in (script["js"] as? [String] ?? []) + (script["css"] as? [String] ?? []) {
-                try requireFile(file, in: root, for: "a content script")
+                try requireFile(file, in: root, for: localized("a content script"))
             }
         }
         for icon in icons(in: fields["icons"]) {
-            try requireFile(icon, in: root, for: "an icon")
+            try requireFile(icon, in: root, for: localized("an icon"))
         }
         if let action = fields["action"] as? [String: Any] {
             for icon in icons(in: action["default_icon"]) {
-                try requireFile(icon, in: root, for: "the action\u{2019}s icon")
+                try requireFile(icon, in: root, for: localized("the action\u{2019}s icon"))
             }
         }
         if let locale = fields["default_locale"] as? String {
-            try requireFile("_locales/\(locale)/messages.json", in: root, for: "the default locale")
+            try requireFile("_locales/\(locale)/messages.json", in: root, for: localized("the default locale"))
         }
     }
 
@@ -64,7 +64,7 @@ enum ChromiumPackageCheck {
         let file = root.appendingPathComponent(relative).standardizedFileURL
         var isDirectory: ObjCBool = false
         guard file.path.hasPrefix(root.standardizedFileURL.path + "/"), FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-            throw ChromiumPackageError("It names \(path) as \(use), which is not in the package.")
+            throw ChromiumPackageError(localized("It names \(path) as \(use), which is not in the package."))
         }
     }
 }

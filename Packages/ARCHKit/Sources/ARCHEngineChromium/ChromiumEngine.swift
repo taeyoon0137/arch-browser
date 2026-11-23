@@ -662,21 +662,21 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
                 items.append(item)
             }
             if suggestions.isEmpty {
-                items.append(engineMenuItem("No Guesses Found", EngineContextMenuItem.noSpellingSuggestions, nil, isEnabled: false))
+                items.append(engineMenuItem(localized("No Guesses Found"), EngineContextMenuItem.noSpellingSuggestions, nil, isEnabled: false))
             }
             let ignore = #selector(NSTextView.ignoreSpelling(_:))
             if let pageView, pageView.responds(to: ignore) {
-                let item = engineMenuItem("Ignore Spelling", EngineContextMenuItem.ignoreSpelling, ignore, isEnabled: true)
+                let item = engineMenuItem(localized("Ignore Spelling"), EngineContextMenuItem.ignoreSpelling, ignore, isEnabled: true)
                 item.target = pageView
                 items.append(item)
             }
-            let learn = engineMenuItem("Learn Spelling", EngineContextMenuItem.learnSpelling, #selector(ChromiumWebContents.learnSpellingFromMenu(_:)), isEnabled: true)
+            let learn = engineMenuItem(localized("Learn Spelling"), EngineContextMenuItem.learnSpelling, #selector(ChromiumWebContents.learnSpellingFromMenu(_:)), isEnabled: true)
             learn.representedObject = misspelledWord
             items.append(learn)
         }
         let commands: [(String, NSUserInterfaceItemIdentifier, ARCHCEFEditCommand)] = [
-            ("Cut", EngineContextMenuItem.cut, .cut), ("Copy", EngineContextMenuItem.copy, .copy),
-            ("Paste", EngineContextMenuItem.paste, .paste), ("Select All", EngineContextMenuItem.selectAll, .selectAll),
+            (localized("Cut"), EngineContextMenuItem.cut, .cut), (localized("Copy"), EngineContextMenuItem.copy, .copy),
+            (localized("Paste"), EngineContextMenuItem.paste, .paste), (localized("Select All"), EngineContextMenuItem.selectAll, .selectAll),
         ]
         let copiesSelection = !(element.selectedText?.isEmpty ?? true) && element.linkURL == nil && element.imageURL == nil && element.mediaURL == nil
         for (title, identifier, command) in commands where element.isEditable || (command == .copy && copiesSelection) {
