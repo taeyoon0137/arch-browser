@@ -464,4 +464,108 @@ import Testing
         #expect(dragged.isPinned && dragged.savedPage?.url == dragged.url)
         #expect(PinState(dragged) == PinState(p1))
     }
+
+    /// The column as the sidebar lays it out with the pinned tabs in place (`SpaceTabsView`): the pinned area from 40, as high as its rows up to `maxPinned` and scrolled `pinnedScroll` points, the divider after it, and the open area from 2 points below the divider to the list's bottom at 540, with the New Tab row after the open rows. `slot` shows the dragged tab where it would land, as the rows do during the drag.
+    private struct TwoAreaColumn {
+        let pinnedArea: CGRect, divider: CGRect, openArea: CGRect
+        let pinnedFrames: [UUID: CGRect], openFrames: [UUID: CGRect]
+        let newTab: CGRect
+        var list: CGRect { pinnedArea.union(divider).union(openArea) }
+
+        @MainActor init(_ tab: Tab, slot: SidebarTabSlot?, in space: Space, session: BrowserSession, maxPinned: CGFloat, pinnedScroll: CGFloat, newTabID: UUID) {
+            let tree = session.folderTree
+            var pinned = tree.rows(in: space.id, pinned: true), open = tree.rows(in: space.id, pinned: false)
+            slot?.project(tab, pinnedRows: &pinned, openRows: &open)
+            let rowFrame = { (y: CGFloat) in CGRect(x: 11, y: y, width: 218, height: 36) }
+            pinnedArea = CGRect(x: 0, y: 40, width: 240, height: min(CGFloat(pinned.count) * 38, maxPinned))
+            pinnedFrames = Dictionary(uniqueKeysWithValues: pinned.enumerated().map { ($1.id, rowFrame(40 + CGFloat($0) * 38 - pinnedScroll)) })
+            divider = CGRect(x: 0, y: pinnedArea.maxY, width: 240, height: pinned.isEmpty ? 36 : 10)
+            let openTop = divider.maxY + 2
+            openArea = CGRect(x: 0, y: openTop, width: 240, height: 540 - openTop)
+            var openFrames = Dictionary(uniqueKeysWithValues: open.enumerated().map { ($1.id, rowFrame(openTop + CGFloat($0) * 38)) })
+            newTab = rowFrame(openTop + CGFloat(open.count) * 38)
+            openFrames[newTabID] = newTab
+            self.openFrames = openFrames
+        }
+    }
+
+    /// Drags `tab` from the middle of its row toward `y` a point at a time, as the sidebar follows the pointer: each move picks the next slot from the rows the pointer can reach (`SidebarTabSlot.reachableFrames`), and the rows are laid out again with that slot.
+    private func drag(_ tab: Tab, toward y: CGFloat, in space: Space, session: BrowserSession, maxPinned: CGFloat = 500, pinnedScroll: CGFloat = 0) -> SidebarTabSlot? {
+        let newTabID = UUID()
+        var slot: SidebarTabSlot?
+        var hover = SidebarReorderHover()
+        let start = TwoAreaColumn(tab, slot: nil, in: space, session: session, maxPinned: maxPinned, pinnedScroll: pinnedScroll, newTabID: newTabID)
+        var pointer = (start.pinnedFrames[tab.id] ?? start.openFrames[tab.id])?.midY ?? 0
+        while pointer < y {
+            pointer += 1
+            let at = point(pointer)
+            let column = TwoAreaColumn(tab, slot: slot, in: space, session: session, maxPinned: maxPinned, pinnedScroll: pinnedScroll, newTabID: newTabID)
+            guard hover.acceptsRow(at: at, in: column.list, excluding: nil) else { continue }
+            let frames = SidebarTabSlot.reachableFrames(at: at, pinnedArea: column.pinnedArea, pinnedFrames: column.pinnedFrames, openArea: column.openArea, openFrames: column.openFrames, slotOf: tab.id)
+            guard hover.canMove(at: at),
+                  let move = SidebarTabSlot.next(for: tab, at: at, current: slot, in: space.id, tree: session.folderTree, rowFrames: frames,
+                                                 divider: column.divider, newTabRow: frames[newTabID], list: column.list),
+                  move.slot != slot else { continue }
+            slot = move.slot
+            if let frame = move.holding { hover.moved(into: frame) }
+        }
+        return slot
+    }
+
+    @Test(arguments: [(CGFloat(200), 1), (CGFloat(250), 2), (CGFloat(300), 3), (CGFloat(420), 3)])
+    func aPinnedTabDraggedBelowTheDividerUnpinsWhereItsSlotShows(toward y: CGFloat, at index: Int) throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pins = ["p1", "p2", "p3"].map { tab($0, pinned: true, in: session, space) }
+        let open = ["o1", "o2", "o3"].map { tab($0, pinned: false, in: session, space) }
+        let dragged = pins[1]
+        // The pinned rows at 40, 78, and 116, the divider at 154, and the open rows from 166, with the New Tab row at 280: among the open tabs, past the last, over the New Tab row, and below it.
+        let slot = try #require(drag(dragged, toward: y, in: space, session: session))
+        #expect(!slot.pinned)
+        var shownPins = session.folderTree.rows(in: space.id, pinned: true), shownOpen = session.folderTree.rows(in: space.id, pinned: false)
+        slot.project(dragged, pinnedRows: &shownPins, openRows: &shownOpen)
+        #expect(shownOpen.map(\.id).firstIndex(of: dragged.id) == index)
+
+        // Released there, it unpins at that place as Unpin Tab unpins a tab.
+        slot.commit(dragged, in: space, session: session)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: true).map(\.id) == [pins[0].id, pins[2].id])
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == shownOpen.map(\.id))
+        session.togglePinned(pins[0])
+        #expect(PinState(dragged) == PinState(pins[0]) && PinState(dragged) == PinState(open[0]))
+    }
+
+    @Test func theOnlyPinnedTabUnpinsThoughThePinnedListEmptiesUnderThePointer() throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pinned = tab("pinned", pinned: true, in: session, space)
+        let o1 = tab("o1", pinned: false, in: session, space), o2 = tab("o2", pinned: false, in: session, space)
+        // Its slot leaving the pinned list takes the pinned area's row away and makes the divider a row high, so the rows below move under the pointer.
+        let slot = try #require(drag(pinned, toward: 140, in: space, session: session))
+        slot.commit(pinned, in: space, session: session)
+        #expect(!pinned.isPinned && pinned.savedPage == nil)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == [o1.id, pinned.id, o2.id])
+    }
+
+    @Test func rowsScrolledOutOfThePinnedAreaDoNotTakeATabOverTheOpenArea() throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pins = (1...6).map { tab("p\($0)", pinned: true, in: session, space) }
+        let open = ["o1", "o2"].map { tab($0, pinned: false, in: session, space) }
+        // The pinned area shows two rows of six, from 40 to 116; p3 to p6 lie under the divider and the open area, out of sight.
+        let column = TwoAreaColumn(pins[0], slot: nil, in: space, session: session, maxPinned: 76, pinnedScroll: 0, newTabID: UUID())
+        let overO1 = point(column.openFrames[open[0].id]!.minY + 4)
+        #expect(column.pinnedFrames[pins[2].id]!.contains(overO1))
+        let frames = SidebarTabSlot.reachableFrames(at: overO1, pinnedArea: column.pinnedArea, pinnedFrames: column.pinnedFrames, openArea: column.openArea, openFrames: column.openFrames, slotOf: pins[0].id)
+        #expect(frames[pins[2].id] == nil && frames[open[0].id] != nil && frames[pins[0].id] != nil)
+        // Over the divider no row is reachable but the slot.
+        let overDivider = point(column.divider.midY)
+        #expect(SidebarTabSlot.reachableFrames(at: overDivider, pinnedArea: column.pinnedArea, pinnedFrames: column.pinnedFrames, openArea: column.openArea, openFrames: column.openFrames, slotOf: nil).isEmpty)
+
+        // So the first pinned tab dragged into the first open tab's upper half unpins before it, not beside a hidden pin.
+        let slot = try #require(drag(pins[0], toward: overO1.y, in: space, session: session, maxPinned: 76))
+        #expect(slot == .beside(open[0].id, folder: nil, pinned: false, after: false))
+        slot.commit(pins[0], in: space, session: session)
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == [pins[0].id] + open.map(\.id))
+        #expect(session.tabsOutsideFolders(in: space.id, pinned: true).map(\.id) == pins[1...].map(\.id))
+    }
 }
