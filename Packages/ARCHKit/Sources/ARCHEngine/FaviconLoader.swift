@@ -2,6 +2,7 @@
 import AppKit
 import Foundation
 
+/// Loads and caches site icons for both engines' tabs, unloaded tabs, and favorites, and downloads Now Playing artwork, without cookies or credentials.
 public enum FaviconLoader {
     private static var cache: [URL: NSImage] = [:]
     private static var pending: [URL: [(NSImage?) -> Void]] = [:]

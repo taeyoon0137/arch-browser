@@ -1,12 +1,14 @@
 import AppKit
 import Foundation
 
+/// Whether a page's media plays, is paused, or is absent.
 public enum EngineMediaPlaybackState: String, Codable, Sendable {
     case none
     case playing
     case paused
 }
 
+/// Where a page's media is in its length and how fast it plays, for Now Playing.
 public struct EngineMediaPosition: Hashable, Sendable {
     /// Infinite for a live stream and 0 while unknown.
     public var duration: TimeInterval
@@ -34,6 +36,7 @@ public struct EngineMediaMetadata: Hashable, Sendable {
     }
 }
 
+/// Hears of changes to a page's `EngineMediaSession`.
 public protocol EngineMediaSessionDelegate: AnyObject {
     /// The page's media started or stopped, moved, or changed its metadata or the tracks it offers. The session's properties hold the new values.
     func mediaSessionDidChange(_ session: any EngineMediaSession)

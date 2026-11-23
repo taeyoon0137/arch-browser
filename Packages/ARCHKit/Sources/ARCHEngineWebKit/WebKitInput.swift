@@ -3,6 +3,7 @@ import AppKit
 import ARCHEngine
 import WebKit
 
+/// Sends a WebKit tab trusted mouse and key events as AppKit events, for the agents' action tools.
 final class WebKitInput: EngineInput {
     private weak var webView: WKWebView?
 

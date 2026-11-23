@@ -17,6 +17,7 @@ final class ChromiumPictureInPicture: NSObject {
     /// The session that AVKit shows. Only one video is in picture in picture at a time, so a new session ends an earlier one that is still stopping.
     private static weak var current: ChromiumPictureInPicture?
 
+    /// Where the session is in AVKit's start and stop.
     private enum Phase {
         /// Waiting for AVKit to offer picture in picture.
         case waiting

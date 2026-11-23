@@ -67,6 +67,7 @@ public protocol EngineExtensionPopupView: AnyObject {
 
 /// A question that an engine's extension runtime needs the user to answer, beyond the access questions of `EngineExtensionAccess`.
 public struct EngineExtensionPrompt {
+    /// What the extension runtime asks the user.
     public enum Kind: Equatable {
         /// More access that the extension asks for at run time, such as with `permissions.request()`, in the engine's own sentences, which do not say which permissions or sites they stand for. Chromium keeps what the user allows until the extension's storage goes, except sites: a grant that covers every site lasts until the extension next loads while its install grant leaves sites out, and a load that moves the install grant from every site to some revokes every site granted at run time.
         case permissions([String])

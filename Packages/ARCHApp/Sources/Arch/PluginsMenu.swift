@@ -7,6 +7,7 @@ import Combine
 import Plugins
 import Preferences
 
+/// The menu bar's Plugins menu, which lists the commands of the enabled plugins in the active window's Persona.
 @MainActor
 final class PluginsMenu: NSObject, NSMenuItemValidation {
     private let session: BrowserSession

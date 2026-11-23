@@ -10,6 +10,7 @@ public enum EngineCookieSameSite: String, Hashable, Sendable {
     case strict
 }
 
+/// One cookie as both engines read and write it, apart from each engine's own cookie type.
 public struct EngineCookie: Hashable, Sendable {
     public var name: String
     public var value: String

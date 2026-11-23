@@ -16,6 +16,7 @@ import Preferences
 import Sync
 import Terminal
 
+/// The app's delegate: it starts the engines, the browser session, and the services, and builds and runs the menu bar.
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     /// Scripting reads it through the application.
     private(set) var session: BrowserSession!

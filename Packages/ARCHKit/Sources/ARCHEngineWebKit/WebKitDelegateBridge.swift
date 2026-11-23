@@ -13,6 +13,7 @@ extension WebKitWebContents {
     }
 }
 
+/// The navigation and UI delegate of a `WebKitWebContents`'s web view. It turns WebKit's callbacks into calls to the engine delegates.
 final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     unowned let owner: WebKitWebContents
     private var observations: [NSKeyValueObservation] = []

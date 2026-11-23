@@ -375,6 +375,7 @@ final class ChromiumExtensionPopup: EngineExtensionPopupView {
     }
 }
 
+/// Why Chromium did not load an extension package, in a sentence for the user.
 enum ChromiumExtensionError: LocalizedError {
     case refused(String)
     case otherIdentifier

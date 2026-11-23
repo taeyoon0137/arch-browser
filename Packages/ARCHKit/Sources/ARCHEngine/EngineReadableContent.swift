@@ -24,6 +24,7 @@ public struct EngineReadableContent: Sendable {
     }
 }
 
+/// Why a page's readable content could not be read.
 public enum EngineReadableContentError: Error {
     /// The page has no document a script can read, as on an engine's own error page, or it went away before answering.
     case unreadable
@@ -121,6 +122,7 @@ extension EngineReadableContent {
 
     /// Reads the JSON text that `script` returns. Throws `unreadable` for anything else, such as nil from a page the script could not run in.
     public init(scriptResult: String?) throws {
+        /// The JSON object that `script` returns.
         struct Payload: Decodable {
             var url: String
             var title: String

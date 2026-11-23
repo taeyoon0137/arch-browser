@@ -2,6 +2,7 @@
 import AVFoundation
 import Foundation
 
+/// The macOS camera and microphone access checks that both adapters run before they grant a site's capture request.
 public enum EngineCaptureAccess {
     /// The capture devices that `types` name: video for the camera, audio for the microphone. The other permissions need no device.
     public static func mediaTypes(for types: [EnginePermissionType]) -> [AVMediaType] {

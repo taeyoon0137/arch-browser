@@ -2,6 +2,7 @@
 // Plugins add their scripts through these types (`docs/plugins.md`).
 import Foundation
 
+/// When an `EnginePageScript` runs in a new document.
 public enum EnginePageScriptInjectionTime: String, Hashable, Sendable {
     /// Before the page's own scripts.
     case documentStart

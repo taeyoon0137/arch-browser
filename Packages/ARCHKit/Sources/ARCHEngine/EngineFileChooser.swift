@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 /// What a page asks the user to choose for a file input, as its click or `showPicker()` opens it, or what another chooser of the engine asks, such as Chromium's Save As.
 public struct EngineFileChooserRequest: Equatable, Sendable {
+    /// What kind of choice the chooser asks for.
     public enum Mode: String, Sendable {
         /// One existing file.
         case openFile

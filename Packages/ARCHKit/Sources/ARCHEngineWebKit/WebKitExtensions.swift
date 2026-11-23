@@ -5,6 +5,7 @@ import AppKit
 import ARCHEngine
 import WebKit
 
+/// The web extensions of one WebKit profile, which a `WKWebExtensionController` runs.
 @available(macOS 15.4, *)
 final class WebKitExtensions: NSObject, EngineExtensions, WKWebExtensionControllerDelegate {
     weak var delegate: (any EngineExtensionsDelegate)?
@@ -359,6 +360,7 @@ private struct TabPlace {
     let index: Int
 }
 
+/// Why a WebKit extension call that Arch answers failed.
 enum WebKitExtensionError: LocalizedError {
     case popupNotShown
     case notJSON

@@ -1,6 +1,7 @@
 // The languages Chromium's pages see and Chromium's own text uses, from the app's preferred languages (`docs/localization.md`, Pages' languages).
 import Foundation
 
+/// Builds the language settings that `ChromiumEngine` hands CEF at start.
 enum ChromiumLanguages {
     /// The list for `Accept-Language` and `navigator.languages` in every profile: each preferred language as macOS names it, with its region, then the language alone, in order and without repeats, as in `ko-KR,ko,en-US,en`. CEF takes commas without spaces and adds the weights itself. No languages give CEF's own `en-US,en`.
     static func acceptLanguageList(from preferred: [String]) -> String {

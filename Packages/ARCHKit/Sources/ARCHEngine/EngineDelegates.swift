@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 
+/// Where a navigation asks to open: in the current tab, in a new tab, or in a new window or popup.
 public enum EngineNavigationDisposition: String, Codable, Sendable {
     case currentTab
     case newForegroundTab
@@ -10,6 +11,7 @@ public enum EngineNavigationDisposition: String, Codable, Sendable {
     case newPopup
 }
 
+/// A navigation that an engine asks its navigation delegate about before it loads, with where it opens and whether the user started it.
 public struct EngineNavigationAction: Sendable {
     public var url: URL
     public var disposition: EngineNavigationDisposition
@@ -28,6 +30,7 @@ public struct EngineNavigationAction: Sendable {
     }
 }
 
+/// The navigation delegate's answer to an `EngineNavigationAction`.
 public enum EngineNavigationPolicy: Sendable {
     case allow
     case cancel
@@ -35,6 +38,7 @@ public enum EngineNavigationPolicy: Sendable {
     case openLinkInNewTab
 }
 
+/// A kind of access that a site can ask for, such as the camera or notifications.
 public enum EnginePermissionType: String, Codable, Sendable {
     case camera
     case microphone
@@ -45,6 +49,7 @@ public enum EnginePermissionType: String, Codable, Sendable {
     case screenCapture
 }
 
+/// A site's request for one or more kinds of access, which the engine hands its UI delegate to decide.
 public struct EnginePermissionRequest: Sendable {
     public var origin: URL
     public var types: [EnginePermissionType]
@@ -83,6 +88,7 @@ public enum EngineContextMenuItem {
     public static let share = NSUserInterfaceItemIdentifier("ARCHEngine.contextMenu.share")
 }
 
+/// What the user right-clicked in a page, which the engine hands its UI delegate with the context menu.
 public struct EngineContextMenuElement: Sendable {
     public var linkURL: URL?
     public var imageURL: URL?

@@ -3,6 +3,7 @@ import AppKit
 import ARCHEngine
 import CEFBridge
 
+/// Sends a Chromium tab trusted mouse and key events through the bridge, for the agents' action tools.
 final class ChromiumInput: EngineInput {
     private weak var webContents: ChromiumWebContents?
 
