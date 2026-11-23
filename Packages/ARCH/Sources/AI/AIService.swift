@@ -218,7 +218,7 @@ public final class AIService: ObservableObject, AIClient {
             try Task.checkCancellation()
             try checkDestination(of: candidate.provider, known: request.knownProviders)
             if key != nil, settings.providers.first(where: { $0.id == candidate.provider.id })?.keepsItsKey(in: candidate.provider) != true {
-                throw AIError.providerUnavailable(candidate.provider.id, detail: "The provider's settings changed while the request waited.")
+                throw AIError.providerUnavailable(candidate.provider.id, detail: localized("The provider's settings changed while the request waited."))
             }
             if reachedSpendingLimit() { throw AIError.budgetReached(.monthlySpending) }
             providerRequest = try prepare(request, feature: feature, on: candidate, entry: &entry)
@@ -248,7 +248,7 @@ public final class AIService: ObservableObject, AIClient {
             }
             // A cancelled request's stream ends without an error, so cancellation is checked here.
             try Task.checkCancellation()
-            guard let finishReason else { throw AIError.malformedReply("The reply ended without finishing.") }
+            guard let finishReason else { throw AIError.malformedReply(localized("The reply ended without finishing.")) }
             outcome = .success(finishReason)
         } catch {
             outcome = .failure(Task.isCancelled ? .cancelled : AIError(error))
@@ -369,7 +369,7 @@ public final class AIService: ObservableObject, AIClient {
         do {
             return try await keys.key(for: provider.id)
         } catch {
-            throw AIError.providerUnavailable(provider.id, detail: "The key could not be read from the Keychain. \(error.localizedDescription)")
+            throw AIError.providerUnavailable(provider.id, detail: localized("The key could not be read from the Keychain. \(error.localizedDescription)"))
         }
     }
 
@@ -377,7 +377,7 @@ public final class AIService: ObservableObject, AIClient {
     private func savedKey(forUnsaved configuration: AIProviderConfiguration) async throws -> String? {
         guard case .http(let http) = configuration.kind, http.hasKey else { return nil }
         if let saved = settings.providers.first(where: { $0.id == configuration.id }), !saved.keepsItsKey(in: configuration) {
-            throw AIError.providerUnavailable(configuration.id, detail: "Enter the key again to use it with the new base URL, or save the change first.")
+            throw AIError.providerUnavailable(configuration.id, detail: localized("Enter the key again to use it with the new base URL, or save the change first."))
         }
         return try await storedKey(for: configuration)
     }

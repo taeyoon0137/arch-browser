@@ -90,13 +90,13 @@ public final class AISettingsStore: ObservableObject {
     public func message(for error: any Error) -> String {
         guard let error = error as? AIError else { return error.localizedDescription }
         func name(of id: AIProviderID) -> String {
-            providers.first { $0.id == id }.flatMap { $0.name.isEmpty ? nil : $0.name } ?? "The provider"
+            providers.first { $0.id == id }.flatMap { $0.name.isEmpty ? nil : $0.name } ?? localized("The provider")
         }
         switch error {
         case .authentication(let id):
-            return "\(name(of: id)) did not accept the API key."
+            return localized("\(name(of: id)) did not accept the API key.")
         case .providerUnavailable(let id, let detail):
-            return "\(name(of: id)) is unavailable: \(detail)"
+            return localized("\(name(of: id)) is unavailable: \(detail)")
         case .rateLimited(let id, let until):
             return AIError.rateLimitMessage(provider: name(of: id), until: until)
         default:

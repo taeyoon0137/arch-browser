@@ -38,7 +38,7 @@ struct CommandLineProvider: AIProvider {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
             // A folder that cannot be made, as on a full disk, keeps the tool from starting; it is not a request the tool refused.
-            throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start. \(error.localizedDescription)")
+            throw AIError.providerUnavailable(configuration.id, detail: localized("\(tool.executable.lastPathComponent) could not start. \(error.localizedDescription)"))
         }
         defer { try? FileManager.default.removeItem(at: directory) }
         let process: CommandLineProcess
@@ -46,7 +46,7 @@ struct CommandLineProvider: AIProvider {
             process = try CommandLineProcess(executable: tool.executable, arguments: invocation.arguments,
                                              environment: invocation.environment, directory: directory, input: input)
         } catch let error as POSIXError {
-            throw AIError.providerUnavailable(configuration.id, detail: "\(tool.executable.lastPathComponent) could not start (\(String(cString: strerror(error.code.rawValue)))).")
+            throw AIError.providerUnavailable(configuration.id, detail: localized("\(tool.executable.lastPathComponent) could not start (\(String(cString: strerror(error.code.rawValue))))."))
         }
         do {
             try await withTaskCancellationHandler {
@@ -105,7 +105,7 @@ struct CommandLineProvider: AIProvider {
                 try Task.checkCancellation()
                 try await checkTermination(of: process)
                 for event in try decoder.finish() { continuation.yield(event) }
-                guard decoder.hasReply else { throw AIError.malformedReply("The tool printed no reply.") }
+                guard decoder.hasReply else { throw AIError.malformedReply(localized("The tool printed no reply.")) }
                 continuation.yield(.finished(.completed))
             }
             group.addTask { [provider = configuration.id] in
@@ -130,8 +130,8 @@ struct CommandLineProvider: AIProvider {
         let reason: String
         switch termination {
         case .exited(0): return
-        case .exited(let code): reason = "\(name) exited with status \(code)."
-        case .signaled(let signal): reason = "\(name) stopped on signal \(signal)."
+        case .exited(let code): reason = localized("\(name) exited with status \(code).")
+        case .signaled(let signal): reason = localized("\(name) stopped on signal \(signal).")
         }
         throw AIError.providerUnavailable(configuration.id, detail: await process.lastErrorLine() ?? reason)
     }
@@ -141,7 +141,7 @@ struct CommandLineProvider: AIProvider {
     /// The request as text: the instructions, then each message labeled `User:` or `Assistant:` with its parts as delimited blocks. A JSON reply is asked for in the instructions. Tools read only text files.
     private static func prompt(for request: AIProviderRequest) throws -> String {
         if let file = unreadableFile(in: request.messages.flatMap(\.parts)) {
-            throw AIError.invalidRequest("This tool cannot read \(file.name).")
+            throw AIError.invalidRequest(localized("This tool cannot read \(file.name)."))
         }
         var request = request
         if case .json(let schema) = request.output {
@@ -337,9 +337,9 @@ struct CommandLineOutputDecoder: CommandLineReplyDecoder {
         case let text as String:
             return text.isEmpty ? nil : text
         case let number as NSNumber where CFGetTypeID(number) == CFBooleanGetTypeID():
-            return number.boolValue ? "The tool reported an error." : nil
+            return number.boolValue ? localized("The tool reported an error.") : nil
         default:
-            guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed]) else { return "The tool reported an error." }
+            guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed]) else { return localized("The tool reported an error.") }
             return String(decoding: data, as: UTF8.self)
         }
     }

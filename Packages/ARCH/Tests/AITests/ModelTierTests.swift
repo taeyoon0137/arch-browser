@@ -149,7 +149,7 @@ private func answering(_ text: String) -> [Step] {
                     continue
                 }
                 // Nothing reached a provider, so the sentence blames none.
-                #expect(error?.localizedDescription == "This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own.")
+                #expect(error?.localizedDescription == catalogText("This feature uses the models chosen for it in Settings \u{25B8} AI, so a request cannot name its own."))
             }
         }
         #expect(log.requests.isEmpty)

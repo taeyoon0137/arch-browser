@@ -225,10 +225,10 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
     @Test func toolsThatDidNotConnectAreRefused() throws {
         var event = try recordedInit()
         event["mcp_servers"] = [["name": "arch", "status": "failed"]]
-        #expect(session().failure(of: event, isFirst: true) == "Arch's tools did not connect.")
+        #expect(session().failure(of: event, isFirst: true) == catalogText("Arch's tools did not connect."))
         event = try recordedInit()
         event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs"]
-        #expect(session().failure(of: event, isFirst: true) == "Arch's tools did not connect.")
+        #expect(session().failure(of: event, isFirst: true) == catalogText("Arch's tools did not connect."))
     }
 
     @Test func anOrdinaryRequestMayListNoToolOrServer() throws {
@@ -250,10 +250,10 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs", "mcp__arch__session_info", "mcp__arch__press"]
         #expect(session(raised).failure(of: event, isFirst: false)?.contains("mcp__arch__press") == true)
         event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs"]
-        #expect(session(raised).failure(of: event, isFirst: false) == "Arch's tools did not connect.")
+        #expect(session(raised).failure(of: event, isFirst: false) == catalogText("Arch's tools did not connect."))
         // The first init must list the whole first answer.
         event["tools"] = Self.tools.map { "mcp__arch__\($0)" }
-        #expect(session([Self.tools + ["type"]]).failure(of: event, isFirst: true) == "Arch's tools did not connect.")
+        #expect(session([Self.tools + ["type"]]).failure(of: event, isFirst: true) == catalogText("Arch's tools did not connect."))
     }
 
     @Test func theRecordedSkillFolderInitPassesOnlyWithItsSkills() throws {

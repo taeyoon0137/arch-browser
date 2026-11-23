@@ -55,9 +55,9 @@ public enum AIModelTier: String, Codable, Hashable, Sendable, CaseIterable {
     /// "Fast", "Standard", or "Deep".
     public var title: String {
         switch self {
-        case .fast: return "Fast"
-        case .standard: return "Standard"
-        case .deep: return "Deep"
+        case .fast: return localized("Fast")
+        case .standard: return localized("Standard")
+        case .deep: return localized("Deep")
         }
     }
 }
@@ -170,13 +170,13 @@ extension AISettingsStore {
 
 /// A model's name in lists. A command-line tool's own default model has no name.
 public func aiModelTitle(_ name: String) -> String {
-    name.isEmpty ? "default model" : name
+    name.isEmpty ? localized("default model") : name
 }
 
 extension AISettingsStore {
     /// "Provider — model", for pickers and for the line under an answer.
     public func title(of ref: AIModelRef) -> String {
-        guard let provider = providers.first(where: { $0.id == ref.provider }) else { return "\(aiModelTitle(ref.model)) (removed)" }
+        guard let provider = providers.first(where: { $0.id == ref.provider }) else { return localized("\(aiModelTitle(ref.model)) (removed)") }
         return "\(provider.name) \u{2014} \(aiModelTitle(ref.model))"
     }
 
