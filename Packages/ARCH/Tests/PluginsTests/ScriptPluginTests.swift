@@ -60,8 +60,10 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
             ("unread key", ["plugin.json": manifest + #", "network": ["example.org"]}"#], .invalidPackage("plugin.json: network is not a field Arch reads.")),
             ("empty name", ["plugin.json": #"{"id": "org.example.bad", "name": "", "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must not be empty.")),
             ("name not text", ["plugin.json": #"{"id": "org.example.bad", "name": 1, "version": "1", "apiVersion": 1, "summary": "Bad."}"#], .invalidPackage("plugin.json: name must be text.")),
-            ("unknown permission", ["plugin.json": manifest + #", "permissions": ["notifications"]}"#],
-             .invalidPackage("plugin.json: permissions lists “notifications”, which Arch does not grant.")),
+            ("unknown permission", ["plugin.json": manifest + #", "permissions": ["camera"]}"#],
+             .invalidPackage("plugin.json: permissions lists “camera”, which Arch does not grant.")),
+            ("network without hosts", ["plugin.json": manifest + #", "permissions": ["network"]}"#],
+             .invalidPackage("plugin.json: permissions lists “network”, which needs its host list.")),
             ("native messaging", ["plugin.json": manifest + #", "permissions": ["nativeMessaging"]}"#],
              .invalidPackage("plugin.json: permissions lists “nativeMessaging”, which only web extensions may ask for.")),
             ("command without background", ["plugin.json": manifest + #", "contributes": {"commands": [{"id": "a", "title": "A"}]}}"#],
@@ -338,7 +340,7 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         panel.viewWillAppear()
         #expect(await eventually { storage.value(forKey: "panel") != nil })
         #expect(storage.value(forKey: "panel") == .object([
-            "members": .array(["ai", "secrets", "settings", "storage", "tabs", "ui"].map(PluginValue.string)), "stream": .string("function"), "deliver": .string("undefined"),
+            "members": .array(["ai", "downloads", "net", "secrets", "settings", "storage", "tabs", "ui"].map(PluginValue.string)), "stream": .string("function"), "deliver": .string("undefined"),
         ]))
         let count = PluginCommandRef(plugin: id, command: "count")
         await manager.run(count, PluginInvocation(tab: nil))

@@ -90,7 +90,8 @@ struct ScriptManifest {
             switch item {
             case let .string(name):
                 guard let permission = PluginPermission(rawValue: name) else { throw invalidManifest("permissions lists “\(name)”, which Arch does not grant") }
-                guard permission != .nativeMessaging, permission != .network else { throw invalidManifest("permissions lists “\(name)”, which needs its host list") }
+                guard permission != .nativeMessaging else { throw invalidManifest("permissions lists “\(name)”, which only web extensions may ask for") }
+                guard permission != .network else { throw invalidManifest("permissions lists “\(name)”, which needs its host list") }
                 permissions.insert(permission)
             case let .object(fields):
                 if fields.count == 1, case let .array(hosts)? = fields[PluginPermission.network.rawValue] {
