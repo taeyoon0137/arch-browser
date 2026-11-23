@@ -256,6 +256,18 @@ final class SidebarDragState: ObservableObject {
         return spaceSymbolFrames.first { $0.value.insetBy(dx: -1, dy: -6).contains(point) }?.key
     }
 
+    /// The space whose symbol is at `point` and that takes the dragged tab on release: another space, of any Persona, as `BrowserSession.canCarryTab(_:toSpace:)` allows. In another Persona's space the tab's page loads again in that Persona's profile (`BrowserSession.moveTab(_:toSpace:windowsFollow:)`).
+    @MainActor
+    func spaceDestination(forTab tab: Tab, at point: CGPoint, session: BrowserSession) -> UUID? {
+        space(at: point).flatMap { session.canCarryTab(tab.id, toSpace: $0) ? $0 : nil }
+    }
+
+    /// The space whose symbol is at `point` and that takes the dragged folder with what it holds, as `BrowserSession.canMoveFolder(_:toSpace:)` allows.
+    @MainActor
+    func spaceDestination(forFolder id: UUID, at point: CGPoint, session: BrowserSession) -> UUID? {
+        space(at: point).flatMap { session.canMoveFolder(id, toSpace: $0) ? $0 : nil }
+    }
+
     /// On release, the lifted item returns to its slot, and its shadow fades out before the item reappears there. With `list`, the visible part of the slot's list, a slot whose middle lies above or below it takes the item only to that edge of the list, where the item fades out.
     func settle(into slot: CGRect, within list: CGRect? = nil, ownedBy owner: UUID) {
         let isHidden = list.map { slot.midY < $0.minY || slot.midY > $0.maxY } ?? false

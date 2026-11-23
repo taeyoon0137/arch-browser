@@ -1,5 +1,5 @@
 // The command palette floats over a window. Its mode edits the current tab's address or opens a new tab.
-// It lists a Web Store install for recognized extension text, Ask Agent for two or more words, sessions to show, matching plugin commands, and Ask About This Page when its name matches.
+// It lists a Web Store install for recognized extension text, Ask Agent for two or more words, sessions to show, matching plugin commands, Ask About This Page when its name matches, and Move Tab to Space for each space whose row's title the text begins.
 // On a Web Store page it lists Install Extension from This Page. It also finds open tabs and history pages.
 // Text starting with a site-search keyword and a space searches that site.
 import Agent
@@ -90,6 +90,12 @@ struct CommandPaletteView: View {
         return !words.isEmpty && ("ask about this page".hasPrefix(words) || localized("Ask About This Page").lowercased().hasPrefix(words)) && windowModel.canAskAboutPage
     }
 
+    /// Move Tab to Space for the selected tab, one row per space that takes it, while the typed words begin the row's title (`BrowserSession.spaceMoveCommands(matching:forTab:)`). A small window's tab moves with its window's Persona menu instead.
+    private var spaceMoveCommands: [SpaceMoveCommand] {
+        guard argumentCommand == nil, windowModel.kind == .main, let tab = windowModel.selectedTab else { return [] }
+        return Array(session.spaceMoveCommands(matching: text, forTab: tab).prefix(5))
+    }
+
     /// The Web Store rows for the text and the selected tab's page, which no internal page or preview panel covers, while the app shell can start a store install.
     private var webStoreRows: PaletteWebStoreRows {
         guard session.installFromWebStore != nil else { return PaletteWebStoreRows() }
@@ -140,6 +146,7 @@ struct CommandPaletteView: View {
         items += matchingAgentSessions.map(PaletteItem.agentSession)
         items += pluginCommands.map(PaletteItem.command)
         if offersAskAboutPage { items.append(.askAboutPage) }
+        items += spaceMoveCommands.map(PaletteItem.moveTab)
         if let id = storeRows.pageExtension { items.append(.pageStore(id)) }
         items += matchingTabs.map(PaletteItem.tab)
         items += historySuggestions.map(PaletteItem.history)
@@ -196,6 +203,10 @@ struct CommandPaletteView: View {
         case .askAboutPage:
             windowModel.dismissCommandPalette()
             windowModel.askAboutPage()
+        case .moveTab(let command):
+            // The window keeps its space and selects another tab, as the menus' moves do.
+            windowModel.dismissCommandPalette()
+            if let tab = windowModel.selectedTab { session.moveTab(tab.id, toSpace: command.space.id, windowsFollow: false) }
         case .pageStore(let id):
             installFromWebStore(id, fromPage: true)
         case .tab(let tab):
@@ -220,6 +231,8 @@ struct CommandPaletteView: View {
             PaletteRow(symbol: command.item.symbol ?? "puzzlepiece.extension", title: command.item.title, detail: command.pluginName, isSelected: isSelected)
         case .askAboutPage:
             PaletteRow(symbol: "sparkles", title: localized("Ask About This Page\u{2026}"), isSelected: isSelected)
+        case .moveTab(let command):
+            PaletteRow(symbol: command.space.symbol, title: command.title, isSelected: isSelected)
         case .pageStore:
             PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.pageTitle, isSelected: isSelected)
         case .tab(let tab):
@@ -305,11 +318,12 @@ struct CommandPaletteView: View {
     case agentSession(AgentSession)
     case command(Attributed<PluginCommand>)
     case askAboutPage
+    case moveTab(SpaceMoveCommand)
     case pageStore(String)
     case tab(Tab)
     case history(HistoryEntry)
 
-    /// Unique among the rows: each kind of row shows once at most, except commands, tabs, and history pages, which each have their own identity.
+    /// Unique among the rows: each kind of row shows once at most, except commands, space moves, tabs, and history pages, which each have their own identity.
     var id: AnyHashable {
         switch self {
         case .primary: return "primary"
@@ -318,6 +332,7 @@ struct CommandPaletteView: View {
         case .agentSession(let session): return "agent-" + session.id.uuidString
         case .command(let command): return command.ref
         case .askAboutPage: return "askAboutPage"
+        case .moveTab(let command): return "moveTab-" + command.space.id.uuidString
         case .pageStore: return "pageStore"
         case .tab(let tab): return tab.id
         case .history(let entry): return entry.id

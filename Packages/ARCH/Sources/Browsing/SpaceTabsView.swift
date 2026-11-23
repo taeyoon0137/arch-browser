@@ -551,8 +551,8 @@ struct SpaceTabsView: View {
         let list = tabsFrame
         let frames = reachableFrames(at: point)
         let tree = session.folderTree
-        // Another space's symbol, or another folder's row at any level, under the pointer lights up and takes the tab on release. The rows do not make room for it. A space of another Persona does not take the tab.
-        setDropTarget(\.targetSpaceID, to: sidebarDrag.space(at: point).flatMap { $0 == tab.spaceID || !session.canMoveTab(tab.id, toSpace: $0) ? nil : $0 })
+        // Another space's symbol, of any Persona, or another folder's row at any level, under the pointer lights up and takes the tab on release. The rows do not make room for it.
+        setDropTarget(\.targetSpaceID, to: sidebarDrag.spaceDestination(forTab: tab, at: point, session: session))
         setDropTarget(\.targetFolderID, to: list.contains(point) ? session.folders(in: space.id).first { frames[$0.id]?.contains(point) == true }.flatMap { tree.canMoveTab(tab, into: $0.id) ? $0.id : nil } : nil)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && point.x > pageFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: point, in: windowModel) : nil)
@@ -576,9 +576,9 @@ struct SpaceTabsView: View {
         updateDropTargets(forFolder: folderID, at: value.location)
     }
 
-    /// `FolderTree.dropTarget(for:at:)` decides each place in the list: the rows make room for the folder between them, with a light haptic at each new position, or a folder's row lights up to take it on release. Another space's symbol of its Persona lights up to take it with what it holds. Where the tree refuses a place, nothing moves, and the row returns to its slot on release.
+    /// `FolderTree.dropTarget(for:at:)` decides each place in the list: the rows make room for the folder between them, with a light haptic at each new position, or a folder's row lights up to take it on release. Another space's symbol, of any Persona that takes the folder, lights up to take it with what it holds. Where the tree refuses a place, nothing moves, and the row returns to its slot on release.
     private func updateDropTargets(forFolder folderID: UUID, at point: CGPoint) {
-        setDropTarget(\.targetSpaceID, to: sidebarDrag.space(at: point).flatMap { session.canMoveFolder(folderID, toSpace: $0) ? $0 : nil })
+        setDropTarget(\.targetSpaceID, to: sidebarDrag.spaceDestination(forFolder: folderID, at: point, session: session))
         let tree = session.folderTree
         let target = tabsFrame.contains(point) ? dropPosition(at: point, in: tree).flatMap { tree.dropTarget(for: folderID, at: $0) } : nil
         if case .into(let parentID)? = target {
