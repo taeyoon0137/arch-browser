@@ -82,6 +82,14 @@ for bundle in "$BIN"/ArchBrowser_*.bundle; do
   case "$bundle" in *Tests.bundle) continue ;; esac
   cp -R "$bundle" "$APP/Contents/Resources/"
 done
+# The usage descriptions above in Korean, which the system shows when it asks for a device on a page's behalf.
+mkdir -p "$APP/Contents/Resources/ko.lproj"
+cat > "$APP/Contents/Resources/ko.lproj/InfoPlist.strings" <<'STRINGS'
+"NSCameraUsageDescription" = "웹 페이지는 사용자가 허용한 후에 카메라를 사용할 수 있습니다.";
+"NSMicrophoneUsageDescription" = "웹 페이지는 사용자가 허용한 후에 마이크를 사용할 수 있습니다.";
+"NSLocationUsageDescription" = "웹 페이지는 사용자가 허용한 후에 사용자의 위치를 사용할 수 있습니다.";
+"NSBluetoothAlwaysUsageDescription" = "웹 페이지는 Bluetooth를 사용할 수 있습니다. 예를 들어 휴대폰의 패스키로 로그인할 때 사용합니다.";
+STRINGS
 cp -R "$CEF" "$APP/Contents/Frameworks/"
 
 # Build the icon set from the 1024-pixel symbol. `opaque_icon.swift` fills its transparent corners so that macOS clips it to the system shape instead of placing it on a gray plate. Each size appears at 1x and 2x, as `iconutil` requires.
