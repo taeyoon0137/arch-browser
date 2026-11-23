@@ -1,6 +1,6 @@
 // The built-in terminal opens the user's login shell in one window.
 // The user can install command-line AI tools and sign in to them there.
-// Closing the window or quitting Arch ends the shell. Showing the terminal again starts a new shell.
+// Closing the window or quitting Arch ends the shell. Showing the terminal again after its shell ends starts a new shell.
 import AppKit
 
 /// Owns the built-in terminal window and its current login shell.
