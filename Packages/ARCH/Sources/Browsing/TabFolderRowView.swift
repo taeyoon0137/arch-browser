@@ -172,7 +172,7 @@ private struct SessionFolderMenu: View {
     }
 }
 
-/// A folder's New Folder Inside, Move to Folder, and Move Out of Folder. The menu asks the folder tree as it builds, and gets the window model as a value rather than from the environment.
+/// A folder's New Folder Inside, Move to Folder, Move Out of Folder, and Move to Space, which an agent folder lacks because it stays where its agent works. The menu asks the folder tree as it builds, and gets the window model as a value rather than from the environment.
 private struct FolderNestingItems: View {
     @ObservedObject var session: BrowserSession
     let windowModel: BrowserWindowModel
@@ -187,6 +187,13 @@ private struct FolderNestingItems: View {
         }
         if folder.parentID != nil {
             Button(localized("Move Out of Folder")) { withAnimation(.easeInOut(duration: 0.15)) { session.moveFolderOut(folder.id) } }
+        }
+        if !folder.isAgentFolder {
+            MoveToSpaceMenu(sections: session.spaceMoveSections { session.spaceMoveRefusal(ofFolder: folder.id, toPersona: $0) }, currentSpaceID: folder.spaceID) { target in
+                withAnimation(.easeInOut(duration: 0.15)) { session.moveFolder(folder.id, toSpace: target, windowsFollow: false) }
+            } moveToNewSpace: { personaID in
+                withAnimation(.easeInOut(duration: 0.15)) { session.moveFolderToNewSpace(folder.id, in: personaID) }
+            }
         }
     }
 }

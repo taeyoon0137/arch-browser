@@ -30,6 +30,8 @@ import Terminal
     private var historyMenu: NSMenu?
     /// Lists the favorites and the spaces' pinned folders and tabs each time it opens (bookmark rule 7).
     private var bookmarksMenu: NSMenu?
+    /// Tab ▸ Move Tab to Space, filled each time it opens for the sidebar target's selected tab.
+    private var spaceMoveMenu: NSMenu?
     /// Names Undo Close Tab in its Undo item while ⌘Z reopens closed tabs.
     private var editMenu: NSMenu?
     /// Edit ▸ Undo, and File ▸ Close Tab, Close Other Tabs, and Reopen Last Closed Tab, whose shortcuts, which Settings ▸ Shortcuts can change, the undo close monitor reads.
@@ -500,6 +502,12 @@ import Terminal
         moveUpItem.keyEquivalentModifierMask = [.command, .option]
         let moveDownItem = tabMenu.addItem(withTitle: localized("Move Tab Down"), action: #selector(moveTabDown), keyEquivalent: String(Character(UnicodeScalar(NSDownArrowFunctionKey)!)))
         moveDownItem.keyEquivalentModifierMask = [.command, .option]
+        // Filled each time it opens (`menuWillOpen(_:)`), so Settings ▸ Shortcuts lists none of its items.
+        let spaceMoveMenu = NSMenu(title: localized("Move Tab to Space"))
+        spaceMoveMenu.autoenablesItems = false
+        spaceMoveMenu.delegate = self
+        self.spaceMoveMenu = spaceMoveMenu
+        tabMenu.addItem(submenu(spaceMoveMenu, title: localized("Move Tab to Space")))
         tabMenu.addItem(.separator())
         for number in 1...8 {
             tabMenu.addItem(withTitle: localized("Select Tab \(number)"), action: #selector(selectTab(_:)), keyEquivalent: String(number)).tag = number
@@ -700,6 +708,7 @@ import Terminal
     /// Fills the Bookmarks menu for the sidebar target, and lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. Both are made when their menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; their items have no key equivalents.
     func menuWillOpen(_ menu: NSMenu) {
         if menu === bookmarksMenu, let session { return fillBookmarks(menu, with: session.bookmarkMenuEntries) }
+        if menu === spaceMoveMenu { return fillSpaceMoves(menu) }
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
         let activeWindow = session?.activeWindow
@@ -738,6 +747,62 @@ import Terminal
             undoItem.target = nil
             undoItem.action = Selector(("undo:"))
         }
+    }
+
+    /// A space Tab ▸ Move Tab to Space lists, for the tab it was filled for.
+    private struct SpaceMove {
+        let tabID: UUID
+        let spaceID: UUID
+    }
+
+    /// New Space in Tab ▸ Move Tab to Space, for the tab it was filled for and the Persona whose section it ends.
+    private struct NewSpaceMove {
+        let tabID: UUID
+        let personaID: Persona.ID
+    }
+
+    /// Lists Move to Space for the sidebar target's selected tab, as its row's context menu does (`MoveToSpaceMenu`): each Persona's spaces under the Persona's name while there are several, the tab's own space checked and disabled, New Space at the end of each Persona's part, and the spaces of a Persona that refuses the tab disabled with the reason as their tooltip. Without a tab that a menu moves, such as a favorite's, it holds one disabled item.
+    private func fillSpaceMoves(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let tab = session?.lastMainWindow?.selectedTab
+        guard let session, let tab, let currentSpaceID = tab.spaceID, case let sections = session.spaceMoveSections(forTab: tab), !sections.isEmpty else {
+            menu.addItem(withTitle: localized("No Tab to Move"), action: nil, keyEquivalent: "").isEnabled = false
+            return
+        }
+        for (index, section) in sections.enumerated() {
+            if index > 0 { menu.addItem(.separator()) }
+            if let title = section.title { menu.addItem(.sectionHeader(title: title)) }
+            for space in section.spaces {
+                let item = NSMenuItem(title: space.name, action: #selector(moveTabToSpace(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = SpaceMove(tabID: tab.id, spaceID: space.id)
+                if space.id == currentSpaceID {
+                    item.state = .on
+                    item.isEnabled = false
+                } else {
+                    item.isEnabled = section.refusalHelp == nil
+                    item.toolTip = section.refusalHelp
+                }
+                menu.addItem(item)
+            }
+            let newSpace = NSMenuItem(title: localized("New Space"), action: #selector(moveTabToNewSpace(_:)), keyEquivalent: "")
+            newSpace.target = self
+            newSpace.representedObject = NewSpaceMove(tabID: tab.id, personaID: section.personaID)
+            newSpace.isEnabled = section.refusalHelp == nil
+            newSpace.toolTip = section.refusalHelp
+            menu.addItem(newSpace)
+        }
+    }
+
+    /// The window keeps its space and selects another tab, as the tab row's Move to Space does.
+    @objc private func moveTabToSpace(_ sender: NSMenuItem) {
+        guard let move = sender.representedObject as? SpaceMove else { return }
+        session.moveTab(move.tabID, toSpace: move.spaceID, windowsFollow: false)
+    }
+
+    @objc private func moveTabToNewSpace(_ sender: NSMenuItem) {
+        guard let move = sender.representedObject as? NewSpaceMove else { return }
+        session.moveTabToNewSpace(move.tabID, in: move.personaID)
     }
 
     @objc private func goToRecentPage(_ sender: NSMenuItem) {

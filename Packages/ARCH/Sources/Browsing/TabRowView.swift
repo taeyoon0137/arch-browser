@@ -141,7 +141,7 @@ struct SidebarAgentMenuItem: View {
     }
 }
 
-/// A tab row's Add to New Folder, which makes the folder where the tab is, Move to Folder, listing the pinned list's folders before the open list's, and Move Out of Folder, which moves the tab up one level. The menu asks the folder tree as it builds, and gets the window model as a value rather than from the environment.
+/// A tab row's Add to New Folder, which makes the folder where the tab is, Move to Folder, listing the pinned list's folders before the open list's, Move Out of Folder, which moves the tab up one level, and Move to Space (`MoveToSpaceMenu`). The menu asks the folder tree as it builds, and gets the window model as a value rather than from the environment.
 private struct TabFolderItems: View {
     @ObservedObject var session: BrowserSession
     let windowModel: BrowserWindowModel
@@ -156,6 +156,14 @@ private struct TabFolderItems: View {
         }
         if tab.folderID != nil {
             Button(localized("Move Out of Folder")) { withAnimation(.easeInOut(duration: 0.15)) { session.moveOutOfFolder(tab) } }
+        }
+        // Each window keeps its space, as for the menu bar's and the palette's moves; a window that selected the tab selects another unless the tab comes to its space.
+        if let spaceID = tab.spaceID {
+            MoveToSpaceMenu(sections: session.spaceMoveSections(forTab: tab), currentSpaceID: spaceID) { target in
+                withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toSpace: target, windowsFollow: false) }
+            } moveToNewSpace: { personaID in
+                withAnimation(.easeInOut(duration: 0.15)) { session.moveTabToNewSpace(tab.id, in: personaID) }
+            }
         }
     }
 }

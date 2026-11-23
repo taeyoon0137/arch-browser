@@ -351,6 +351,16 @@
         }
       }
     },
+    "An agent's tab stays in its Persona. Choose Keep Tabs on its folder first." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트의 탭은 해당 페르소나에 남습니다. 먼저 폴더에서 탭 유지를 선택하세요."
+          }
+        }
+      }
+    },
     "An embedded page on “%@” says" : {
       "localizations" : {
         "ko" : {
@@ -2411,6 +2421,16 @@
         }
       }
     },
+    "Move Tab to %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 이동: %@"
+          }
+        }
+      }
+    },
     "Move to Folder" : {
       "localizations" : {
         "ko" : {
@@ -2427,6 +2447,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "메인 윈도우로 이동"
+          }
+        }
+      }
+    },
+    "Move to Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스페이스로 이동"
           }
         }
       }

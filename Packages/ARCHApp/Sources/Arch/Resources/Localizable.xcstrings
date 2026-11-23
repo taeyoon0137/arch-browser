@@ -611,6 +611,16 @@
         }
       }
     },
+    "Move Tab to Space" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭을 스페이스로 이동"
+          }
+        }
+      }
+    },
     "Move to Main Window" : {
       "localizations" : {
         "ko" : {
@@ -707,6 +717,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "북마크 없음"
+          }
+        }
+      }
+    },
+    "No Tab to Move" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이동할 탭 없음"
           }
         }
       }

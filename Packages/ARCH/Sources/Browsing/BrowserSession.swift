@@ -1769,11 +1769,40 @@ final class EngineRuntime {
         spaces = reordered
     }
 
-    /// Moves a tab dropped on another space's symbol after that space's own pinned or open tabs, outside its folders. The window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. A space of another Persona refuses the tab.
-    public func moveTab(_ id: UUID, toSpace spaceID: UUID) {
-        guard canMoveTab(id, toSpace: spaceID), let moving = tabs.first(where: { $0.id == id }), moving.spaceID != spaceID else { return }
+    /// Why Move to Space cannot move a tab or folder to the spaces of a Persona, which the menus show as the disabled items' help (`docs/windows-personas.md`, Moving tabs between spaces).
+    enum SpaceMoveRefusal: Equatable {
+        /// An agent's tab moves only within its Persona, where it leaves its agent folder as a dragged one does.
+        case agentTab
+
+        var help: String {
+            switch self {
+            case .agentTab: localized("An agent's tab stays in its Persona. Choose Keep Tabs on its folder first.")
+            }
+        }
+    }
+
+    /// Whether Move to Space and a drop on a space's symbol can take the tab anywhere: a tab in a space's list. A favorite's tab belongs to no space, and a small window's tab moves with its window's own Persona menu.
+    func canMoveToAnotherSpace(_ tab: Tab) -> Bool {
+        tab.spaceID != nil && tab.isListedInSidebar && tabs.contains { $0 === tab }
+    }
+
+    /// Why the tab cannot move to the spaces of the Persona `personaID`, or nil when it can. Its own Persona's spaces take any tab that `canMoveToAnotherSpace(_:)` allows.
+    func spaceMoveRefusal(ofTab tab: Tab, toPersona personaID: Persona.ID) -> SpaceMoveRefusal? {
+        personaID != tab.personaID && tab.agentOwnerID != nil ? .agentTab : nil
+    }
+
+    /// The guard of Move to Space and of a tab's drop on a space's symbol: another space, of any Persona, as `spaceMoveRefusal(ofTab:toPersona:)` allows.
+    func canCarryTab(_ id: UUID, toSpace spaceID: UUID) -> Bool {
+        guard let tab = tabs.first(where: { $0.id == id }), canMoveToAnotherSpace(tab), tab.spaceID != spaceID,
+              let space = spaces.first(where: { $0.id == spaceID }) else { return false }
+        return spaceMoveRefusal(ofTab: tab, toPersona: space.resolvedPersonaID) == nil
+    }
+
+    /// Move to Space, and a tab dropped on a space's symbol: the tab goes after that space's own pinned or open tabs, outside its folders, with its name, pinned state, and saved page. Within its Persona it keeps its ID and page. In a space of another Persona a new tab of that Persona takes its place (`replacingInPersona(_:_:folderIDs:)`). With `windowsFollow`, as for a drop, a window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. Otherwise, as for the menus, each window keeps its space, and one that selected the tab selects another as closing the tab would, unless its space is the tab's new one.
+    public func moveTab(_ id: UUID, toSpace spaceID: UUID, windowsFollow: Bool = true) {
+        guard canCarryTab(id, toSpace: spaceID), let moving = tabs.first(where: { $0.id == id }) else { return }
         // The other panes of its split view stay together in the space it leaves.
-        leaveSplitView(moving)
+        let splitNeighbor = leaveSplitView(moving).flatMap { neighbor in tabs.first { $0.id == neighbor } }
         guard let index = tabs.firstIndex(where: { $0 === moving }) else { return }
         var reordered = tabs
         let tab = reordered.remove(at: index)
@@ -1783,7 +1812,54 @@ final class EngineRuntime {
             reordered.append(tab)
             tabs = reordered
         }
-        for window in windows where window.selectedTabID == tab.id { window.currentSpaceID = spaceID }
+        let personaID = self.personaID(ofSpace: spaceID)
+        let moved = tab.personaID == personaID ? [(old: tab, new: tab)] : replacingInPersona([tab], personaID, folderIDs: [:])
+        finishMove(moved, toSpace: spaceID, windowsFollow: windowsFollow, splitNeighbor: splitNeighbor)
+    }
+
+    /// Move to Space ▸ New Space: makes a space in the Persona, named as a new space is, and moves the tab there as `moveTab(_:toSpace:windowsFollow:)` does for the menus. Nothing is made for a tab that cannot move there.
+    public func moveTabToNewSpace(_ id: UUID, in personaID: Persona.ID) {
+        guard let tab = tabs.first(where: { $0.id == id }), canMoveToAnotherSpace(tab), persona(withID: personaID) != nil,
+              spaceMoveRefusal(ofTab: tab, toPersona: personaID) == nil else { return }
+        moveTab(id, toSpace: makeSpace(in: personaID).id, windowsFollow: false)
+    }
+
+    /// For tabs that a move put in a space of the Persona `personaID`: a new tab of that Persona with a new ID takes each one's place in the list, as Merge Into… makes them (`carryContents(ofSpace:toSpace:persona:)`), so sync deletes the old record and uploads a new one in that Persona. It has a stand-in at the old tab's address in the same engine, which loads in the Persona's profile once a window shows it, so the page state, the back and forward list, and the sign-in stay behind, and it keeps the saved page, name, pinned state, and the folder that `folderIDs` maps its old one to. The caller removes the old tabs once the windows have moved their selection (`finishMove(_:toSpace:windowsFollow:splitNeighbor:)`).
+    private func replacingInPersona(_ olds: [Tab], _ personaID: Persona.ID, folderIDs: [UUID: UUID]) -> [(old: Tab, new: Tab)] {
+        let pairs = olds.map { old in
+            let page = UnloadedWebContents(url: old.url, title: old.title, engine: old.preferredEngine, state: nil)
+            let tab = makeTab(page, id: UUID(), spaceID: old.spaceID, personaID: personaID, pinned: old.isPinned)
+            tab.preferredEngine = old.preferredEngine
+            tab.folderID = old.folderID.flatMap { folderIDs[$0] }
+            tab.savedPage = old.savedPage
+            tab.customTitle = old.customTitle
+            tab.suggestedTitle = old.suggestedTitle
+            tab.lastActivatedAt = old.lastActivatedAt
+            return (old: old, new: tab)
+        }
+        // They join right after the tabs they replace, as restored tabs do, so the hooks post no new tab for them.
+        pairs.forEach { $0.new.isRestored = true }
+        tabs = tabs.flatMap { tab in [tab] + pairs.filter { $0.old === tab }.map(\.new) }
+        pairs.forEach { $0.new.isRestored = false }
+        return pairs
+    }
+
+    /// Ends a move of tabs to the space `spaceID`, given as each old tab with the tab that now holds its place, itself within a Persona. With `windowsFollow`, each window that selects an old tab shows that space and selects its tab. Otherwise each main window that selects one, on another space, selects another tab as closing the tab would (`tabToSelect(after:opener:splitNeighbor:among:spaceID:recentTabs:isShownInAnotherWindow:)`), and one on that space selects its new tab. A window to reopen selects the new tab where it selected the old. The replaced old tabs then close without joining the closed list, and their pages close through their Persona's runtime, where a page whose downloads still need it stays open on a blank page until they finish (`retire`).
+    private func finishMove(_ moved: [(old: Tab, new: Tab)], toSpace spaceID: UUID, windowsFollow: Bool, splitNeighbor: Tab? = nil) {
+        for window in windows {
+            guard let pair = moved.first(where: { $0.old.id == window.selectedTabID }) else { continue }
+            if windowsFollow || window.currentSpaceID == spaceID {
+                window.currentSpaceID = spaceID
+                if pair.new !== pair.old { window.selectTab(pair.new.id) }
+            } else if window.kind == .main {
+                let next = Self.tabToSelect(after: pair.old, opener: nil, splitNeighbor: splitNeighbor, among: tabs, spaceID: window.currentSpaceID, isShownInAnotherWindow: window.isShownInAnotherWindow)
+                window.selectTab(next?.id)
+            }
+        }
+        for (old, new) in moved where new !== old {
+            for index in windowsToReopen.indices where windowsToReopen[index].selectedTabID == old.id { windowsToReopen[index].selectedTabID = new.id }
+            _ = removeTab(old, closedRecord: nil, reason: .persona)
+        }
     }
 
     /// Moves a dragged tab after its space's pinned or open tabs outside folders, so that a drag can take a tab out of a folder even when no other tab sits outside folders in that list.
@@ -1859,18 +1935,50 @@ final class EngineRuntime {
         changeFolderTree { $0.moveFolder(id, to: target) }
     }
 
-    /// The guard of a folder's drop on another space's symbol: a space of the folder's Persona other than its own, to which every tab inside the folder can move (Persona rule 3).
-    func canMoveFolder(_ id: UUID, toSpace spaceID: UUID) -> Bool {
-        guard let folder = folders.first(where: { $0.id == id }), !folder.isAgentFolder, folder.spaceID != spaceID,
-              let from = spaces.first(where: { $0.id == folder.spaceID }), let to = spaces.first(where: { $0.id == spaceID }),
-              from.resolvedPersonaID == to.resolvedPersonaID else { return false }
-        return folderTree.tabs(inside: id).allSatisfy { canMoveTab($0.id, toSpace: spaceID) }
+    /// Why the folder cannot move to the spaces of the Persona `personaID`, or nil when it can: a folder that holds an agent's tab stays in its Persona, as the tab does. An agent folder has no Move to Space and refuses every space (`canMoveFolder(_:toSpace:)`).
+    func spaceMoveRefusal(ofFolder id: UUID, toPersona personaID: Persona.ID) -> SpaceMoveRefusal? {
+        guard let folder = folders.first(where: { $0.id == id }), self.personaID(ofSpace: folder.spaceID) != personaID else { return nil }
+        return folderTree.tabs(inside: id).lazy.compactMap { self.spaceMoveRefusal(ofTab: $0, toPersona: personaID) }.first
     }
 
-    /// Moves a folder dropped on another space's symbol, with the folders and tabs inside it, last among the folders at the top of that space's list of its kind (`FolderTree.moveFolder(_:toSpace:)`). As for a dropped tab, its tabs leave the split view of the space they leave, and a window that selects one of them follows it to the space.
-    public func moveFolder(_ id: UUID, toSpace spaceID: UUID) {
+    /// The guard of Move to Space for a folder and of a folder's drop on another space's symbol: a space other than its own, of any Persona, as `spaceMoveRefusal(ofFolder:toPersona:)` allows. An agent folder stays where its agent works.
+    func canMoveFolder(_ id: UUID, toSpace spaceID: UUID) -> Bool {
+        guard let folder = folders.first(where: { $0.id == id }), !folder.isAgentFolder, folder.spaceID != spaceID,
+              let to = spaces.first(where: { $0.id == spaceID }) else { return false }
+        return spaceMoveRefusal(ofFolder: id, toPersona: to.resolvedPersonaID) == nil
+    }
+
+    /// Moves a folder by Move to Space or a drop on another space's symbol, with the folders and tabs inside it, last among the folders at the top of that space's list of its kind (`FolderTree.moveFolder(_:toSpace:)`). In a space of another Persona the folder and every folder inside it take new IDs, and each of its tabs is replaced by a new tab of that Persona, as a moved tab is (`replacingInPersona(_:_:folderIDs:)`). As for a moved tab, its tabs leave the split view of the space they leave, and `windowsFollow` decides what the windows that select one of them do (`moveTab(_:toSpace:windowsFollow:)`).
+    public func moveFolder(_ id: UUID, toSpace spaceID: UUID, windowsFollow: Bool = true) {
         guard canMoveFolder(id, toSpace: spaceID) else { return }
-        carryFolder(id, toSpace: spaceID)
+        let personaID = self.personaID(ofSpace: spaceID)
+        guard let source = folders.first(where: { $0.id == id }), self.personaID(ofSpace: source.spaceID) != personaID else {
+            if windowsFollow { return carryFolder(id, toSpace: spaceID) }
+            let carried = folderTree.tabs(inside: id)
+            carried.forEach { leaveSplitView($0) }
+            changeFolderTree { $0.moveFolder(id, toSpace: spaceID) }
+            return finishMove(carried.map { (old: $0, new: $0) }, toSpace: spaceID, windowsFollow: false)
+        }
+        let carried = folderTree.tabs(inside: id)
+        var folderIDs: [UUID: UUID] = [:]
+        for folder in [id] + folderTree.descendants(of: id).map(\.id) { folderIDs[folder] = UUID() }
+        carried.forEach { leaveSplitView($0) }
+        changeFolderTree { $0.moveFolder(id, toSpace: spaceID) }
+        folders = folders.map { folder in
+            guard let newID = folderIDs[folder.id] else { return folder }
+            var renumbered = folder
+            renumbered.id = newID
+            renumbered.parentID = folder.parentID.flatMap { folderIDs[$0] }
+            return renumbered
+        }
+        finishMove(replacingInPersona(carried, personaID, folderIDs: folderIDs), toSpace: spaceID, windowsFollow: windowsFollow)
+    }
+
+    /// Move to Space ▸ New Space for a folder: makes a space in the Persona and moves the folder there as the menus do. Nothing is made for a folder that cannot move there.
+    public func moveFolderToNewSpace(_ id: UUID, in personaID: Persona.ID) {
+        guard let folder = folders.first(where: { $0.id == id }), !folder.isAgentFolder, persona(withID: personaID) != nil,
+              spaceMoveRefusal(ofFolder: id, toPersona: personaID) == nil else { return }
+        moveFolder(id, toSpace: makeSpace(in: personaID).id, windowsFollow: false)
     }
 
     /// The move of `moveFolder(_:toSpace:)` without its checks, which a folder that sync moves passed on the Mac that moved it.
