@@ -2180,7 +2180,7 @@ final class ScopedPluginContext: PluginPanelContext {
         let started = ContinuousClock.now
         return try await withCheckedThrowingContinuation { continuation in
             pageRuns[number] = continuation
-            contents.executeJavaScriptWithoutUserGesture(function, inWorld: pluginID.pageScriptWorld) { result in
+            contents.executeJavaScriptWithoutUserGesture(function, inWorld: pluginID.pageScriptWorld) { [weak self] result in
                 let settled = result.mapError { error -> PluginError in
                     if error is EngineUserGestureError { return .pageRunUnavailable }
                     return ContinuousClock.now - started < limit ? .noPage : .timedOut

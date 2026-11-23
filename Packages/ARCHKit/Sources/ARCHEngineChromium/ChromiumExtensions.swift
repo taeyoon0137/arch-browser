@@ -143,7 +143,8 @@ final class ChromiumExtensions: NSObject, EngineExtensions, @unchecked Sendable 
     /// Whether Chromium's list shows as running none of what the app asked to stop (`waitForUnloads()`). The extensions that it lists as off, or does not list, leave `stopping`.
     private func unloadsApplied() async -> Bool {
         await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return continuation.resume(returning: true) }
                 self.requestContext.extensions { [weak self] installed in
                     guard let self else { return continuation.resume(returning: true) }
                     let running = Set(installed.filter(\.isEnabled).map(\.identifier))
