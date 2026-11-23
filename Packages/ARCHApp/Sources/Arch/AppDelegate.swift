@@ -639,10 +639,10 @@ import Terminal
     }
     @objc private func reload() { session.activeWindow?.reload() }
     @objc private func stopLoading() { session.activeWindow?.stopLoading() }
+    /// Named for what it first did: Settings ▸ Shortcuts keeps a shortcut under the action's name.
     @objc private func startPictureInPicture() {
-        session.activeWindow?.selectedTab?.webContents.startPictureInPicture { started in
-            if !started { NSSound.beep() }
-        }
+        guard let window = session.activeWindow, let tab = window.selectedTab else { return NSSound.beep() }
+        window.togglePictureInPicture(tab)
     }
     @objc private func zoomIn() { session.activeWindow?.zoomIn() }
     @objc private func zoomOut() { session.activeWindow?.zoomOut() }
@@ -842,8 +842,8 @@ import Terminal
         }
         if item.action == #selector(savePageAs) { return activeWindow?.canSavePageAs == true }
         if item.action == #selector(startPictureInPicture) {
-            guard activeWindow?.canCapture == true, let scheme = activeWindow?.selectedTab?.url?.scheme?.lowercased() else { return false }
-            return scheme == "http" || scheme == "https" || scheme == "file"
+            guard let activeWindow, let tab = activeWindow.selectedTab else { return false }
+            return activeWindow.canTogglePictureInPicture(tab)
         }
         if item.action == #selector(chooseAppearance(_:)) {
             item.state = (item.representedObject as? String) == AppearanceSetting.current.rawValue ? .on : .off

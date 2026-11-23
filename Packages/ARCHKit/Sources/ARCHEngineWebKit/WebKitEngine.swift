@@ -392,10 +392,12 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         }
     }
 
-    public func startPictureInPicture(completion: @escaping (Bool) -> Void) {
-        Task { @MainActor in
-            let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.start,
-                                                                arguments: [:], in: nil, contentWorld: .page)
+    /// `callAsyncJavaScript` runs with the user's gesture, which the request needs, in the client's world, whose functions the page cannot replace. The script settles within five seconds, so the call keeps the web view no longer.
+    public func togglePictureInPicture(completion: @escaping (Bool) -> Void) {
+        Task { @MainActor [weak self] in
+            guard let webView = self?.webView else { return completion(false) }
+            let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.toggle,
+                                                                arguments: [:], in: nil, contentWorld: .defaultClient)
             completion(result as? Bool == true)
         }
     }

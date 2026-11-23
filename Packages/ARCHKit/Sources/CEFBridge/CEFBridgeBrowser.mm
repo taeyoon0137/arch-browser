@@ -847,9 +847,26 @@ private:
     IMPLEMENT_REFCOUNTING(BridgePdfCallback);
 };
 
-// Runs the browser's screenshot requests through the DevTools protocol and passes each one's PNG, or nil, to its completion exactly once.
+// Runs the browser's screenshot requests, evaluations, and other DevTools methods through the DevTools protocol and passes each one's PNG, boolean, or result object, or nil or NO, to its completion exactly once.
 class BridgeDevToolsObserver : public CefDevToolsMessageObserver {
 public:
+    // Sends `method` and passes its result object, or nil when it fails.
+    void Call(CefRefPtr<CefBrowserHost> host, const std::string &method, CefRefPtr<CefDictionaryValue> params, void (^completion)(NSDictionary *_Nullable)) {
+        isSending_ = true;
+        isSendingObject_ = true;
+        int messageID = host->ExecuteDevToolsMethod(0, method, params);
+        isSending_ = false;
+        isSendingObject_ = false;
+        std::map<int, NSDictionary *> early;
+        early.swap(earlyObject_);
+        if (messageID == 0) {
+            completion(nil);
+        } else if (auto result = early.find(messageID); result != early.end()) {
+            completion(result->second);
+        } else {
+            pendingObject_[messageID] = completion;
+        }
+    }
     void Evaluate(CefRefPtr<CefBrowserHost> host, CefRefPtr<CefDictionaryValue> params, void (^completion)(BOOL)) {
         isSending_ = true;
         isSendingBoolean_ = true;
@@ -892,21 +909,33 @@ public:
         std::map<int, void (^)(BOOL)> booleans;
         booleans.swap(pendingBoolean_);
         for (auto &entry : booleans) { entry.second(NO); }
+        std::map<int, void (^)(NSDictionary *_Nullable)> objects;
+        objects.swap(pendingObject_);
+        for (auto &entry : objects) { entry.second(nil); }
     }
 
     void OnDevToolsMethodResult(CefRefPtr<CefBrowser> browser, int message_id, bool success, const void *result,
                                 size_t result_size) override {
         NSData *png = nil;
         bool boolean = false;
+        NSDictionary *object = nil;
         if (success && result_size > 0) {
             NSData *json = [NSData dataWithBytesNoCopy:const_cast<void *>(result) length:result_size freeWhenDone:NO];
-            NSDictionary *object = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
+            id parsed = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
+            object = [parsed isKindOfClass:NSDictionary.class] ? parsed : nil;
             id base64 = [object objectForKey:@"data"];
             if ([base64 isKindOfClass:NSString.class]) {
                 png = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
             }
             id value = [[object objectForKey:@"result"] objectForKey:@"value"];
             boolean = [value isKindOfClass:NSNumber.class] && [value boolValue];
+        }
+        auto pendingObject = pendingObject_.find(message_id);
+        if (pendingObject != pendingObject_.end()) {
+            void (^completion)(NSDictionary *_Nullable) = pendingObject->second;
+            pendingObject_.erase(pendingObject);
+            completion(object);
+            return;
         }
         auto pendingBoolean = pendingBoolean_.find(message_id);
         if (pendingBoolean != pendingBoolean_.end()) {
@@ -918,7 +947,8 @@ public:
         auto pending = pending_.find(message_id);
         if (pending == pending_.end()) {
             if (isSending_) {
-                if (isSendingBoolean_) { earlyBoolean_[message_id] = boolean; }
+                if (isSendingObject_) { earlyObject_[message_id] = object; }
+                else if (isSendingBoolean_) { earlyBoolean_[message_id] = boolean; }
                 else { early_[message_id] = png; }
             }
             return;
@@ -936,8 +966,11 @@ private:
     std::map<int, NSData *> early_;
     std::map<int, void (^)(BOOL)> pendingBoolean_;
     std::map<int, bool> earlyBoolean_;
+    std::map<int, void (^)(NSDictionary *_Nullable)> pendingObject_;
+    std::map<int, NSDictionary *> earlyObject_;
     bool isSending_ = false;
     bool isSendingBoolean_ = false;
+    bool isSendingObject_ = false;
     IMPLEMENT_REFCOUNTING(BridgeDevToolsObserver);
 };
 
@@ -1911,19 +1944,34 @@ static CefMouseEvent InputMouseEvent(NSPoint point, uint32_t flags) {
     _devToolsObserver->Capture(host, params, completion);
 }
 
-- (void)evaluateWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion {
+// The main frame's ID comes from the frame tree, then `Page.createIsolatedWorld` gives the world's context, which DevTools reuses for the same name, and `Runtime.evaluate` runs there.
+- (void)evaluateInIsolatedWorldWithUserGesture:(NSString *)script completion:(void (^)(BOOL))completion {
     if (!_browser) { completion(NO); return; }
     CefRefPtr<CefBrowserHost> host = _browser->GetHost();
     if (!_devToolsObserver) {
         _devToolsObserver = new BridgeDevToolsObserver;
         _devToolsRegistration = host->AddDevToolsMessageObserver(_devToolsObserver);
     }
-    CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
-    params->SetString("expression", CefString(script.UTF8String));
-    params->SetBool("userGesture", true);
-    params->SetBool("awaitPromise", true);
-    params->SetBool("returnByValue", true);
-    _devToolsObserver->Evaluate(host, params, completion);
+    CefRefPtr<BridgeDevToolsObserver> observer = _devToolsObserver;
+    std::string expression = script.UTF8String;
+    observer->Call(host, "Page.getFrameTree", CefDictionaryValue::Create(), ^(NSDictionary *tree) {
+        id frameID = [[[tree objectForKey:@"frameTree"] objectForKey:@"frame"] objectForKey:@"id"];
+        if (![frameID isKindOfClass:NSString.class]) { completion(NO); return; }
+        CefRefPtr<CefDictionaryValue> world = CefDictionaryValue::Create();
+        world->SetString("frameId", CefString([frameID UTF8String]));
+        world->SetString("worldName", "Arch");
+        observer->Call(host, "Page.createIsolatedWorld", world, ^(NSDictionary *created) {
+            id context = [created objectForKey:@"executionContextId"];
+            if (![context isKindOfClass:NSNumber.class]) { completion(NO); return; }
+            CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+            params->SetString("expression", CefString(expression));
+            params->SetInt("contextId", [context intValue]);
+            params->SetBool("userGesture", true);
+            params->SetBool("awaitPromise", true);
+            params->SetBool("returnByValue", true);
+            observer->Evaluate(host, params, completion);
+        });
+    });
 }
 
 /// Ends every capture still waiting for its result, as when the page's process quits or the browser goes.
