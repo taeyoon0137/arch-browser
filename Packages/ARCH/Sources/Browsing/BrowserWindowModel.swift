@@ -49,10 +49,16 @@ public enum BrowserWindowKind {
     /// The internal page covering the page area, opened by its address from the command palette.
     @Published public private(set) var internalPage: InternalPage?
     /// The tab whose page fills the window in fullscreen. Only engines that leave the transition to the app report it; WebKit shows fullscreen in its own window. The other panes of a split view leave the screen meanwhile, and their prompts wait until the panes return.
-    @Published public private(set) var fullscreenTabID: UUID?
+    @Published public private(set) var fullscreenTabID: UUID? {
+        // A page in fullscreen takes the docked sidebar off the screen, and a sidebar panel's page ends with it.
+        didSet { if fullscreenTabID != nil { closeSidebarPanel() } }
+    }
     /// The page in the preview panel over the page area, or nil while no panel shows. Its web contents belongs to no tab.
     @Published private(set) var preview: PagePreview?
-    @Published public var isSidebarVisible = true
+    /// Hiding the sidebar closes a sidebar panel: its page ends with the docked column, and the floating card does not take it over.
+    @Published public var isSidebarVisible = true {
+        didSet { if !isSidebarVisible { closeSidebarPanel() } }
+    }
     /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
     @Published public var isLibraryVisible = false {
         didSet { if isLibraryVisible { session.markDownloadsSeen(); closeSidebarPanel() } }
@@ -763,7 +769,7 @@ public enum BrowserWindowKind {
         }
     }
 
-    /// Detaches and dismisses the plugin panel shown in the sidebar.
+    /// Detaches and dismisses the plugin panel shown in the sidebar. The panel's page ends when its view leaves the window, so the panel closes whenever the column that shows it goes: on Back, a change of space, the library, hiding the sidebar, a page entering fullscreen, or the floating card closing.
     func closeSidebarPanel() {
         (sidebarPanel?.controller as? any PluginEndingPanel)?.onEnd = nil
         sidebarPanelObserver = nil

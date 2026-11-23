@@ -10,7 +10,7 @@ private struct FavoriteBarFramesKey: PreferenceKey {
     }
 }
 
-/// A plugin's page in place of the tab list, with the row-sized return control.
+/// A plugin's page in place of the tab list, with the sidebar's return button. Escape closes it only while focus is in the panel's page, so Escape anywhere else in the window still reaches the page, the address field, the palette, or the find bar. The panel's page ends when the panel leaves the window, so the panel closes then too.
 private struct SidebarPluginPanelContent: View {
     let panel: BrowserWindowModel.SidebarPluginPanel
     let windowModel: BrowserWindowModel
@@ -18,15 +18,8 @@ private struct SidebarPluginPanelContent: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 8) {
-                Button { windowModel.closeSidebarPanel() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 18, height: 30)
-                }
-                .buttonStyle(.plain)
-                .help("Back to Tabs")
-                .accessibilityLabel("Back to Tabs")
+            HStack(spacing: 4) {
+                SidebarIconButton(symbol: "chevron.left", label: "Back to Tabs") { windowModel.closeSidebarPanel() }
                 Text(panel.title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
@@ -34,24 +27,30 @@ private struct SidebarPluginPanelContent: View {
                     .help(panel.title)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
             .frame(height: 36)
             SidebarPluginPanelController(controller: panel.controller)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onExitCommand { windowModel.closeSidebarPanel() }
-        .onAppear { [windowModel] in
+        .onAppear { [windowModel, controller = panel.controller] in
             guard escapeMonitor == nil else { return }
-            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak windowModel] event in
-                guard event.keyCode == 53, event.window === windowModel?.nsWindow else { return event }
-                windowModel?.closeSidebarPanel()
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak windowModel, weak controller] event in
+                guard event.keyCode == 53, let windowModel, let controller,
+                      Self.panelHasFocus(controller.view, in: event.window) else { return event }
+                windowModel.closeSidebarPanel()
                 return nil
             }
         }
-        .onDisappear {
+        .onDisappear { [windowModel, controller = panel.controller] in
             if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
             escapeMonitor = nil
+            if windowModel.sidebarPanel?.controller === controller { windowModel.closeSidebarPanel() }
         }
+    }
+
+    /// Whether the window's focus is in the panel's view.
+    static func panelHasFocus(_ panelView: NSView, in window: NSWindow?) -> Bool {
+        guard let window, panelView.window === window, let focused = window.firstResponder as? NSView else { return false }
+        return focused.isDescendant(of: panelView)
     }
 }
 
