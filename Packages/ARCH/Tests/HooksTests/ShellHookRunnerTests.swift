@@ -352,8 +352,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
                         "#!/usr/bin/python3 -i\n", "#!/usr/bin/python3 other.py\n", "#!/bin/sh e\n"] {
             #expect(HookShellScript.problem(in: Data(refused.utf8)) == HookShellScript.firstLineSentence, "\(refused)")
         }
-        #expect(HookShellScript.problem(in: Data([0x23, 0x21, 0x2F, 0xFF])) == "The script is not UTF-8 text.")
-        #expect(HookShellScript.problem(in: Data("#!/bin/sh\n".utf8) + Data(repeating: 0x20, count: HookShellScript.maximumSize)) == "The script is larger than 1 MB.")
+        #expect(HookShellScript.problem(in: Data([0x23, 0x21, 0x2F, 0xFF])) == catalogText("The script is not UTF-8 text."))
+        #expect(HookShellScript.problem(in: Data("#!/bin/sh\n".utf8) + Data(repeating: 0x20, count: HookShellScript.maximumSize)) == catalogText("The script is larger than 1 MB."))
     }
 
     @Test func aScriptWithCharactersTheTrustSheetCannotShowIsRefused() async throws {
@@ -391,7 +391,7 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         try FileManager.default.removeItem(at: program)
         try FileManager.default.createSymbolicLink(atPath: program.path, withDestinationPath: "/bin/zsh")
         let changed = try await outcome(loading: harness.tab("/two"), recorder: recorder)
-        #expect(changed.code == "scriptChanged" && changed.failure == "Its interpreter changed.")
+        #expect(changed.code == "scriptChanged" && changed.failure == catalogText("Its interpreter changed."))
         #expect(await eventually { registry.hooks.first?.state == .paused(.scriptChanged) })
         // Resume cannot lift it; trusting the script again with the new interpreter does.
         registry.resume(hook.id)
@@ -414,7 +414,7 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         let recorded = try HookShellScript.inspect(script, searchPath: searchPath).get().interpreter
         #expect(HookShellScript.interpreterProblem(recorded, script: script, searchPath: searchPath) == nil)
         try Data("second build".utf8).write(to: program)
-        #expect(HookShellScript.interpreterProblem(recorded, script: script, searchPath: searchPath) == "Its interpreter changed.")
+        #expect(HookShellScript.interpreterProblem(recorded, script: script, searchPath: searchPath) == catalogText("Its interpreter changed."))
     }
 
     @Test func aCopyChangedOutsideArchNeverRuns() async throws {
@@ -426,7 +426,7 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         harness.load(harness.tab())
         try #require(await eventually { registry.hooks.first?.state == .paused(.scriptChanged) && registry.lastRuns[hook.id]?.last != nil })
         #expect(recorder.invocations.isEmpty)
-        #expect(registry.lastRuns[hook.id]?.last?.message == "Its script changed outside Arch.")
+        #expect(registry.lastRuns[hook.id]?.last?.message == catalogText("Its script changed outside Arch."))
     }
 
     // MARK: Allow Shell Scripts
