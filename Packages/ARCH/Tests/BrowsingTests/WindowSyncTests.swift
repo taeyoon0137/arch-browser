@@ -156,6 +156,71 @@ import Testing
         }
     }
 
+    /// Open decision 5: the window where the user selects a tab that another window shows takes it, and the other window keeps it selected behind a placeholder, its row dimmed there, until it takes the tab back; automatic selection still passes the tab by (window rule 3), and the tab comes back on its own once the other window lets it go.
+    @Test func selectingATabThatAnotherWindowShowsTakesItAndTheOtherWindowKeepsItsSelection() throws {
+        try withTwoWindows { session, first, second, space, _ in
+            let tab = session.openTab(url: URL(string: "https://example.org/a")!, in: space.id, select: false)
+            let other = session.openTab(url: URL(string: "https://example.org/b")!, in: space.id, select: false)
+            first.selectTab(tab.id)
+            #expect(first.shows(tab))
+
+            second.selectTab(tab.id)
+            #expect(second.shows(tab) && second.selectedTabID == tab.id)
+            #expect(first.selectedTabID == tab.id && !first.shows(tab) && first.isShownInAnotherWindow(tab))
+            #expect(session.window(showing: tab) === second && first.tabsOnScreen.isEmpty)
+
+            // Taking it back.
+            first.selectTab(tab.id)
+            #expect(first.shows(tab) && !second.shows(tab) && second.selectedTabID == tab.id)
+            #expect(second.isShownInAnotherWindow(tab))
+
+            // Automatic selection passes it by.
+            #expect(second.firstFreeTab(inSpace: space.id)?.id == other.id)
+
+            // Once the window that holds it selects another tab, the waiting window shows it again.
+            first.selectTab(other.id)
+            #expect(second.shows(tab) && first.shows(other))
+        }
+    }
+
+    /// Open decision 4: a small window's tab is not written to `session.json`, so it does not come back at launch; once it moves to a main window it is.
+    @Test func aSmallWindowsTabIsNotSaved() {
+        let space = Space(name: "Personal", personaID: Persona.defaultID)
+        let tab = Tab(id: UUID(), webContents: PageStub(engine: .webKit, url: URL(string: "https://example.org/")!), spaceID: space.id, isPinned: false, personaID: Persona.defaultID)
+        tab.isInSmallWindow = true
+        #expect(SessionSnapshot.keptSidebar(tabs: [tab], folders: []).tabs.isEmpty)
+        tab.isInSmallWindow = false
+        #expect(SessionSnapshot.keptSidebar(tabs: [tab], folders: []).tabs.map(\.id) == [tab.id])
+    }
+
+    /// The small window's Persona menu moves its page to the chosen Persona at the same address, in the space of that Persona's front main window or else its first space; the old tab ends without joining the closed list, and the window stays open.
+    @Test func aSmallWindowSwitchesItsPersona() throws {
+        try withTwoWindows { session, first, second, space, _ in
+            let work = session.addPersona(named: "Work")
+            let workSpace = try #require(session.spaces(in: work.id).first)
+            let small = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: false), kind: .small)
+            defer { session.windowWillClose(small) }
+            let url = URL(string: "https://example.org/page")!
+            let old = session.openTab(url: url, in: space.id, select: false)
+            old.isInSmallWindow = true
+            small.selectTab(old.id)
+
+            session.moveSmallWindow(small, toPersona: work.id)
+            let moved = try #require(small.selectedTab)
+            #expect(moved.personaID == work.id && moved.url == url && moved.isInSmallWindow && moved.spaceID == workSpace.id)
+            #expect(small.currentSpaceID == workSpace.id && small.shows(moved))
+            #expect(!session.tabs.contains { $0 === old } && session.windows.contains { $0 === small })
+            for window in [first, second] { #expect(!rows(session, window, in: workSpace, pinned: false).contains(moved.id)) }
+
+            // A main window of the Persona names the destination: its current space.
+            let back = session.makeSpace(in: Persona.defaultID)
+            second.switchToSpace(back.id)
+            #expect(session.smallWindowDestination(in: Persona.defaultID).id == back.id)
+            session.moveSmallWindow(small, toPersona: Persona.defaultID)
+            #expect(small.selectedTab?.personaID == Persona.defaultID && small.selectedTab?.spaceID == back.id && small.selectedTab?.url == url)
+        }
+    }
+
     /// A small window's tab stays out of every main window's list.
     @Test func aSmallWindowsTabStaysOutOfEveryList() throws {
         try withTwoWindows { session, first, second, space, _ in

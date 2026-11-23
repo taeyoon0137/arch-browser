@@ -37,8 +37,8 @@ import Testing
         #expect(tabs.allSatisfy { !$0.isLoaded })
         #expect(tabs.map(savedRecord) == records)
         // One window shows the third tab. Another selects the first, with the second and third as panes of its split view, and leaves the third to the first window.
-        let otherWindow = BrowserWindowModel.panesToShow([tabs[2]], selectedTabID: tabs[2].id, shownTabIDs: [], isShownInAnotherWindow: { _ in false })
-        let window = BrowserWindowModel.panesToShow(Array(tabs.prefix(3)), selectedTabID: tabs[0].id, shownTabIDs: [], isShownInAnotherWindow: { $0 === tabs[2] })
+        let otherWindow = BrowserWindowModel.panesToShow([tabs[2]], shownTabIDs: [], isShownInAnotherWindow: { _ in false })
+        let window = BrowserWindowModel.panesToShow(Array(tabs.prefix(3)), shownTabIDs: [], isShownInAnotherWindow: { $0 === tabs[2] })
         #expect(otherWindow.map(\.id) == [tabs[2].id])
         #expect(window.map(\.id) == [tabs[0].id, tabs[1].id])
         var created: [(url: URL?, engine: EngineKind, state: Data?)] = []
@@ -53,11 +53,11 @@ import Testing
         #expect(tabs.dropFirst(3).map(savedRecord) == Array(records.dropFirst(3)))
     }
 
-    /// A window keeps showing its selected tab and the panes it shows already, even while another window shows them too.
-    @Test func aWindowKeepsItsSelectedTabAndShownPanes() {
+    /// A window keeps showing the panes it shows already, and leaves out the others that another window shows, its selected tab among them: a selected tab that another window took waits for the user to take it back (open decision 5).
+    @Test func aWindowKeepsItsShownPanesAndLeavesTakenOnesOut() {
         let tabs = (0..<3).map(record).map(restoredTab)
-        let shown = BrowserWindowModel.panesToShow(tabs, selectedTabID: tabs[0].id, shownTabIDs: [tabs[1].id], isShownInAnotherWindow: { _ in true })
-        #expect(shown.map(\.id) == [tabs[0].id, tabs[1].id])
+        let shown = BrowserWindowModel.panesToShow(tabs, shownTabIDs: [tabs[1].id], isShownInAnotherWindow: { _ in true })
+        #expect(shown.map(\.id) == [tabs[1].id])
     }
 
     /// WebKit reports the address it loaded with a user name and password, which the page's own `location.href` leaves out. The tab shows and saves it without them, and history records it without them.

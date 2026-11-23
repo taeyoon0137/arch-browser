@@ -17,7 +17,9 @@ struct TabRowView: View {
 
     private var isSelected: Bool { tab.id == windowModel.selectedTabID }
     /// A tab without its page, as one restored from the last session or unloaded since (bookmark rules 4 and 5), gets it again only when a window shows it, and its icon and title are dimmed until then, so the sidebar shows which tabs have pages.
-    private var isDimmed: Bool { !tab.isLoaded && !isSelected }
+    /// Another window shows the tab's page, as after it took this window's selected tab (open decision 5): the row is dimmed and marked, and a click takes the page back here.
+    private var isShownElsewhere: Bool { windowModel.isShownInAnotherWindow(tab) }
+    private var isDimmed: Bool { (!tab.isLoaded && !isSelected) || isShownElsewhere }
     /// Rows ignore the pointer while a tab is dragged over them.
     private var showsHover: Bool { isHovering && !isDraggingTab }
 
@@ -45,6 +47,9 @@ struct TabRowView: View {
             }
             if tab.isAudible {
                 TabAudioBadge()
+            }
+            if isShownElsewhere {
+                TabShownElsewhereBadge()
             }
             // The tab waits for the user's answer to a prompt, shown or not. It follows the title, as the audio badge does, so the close button's slot does not move it.
             TabPromptIndicator(prompts: session.prompts, tabID: tab.id)
@@ -284,6 +289,17 @@ struct TabAudioBadge: View {
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
             .accessibilityLabel(localized("Playing Audio"))
+    }
+}
+
+/// Marks a row whose tab another window shows, in the audio badge's size and color.
+struct TabShownElsewhereBadge: View {
+    var body: some View {
+        Image(systemName: "macwindow.on.rectangle")
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .help(localized("In use in another window"))
+            .accessibilityLabel(localized("In use in another window"))
     }
 }
 
