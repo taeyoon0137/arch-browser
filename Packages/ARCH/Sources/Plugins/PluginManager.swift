@@ -1545,13 +1545,13 @@ public final class PluginManager: ObservableObject {
         browserHost?.renameDownload(id, to: name, in: persona) ?? false
     }
 
-    /// Posts a notification for an enabled plugin, at most once every ten seconds.
+    /// Posts a notification for an enabled plugin, at most once every ten seconds, with at most 100 characters of title and 500 of body.
     fileprivate func notify(_ plugin: PluginID, title: String, body: String) {
         let now = Date()
         guard lastNotification[plugin].map({ now.timeIntervalSince($0) >= 10 }) ?? true,
               let name = plugins.first(where: { $0.id == plugin && $0.isEnabled })?.manifest.name else { return }
         lastNotification[plugin] = now
-        browserHost?.postNotification(pluginName: name, title: title, body: body)
+        browserHost?.postNotification(pluginName: name, title: String(title.prefix(100)), body: String(body.prefix(500)))
     }
 
     /// Checks a network request at the moment it starts: the plugin is still installed and enabled with the very grant its context holds, so a revoke or an update stops it at once, the grant has `network`, the address is HTTPS on port 443 at a granted host, and the plugin has started fewer than `networkRequestLimit` requests within the last minute. Throws `PluginError.permissionDenied(.network)`, `hostRefused`, or `rateLimited`.
