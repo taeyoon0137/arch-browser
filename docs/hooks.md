@@ -1031,4 +1031,4 @@ Each task that needs the app adds its check to the regression checklist in `docs
 
 ## Open decisions
 
-None needs the user's decision. The following remain for later features: storage for hook scripts, which none needs yet; run tools beyond the three, each with its own rule and record floor; Tab Names as an agent hook preset, which a plain request serves well today; and the `agent` permission for installed script plugins, whose install sheet would then state the grant.
+None needs the user's decision. Live sources, sidebar folders that a scheduled hook fills, are designed in `docs/live-sources.md`, which awaits the user's approval and adds a scheduled trigger, hook network, GitHub search, and folder items to these parts. The following remain for later features: storage for hook scripts, which none needs yet; run tools beyond the three, each with its own rule and record floor; Tab Names as an agent hook preset, which a plain request serves well today; and the `agent` permission for installed script plugins, whose install sheet would then state the grant.
