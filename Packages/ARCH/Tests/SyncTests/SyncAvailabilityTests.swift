@@ -102,10 +102,10 @@ import Testing
     }
 
     @Test func reasonsUseTheSettingsWording() {
-        #expect(SyncAvailability.Reason.notSignedForICloud.message == "This copy of Arch isn\u{2019}t signed for iCloud, so it can\u{2019}t sync.")
-        #expect(SyncAvailability.Reason.noAccount.message == "Sign in to iCloud in System Settings to sync.")
-        #expect(SyncAvailability.Reason.restricted.message == "iCloud is restricted on this Mac.")
-        #expect(SyncAvailability.Reason.temporarilyUnavailable.message == "iCloud isn\u{2019}t available right now. Arch checks again when it becomes active.")
+        #expect(SyncAvailability.Reason.notSignedForICloud.message == catalogText("This copy of Arch isn\u{2019}t signed for iCloud, so it can\u{2019}t sync."))
+        #expect(SyncAvailability.Reason.noAccount.message == catalogText("Sign in to iCloud in System Settings to sync."))
+        #expect(SyncAvailability.Reason.restricted.message == catalogText("iCloud is restricted on this Mac."))
+        #expect(SyncAvailability.Reason.temporarilyUnavailable.message == catalogText("iCloud isn\u{2019}t available right now. Arch checks again when it becomes active."))
     }
 
     /// The test runner has no iCloud entitlements, so the app's own reader finds none and the check never reaches CloudKit, where `CKContainer` would raise an exception. The public initializer, which the controller uses, returns before it creates a container too.

@@ -50,7 +50,7 @@ import Foundation
     /// Set while the controller applies incoming changes or builds a batch of outgoing records (`docs/sync.md`, Crash-loop guard).
     static let applyingKey = "ARCHSyncApplyingChanges"
     /// The key marks the time of an apply or a batch build, not a crash, so the message names only the quit.
-    static let interruptedApplyMessage = "Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again."
+    static let interruptedApplyMessage = localized("Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again.")
     private var guardHolds = 0
     private var quitBeforeDeletion: (any SyncEngineClient)?
     private var first = false
@@ -156,18 +156,18 @@ import Foundation
         do { try await engine.sendChanges() }
         catch {
             if self.engine === engine, !engine.pendingChanges.contains(.deleteZone) {
-                lastError = "Arch could not delete its iCloud data."
+                lastError = localized("Arch could not delete its iCloud data.")
             }
         }
         guard self.engine === engine, isDeletingCloudData else { return }
         if engine.pendingChanges.contains(.deleteZone), lastError == nil {
             // CloudKit owns retries for offline and temporarily unavailable accounts. Keep the
             // live request scoped to this engine. A relaunch starts from the pre-deletion file.
-            lastError = "Arch is waiting to delete its iCloud data."
+            lastError = localized("Arch is waiting to delete its iCloud data.")
             return
         }
         await resumeAfterDeleteFailure(on: engine,
-            message: lastError ?? "Arch could not delete its iCloud data. Try again when connected.")
+            message: lastError ?? localized("Arch could not delete its iCloud data. Try again when connected."))
     }
 
     /// The engine dropped what it fetched while the deletion waited but kept its change token past it, so a new engine starts from `sync.json`, which kept the state from before the deletion, and fetches those changes again.
@@ -216,7 +216,7 @@ import Foundation
             do {
                 try discardPreviousStateIfNeeded()
             } catch {
-                lastError = "The previous sync state could not be removed."
+                lastError = localized("The previous sync state could not be removed.")
                 return
             }
             // A recovered or replacement local session says nothing about deletions. Its old
@@ -247,7 +247,7 @@ import Foundation
         await requestFetch()
         if let quit = quitBeforeDeletion, quit === engine {
             quitBeforeDeletion = nil
-            lastError = "Arch quit before it deleted its iCloud data. Delete it again to remove it."
+            lastError = localized("Arch quit before it deleted its iCloud data. Delete it again to remove it.")
         }
     }
 
@@ -297,7 +297,7 @@ import Foundation
                 needsRecoveryFetch = false
                 do { try await engine.fetchChanges() }
                 catch {
-                    if self.engine === engine, fetching { lastError = "The sync fetch did not finish." }
+                    if self.engine === engine, fetching { lastError = localized("The sync fetch did not finish.") }
                 }
             } while self.engine === engine && needsRecoveryFetch
             if self.engine === engine { fetchTask = nil }
@@ -335,7 +335,7 @@ import Foundation
         do {
             try compareSidebar(state)
             if canSendRecords { persist() }
-        } catch { lastError = "The saved sidebar could not be compared." }
+        } catch { lastError = localized("The saved sidebar could not be compared.") }
     }
 
     func settingsChanged() {
@@ -411,7 +411,7 @@ import Foundation
                 return
             }
             if let error {
-                lastError = "The sync fetch did not finish (\(error.rawValue))."
+                lastError = localized("The sync fetch did not finish (\(error.rawValue)).")
                 return
             }
             if missingZone { disableAfterLoss(.zoneDeleted); return }
@@ -422,7 +422,7 @@ import Foundation
                 if sent.deletedZone || sent.failedDelete == .zoneNotFound {
                     disableAfterLoss(.zoneDeleted)
                 } else if let refusal = sent.failedDelete {
-                    let message = "Arch could not delete its iCloud data (\(refusal.rawValue))."
+                    let message = localized("Arch could not delete its iCloud data (\(refusal.rawValue)).")
                     lastError = message
                     if let engine {
                         // A retry can finish after the original send operation already returned.
@@ -439,7 +439,7 @@ import Foundation
                 if let engine { flushHeldChanges(on: engine) }
             }
             if sent.failedSave != nil { awaitingZoneSave = true }
-            if let code = sent.failedSave ?? sent.failedDelete { lastError = "The sync zone change failed (\(code.rawValue))." }
+            if let code = sent.failedSave ?? sent.failedDelete { lastError = localized("The sync zone change failed (\(code.rawValue)).") }
         case .accountChange(let account):
             if account == .signIn {
                 if isEnabled && !isDeletingCloudData && fetchTask == nil {
@@ -507,7 +507,7 @@ import Foundation
         let old = detach()
         defaults.set(true, forKey: Self.discardStateKey)
         do { try discardPreviousStateIfNeeded() }
-        catch { lastError = "The previous sync state could not be removed." }
+        catch { lastError = localized("The previous sync state could not be removed.") }
         Task { await old?.stop() }
     }
 
@@ -576,7 +576,7 @@ import Foundation
         } catch {
             applying = false
             fetching = true
-            lastError = "The incoming sidebar could not be applied and saved."
+            lastError = localized("The incoming sidebar could not be applied and saved.")
         }
     }
 
@@ -650,7 +650,7 @@ import Foundation
                 } else { missingZone = true }
             case .other(let code):
                 refusedSaves[refused.recordName] = mirror.pendingSaves.first { $0.recordName == refused.recordName }
-                lastError = "A sync save failed (\(code.rawValue))."
+                lastError = localized("A sync save failed (\(code.rawValue)).")
             }
         }
         if !unknown.isEmpty || missingZone {
@@ -670,7 +670,7 @@ import Foundation
                 compareSettings()
                 persist()
             }
-            catch { lastError = "The pending sidebar changes could not be compared." }
+            catch { lastError = localized("The pending sidebar changes could not be compared.") }
         }
     }
 
@@ -686,7 +686,7 @@ import Foundation
     private func persist() {
         guard canSendRecords else { return }
         do { try writeMirror() }
-        catch { lastError = "The sync state could not be saved." }
+        catch { lastError = localized("The sync state could not be saved.") }
     }
 
     /// Writes the mirror with the latest pending engine state.

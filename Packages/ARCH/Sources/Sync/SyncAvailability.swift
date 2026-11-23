@@ -24,10 +24,10 @@ public struct SyncAvailability: Sendable {
         /// The sentence Settings ▸ Sync shows below the disabled toggle (`docs/sync.md`, User interface).
         public var message: String {
             switch self {
-            case .notSignedForICloud: "This copy of Arch isn\u{2019}t signed for iCloud, so it can\u{2019}t sync."
-            case .noAccount: "Sign in to iCloud in System Settings to sync."
-            case .restricted: "iCloud is restricted on this Mac."
-            case .temporarilyUnavailable: "iCloud isn\u{2019}t available right now. Arch checks again when it becomes active."
+            case .notSignedForICloud: localized("This copy of Arch isn\u{2019}t signed for iCloud, so it can\u{2019}t sync.")
+            case .noAccount: localized("Sign in to iCloud in System Settings to sync.")
+            case .restricted: localized("iCloud is restricted on this Mac.")
+            case .temporarilyUnavailable: localized("iCloud isn\u{2019}t available right now. Arch checks again when it becomes active.")
             }
         }
     }
