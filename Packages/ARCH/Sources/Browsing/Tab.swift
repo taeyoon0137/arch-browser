@@ -103,8 +103,8 @@ import LiveFolders
     var presentPrompt: ((PromptContent, @escaping (PromptResponse) -> Void) -> Void)?
     /// The session sets this callback to name the web extension of the tab's Persona whose page is at an address (`BrowserSession.extensionName(ofPageAt:in:)`), which the tab's prompts name in place of the identifier that the address has as its host (`PromptSiteIdentity`), `shownTitle` and `shownPageTitle` put in place of a title that only repeats such a page's address, and Now Playing names as the page's site. Without it they show the identifier, or the address that Chromium reports as the title. The session has a tab on such a page announce a change when its extension's name changes (`BrowserSession.extensionNamesDidChange(from:to:in:)`).
     var extensionName: ((URL) -> String?)?
-    /// Opens a link in a new tab, optionally selecting it in the source window.
-    var openURLInNewTab: ((URL, Bool) -> Void)?
+    /// Opens a link from the context menu in a new tab behind the selected one.
+    var openURLInNewTab: ((URL) -> Void)?
     /// The session sets this callback to show the search engine's results for text selected in the page in a new tab, for the context menu's Search with.
     var searchInNewTab: ((String) -> Void)?
     /// The page assistant sets this callback to ask about text selected in the page. The context menu offers it while a provider can answer questions about pages.
@@ -571,7 +571,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     /// Only web addresses open in a tab; a link for another app offers just Copy Link.
     private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
-        return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url, false) }
+        return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
     }
 
     /// Offers an explicit download for an HTTP link or image in the context menu.
@@ -701,17 +701,13 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 // MARK: Navigation checks and link previews
 
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
-    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rules P13 and P16), whoever started the navigation; a link or window that opens elsewhere is asked about as a popup, not as a hop of the tab's navigation. A modified link can open a new tab or a Shift preview. Both open after the engine's policy callback returns.
+    /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rules P13 and P16), whoever started the navigation; a link or window that opens elsewhere is asked about as a popup, not as a hop of the tab's navigation. A web or file link clicked with Command or the middle button goes back to the engine, which opens it in a new web contents with the page's referrer and reports it as the page's new tab (`openNewTab`), on both engines; an agent's tab opens none. A Shift-clicked web link opens a preview after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
         let kind: AgentLoadKind = action.disposition != .currentTab ? .popup : action.isRedirect ? .redirect : .navigation
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url, kind: kind) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
-           ["http", "https", "file"].contains(scheme), let openURLInNewTab {
-            guard agentOwnerID == nil else { return .cancel }
-            if webContents.engineKind == .webKit { return .openLinkInNewTab }
-            let foreground = action.disposition == .newForegroundTab
-            DispatchQueue.main.async { openURLInNewTab(action.url, foreground) }
-            return .cancel
+           ["http", "https", "file"].contains(scheme), openNewTab != nil {
+            return agentOwnerID == nil ? .openLinkInNewTab : .cancel
         }
         guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "include/cef_picture_in_picture_handler.h"
 #include "include/cef_request_context.h"
 #include "include/cef_request_handler.h"
+#include "include/cef_resource_request_handler.h"
 #include "include/cef_values.h"
 
 using namespace cef_bridge;
@@ -309,7 +311,7 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
                 extraInfo:(CefRefPtr<CefDictionaryValue> &)extraInfo;
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
 - (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture;
-- (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture;
+- (BOOL)handleMayOpenURL:(NSString *)url frame:(CefRefPtr<CefFrame>)frame disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture;
 - (void)handleMainFrameNavigationPending:(BOOL)pending;
 - (void)handleBeforeClose;
 - (ARCHCEFDownload *)downloadForItem:(CefRefPtr<CefDownloadItem>)item;
@@ -427,6 +429,22 @@ void DetachBrowserView(CefRefPtr<CefBrowser> browser) {
     }
 }
 
+// Gives one request a referrer under Chromium's default policy (strict-origin-when-cross-origin), as the page of a link the user opened in a new tab would have sent.
+class ReferrerSetter : public CefResourceRequestHandler {
+public:
+    explicit ReferrerSetter(const std::string &referrer) : referrer_(referrer) {}
+
+    cef_return_value_t OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                                            CefRefPtr<CefCallback> callback) override {
+        request->SetReferrer(referrer_, REFERRER_POLICY_REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN);
+        return RV_CONTINUE;
+    }
+
+private:
+    const std::string referrer_;
+    IMPLEMENT_REFCOUNTING(ReferrerSetter);
+};
+
 // Forwards one browser's CEF callbacks to its `ARCHCEFBrowser`. The owner calls `Detach()` before releasing the client.
 class BridgeClient : public CefClient,
                      public CefDisplayHandler,
@@ -450,6 +468,12 @@ public:
     // The view that the developer tools fill while they are open. CEF holds only a raw handle to it, so the client, which CEF keeps until the browser has closed, keeps the view until the tools or the browser close, even after the owner goes.
     NSView *DevToolsView() const { return devToolsView_; }
     void SetDevToolsView(NSView *view) { devToolsView_ = view; }
+
+    // The referrer of the browser's first main frame request, set before CEF creates the browser. CEF asks for the request's handler on its IO thread.
+    void SetFirstRequestReferrer(const std::string &referrer) {
+        std::lock_guard<std::mutex> lock(firstRequestReferrerLock_);
+        firstRequestReferrer_ = new ReferrerSetter(referrer);
+    }
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -620,13 +644,31 @@ public:
         if (!cancel && frame->IsMain()) {
             [owner_ handleMainFrameNavigationPending:YES];
         }
+        // A main frame navigation stopped before its request leaves no referrer for a later one.
+        if (cancel && frame->IsMain()) {
+            std::lock_guard<std::mutex> lock(firstRequestReferrerLock_);
+            firstRequestReferrer_ = nullptr;
+        }
         return cancel;
     }
 
     // Alloy defaults to loading modified links in place. Let the app honor the requested tab or window instead.
     bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString &target_url,
                           CefRequestHandler::WindowOpenDisposition target_disposition, bool user_gesture) override {
-        return owner_ != nil && ![owner_ handleMayOpenURL:ToNSString(target_url) disposition:target_disposition userGesture:user_gesture];
+        return owner_ != nil && ![owner_ handleMayOpenURL:ToNSString(target_url) frame:frame disposition:target_disposition userGesture:user_gesture];
+    }
+
+    // Only the first main frame request of a browser opened for a link takes the link's referrer; a redirect's referrer follows from it.
+    CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                                                                   bool is_navigation, bool is_download, const CefString &request_initiator,
+                                                                   bool &disable_default_handling) override {
+        if (!is_navigation || request->GetResourceType() != RT_MAIN_FRAME) {
+            return nullptr;
+        }
+        std::lock_guard<std::mutex> lock(firstRequestReferrerLock_);
+        CefRefPtr<CefResourceRequestHandler> handler = firstRequestReferrer_;
+        firstRequestReferrer_ = nullptr;
+        return handler;
     }
 
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
@@ -678,7 +720,7 @@ public:
                        bool *no_javascript_access) override {
         NSString *url = ToNSString(target_url);
         if (!gInitialized || target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE || ![owner_.delegate cefBrowserCanAdoptPopup] ||
-            (target_disposition == CEF_WOD_NEW_WINDOW && ![owner_ handleMayOpenURL:url disposition:target_disposition userGesture:user_gesture]) ||
+            (target_disposition == CEF_WOD_NEW_WINDOW && ![owner_ handleMayOpenURL:url frame:frame disposition:target_disposition userGesture:user_gesture]) ||
             [owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
             return true;
         }
@@ -827,6 +869,8 @@ private:
 
     __unsafe_unretained ARCHCEFBrowser *owner_;
     NSView *devToolsView_ = nil;
+    std::mutex firstRequestReferrerLock_;
+    CefRefPtr<CefResourceRequestHandler> firstRequestReferrer_;
     IMPLEMENT_REFCOUNTING(BridgeClient);
 };
 
@@ -1022,9 +1066,21 @@ private:
                     requestContext:(ARCHCEFRequestContext *)requestContext
                        pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
                           delegate:(id<ARCHCEFBrowserDelegate>)delegate {
+    return [self initWithParentView:parentView url:url referrer:nil requestContext:requestContext pageScripts:pageScripts delegate:delegate];
+}
+
+- (instancetype)initWithParentView:(NSView *)parentView
+                               url:(NSString *)url
+                          referrer:(NSString *)referrer
+                    requestContext:(ARCHCEFRequestContext *)requestContext
+                       pageScripts:(NSArray<ARCHCEFPageScript *> *)pageScripts
+                          delegate:(id<ARCHCEFBrowserDelegate>)delegate {
     self = [self initForBrowserInParentView:parentView url:url pageScripts:pageScripts delegate:delegate];
     if (!self) {
         return nil;
+    }
+    if (referrer.length > 0) {
+        _client->SetFirstRequestReferrer(referrer.UTF8String);
     }
     CefWindowInfo windowInfo;
     [self placeInWindowInfo:windowInfo];
@@ -1260,12 +1316,12 @@ private:
 }
 
 // Alloy loads modified links in place unless the app handles their requested disposition.
-- (BOOL)handleMayOpenURL:(NSString *)url disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture {
+- (BOOL)handleMayOpenURL:(NSString *)url frame:(CefRefPtr<CefFrame>)frame disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture {
     if (!userGesture || (disposition != CEF_WOD_NEW_WINDOW && disposition != CEF_WOD_NEW_BACKGROUND_TAB && disposition != CEF_WOD_NEW_FOREGROUND_TAB)) {
         return YES;
     }
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
-    return delegate == nil || [delegate cefBrowserShouldOpenURL:url disposition:PopupDisposition(disposition)];
+    return delegate == nil || [delegate cefBrowserShouldOpenURL:url disposition:PopupDisposition(disposition) frameURL:frame ? ToNSString(frame->GetURL()) : @""];
 }
 
 /// Fills CEF's parameters for a popup the page opens: CEF creates it in this browser's browsing context, as the bridge's own browser object, with its own client and a container view of this browser's size, and its renderers start with this browser's page scripts. CEF uses this browser's request context and settings. The object waits in `gPendingPopups` until CEF creates the popup or aborts it.

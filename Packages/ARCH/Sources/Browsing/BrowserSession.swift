@@ -196,7 +196,11 @@ final class EngineRuntime {
         let candidates = [registry.defaultKind] + registry.registeredKinds.filter { $0 != registry.defaultKind }
         var primary: (any EngineApplication)?
         for kind in candidates where primary == nil {
-            primary = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
+            do {
+                primary = try Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
+            } catch {
+                engineStartLog.record(EngineStartFailure(engine: kind, persona: nil, error: error))
+            }
             if primary == nil { enginesThatDidNotStart.insert(kind) }
         }
         guard let primary else { throw SessionError.noEngineStarted }
@@ -541,10 +545,10 @@ final class EngineRuntime {
         EngineApplicationConfiguration(userDataDirectory: userDataDirectory, cacheDirectory: userDataDirectory.appendingPathComponent("Cache"))
     }
 
-    /// Creates an engine's application. Returns nil when the engine cannot start.
-    private static func makeApplication(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) -> (any EngineApplication)? {
+    /// Creates an engine's application, or nil for an engine that is not registered. Throws the engine's reason when it cannot start.
+    private static func makeApplication(_ kind: EngineKind, registry: EngineRegistry, userDataDirectory: URL) throws -> (any EngineApplication)? {
         guard let engine = registry.engine(for: kind) else { return nil }
-        return try? engine.makeApplication(configuration: engineConfiguration(userDataDirectory: userDataDirectory))
+        return try engine.makeApplication(configuration: engineConfiguration(userDataDirectory: userDataDirectory))
     }
 
     /// Makes the session the application's delegate and keeps the application for the engine's runtimes.
@@ -553,10 +557,16 @@ final class EngineRuntime {
         applications[application.engineKind] = application
     }
 
-    /// The engine's application, started on first use. Returns nil when the engine cannot start.
+    /// The engine's application, started on first use. Returns nil when the engine cannot start, and the engine start log keeps its reason.
     private func application(for kind: EngineKind) -> (any EngineApplication)? {
         if let application = applications[kind] { return application }
-        guard let application = Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory) else {
+        var started: (any EngineApplication)?
+        do {
+            started = try Self.makeApplication(kind, registry: registry, userDataDirectory: userDataDirectory)
+        } catch {
+            engineStartLog.record(EngineStartFailure(engine: kind, persona: nil, error: error))
+        }
+        guard let application = started else {
             enginesThatDidNotStart.insert(kind)
             return nil
         }
@@ -583,13 +593,14 @@ final class EngineRuntime {
         return nil
     }
 
-    /// Creates the Persona's profile and browser in the engine and connects them to the session: the Persona's web extensions, their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed.
+    /// Creates the Persona's profile and browser in the engine and connects them to the session: the Persona's web extensions, their downloads, the download settings, the remembered permissions, and the Persona's cookie copies. Returns nil when the engine cannot start or the Persona is not listed; the engine start log keeps the reason of a profile that did not open.
     private func startRuntime(_ kind: EngineKind, in engines: PersonaEngines) -> EngineRuntime? {
         guard let application = application(for: kind), let persona = personas.first(where: { $0.id == engines.personaID }) else { return nil }
         // Both engines create a profile before `createBrowserContext` returns.
-        var created: (any EngineBrowserContext)?
-        application.createBrowserContext(storageIdentifier: persona.storageIdentifier) { created = try? $0.get() }
-        guard let context = created else { return nil }
+        var created: Result<any EngineBrowserContext, any Error>?
+        application.createBrowserContext(storageIdentifier: persona.storageIdentifier) { created = $0 }
+        if case .failure(let error)? = created { engineStartLog.record(EngineStartFailure(engine: kind, persona: persona, error: error)) }
+        guard let context = try? created?.get() else { return nil }
         let browser = application.createBrowser(context: context)
         let runtime = EngineRuntime(kind: kind, personaID: persona.id, context: context, browser: browser)
         engines.runtimes[kind] = runtime
@@ -1102,17 +1113,11 @@ final class EngineRuntime {
                 DispatchQueue.main.async { [weak tab] in tab?.webContents.exitFullscreen() }
             }
         }
-        // A modified link or a context-menu link stays in the source Persona and engine. Only a requested foreground tab selects a new page.
-        tab.openURLInNewTab = { [weak self, weak tab] url, foreground in
+        // A context-menu link opens behind, marked unread, in the source Persona and engine. A link clicked with Command or the middle button opens through `openNewTab`.
+        tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
-            let window = self.window(showing: tab)
-            if foreground, let window {
-                let page = self.makeWebContents(url: url, engine: tab.preferredEngine, state: nil, in: tab.personaID)
-                window.showOpenedPage(page, personaID: tab.personaID, preferredEngine: tab.preferredEngine)
-            } else {
-                let spaceID = tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: tab.personaID).id
-                self.openTab(url: url, in: spaceID, select: false, engine: tab.preferredEngine).isUnread = true
-            }
+            let spaceID = tab.spaceID ?? self.window(showing: tab)?.currentSpaceID ?? self.preferredSpace(in: tab.personaID).id
+            self.openTab(url: url, in: spaceID, select: false, engine: tab.preferredEngine).isUnread = true
         }
         // Search with in a page's context menu shows the results for the page's selection as a page the tab opens: in a new tab that the window showing the page selects, in the page's engine and Persona, or behind, marked unread, when no window shows the page.
         tab.searchInNewTab = { [weak self, weak tab] text in
@@ -1718,6 +1723,8 @@ final class EngineRuntime {
 
     /// Why each tab closed this launch, for the tab close log window.
     public let closeLog = TabCloseLog()
+    /// Which engines and profiles did not start this launch, and why, which the same window shows.
+    public let engineStartLog = EngineStartLog()
 
     /// Drops a closing tab from each window's switcher order and, when `logs` holds, logs it with its crash count and the engines' total.
     private func recordClose(of tab: Tab, reason: TabCloseReason, logs: Bool) {

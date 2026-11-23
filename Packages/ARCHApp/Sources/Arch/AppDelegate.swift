@@ -1111,7 +1111,7 @@ import Terminal
 
     // MARK: Tab close log
 
-    private lazy var closeLogWindow = TabCloseLogWindowController(log: session.closeLog)
+    private lazy var closeLogWindow = TabCloseLogWindowController(log: session.closeLog, startLog: session.engineStartLog)
 
     @objc private func showTabCloseLog() { closeLogWindow.show() }
 
