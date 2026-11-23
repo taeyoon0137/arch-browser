@@ -25,7 +25,7 @@ import Testing
 
     /// Asks the session for the file's name as the engine does once the download has started.
     private func download(_ item: RequestedDownload, from tab: Tab, in session: BrowserSession) -> RequestedDownload {
-        let downloads = session.runtime(for: tab.engineKind, in: tab.personaID).context.downloads
+        let downloads = session.runtime(for: tab.engineKind, in: tab.personaID)!.context.downloads
         session.downloads(downloads, determineFilenameFor: item, defaultFilename: "file") { _ in item.isDecided = true }
         return item
     }
