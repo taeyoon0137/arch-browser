@@ -1,4 +1,17 @@
-// Agent sessions on the user's CLI (docs/agents.md, Tests ▸ AITests): the exact arguments and environments of Claude Code and Codex, the start check and the stream watcher, the feature derivation and the configuration probe, the probes that run again when the executable changes, the open input mode, Stop, the idle timer, fallbacks before `ready`, Codex's thread deletion, usage under `agent`, an automatic feature's turns under the daily limit and behind the user's requests, the derived `agent` capability, and the presets' ordinary requests. Shell scripts stand in for `claude` and `codex` and replay the recorded streams in `Fixtures/Agent`, so no test reaches a real tool or a model.
+// Tests agent sessions on the user's CLI (docs/agents.md, Tests ▸ AITests).
+// Tests the exact arguments and environments of Claude Code and Codex.
+// Tests the start check and stream watcher.
+// Tests feature derivation and the configuration probe.
+// Probes run again when the executable changes.
+// Tests open input mode, Stop, and the idle timer.
+// Tests fallbacks before `ready`.
+// Tests Codex's thread deletion.
+// Tests usage under `agent`.
+// An automatic feature's turns stay under the daily limit and behind the user's requests.
+// Tests the derived `agent` capability and the presets' ordinary requests.
+// Shell scripts stand in for `claude` and `codex`.
+// They replay the recorded streams in `Fixtures/Agent`.
+// No test therefore reaches a real tool or model.
 import Darwin
 import Foundation
 import Testing
@@ -87,7 +100,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(arguments[arguments.firstIndex(of: "--settings")! + 1] == #"{"skillOverrides":{"plugin-authoring":"off"}}"#)
         #expect(!arguments.contains("--disable-slash-commands"))
         #expect(!arguments.contains("--model"))
-        // An effort the tool does not take is left out.
+        // Arch leaves out an effort the tool does not accept.
         #expect(!arguments.contains("--effort"))
         let environment = ClaudeCodeAgent.sessionEnvironment(["HOME": "/h"], skills: skills)
         #expect(environment["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] == "1")
@@ -241,12 +254,12 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(session(raised).failure(of: event, isFirst: false) == nil)
         event["tools"] = (Self.tools + ["type"]).map { "mcp__arch__\($0)" }
         #expect(session(raised).failure(of: event, isFirst: false) == nil)
-        // Lowered again: the raised list or the lower one.
+        // After lowering the list again, either the raised list or the lower one works.
         let lowered = [Self.tools + ["type"], Self.tools]
         #expect(session(lowered).failure(of: event, isFirst: false) == nil)
         event["tools"] = Self.tools.map { "mcp__arch__\($0)" }
         #expect(session(lowered).failure(of: event, isFirst: false) == nil)
-        // A tool no answer offered, or one every answer offered left out.
+        // A tool that no answer offered, or a missing tool that every answer offered.
         event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs", "mcp__arch__session_info", "mcp__arch__press"]
         #expect(session(raised).failure(of: event, isFirst: false)?.contains("mcp__arch__press") == true)
         event["tools"] = ["mcp__arch__click", "mcp__arch__list_tabs"]
@@ -259,7 +272,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
     @Test func theRecordedSkillFolderInitPassesOnlyWithItsSkills() throws {
         let event = try recordedInit("claude-skills")
         #expect(session(skills: recordedSkills).failure(of: event, isFirst: true) == nil)
-        // Every built-in command it lists is on the reviewed list, which holds nothing else.
+        // Every built-in command it lists is on the reviewed list.
+        // The reviewed list holds nothing else.
         #expect(Set(event["slash_commands"] as? [String] ?? []) == ClaudeCodeStartCheck.reviewedCommands.union(["arch:arch-browser"]))
         let refused = try #require(session().failure(of: event, isFirst: true))
         #expect(refused.contains("Skill") && refused.contains("the skill arch:arch-browser") && refused.contains("the command /model") && refused.contains("the plugin arch"))
@@ -321,7 +335,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         }
     }
 
-    /// The sentence of the `agentUsedOwnTools` refusal that `body` throws, or nil when it throws none.
+    /// The refusal sentence for `agentUsedOwnTools` that `body` throws, or nil if it throws none.
     private func refusal(_ body: () throws -> [AIAgentStreamEvent]) -> String? {
         do {
             _ = try body()
@@ -337,7 +351,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let list = try String(contentsOf: agentFixtures.appendingPathComponent("codex-features-list.txt"), encoding: .utf8)
         let disabled = try CodexAgent.disabledFeatures(fromList: list)
         #expect(disabled.count == 132)
-        // Features listed as off are disabled too; removed ones, deprecated ones listed as off, and the keep list are not.
+        // Arch disables features listed as off too.
+        // It does not disable removed features, deprecated features listed as off, or the keep list.
         #expect(disabled.contains("shell_tool") && disabled.contains("unified_exec") && disabled.contains("daemon_auto_start"))
         #expect(disabled.contains("agent_message_board"))
         #expect(!disabled.contains("apply_patch_freeform"))
@@ -426,7 +441,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         } catch let error as AIAgentToolError {
             #expect(error.detail == "Codex 0.164.0 does not accept `\(group)`. Update Codex in the terminal.")
         }
-        // The server's settings go together, so none of them is probed alone.
+        // The server's settings go together, so Arch probes none of them alone.
         let groups = cli.calls().filter { $0.contains("--strict-config") }.dropFirst()
         #expect(!groups.contains { $0.filter { $0.hasPrefix("mcp_servers.") }.count == 1 })
     }
@@ -453,7 +468,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
     @Test func aScriptPipeThatAChildKeepsOpenClosesWhenTheProcessEnds() async throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // The interpreter leaves a child that inherits descriptor 3 without reading it and exits long before it reads a script larger than the pipe holds.
+        // The interpreter leaves a child that inherits descriptor 3 without reading it.
+        // The interpreter exits long before it reads a script larger than the pipe holds.
         let script = Data("sleep 20 &\nexit 0\n".utf8) + Data(repeating: UInt8(ascii: "#"), count: 512 * 1024) + Data("\n".utf8)
         let process = try CommandLineProcess(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["/dev/fd/3"], environment: ["PATH": "/usr/bin:/bin"],
                                              directory: directory, input: Data(), script: script, argumentZero: "fixture-shell")
@@ -488,7 +504,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(total.requests == 4)
         #expect(total.errors == 0)
         #expect(total.usage == AIUsage(inputTokens: 3742, outputTokens: 137, cachedInputTokens: 20048))
-        // One process; each message one line on standard input.
+        // One process receives each message as one line on standard input.
         #expect(cli.calls().filter { $0.contains("--input-format") }.count == 1)
         let input = cli.text("stdin.log").split(separator: "\n")
         #expect(input.count == 4)
@@ -496,7 +512,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         await session.end()
     }
 
-    /// A message on a provider in a cool-down, here an hour, says so instead of waiting silently, and Stop ends it before any process starts.
+    /// A message on a provider in a cooldown, here an hour, reports the cooldown instead of waiting silently.
+    /// Stop ends it before any process starts.
     @Test func aMessageWaitingOnAUsageLimitSaysSoAndStopEndsIt() async throws {
         let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
         let fixture = try AgentFixture(cli: cli, model: "haiku")
@@ -513,7 +530,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         await session.end()
     }
 
-    /// A Stop while the sign-in is read leaves it unread, so the next message reads it again.
+    /// Stop during a sign-in read leaves it unread.
+    /// The next message therefore reads it again.
     @Test func aStopDuringTheSignInReadLeavesItUnread() async throws {
         let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
         try cli.write("status-sleeps", "")
@@ -534,7 +552,9 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
 
     @Test func aLaterClaudeTurnCanReportADifferentModelWithoutReopeningTheProcess() async throws {
         var turns = try claudeTurns("claude-session")
-        // The start omits its model, the assistant names it, and the final per-turn usage confirms the resolved name.
+        // The start omits its model.
+        // The assistant names it.
+        // The final per-turn usage confirms the resolved name.
         let lines = try turns[1].split(separator: "\n").map { line -> String in
             var object = try #require(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
             if var event = object["event"] as? [String: Any], var message = event["message"] as? [String: Any] {
@@ -826,7 +846,9 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         try await log.wait { $0.contains("finished:completed") }
         try session.send("Call click.")
         try await log.wait { $0.filter { $0 == "finished:completed" }.count == 2 }
-        // `turn.completed.usage` is the thread's running total: 24836 input, 21888 cached, and 61 output after the first turn, 50451, 46208, and 125 after the resumed one.
+        // `turn.completed.usage` is the thread's running total.
+        // After the first turn, it reports 24836 input, 21888 cached, and 61 output.
+        // After the resumed turn, it reports 50451, 46208, and 125.
         #expect(log.events.filter { $0.hasPrefix("usage:") } == ["usage:2948/61/21888", "usage:1295/64/24320"])
         let total = try #require(fixture.service.usage.totals(monthsAgo: 0).first { $0.feature == "agent" })
         #expect(total.requests == 2)
@@ -843,13 +865,15 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let log = AgentEventLog(session)
         try session.send("Call the session_info tool.")
         try await log.wait { $0.contains("finished:completed") }
-        // The init passed, but the model never replied, so the route's next model holds the session.
+        // The init passed.
+        // The model never replied, so the route's next model holds the session.
         #expect(session.model == AIModelRef(provider: fixture.providers[1].id, model: "claude-haiku-5-5"))
         #expect(log.events.filter { $0.hasPrefix("ready:") }.count == 1)
         #expect(log.events.first?.hasPrefix("notice:Claude Code reports its usage limit (five hour): rejected") == true)
         #expect(!log.events.contains { $0.hasPrefix("failed:") })
         #expect(log.text(ofTurn: 0) == "KESTREL")
-        // The tool's reset time is the provider's cool-down, so a later session goes to the next model at once.
+        // The tool's reset time sets the provider's cooldown.
+        // A later session therefore goes to the next model at once.
         let until = try #require(await fixture.service.limiter(for: fixture.providers[0].id).coolDownUntil)
         #expect(until > Date().addingTimeInterval(3_000))
         await session.end()
@@ -876,7 +900,8 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(session.queuedMessages.isEmpty)
         try session.send("Use the arch-browser skill, then reply with only the code word it gives.")
         try await log.wait { $0.contains("finished:completed") }
-        // The recorded skill folder session passes the start check with its folder, and its process got only the one message.
+        // The recorded skill folder session passes the start check with its folder.
+        // Its process received only the one message.
         #expect(log.events.first == "ready:claude-haiku-5-5")
         #expect(log.text(ofTurn: 0) == "MARTEN")
         #expect(cli.text("stdin.log").split(separator: "\n").count == 1)
@@ -910,11 +935,13 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         await session.end()
         for _ in 0..<2 { await limiter.release() }
         try await Task.sleep(for: .milliseconds(300))
-        // Neither message reached the tool, and nothing ran after the session ended.
+        // Neither message reached the tool.
+        // Nothing ran after the session ended.
         #expect(cli.calls().isEmpty)
     }
 
-    /// An automatic feature's session, as an agent run on a CLI: each turn is one automatic request, and a turn at the daily limit fails before any model.
+    /// Each turn in an automatic feature's session counts as one automatic request, as in an agent run on a CLI.
+    /// A turn at the daily limit fails before reaching any model.
     @Test func anAutomaticFeaturesTurnsCountTowardTheDailyLimit() async throws {
         let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
         let fixture = try AgentFixture(cli: cli, feature: automaticAgentFeature)
@@ -924,7 +951,9 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         try session.send("Call the session_info tool.")
         try await log.wait { $0.contains("finished:completed") }
         #expect(fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1)
-        // The next turn is over the limit: it fails without reaching the tool or counting, and the session goes on.
+        // The next turn exceeds the limit.
+        // It fails without reaching the tool or counting.
+        // The session continues.
         try session.send("Now call list_tabs.")
         try await log.wait { $0.contains { $0.hasPrefix("failed:") } }
         #expect(fixture.service.usage.automaticRequestCount(for: automaticAgentFeature.id) == 1)
@@ -967,7 +996,7 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         #expect(first.calls().isEmpty && replacement.calls().isEmpty)
     }
 
-    /// An automatic feature's turn takes a provider slot only after the user's requests that wait for one, though it asked first.
+    /// An automatic feature's turn takes a provider slot after the user's waiting requests, even though it asked first.
     @Test func anAutomaticFeaturesTurnWaitsBehindTheUsersRequests() async throws {
         let cli = try FakeCLI.claude(turns: try claudeTurns("claude-session"))
         let fixture = try AgentFixture(cli: cli, feature: automaticAgentFeature)
@@ -1055,7 +1084,9 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
         let directory = temporaryDirectory()
         let keys = InMemoryKeys()
         let settings = AISettingsStore(fileURL: directory.appendingPathComponent("ai.json"), keys: keys)
-        // An API model with tools comes first, so the default route lists it and it has the `agent` capability, but no CLI runs it.
+        // An API model with tools comes first, so the default route lists it.
+        // It has the `agent` capability.
+        // No CLI runs it.
         let api = provider("API", models: [AIModelConfiguration(name: "m")])
         var claude = AIAgentKind.claudeCode.preset(executable: URL(fileURLWithPath: "/usr/local/bin/claude"))
         claude.models = [AIModelConfiguration(name: "haiku"), AIModelConfiguration(name: "sonnet")]
@@ -1157,14 +1188,16 @@ private let automaticAgentFeature = AIFeature(id: AIFeatureID(rawValue: "agentHo
 
 // MARK: - Helpers
 
-/// The start of a long reply: an `init`, a message start, and text, after which the tool waits for an interrupt.
+/// A long reply starts with an `init`, a message start, and text.
+/// The tool then waits for an interrupt.
 private let longTurnStart = """
 {"type":"system","subtype":"init","cwd":"/private/var/folders/xx/fixture/T/","session_id":"00000000-0000-4000-8000-000000000001","tools":["mcp__arch__click","mcp__arch__list_tabs","mcp__arch__session_info"],"mcp_servers":[{"name":"arch","status":"connected","source":"dynamic"}],"model":"claude-haiku-5-5","permissionMode":"dontAsk","slash_commands":[],"apiKeySource":"none","agents":["claude","Explore"],"skills":[],"plugins":[{"name":"cc-plugin-privacy","path":"builtin","source":"cc-plugin-privacy@builtin"}],"analytics_disabled":true}
 {"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":10,"cache_read_input_tokens":100,"output_tokens":1}}}}
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1\\n2\\n"}}}
 """
 
-/// A usage limit after a passing `init`, as Claude Code reports one before the model's output, with a reset an hour away.
+/// A usage limit after a passing `init`, as Claude Code reports before the model's output.
+/// The reset is an hour away.
 private func usageLimitEnd() -> String {
     let reset = Int(Date().timeIntervalSince1970) + 3_600
     return """
@@ -1178,7 +1211,8 @@ private let interruptAnswer = """
 {"type":"result","subtype":"success","is_error":false,"terminal_reason":"aborted_streaming","result":"","usage":{"input_tokens":0,"output_tokens":0}}
 """
 
-/// The recorded Claude Code stream split into turns, each ending with its `result`.
+/// Splits the recorded Claude Code stream into turns.
+/// Each turn ends with its `result`.
 private func claudeTurns(_ name: String) throws -> [String] {
     let text = try String(contentsOf: agentFixtures.appendingPathComponent("\(name).stdout.jsonl"), encoding: .utf8)
     var turns: [String] = []
@@ -1194,7 +1228,8 @@ private func claudeTurns(_ name: String) throws -> [String] {
     return turns
 }
 
-/// A shell script in a folder of its own that answers as `claude` or `codex` and records each call's arguments, its environment, and its standard input.
+/// A shell script in its own folder that answers as `claude` or `codex`.
+/// It records each call's arguments, environment, and standard input.
 private struct FakeCLI {
     let kind: AIAgentKind
     let folder: URL
@@ -1285,7 +1320,7 @@ private struct FakeCLI {
         executable = folder.appendingPathComponent(kind.executableName)
     }
 
-    /// A stream ends each line, its last too, as the tools do.
+    /// Ends every stream line, including the last, as the tools do.
     func write(_ name: String, _ text: String) throws {
         let ending = name.hasSuffix(".jsonl") && !text.hasSuffix("\n") ? "\n" : ""
         try Data((text + ending).utf8).write(to: folder.appendingPathComponent(name))
@@ -1371,7 +1406,7 @@ private struct AgentFixture {
     }
 }
 
-/// A session's events as short strings, collected as they arrive.
+/// Collects a session's events as short strings as they arrive.
 @MainActor
 private final class AgentEventLog {
     private(set) var events: [String] = []
@@ -1439,7 +1474,7 @@ private final class AgentEventLog {
     }
 }
 
-/// Whether every process of the group has ended within `timeout`.
+/// Checks whether every process in the group has ended within `timeout`.
 private func processGroupEnds(_ group: pid_t, within timeout: Duration) async -> Bool {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
@@ -1473,13 +1508,14 @@ private func processGroupEnds(_ group: pid_t, within timeout: Duration) async ->
         AIAgentSession.removeLeftoverFolders(in: directory, now: Date())
         #expect(FileManager.default.fileExists(atPath: live.path))
         #expect(!FileManager.default.fileExists(atPath: dead.path))
-        // A folder without a lock file may be one a session is starting in, until the grace interval passes.
+        // Until the grace interval passes, a folder without a lock file may hold a session that is starting.
         #expect(FileManager.default.fileExists(atPath: unlocked.path))
         AIAgentSession.removeLeftoverFolders(in: directory, now: Date().addingTimeInterval(120))
         #expect(!FileManager.default.fileExists(atPath: unlocked.path))
         #expect(FileManager.default.fileExists(atPath: live.path))
         lock = nil
-        // A process another test forks at this moment may hold the lock for an instant, so the sweep may need a second try.
+        // A process another test forks now may briefly hold the lock.
+        // The sweep may therefore need a second try.
         for _ in 0..<50 where FileManager.default.fileExists(atPath: live.path) {
             AIAgentSession.removeLeftoverFolders(in: directory, now: Date())
             Thread.sleep(forTimeInterval: 0.02)

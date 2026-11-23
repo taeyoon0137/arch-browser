@@ -1,4 +1,18 @@
-// Hooks from outside programs in the registry (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks): a proposal shows the sheet with its agent's instructions, script, and permissions, adds the hook only after Allow and Touch ID, with the program as its origin and the caps in its grant, and makes the program wait a minute after a decline; a program has one sheet at a time, which closes unanswered when the program leaves, and a program whose access ended while its sheet showed adds nothing without Touch ID; one program adds at most 20 hooks; the user's edits cannot lift the caps; a program's hooks run only after the first report of grants and never on a site excluded from AI; they pause with `grantEnded` when the grant ends, also at the launch after a grant until Arch quits, and Resume needs no Touch ID; and a program lists and removes only its own hooks.
+// Tests registry hooks from outside programs (`docs/hooks.md`, Hooks from outside programs; arch-cli hooks).
+// A proposal shows a sheet with its agent's instructions, script, and permissions.
+// It adds the hook only after Allow and Touch ID.
+// The hook records the program as its origin and keeps the grant's limits.
+// A decline makes the program wait a minute.
+// A program has one sheet at a time.
+// The sheet closes unanswered when the program leaves.
+// If the program's access ends while its sheet is open, it adds nothing and asks for no Touch ID.
+// One program adds at most 20 hooks.
+// The user's edits cannot lift the limits.
+// A program's hooks run only after the first report of grants.
+// They never run on a site excluded from AI.
+// They pause with `grantEnded` when the grant ends, including at the launch after a grant until Arch quits.
+// Resume needs no Touch ID.
+// A program lists and removes only its own hooks.
 import Agent
 import AgentControl
 import AI
@@ -19,7 +33,7 @@ import Testing
     func cancelAll() {}
 }
 
-/// A proposal sheet that stays open until `answer` or until its asking task is cancelled, as when the program leaves.
+/// A proposal sheet that stays open until `answer` or until its asking task is canceled, as when the program leaves.
 @MainActor final class WaitingProposalPrompt: HookProposalPrompting {
     private var waiting: [CheckedContinuation<Bool, Never>] = []
     private(set) var asked = 0
@@ -122,7 +136,8 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
         guard case .declined = await registry.propose(proposal(), from: program, grant: grant(for: program)) else { Issue.record("Don't Allow must decline."); return }
         guard case .declined = await registry.propose(proposal(), from: program, grant: grant(for: program)) else { Issue.record("A minute must pass."); return }
         #expect(prompt.reviews.count == 1)
-        // Another program is not held up, and Touch ID that fails declines too.
+        // Another program does not have to wait.
+        // Failed Touch ID also declines the proposal.
         prompt.answer = true
         authenticator.answer = false
         guard case .declined = await registry.propose(proposal(), from: other, grant: grant(for: other)) else { Issue.record("Touch ID must confirm."); return }
@@ -144,14 +159,15 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
         registry.grantsDidChange(inForce: [program.key, other.key])
         let first = Task { await registry.propose(proposal(), from: program, grant: grant(for: program)) }
         #expect(await eventually { prompt.isWaiting })
-        // The program's next proposal does not show while its first one does.
+        // The program's next proposal does not appear while its first is open.
         guard case .declined = await registry.propose(proposal(), from: program, grant: grant(for: program)) else { Issue.record("A second sheet must not show."); return }
         #expect(prompt.asked == 1)
-        // The program leaves: its sheet closes unanswered, without Touch ID.
+        // When the program leaves, its sheet closes unanswered without Touch ID.
         first.cancel()
         guard case .declined = await first.value else { Issue.record("A program that left must add nothing."); return }
         #expect(authenticator.count == 0)
-        // Another program's access ends while its sheet shows: Allow adds nothing and asks for no Touch ID.
+        // Another program's access ends while its sheet is open.
+        // Allow adds nothing and asks for no Touch ID.
         let second = Task { await registry.propose(proposal(), from: other, grant: grant(for: other)) }
         #expect(await eventually { prompt.isWaiting })
         registry.grantsDidChange(inForce: [program.key])
@@ -175,7 +191,7 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
             harness.host.show(tab)
             harness.bus.post(.tabOpened(tab: tab, openerTabID: nil))
         }
-        // Until the agents' service has checked agent.json and said which programs keep a grant, a program's hook does not run.
+        // A program's hook waits for the agents' service to check agent.json and report which programs keep a grant.
         open()
         #expect(await eventually { harness.javaScript.invocations(of: users.id).count == 1 })
         try? await Task.sleep(for: .milliseconds(50))
@@ -183,7 +199,8 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
         registry.grantsDidChange(inForce: [program.key])
         open()
         #expect(await eventually { harness.javaScript.invocations(of: programs.id).count == 1 })
-        // A site excluded from AI keeps its events from a program's hook without agent, so that its last runs do not tell the program of the visit.
+        // A site excluded from AI keeps its events from a program's hook without agent.
+        // This keeps the hook's last runs from telling the program about the visit.
         harness.service.settings.excludedSites.append(AISitePattern("excluded.example"))
         open("excluded.example")
         #expect(await eventually { harness.javaScript.invocations(of: users.id).count == 3 })
@@ -241,11 +258,11 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
         registry.resume(id)
         #expect(registry.hooks.first { $0.id == id }?.state == .active)
         #expect(authenticator.count == touches)
-        // A later change that ends no grant of the program leaves the resumed hook alone.
+        // A later change that ends none of the program's grants leaves the resumed hook alone.
         registry.grantsDidChange(inForce: [])
         #expect(registry.hooks.first { $0.id == id }?.state == .active)
         #expect(registry.hooks.first { $0.id == kept }?.state == .paused(.grantEnded))
-        // At the next launch, a program with no grant in force, as after a grant until Arch quits, has its hooks paused.
+        // At the next launch, Arch pauses hooks from a program with no grant in force, as after a grant until Arch quits.
         registry.resume(kept)
         #expect(await eventually { FileManager.default.fileExists(atPath: harness.folder.appendingPathComponent("hooks.json").path) })
         let relaunch = RegistryHarness(folder: harness.folder, keys: harness.keys)

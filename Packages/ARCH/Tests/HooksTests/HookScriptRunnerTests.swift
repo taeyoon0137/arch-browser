@@ -1,4 +1,19 @@
-// The JavaScript hook runner (`docs/hooks.md`, JavaScript scripts and The script API): the fixture scripts in `Fixtures` run in the plugin sandbox through the registry and receive their events; `arch.tabs.get` without `tabs` lacks titles and addresses; `arch.tabs.list` and `get` reach only the tabs the hook's filter covers in the event's Persona, never agent tabs, and for a hook with `agent` show no title or address of a tab whose address or committed document, which the registry gives the run, is on a site excluded from AI; a rename of a tab outside the filter is refused; a rename goes through the browser host under the suggested name rules with the run's cause, is only reported in a test, belongs to the run's document, and resolves false once the tab shows another one; a timed-out or canceled run ends its instance, a held instance does not stop for being idle, and a run releases its instance after it; what a listener throws, as the run's message; and the syntax check.
+// Tests the JavaScript hook runner (`docs/hooks.md`, JavaScript scripts and The script API).
+// The fixture scripts in `Fixtures` run in the plugin sandbox through the registry and receive their events.
+// `arch.tabs.get` without `tabs` lacks titles and addresses.
+// `arch.tabs.list` and `get` reach only tabs the hook's filter covers in the event's Persona.
+// They never reach agent tabs.
+// For a hook with `agent`, they hide a tab's title and address if its address or committed document is on a site excluded from AI.
+// The registry gives the run that committed document.
+// The runner refuses a rename outside the filter.
+// A rename goes through the browser host under the suggested name rules with the run's cause.
+// A test only reports the rename.
+// The rename belongs to the run's document and resolves false once the tab shows another document.
+// A timed-out or canceled run ends its instance.
+// A held instance does not stop for being idle.
+// A run releases its instance when it ends.
+// Tests what a listener throws as the run's message.
+// Tests the syntax check.
 import Agent
 import AI
 import ARCHEngine
@@ -22,7 +37,11 @@ private enum Probe {
     static let excluded = UUID(uuidString: "00000000-0000-0000-0000-0000000000C5")!
 }
 
-/// The registry's fake host's tabs as plugins see them, with titles, and renames under the suggested name rules: a tab takes a name for the document it shows while the user has not named it. It lists agent tabs too, so the tests show that the run's tabs leave them out. A tab in `shownURLs` shows that address, as a WebKit tab shows a navigation's before it commits, while the registry's host and the title keep the committed one.
+/// Shows the registry's fake host's tabs to plugins with their titles.
+/// Renames follow the suggested name rules: a tab takes a name for its current document if the user has not named it.
+/// Lists agent tabs too, so the tests can check that the run leaves them out.
+/// A tab in `shownURLs` shows that address, as a WebKit tab shows a navigation's address before it commits.
+/// The registry's host and the title keep the committed address.
 @MainActor
 final class FakePluginHost: PluginBrowserHost {
     struct Rename: Equatable {
@@ -65,7 +84,8 @@ final class FakePluginHost: PluginBrowserHost {
     func moveTab(_ id: UUID, to place: PluginTabPlace, cause: BrowserEventCause) throws -> Bool { false }
 }
 
-/// The real runner, recording each invocation and outcome, since the registry keeps only a failed run's first 200 characters.
+/// Records each invocation and outcome from the real runner.
+/// The registry keeps only a failed run's first 200 characters.
 @MainActor
 final class RecordingRunner: HookScriptRunning {
     let runner: HookScriptRunner
@@ -163,7 +183,8 @@ extension PluginValue {
         return try JSONDecoder().decode(PluginValue.self, from: Data(message.utf8))
     }
 
-    /// An invocation of the hook for a page load in the tab, outside the registry, as tests that drive the runner alone make it.
+    /// Creates a hook invocation for a page load in the tab, outside the registry.
+    /// Tests that drive the runner alone use this invocation.
     private func invocation(of hook: Hook, script: String, loading tab: BrowserTabRef, documents: [UUID: URL]? = nil, applying: Bool = true,
                             timeout: Duration = .seconds(20)) -> HookInvocation {
         var hook = hook
@@ -207,7 +228,8 @@ extension PluginValue {
         #expect(harness.entries(of: preset.id).isEmpty)
     }
 
-    /// The generated close and space-switch scripts call no agent while no tab is left to act on, so the last tab's close or a switch to an empty space costs no run and fails nothing.
+    /// The generated close and space-switch scripts call no agent when no tab remains to act on.
+    /// Closing the last tab or switching to an empty space therefore costs no run and causes no failure.
     @Test func theGeneratedScriptsCallNoAgentWithoutATabToActOn() async throws {
         defer { harness.cleanUp() }
         var calls = 0
@@ -329,7 +351,8 @@ extension PluginValue {
         #expect(calls == 1)
     }
 
-    /// An agent run that Stop All Agents cancelled is no failure of the hook's run, so it counts toward no pause.
+    /// An agent run that Stop All Agents canceled does not fail the hook's run.
+    /// It therefore does not count toward a pause.
     @Test func aCancelledAgentRunIsNoFailureOfTheHooksRun() async throws {
         defer { harness.cleanUp() }
         let tab = harness.tab("/article", id: Probe.covered)
@@ -381,7 +404,8 @@ extension PluginValue {
         for outside in [Probe.otherSpace, Probe.otherPersona, Probe.agent, Probe.excluded] {
             #expect(got[outside.uuidString] == .null)
         }
-        // While a WebKit navigation waits to commit, the tab gives the run's document, which its renames belong to, not the navigation's address.
+        // While a WebKit navigation waits to commit, the tab gives the run's document instead of the navigation's address.
+        // The run's renames belong to that document.
         plugins.shownURLs[Probe.covered] = URL(string: "https://example.net/next")
         let waiting = try self.report(of: try await outcome(loading: covered))
         #expect(waiting["list"]?.array?.first?["url"] == .string("https://example.org/covered"))
@@ -400,7 +424,9 @@ extension PluginValue {
         #expect(excluded["title"] == nil && excluded["url"] == nil)
         #expect(report["list"]?.array?.count == 2)
 
-        // The tab now shows an allowed address while its committed document is still on the excluded site, as it shows that page's title until the next page commits. The registry gives the run that document, which keeps the tab's title and address out.
+        // The tab now shows an allowed address while its committed document remains on the excluded site.
+        // It shows that page's title until the next page commits.
+        // The registry gives the run the committed document, which keeps the tab's title and address out.
         plugins.shownURLs[Probe.excluded] = URL(string: "https://example.org/next")
         let leaving = try self.report(of: try await outcome(loading: harness.tab("/allowed", id: Probe.covered)))
         #expect(recorder.invocations.last?.documents[Probe.excluded] == URL(string: "https://excluded.example/secret"))
@@ -423,7 +449,8 @@ extension PluginValue {
         #expect(rename.cause == invocation.cause && rename.cause.hookChain == [hook.id])
         #expect(plugins.suggested[tab.id] == "Named")
 
-        // The user's own name wins, and the script's rename resolves false.
+        // The user's own name wins.
+        // The script's rename resolves false.
         plugins.userNamed.insert(tab.id)
         #expect(try await self.outcome(loading: tab).failure == "notTaken")
     }
@@ -451,7 +478,8 @@ extension PluginValue {
         let outcome = await runner.run(invocation(of: hook, script: script, loading: shown, documents: [shown.id: URL(string: "https://example.org/a")!]))
         #expect(outcome.failure == "notTaken")
         #expect(plugins.renames.last?.document == URL(string: "https://example.org/a"))
-        // A tab without a document for the run takes no name, and the host is not asked.
+        // A tab without a document for the run takes no name.
+        // The runner does not ask the host.
         let count = plugins.renames.count
         #expect(await runner.run(invocation(of: hook, script: script, loading: shown, documents: [:])).failure == "notTaken")
         #expect(plugins.renames.count == count)
@@ -506,7 +534,7 @@ extension PluginValue {
         let timedOut = await runner.run(invocation(of: hook, script: script, loading: hang, timeout: .milliseconds(500)))
         #expect(timedOut.isTimedOut)
         #expect(runner.keptInstanceCount == 0)
-        // A new start of the script ran the next run.
+        // The next run started the script again.
         #expect(await runner.run(invocation(of: hook, script: script, loading: tab)).failure == "1")
 
         let held = invocation(of: hook, script: script, loading: hang)
@@ -517,7 +545,8 @@ extension PluginValue {
         #expect(await runner.run(invocation(of: hook, script: script, loading: tab)).failure == "1")
     }
 
-    /// The runner holds the instance it picks for a run until the run ends, so that the idle stop cannot end it between the pick and the event's delivery.
+    /// The runner holds the instance it picks until the run ends.
+    /// The idle stop therefore cannot end it between the pick and the event's delivery.
     @Test func aHeldInstanceDoesNotStopForBeingIdleAndARunReleasesItsInstance() async throws {
         defer { harness.cleanUp() }
         let script = try fixture("instances.js")
@@ -536,7 +565,8 @@ extension PluginValue {
         plugin.isHeld = false
         #expect(await eventually(within: .seconds(5)) { stops.entries == ["idle"] })
 
-        // After a run, the instance is no longer held, and its idle stop counts again.
+        // After a run, the runner releases the instance.
+        // Its idle stop counts again.
         let runner = HookScriptRunner(host: plugins, allowsAI: { _ in true }, idleLimit: 0.2)
         let tab = harness.tab("/a", id: Probe.covered)
         harness.host.show(tab)
@@ -547,7 +577,8 @@ extension PluginValue {
 
     @Test func aFailedRunNamesWhatItsListenerThrew() async throws {
         defer { harness.cleanUp() }
-        // One script, so that every run uses one instance: the page's path picks what the listener throws.
+        // One script makes every run use one instance.
+        // The page's path picks what the listener throws.
         let script = #"""
         const throws = {
           plain: () => { throw new Error("plain"); },
@@ -594,7 +625,9 @@ extension PluginValue {
         let other = await runner.run(invocation(of: hook, script: #"arch.events.on("tabOpened", () => {});"#, loading: tab))
         #expect(other.code == "noListener")
         #expect(other.failure == "The script set no listener for pageLoaded with arch.events.on.")
-        // A script has no storage, secrets, clipboard, or page, not even its event's tab's, and no selected tab; it opens, closes, selects, and moves no tab.
+        // A script has no storage, secrets, clipboard, page, or selected tab.
+        // It cannot access even its event's tab's page.
+        // It cannot open, close, select, or move a tab.
         let probe = #"arch.events.on("pageLoaded", async (event) => { const results = []; for (const attempt of [() => arch.storage.set("a", 1), () => arch.ui.copy("a"), () => arch.pages.run(event.tab.id, "script.js"), () => arch.pages.post(event.tab.id, 1), () => arch.tabs.open("https://example.org/"), () => arch.tabs.close(event.tab.id), () => arch.tabs.select(event.tab.id), () => arch.tabs.move(event.tab.id), async () => { if ((await arch.tabs.selected()) !== null) throw new Error("selected"); }]) { try { await attempt(); results.push("allowed"); } catch (error) { results.push(error.message); } } throw new Error(results.join()); });"#
         #expect(await runner.run(invocation(of: hook, script: probe, loading: tab)).failure == "quotaExceeded,permissionDenied,notGranted,notGranted,permissionDenied,permissionDenied,permissionDenied,permissionDenied,allowed")
     }

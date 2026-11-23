@@ -1,4 +1,7 @@
-// `arch-cli`'s side of the control channel without a socket: the `argv[0]` dispatch to `arch-mcp`, the command table's parsing and usage errors, the exit codes and the statuses and client errors they report, and the first harness with its `cli` topic generated from the command table and the exit codes.
+// Tests `arch-cli`'s side of the control channel without a socket.
+// Tests `argv[0]` dispatch to `arch-mcp` and the command table's parsing and usage errors.
+// Tests the exit codes and the statuses and client errors they report.
+// Tests the first harness with its `cli` topic generated from the command table and exit codes.
 import AgentControl
 import Foundation
 import Testing
@@ -76,7 +79,9 @@ import Testing
         #expect(try AgentCommandLine.parse(["--json", "open", "https://example.org/"]).json)
     }
 
-    /// The reading and acting commands of snapshots and refs each run one tool; `type --text -` leaves the text for standard input, and `screenshot` names its file.
+    /// The snapshot and ref commands for reading and acting each run one tool.
+    /// `type --text -` leaves the text for standard input.
+    /// `screenshot` names its file.
     @Test func actingCommandsParseIntoTheirCalls() throws {
         func call(_ arguments: [String]) throws -> AgentToolCall? {
             guard case .tool(let call) = try AgentCommandLine.parse(arguments).command else { return nil }
@@ -204,7 +209,9 @@ import Testing
         #expect(AgentClientError.protocolMismatch(arch: 2).message.contains("version 2") && AgentClientError.protocolMismatch(arch: 2).message.contains("version 1"))
     }
 
-    /// `events` takes repeatable filter options of its own, checks each value, and `--after`; `--space` there is not `task`'s.
+    /// `events` takes its own repeatable filter options and checks each value.
+    /// It also takes `--after`.
+    /// Its `--space` differs from `task`'s.
     @Test func eventsParseIntoASubscription() throws {
         #expect(try AgentCommandLine.parse(["events"]) == AgentCLIRequest(command: .events(AgentEventSubscribe()), json: false))
         let full = try AgentCommandLine.parse(["--json", "events", "--kind", "pageLoaded", "--kind", "tabClosed", "--space", "Home", "--site", "example.org", "--except-site", "mail.example.org",
@@ -220,7 +227,8 @@ import Testing
         #expect(try AgentCommandLine.parse(["task", "read it", "--space", "Home"]).command == .task(AgentTaskStart(task: "read it", space: "Home")))
     }
 
-    /// `hooks list`, `hooks add` with its required and repeatable options, whose event and permissions Arch checks, and `hooks remove <id>`.
+    /// Tests `hooks list`, `hooks add` with its required and repeatable options, and `hooks remove <id>`.
+    /// Arch checks the event and permissions.
     @Test func hooksParse() throws {
         #expect(try AgentCommandLine.parse(["hooks"]).command == .hooks(.list))
         #expect(try AgentCommandLine.parse(["hooks", "list", "--json"]) == AgentCLIRequest(command: .hooks(.list), json: true))
@@ -241,7 +249,9 @@ import Testing
         }
     }
 
-    /// `agent run` with its options as `agent/run` takes them, `-` for a prompt from standard input, and `rename <tab> <name>` as `rename_tab`.
+    /// Tests `agent run` with the options `agent/run` takes.
+    /// `-` reads the prompt from standard input.
+    /// `rename <tab> <name>` runs `rename_tab`.
     @Test func agentRunAndRenameParse() throws {
         let run = try AgentCommandLine.parse(["agent", "run", "Name the tabs", "--tab", "t1", "--tab", "t3", "--tier", "fast", "--page", "--record", "session", "--tools", "rename_tab, read_text",
                                               "--timeout", "40", "--rounds", "2", "--dry-run", "--json"])
@@ -259,7 +269,8 @@ import Testing
         }
     }
 
-    /// One event's line without `--json`: the time, the kind, the tab's handle or watch ID with its address or site, and the engine and tab kind; an excluded site shows neither.
+    /// Without `--json`, an event's line shows its time, kind, tab handle or watch ID, address or site, engine, and tab kind.
+    /// An excluded site shows neither address nor site.
     @Test func eventLines() throws {
         let event: AgentJSON = ["seq": 812, "kind": "pageLoaded", "date": "2026-11-14T09:30:12Z",
                                 "tab": ["watch": "w4", "space": "s1", "kind": "open", "engine": "chromium", "site": "example.org"], "isRestore": false, "isFirstLoadAfterOpen": true]

@@ -1,4 +1,18 @@
-// Shell hook scripts (`docs/hooks.md`, Shell scripts): the fixture scripts in `Fixtures` receive the event on standard input and exactly the listed environment, run the checked bytes through `/dev/fd/3`, and fail with their exit status and last line of standard error; a copy changed outside Arch never runs; the interpreter is recorded by path and digest, and a replaced one pauses the hook with `scriptChanged`; Allow Shell Scripts pauses and resumes shell hooks and refuses new ones while it is off; the time limit ends the process group; standard error stays in the hook's last runs in memory only; the agent grant keeps tab access `title` until the user allows pages; and the run's tools reach only its tabs, by handle, under the hook's grant, with the handles also given to the channel, which names renamed tabs by them in `agent run`'s answer. `AgentTests` checks that the ticket binds only within the run's process tree.
+// Tests shell hook scripts (`docs/hooks.md`, Shell scripts).
+// The fixture scripts in `Fixtures` receive the event on standard input and exactly the listed environment.
+// They run the checked bytes through `/dev/fd/3`.
+// They fail with their exit status and last line of standard error.
+// A copy changed outside Arch never runs.
+// Arch records the interpreter by path and digest.
+// Replacing the interpreter pauses the hook with `scriptChanged`.
+// Allow Shell Scripts pauses and resumes shell hooks.
+// It refuses new shell hooks while off.
+// The time limit ends the process group.
+// Standard error stays in the hook's last runs in memory only.
+// The agent grant keeps tab access `title` until the user allows pages.
+// The run's tools reach only its tabs, by handle, under the hook's grant.
+// The channel also receives the handles and uses them to name renamed tabs in `agent run`'s answer.
+// `AgentTests` checks that the ticket binds only within the run's process tree.
 import Agent
 import AgentControl
 import AI
@@ -15,7 +29,9 @@ private func shellFixture(_ name: String) throws -> Data {
     try Data(contentsOf: Bundle.module.resourceURL!.appendingPathComponent("Fixtures/\(name)"))
 }
 
-/// Stands in for the agents' service: it records each run's tools, start, and end, and keeps each open run's handler of `arch-cli`'s calls.
+/// Stands in for the agents' service.
+/// Records each run's tools, start, and end.
+/// Keeps each open run's handler for `arch-cli`'s calls.
 @MainActor
 final class FakeRunChannel: AgentHookRunChannel {
     let ticket = "fixture-ticket"
@@ -107,7 +123,7 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         return ShellHookRunner(host: plugins, allowsAI: { _ in true }, channel: channel, helpers: helpers, temporaryFolder: temporary, loginPath: { path })
     }
 
-    /// A shell hook whose script's interpreter is recorded as it resolves now, as the trust sheet records it.
+    /// Creates a shell hook with its script's interpreter resolved and recorded as the trust sheet does.
     private func shellHook(_ script: Data, permissions: Set<HookPermission> = [.tabsRename], record: AgentRunRecord = .activity, searchPath: String? = nil) throws -> Hook {
         let resolution = try HookShellScript.inspect(script, searchPath: searchPath ?? self.searchPath).get()
         return Hook(name: "Shell", trigger: pageLoads, script: .shell(source: "/Users/fixture/hook.sh", digest: HookStore.digest(of: script), interpreter: resolution.interpreter),
@@ -165,7 +181,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         #expect(event["tab"]?["url"] == nil)
         #expect(event["hook"]?["id"]?.stringValue == hook.id.uuidString && event["hook"]?["name"] == "Shell" && event["hook"]?["agent"] == .null)
         #expect(channel.tools[run.run] == ["list_tabs", "rename_tab"] && channel.handles[run.run] == [tab.id: "t1"] && channel.closed == [run.run])
-        // The run's working folder is gone, and its error output is taken once.
+        // The run's working folder is gone.
+        // The runner returns its error output once.
         #expect(try FileManager.default.contentsOfDirectory(atPath: temporary.path).isEmpty)
         #expect(shell.takeErrorOutput(of: run.run) == nil)
     }
@@ -198,7 +215,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
 
     @Test func theInterpreterStartsUnderTheNameTheFirstLineGivesIt() async throws {
         defer { harness.cleanUp() }
-        // A program that serves several tools reads which one it is from that name, while the link resolves to the recorded program.
+        // A program that serves several tools uses that name to choose the tool.
+        // The link resolves to the recorded program.
         let link = programs.appendingPathComponent("fixture-awk")
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/usr/bin/awk")
         let body = String(decoding: try shellFixture("environment.awk"), as: UTF8.self).split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)[1]
@@ -263,7 +281,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         try #require(await eventually { channel.started[run.run] != nil })
         let handler = try #require(channel.handlers[run.run])
         shell.cancel(run: run.run)
-        // The run's tools and connections end with the cancel, before the script does, so no call of a script that ignores SIGTERM lands meanwhile.
+        // Canceling ends the run's tools and connections before the script ends.
+        // This blocks calls from a script that ignores SIGTERM while it still runs.
         #expect(channel.closed == [run.run])
         #expect(await handler(AgentToolCall(name: "list_tabs")).code == "runEnded")
         #expect(await running.value.isCancelled)
@@ -282,7 +301,7 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         try #require(await eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("ready").path) })
         let group = try #require(channel.started[run.run])
         let started = ContinuousClock.now
-        // A short grace keeps the main actor, which the other suites' timed runs share, free.
+        // A short grace period keeps the main actor free for the other suites' timed runs.
         shell.endAll(grace: 0.1)
         #expect(started.duration(to: .now) < .seconds(1))
         #expect(!FileManager.default.fileExists(atPath: folder.path))
@@ -331,7 +350,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         let digest = "sha256:" + SHA256.hash(data: try Data(contentsOf: URL(fileURLWithPath: shell))).map { String(format: "%02x", $0) }.joined()
         let absolute = try HookShellScript.inspect(Data("#!/bin/sh\nexit 0\n".utf8), searchPath: searchPath).get()
         #expect(absolute.interpreter == HookInterpreter(path: shell, digest: digest))
-        // A `/usr/bin/env` program resolves in the script's PATH through its link, and the sheet names the folder the user can write to.
+        // A `/usr/bin/env` program resolves through its link in the script's PATH.
+        // The sheet names the folder the user can write to.
         let link = programs.appendingPathComponent("fixture-sh")
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "/bin/sh")
         let found = try HookShellScript.inspect(Data("#!/usr/bin/env fixture-sh\n".utf8), searchPath: "\(programs.path):\(searchPath)").get()
@@ -393,7 +413,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         let changed = try await outcome(loading: harness.tab("/two"), recorder: recorder)
         #expect(changed.code == "scriptChanged" && changed.failure == catalogText("Its interpreter changed."))
         #expect(await eventually { registry.hooks.first?.state == .paused(.scriptChanged) })
-        // Resume cannot lift it; trusting the script again with the new interpreter does.
+        // Resume cannot lift the pause.
+        // Trusting the script again with the new interpreter lifts it.
         registry.resume(hook.id)
         #expect(registry.hooks.first?.state == .paused(.scriptChanged))
         var trusted = try #require(registry.hooks.first)
@@ -406,7 +427,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
 
     @Test func aChangedInterpreterFileIsNoLongerTheRecordedOne() throws {
         defer { harness.cleanUp() }
-        // A program file that changes in place keeps its path, but not its digest; Arch only reads it here.
+        // A program file that changes in place keeps its path but changes its digest.
+        // Arch only reads it here.
         let program = programs.appendingPathComponent("fixture-interpreter")
         try Data("first build".utf8).write(to: program)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
@@ -445,7 +467,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         #expect(throws: HookRegistryError.shellScriptsOff) { try registry.add(try shellHook(script), script: script) }
         registry.setAllowsShellScripts(true)
         #expect(registry.hooks.first { $0.id == hook.id }?.state == .active)
-        // Outside programs never add shell hooks, and a file the runner would refuse is refused at once.
+        // Outside programs never add shell hooks.
+        // The registry immediately refuses a file the runner would refuse.
         var outside = try shellHook(script)
         outside.origin = .outsideClient(.signed(identifier: "com.example.agent", team: "ABCDE12345"), name: "Agent")
         #expect(throws: HookRegistryError.shellScriptsOff) { try registry.add(outside, script: script) }
@@ -491,7 +514,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         slow = try harness.add(slow, script: String(decoding: script, as: UTF8.self))
         // The runner's own limit or the scheduler's cancel at the same limit ends the script, whichever comes first.
         _ = try await outcome(loading: harness.tab("/slow"), recorder: recorder)
-        // The scheduler may record the run as its time passes; the error output, read once the script has ended, joins it then.
+        // The scheduler may record the run when its time limit passes.
+        // The error output joins the record after the script ends and the runner reads it.
         try #require(await eventually { registry.lastRuns[slow.id]?.last?.errorOutput != nil })
         let summary = try #require(registry.lastRuns[slow.id]?.last)
         #expect(summary.outcome == .timedOut && values("child", in: summary.errorOutput).count == 1)
@@ -525,7 +549,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         event.documentID = UUID()
         let other = harness.tab("/other")
         let outside = harness.tab("/outside")
-        // Sidebar order puts the other tab first; the event's tab is still t1.
+        // Sidebar order puts the other tab first.
+        // The event's tab is still t1.
         [other, event, outside].forEach(harness.host.show)
         var hook = try shellHook(try shellFixture("input.sh"), permissions: [.tabsRename])
         var run = invocation(of: hook, script: try shellFixture("input.sh"), loading: event)
@@ -553,7 +578,8 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         tools.end()
         #expect(tools.call(AgentToolCall(name: "list_tabs")).code == "runEnded")
 
-        // With `tabs`, titles and the run's documents show; without `tabs.rename`, no rename is listed or run.
+        // With `tabs`, titles and the run's documents show.
+        // Without `tabs.rename`, the runner neither lists nor runs a rename.
         hook.grant.permissions = [.tabs]
         run.hook = hook
         harness.host.show(event)
@@ -566,7 +592,12 @@ private func values(_ prefix: String, in output: String?) -> [String] {
         #expect(tools.call(AgentToolCall(name: "rename_tab", arguments: ["tab": "t1", "name": "No"])).code == "notGranted")
     }
 
-    /// `arch-cli agent run` inside the run (`docs/hooks.md`, arch-cli agent run and rename): the hook's grant and feature, the run's tabs by handle with `t1` the event's tab by default, the hook's saved model, its actions joining the run's, and nothing once the run ended; a hook without `agent` starts none.
+    /// Tests `arch-cli agent run` inside the run (`docs/hooks.md`, arch-cli agent run and rename).
+    /// It uses the hook's grant, feature, and saved model.
+    /// It uses the run's tabs by handle, with `t1` as the event's tab by default.
+    /// Its actions join the run's actions.
+    /// It does nothing after the run ends.
+    /// A hook without `agent` starts no agent run.
     @Test func aRunsAgentRunUsesTheHooksGrantFeatureAndTabs() async throws {
         defer { harness.cleanUp() }
         let event = harness.tab("/event")

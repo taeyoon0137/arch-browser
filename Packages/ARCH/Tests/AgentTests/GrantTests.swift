@@ -1,4 +1,14 @@
-// Grants for outside clients (docs/agents.md, Outside clients: identity, grants, revocation): the first tool call asks with the sheet and `hello` then names the grant, and the client's connections get `tools/changed`; the Agents Persona is made on demand, recorded, and agent-only; Touch ID or the login password guards every grant except Read Only in the Agents Persona with no scope until quit; Don't Allow asks again only after a minute; revocation, release, expiry, a grant's process ending, and its Persona's deletion end the grant and close its connections with `revoked`.
+// Tests grants for outside clients (docs/agents.md, Outside clients: identity, grants, revocation).
+// The first tool call asks with the sheet.
+// `hello` then names the grant.
+// The client's connections get `tools/changed`.
+// Arch creates the Agents Persona on demand.
+// Arch records it.
+// Arch makes it agent-only.
+// Touch ID or the login password guards every grant except Read Only in the Agents Persona with no scope until quit.
+// Don't Allow asks again only after a minute.
+// Revocation, release, expiry, the grant's process ending, and its Persona's deletion end the grant.
+// Each closes the grant's connections with `revoked`.
 import AgentControl
 import Foundation
 import Testing
@@ -17,17 +27,21 @@ import Testing
         #expect(result.status == .ok)
         #expect(result.text.hasPrefix("The Agents Persona has 1 space."))
         #expect(result.structured == ["spaces": [["handle": "s1", "name": "Personal", "agentTabs": 0]]])
-        // The sheet offered the user's own Personas, and no Agents Persona existed yet.
+        // The sheet offered the user's own Personas.
+        // No Agents Persona existed yet.
         #expect(harness.prompt.requests.map(\.personas) == [[FakeHost.defaultPersona, FakeHost.workPersona]])
         #expect(harness.prompt.requests.first?.agentsSpaces.isEmpty == true)
         #expect(harness.authenticator.count == 0)
-        // The Agents Persona was made once, recorded, and made agent-only before any of its profiles could start.
+        // Arch created the Agents Persona once.
+        // It recorded the Persona before any of its profiles could start.
+        // It made the Persona agent-only before any of its profiles could start.
         let agentsID = try #require(service.settings.agentsPersonaID)
         #expect(harness.host.madeAgentsPersonas == 1)
         #expect(harness.host.agentOnlyPersonaID == agentsID)
         #expect(service.launchGrants.count == 1 && service.settings.grants.isEmpty)
         #expect(try await TestClient(harness.location).hello().status == .granted(AgentGrantSummary(level: .readOnly, persona: "Agents", space: "Personal", expiry: .whenArchQuits)))
-        // A later call uses the grant without asking, and so does a call for another grant in the existing Agents Persona.
+        // A later call uses the grant without asking.
+        // A call for another grant in the existing Agents Persona also skips asking.
         #expect(try await client.callTool("session_info").status == .ok)
         #expect(harness.prompt.requests.count == 1)
         #expect(service.activity.entries.map(\.event) == [.granted, .firstUse, .toolCall, .toolCall])
@@ -39,14 +53,17 @@ import Testing
         _ = try await harness.makeOpenService()
         let client = try TestClient(harness.location)
         _ = try await client.hello()
-        // Before a grant, the list names every served tool, since the sheet may allow any of them.
+        // Before a grant, the list names every served tool because the sheet may allow any of them.
         let names = try await client.call("tools/list").decode(as: AgentToolList.self).tools
         let acting = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "click", "type", "press",
                       "select_option", "scroll", "hover", "wait_for", "list_downloads", "search_history", "ask_user", "request_approval", "hand_to_user", "approval_wait", "guide"]
-        // The service serves rename_tab and, since the grant sheet may allow Watch Browser Events, watch_events beside the tool host's tools.
+        // The service serves rename_tab alongside the tool host's tools.
+        // It also serves watch_events because the grant sheet may allow Watch Browser Events.
         #expect(names == acting + ["rename_tab", "watch_events"])
         #expect(AgentToolHost.toolsBeforeGrant.map(\.name) == acting)
-        // Read Only leaves out the actions that change data and the sensitive request_approval; the others come with Ask Before Acting, and search_history with its scope.
+        // Read Only leaves out actions that change data and the sensitive request_approval.
+        // The others come with Ask Before Acting.
+        // search_history comes with its scope.
         let readOnly = ["session_info", "list_spaces", "list_tabs", "request_tab", "open_tab", "navigate", "close_tab", "snapshot", "read_text", "screenshot", "scroll", "hover", "wait_for",
                         "list_downloads", "ask_user", "hand_to_user", "approval_wait", "guide"]
         #expect(AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) == readOnly)
@@ -63,7 +80,8 @@ import Testing
         let idle = try TestClient(harness.location)
         _ = try await idle.hello()
         #expect(try await client.callTool("list_tabs").status == .ok)
-        // The connection that made no call learns that its list changed, and lists again for the grant.
+        // The connection that made no call learns that its list changed.
+        // It lists again for the grant.
         #expect(try await idle.receive() == .notification(method: "tools/changed", params: nil))
         let names = try await idle.call("tools/list").decode(as: AgentToolList.self).tools
         #expect(names == AgentToolHost.tools(for: .readOnly, scopes: AgentGrantScopes()).map(\.name) + ["rename_tab"])
@@ -248,7 +266,8 @@ import Testing
         #expect(!harness.socketExists)
     }
 
-    /// With no session keeping the channel, the endpoint stops without reporting closes, so the service itself ends the client's waiting card.
+    /// With no session keeping the channel open, the endpoint stops without reporting closed connections.
+    /// The service therefore ends the client's waiting card.
     @Test func turningOutsideAccessOffEndsAWaitingCard() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
@@ -266,7 +285,8 @@ import Testing
         _ = await waiting.value
     }
 
-    /// A sheet open when outside access goes off closes without a decline or Touch ID, so the client is asked again at once when access is back.
+    /// Turning outside access off closes an open sheet without a decline or Touch ID.
+    /// The client asks again at once when access returns.
     @Test func aSheetClosedByOutsideAccessGoingOffRecordsNoDecline() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
