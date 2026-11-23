@@ -13,6 +13,7 @@ import Import
 import os
 import Plugins
 import Preferences
+import Sparkle
 import Sync
 import Terminal
 
@@ -27,6 +28,8 @@ import Terminal
     /// Runs the shell hooks' trusted scripts, whose processes end at quit.
     private var shellHooks: ShellHookRunner?
     private var sync: SyncController?
+    /// Sparkle's updater, in an app bundle made with the update signing key (`docs/updates.md`).
+    private var updates: AppUpdates?
     /// Lists the selected tab's recent pages each time it opens.
     private var historyMenu: NSMenu?
     /// Lists the favorites and the spaces' pinned folders and tabs each time it opens (bookmark rule 7).
@@ -159,6 +162,10 @@ import Terminal
         PreferencesWindowController.openTerminal = { TerminalWindowController.shared.show() }
         PreferencesWindowController.openTerminalTyping = { TerminalWindowController.shared.show(typing: $0) }
         PreferencesWindowController.session = session
+        // Before the menu bar is built, so that the app menu offers Check for Updates… when there is an updater.
+        let updates = AppUpdates()
+        self.updates = updates
+        PreferencesWindowController.updates = updates?.controls
         // Before the windows open. It checks the seal of `agent.json`, keeps the session's agent-only Persona in line with it, and listens only once Allow Outside Clients is on.
         let agents = AgentService(directory: supportDirectory, host: BrowserAgentHost(session: session),
                                   version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")
@@ -375,6 +382,9 @@ import Terminal
         // The application menu has the items every Mac app's has, in their order. NSApplication answers and validates About, Hide, Hide Others, and Show All itself.
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: localized("About Arch"), action: #selector(showAbout), keyEquivalent: "")
+        if let updates {
+            appMenu.addItem(withTitle: localized("Check for Updates\u{2026}"), action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "").target = updates.controller
+        }
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: localized("Settings\u{2026}"), action: #selector(showSettings), keyEquivalent: ",")
         appMenu.addItem(withTitle: localized("Set as Default Browser\u{2026}"), action: #selector(setAsDefaultBrowser), keyEquivalent: "")

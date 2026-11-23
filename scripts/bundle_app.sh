@@ -1,5 +1,5 @@
 #!/bin/sh
-# Assemble `build/Arch.app` using Swift Package Manager (SwiftPM) build products, among them `arch-cli`, and the Chromium Embedded Framework (CEF) distribution in `Frameworks/cef`.
+# Assemble `build/Arch.app` using Swift Package Manager (SwiftPM) build products, among them `arch-cli`, and the Chromium Embedded Framework (CEF) distribution in `Frameworks/cef`, with the Sparkle framework that SwiftPM fetches for app updates.
 # Usage: scripts/bundle_app.sh [debug|release]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,6 +15,10 @@ BUILD_NUMBER="$(date -u +%Y%m%d%H%M)"
 BUILD_COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 git -C "$ROOT" diff --quiet HEAD -- 2>/dev/null || BUILD_COMMIT="$BUILD_COMMIT+"
 MIN_MACOS="14.0"
+# Sparkle checks this appcast, which `scripts/release_app.sh` uploads to each GitHub release, and installs only archives signed with the private key of this EdDSA public key (`docs/updates.md`). The public key is the one `generate_keys --account <account>` prints; `ARCH_SPARKLE_PUBLIC_KEY` overrides it. Without a key, the app has no updater.
+SPARKLE="$BIN/Sparkle.framework"
+SPARKLE_FEED_URL="https://github.com/taeyoon0137/arch-browser/releases/latest/download/appcast.xml"
+SPARKLE_PUBLIC_KEY="${ARCH_SPARKLE_PUBLIC_KEY:-}"
 
 [ -x "$BIN/Arch" ] || { echo "missing $BIN/Arch; run swift build -c $CONFIG first" >&2; exit 1; }
 [ -x "$BIN/ArchHelper" ] || { echo "missing $BIN/ArchHelper" >&2; exit 1; }
@@ -23,6 +27,8 @@ MIN_MACOS="14.0"
 [ -f "$ICON_SOURCE" ] || { echo "missing app icon source at $ICON_SOURCE" >&2; exit 1; }
 [ -f "$SDEF" ] || { echo "missing scripting definition at $SDEF" >&2; exit 1; }
 [ -d "$BIN/ArchBrowser_Arch.bundle" ] || { echo "missing the modules' resource bundles in $BIN; run swift build -c $CONFIG first" >&2; exit 1; }
+[ -d "$SPARKLE" ] || { echo "missing Sparkle framework at $SPARKLE; run swift build -c $CONFIG first" >&2; exit 1; }
+[ -n "$SPARKLE_PUBLIC_KEY" ] || echo "no Sparkle public key is set, so the app has no updater; docs/updates.md says how to make the key pair" >&2
 
 write_plist() {
   # Arguments: `$1` is the output path, `$2` the executable name, `$3` the bundle identifier, and `$4` the user interface element flag (0/1). `$5` holds extra keys for the main app.
@@ -68,6 +74,14 @@ APP_KEYS='	<key>CFBundleIconFile</key><string>Arch</string>
 			<key>CFBundleTypeRole</key><string>Viewer</string>
 		</dict>
 	</array>'
+# Sparkle checks once a day without asking first, and sends no system profile with its checks (`docs/updates.md`).
+APP_KEYS="$APP_KEYS
+	<key>SUFeedURL</key><string>$SPARKLE_FEED_URL</string>
+	<key>SUEnableAutomaticChecks</key><true/>
+	<key>SUScheduledCheckInterval</key><integer>86400</integer>
+	<key>SUEnableSystemProfiling</key><false/>"
+[ -z "$SPARKLE_PUBLIC_KEY" ] || APP_KEYS="$APP_KEYS
+	<key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources" "$APP/Contents/Helpers"
@@ -79,6 +93,11 @@ ln -s arch-cli "$APP/Contents/Helpers/arch-mcp"
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 xcrun vtool -set-build-version macos "$MIN_MACOS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
 mv "$APP/Contents/MacOS/Arch.tmp" "$APP/Contents/MacOS/Arch"
+# The app links Sparkle through `@rpath`, which SwiftPM points at its build folders. In the bundle the framework is in Contents/Frameworks, and the build folder's path stays out of the app.
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Arch" 2>/dev/null
+otool -l "$APP/Contents/MacOS/Arch" | sed -n 's/^ *path \(.*\) (offset [0-9]*)$/\1/p' | while IFS= read -r rpath; do
+  case "$rpath" in "$ROOT"/*) install_name_tool -delete_rpath "$rpath" "$APP/Contents/MacOS/Arch" 2>/dev/null ;; esac
+done
 write_plist "$APP/Contents/Info.plist" "Arch" "xyz.taeyoon.arch" 0 "$APP_KEYS"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 cp "$SDEF" "$APP/Contents/Resources/Arch.sdef"
@@ -253,12 +272,30 @@ elif [ -n "$CERT_KIND" ]; then
   echo "no provisioning profile suits the $CERT_KIND identity, so the app has no iCloud or push entitlements; scripts/provision_app.sh gets one" >&2
 fi
 
-# With a profile, `--deep` signs the helper apps and the framework without its entitlements, and the second signing gives them to the app alone.
-if ! SIGN_OUTPUT="$(codesign --force --deep --sign "${IDENTITY:--}" "$APP" 2>&1)" ||
-  { [ -n "$PROFILE" ] && ! SIGN_OUTPUT="$(codesign --force --sign "$IDENTITY" --entitlements "$ENTITLEMENTS" "$APP" 2>&1)"; }; then
+# Signs Sparkle's framework in the bundle with identity `$1`, from the inside out, as Sparkle's documentation does: the XPC services, the Autoupdate helper, the Updater app, and then the framework, each with the hardened runtime that Sparkle's own signatures have. Only the downloader service keeps its entitlements.
+sign_sparkle() {
+  versions="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+  codesign --force --sign "$1" --options runtime "$versions/XPCServices/Installer.xpc" &&
+    codesign --force --sign "$1" --options runtime --preserve-metadata=entitlements "$versions/XPCServices/Downloader.xpc" &&
+    codesign --force --sign "$1" --options runtime "$versions/Autoupdate" &&
+    codesign --force --sign "$1" --options runtime "$versions/Updater.app" &&
+    codesign --force --sign "$1" --options runtime "$APP/Contents/Frameworks/Sparkle.framework"
+}
+
+# Signs the bundle with identity `$1`, and the app with the entitlements at `$2` when it is not empty. `--deep` signs the helper apps and the CEF framework without entitlements, so Sparkle's framework joins the bundle after it, keeping the entitlements and runtime of its signatures, and the last signing seals the app with both.
+sign_app() {
+  rm -rf "$APP/Contents/Frameworks/Sparkle.framework"
+  codesign --force --deep --sign "$1" "$APP" &&
+    ditto "$SPARKLE" "$APP/Contents/Frameworks/Sparkle.framework" &&
+    sign_sparkle "$1" &&
+    codesign --force --sign "$1" ${2:+--entitlements "$2"} "$APP"
+}
+
+if ! SIGN_OUTPUT="$(sign_app "${IDENTITY:--}" "${PROFILE:+$ENTITLEMENTS}" 2>&1)"; then
   printf '%s\n' "$SIGN_OUTPUT" >&2
   echo "signing failed; signing ad hoc instead, without the provisioning profile, so the Keychain items Chromium created under the identity may ask for access" >&2
   rm -f "$APP/Contents/embedded.provisionprofile" "$ENTITLEMENTS"
-  codesign --force --deep --sign - "$APP"
+  sign_app - ""
 fi
+codesign --verify --deep --strict "$APP"
 echo "$APP"

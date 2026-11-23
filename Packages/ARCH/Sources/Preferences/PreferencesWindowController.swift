@@ -56,6 +56,8 @@ public final class PreferencesWindowController: NSWindowController {
     public static var agents: AgentService?
     /// The hook registry whose hooks Settings ▸ AI ▸ Hooks lists. The app shell sets it at launch, before Settings first opens; without it the page is left out.
     public static var hooks: HookRegistry?
+    /// The updater's controls, which Settings ▸ General shows. The app shell sets them at launch, before Settings first opens, when it has an updater; without them the section leaves updates out.
+    public static var updates: AppUpdateControls?
 
     /// Sign In for a Claude Code or Codex provider outside Settings, as from the agent panel: the built-in terminal with the tool's sign-in typed, as the provider's editor types it.
     @MainActor public static func signInToAgentTool(_ providerID: AIProviderID) {
@@ -78,7 +80,7 @@ public final class PreferencesWindowController: NSWindowController {
         let sections = NSTabViewController()
         sections.tabStyle = .toolbar
         let session = Self.session
-        sections.addTabViewItem(Self.section(localized("General"), symbol: "gearshape", GeneralSection()))
+        sections.addTabViewItem(Self.section(localized("General"), symbol: "gearshape", GeneralSection(updates: Self.updates)))
         if let sync = Self.syncController {
             sections.addTabViewItem(Self.section(localized("Sync"), symbol: "icloud", SyncSection(controller: sync)))
         }
