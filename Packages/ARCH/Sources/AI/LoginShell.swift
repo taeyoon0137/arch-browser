@@ -28,8 +28,8 @@ public actor LoginShell {
         ]
     }
 
-    /// The login shell’s search path and the folders used by the agent tools and GitHub CLI.
-    static let variableNames = ["PATH", "HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"]
+    /// The login shell’s search path and the folders used by the agent tools.
+    static let variableNames = ["PATH", "HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]
     /// The variables of `variableNames` that name the tools' folders and that the read takes from this app's environment, as `launchctl setenv` gives them to every app and the built-in terminal passes them on to its shell; a profile can still change or unset them. HOME stays the account's, as in `baseEnvironment`.
     static let inheritedVariableNames = ["CLAUDE_CONFIG_DIR", "CODEX_HOME"]
     static let marker = "__ARCH_LOGIN_SHELL__"

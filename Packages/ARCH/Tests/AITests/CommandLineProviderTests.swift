@@ -381,10 +381,12 @@ import Testing
         let environment = await LoginShell(executable: URL(fileURLWithPath: "/bin/sh")).environment()
         #expect(environment?["PATH"]?.split(separator: ":").contains("/usr/bin") == true)
         // A profile's text before the marker and its exported variables, as a login shell's are.
-        let shell = try toolScript("echo 'Welcome back'\nexport PATH=/usr/bin:/bin XDG_CONFIG_HOME=/tmp/config-home\nexec /bin/sh -c \"$4\"")
+        let shell = try toolScript("echo 'Welcome back'\nexport PATH=/usr/bin:/bin CODEX_HOME=/tmp/codex-home XDG_CONFIG_HOME=/tmp/config-home\nexec /bin/sh -c \"$4\"")
         let profile = await LoginShell(executable: shell).environment()
         #expect(profile?["PATH"] == "/usr/bin:/bin")
-        #expect(profile?["XDG_CONFIG_HOME"] == "/tmp/config-home")
+        #expect(profile?["CODEX_HOME"] == "/tmp/codex-home")
+        // Only the tools' variables come through.
+        #expect(profile?["XDG_CONFIG_HOME"] == nil)
     }
 
     @Test func locatesExecutablesInTheSearchPath() async throws {
