@@ -160,7 +160,7 @@ struct SpaceTabsView: View {
     static let headerBottomSpacing: CGFloat = rowSpacing
     /// The divider's height between the pinned and open tabs.
     static let dividerHeight: CGFloat = 10
-    /// The pinned list's end while it has no rows, a row's height, so that a drag can pin a tab there; it keeps that height through the drag of a space's first pin.
+    /// The space above the divider while the pinned list has no rows, a row's height, which says that a tab dragged there is pinned; it stays through the drag of a space's first pin.
     static let emptyPinnedEndHeight: CGFloat = 36
     /// The largest share of the page's height that the pinned area takes; a longer pinned list scrolls within it.
     static let pinnedAreaMaxShare: CGFloat = 0.5
@@ -361,20 +361,26 @@ struct SpaceTabsView: View {
         })
     }
 
-    /// The divider that ends the pinned list, in place between the two areas. While the pinned list is empty it is a row high, and shows Pin Tab while a tab of this list is dragged.
+    /// The divider that ends the pinned list, in place between the two areas. While the pinned list is empty, a row's space above the divider says that tabs dragged there are pinned, and says Pin Tab while a tab of this list is dragged.
     private func divider(pinnedIsEmpty: Bool) -> some View {
         let draggedHere = sidebarDrag.owner == dragOwner && sidebarDrag.tabID != nil
-        return ZStack {
-            if pinnedIsEmpty && draggedHere {
-                Label(localized("Pin Tab"), systemImage: "pin")
+        return VStack(spacing: 0) {
+            if pinnedIsEmpty {
+                Label(localized(draggedHere ? "Pin Tab" : "Drag Tabs Here to Pin"), systemImage: "pin")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Divider().padding(.horizontal, 10)
+                    .foregroundStyle(draggedHere ? .secondary : .tertiary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(RoundedRectangle(cornerRadius: 9).strokeBorder(.secondary.opacity(draggedHere ? 0.45 : 0.2), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                    .frame(height: Self.emptyPinnedEndHeight)
+            } else if draggedHere && startedWithoutPins {
+                Color.clear.frame(height: Self.emptyPinnedEndHeight)
             }
+            Divider().padding(.horizontal, 10)
+                .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: pinnedIsEmpty || (draggedHere && startedWithoutPins) ? Self.emptyPinnedEndHeight : Self.dividerHeight)
+        .frame(height: pinnedIsEmpty || (draggedHere && startedWithoutPins) ? Self.emptyPinnedEndHeight + Self.dividerHeight : Self.dividerHeight)
         .padding(.horizontal, SidebarView.inset)
         .background(GeometryReader { proxy in
             let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))

@@ -2991,6 +2991,16 @@
         }
       }
     },
+    "Drag Tabs Here to Pin" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "여기로 탭을 끌어 고정"
+          }
+        }
+      }
+    },
     "Pin Tab" : {
       "localizations" : {
         "ko" : {
