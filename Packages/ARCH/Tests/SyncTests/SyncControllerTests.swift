@@ -586,6 +586,22 @@ import Testing
         #expect(SyncController.interruptedApplyMessage == catalogText("Sync turned off because Arch quit before it finished syncing with iCloud. Turn it on to try again."))
     }
 
+    /// A fetch that Arch asks the engine for runs under the crash-loop guard, as CloudKit can stop the app inside the call, and a normal quit clears the guard so that the next launch keeps sync on.
+    @Test func theCrashLoopGuardCoversArchsOwnFetchesAndANormalQuitClearsIt() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let key = SyncController.applyingKey
+        await f.controller.setEnabled(true)
+        let engine = try #require(f.engines.last)
+        var duringFetch: [Bool] = []
+        engine.onFetch = { duringFetch.append(f.defaults.bool(forKey: key)); return [] }
+        await f.controller.refresh()
+        #expect(!duringFetch.isEmpty && duringFetch.allSatisfy { $0 } && !f.defaults.bool(forKey: key))
+        f.defaults.set(true, forKey: key)
+        f.controller.applicationWillTerminate()
+        #expect(!f.defaults.bool(forKey: key) && f.controller.isEnabled)
+    }
+
     @Test func confirmedDeletionSendsOnlyTheZoneAndTurnsOffOnceTheServerAccepts() async throws {
         let f = Fixture()
         defer { f.clean() }
