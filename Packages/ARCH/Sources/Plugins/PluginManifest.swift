@@ -220,11 +220,14 @@ public struct PluginGrant: Hashable, Sendable {
         if kind == .script, manifest.sites.contains(where: \.coversEverySite), !manifest.contributions.commands.isEmpty { siteAccess = .whenInvoked }
     }
 
-    /// What the review of an update to `manifest` offers at first: everything it asks for, except the sites that the installed version asked for and the user left out, with the installed grant's site access, or `whenInvoked` when the manifest asks for it.
+    /// What the review of an update to `manifest` offers at first: everything it asks for, except the permissions, sites, and network hosts that the installed version asked for and the user left out or revoked, with the installed grant's site access, or `whenInvoked` when the manifest asks for it.
     public init(updating installed: InstalledPlugin, to manifest: PluginManifest) {
         let leftOut = Set(installed.manifest.sites).subtracting(installed.grant.sites)
-        self.init(permissions: manifest.permissions, sites: manifest.sites.filter { !leftOut.contains($0) },
-                  siteAccess: manifest.siteAccess == .whenInvoked ? .whenInvoked : installed.grant.siteAccess, network: manifest.network)
+        let revoked = installed.manifest.permissions.subtracting(installed.grant.permissions)
+        let leftOutHosts = Set(installed.manifest.network).subtracting(installed.grant.network)
+        self.init(permissions: manifest.permissions.subtracting(revoked), sites: manifest.sites.filter { !leftOut.contains($0) },
+                  siteAccess: manifest.siteAccess == .whenInvoked ? .whenInvoked : installed.grant.siteAccess,
+                  network: manifest.network.filter { !leftOutHosts.contains($0) })
     }
 
     /// Whether the review, starting from this grant, offers the switch for `whenInvoked` to a plugin of `kind` with `manifest`: a script plugin with sites whose manifest asks for its sites as listed and has commands, without which the switch would leave it no page to reach, or whose grant starts with the switch on, as in an update of a plugin that the user limited and whose new version has no commands, so that the user can switch it off.
