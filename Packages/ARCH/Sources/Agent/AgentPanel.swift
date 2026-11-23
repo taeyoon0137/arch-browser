@@ -3,7 +3,7 @@
 // The transcript shows the user's messages in bubbles at the trailing edge, replies as the page reader does, collapsed thinking, steps with a mark and plain words for a step that did not go through, errors, and each turn's model and tokens.
 // The oldest waiting card is pinned above the message field and takes only the room it needs, up to a share of the panel; its buttons stay in view while its facts scroll.
 // Cards cover approvals, questions, tab sharing, downloads, and external links. Queued messages have Remove.
-// Take Over and Hand Back control the session. The next-message field's Send becomes Stop while a turn runs.
+// Take Over and Hand Back control the session: while the user has control, a strip above the transcript says so with Hand Back, and an ended session's strip offers New Agent Task. The next-message field's Send becomes Stop while a turn runs.
 import AgentControl
 import AI
 import SwiftUI
@@ -35,6 +35,10 @@ public struct AgentSessionPanel: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let strip = statusStrip {
+                strip
+                Divider()
+            }
             transcript
             if let card = pendingCards.first {
                 Divider()
@@ -85,9 +89,8 @@ public struct AgentSessionPanel: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
             AgentStateHeader(title: session.title, status: statusSentence) {
-                if session.isTakenOver && !session.hasEnded {
-                    AgentPrimaryAction(title: localized("Hand Back"), action: session.handBack)
-                } else if session.isTurnRunning {
+                // Hand Back sits in the strip above the transcript while the user has control.
+                if session.isTurnRunning && !session.isTakenOver {
                     AgentPrimaryAction(title: localized("Stop"), action: session.stop)
                 }
                 Menu {
@@ -135,6 +138,19 @@ public struct AgentSessionPanel: View {
             .padding(.horizontal, AgentPanelMetrics.inset)
             .padding(.bottom, 8)
         }
+    }
+
+    /// The state that lasts until the user acts, above the transcript: their control of the session, with Hand Back, or its end, with New Agent Task where the window offers one.
+    private var statusStrip: AgentStatusStrip? {
+        if session.hasEnded {
+            return AgentStatusStrip(symbol: "flag.checkered", text: localized("This task has ended. Its conversation stays until you delete it."),
+                                    actionTitle: actions.newTask == nil ? nil : localized("New Agent Task"), action: actions.newTask)
+        }
+        if session.isTakenOver {
+            return AgentStatusStrip(symbol: "hand.raised", text: localized("You took over. The agent waits until you hand the session back."),
+                                    actionTitle: localized("Hand Back"), action: session.handBack)
+        }
+        return nil
     }
 
     /// Lists tabs shared with the session and lets the user change that list.
@@ -233,9 +249,6 @@ public struct AgentSessionPanel: View {
                                            retry: item.id == session.transcript.retryableErrorID && !session.hasEnded ? { retry(item.id) } : nil)
                             .id(item.id)
                     }
-                    if session.isTakenOver && !session.hasEnded {
-                        note(localized("You took over. The agent waits until you hand the session back."))
-                    }
                 }
                 .padding(AgentPanelMetrics.inset)
             }
@@ -316,13 +329,6 @@ public struct AgentSessionPanel: View {
             problem = error.localizedDescription
         }
     }
-
-    private func note(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: AgentPanelMetrics.detailSize))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
 }
 
 /// One item of the transcript.
@@ -391,28 +397,10 @@ private struct AgentTranscriptRow: View {
         }
     }
 
-    /// A step as one quiet line: its mark, the host's sentence, what went wrong in plain words, and the tab it acted in.
+    /// A step as one quiet line, with Show Tab for the tab it acted in.
     private func stepRow(_ step: AgentStep) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: step.status.symbol)
-                .foregroundStyle(step.status.tint)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(step.sentence)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let words = step.status.plainWords {
-                    Text(words).foregroundStyle(.orange)
-                }
-            }
-            Spacer(minLength: 0)
-            if step.tabHandle != nil, let tabID = step.tabID {
-                Button(localized("Show Tab")) { actions.showTab(tabID) }
-                    .buttonStyle(.link)
-                    .help(localized("Show the tab this step used"))
-            }
-        }
-        .font(.system(size: AgentPanelMetrics.detailSize))
+        AgentStepLine(sentence: step.sentence, status: step.status,
+                      showTab: step.tabHandle != nil ? step.tabID.map { tabID in { actions.showTab(tabID) } } : nil)
     }
 
     /// Links to tabs read for this transcript item while they remain available.

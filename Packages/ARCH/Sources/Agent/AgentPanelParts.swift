@@ -134,6 +134,69 @@ struct AgentPrimaryAction: View {
     }
 }
 
+/// A state that lasts, such as the user's control of a session or its end, as one line above the transcript with the action that leaves it.
+struct AgentStatusStrip: View {
+    let symbol: String
+    let text: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(text)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if let actionTitle, let action {
+                AgentPrimaryAction(title: actionTitle, action: action)
+            }
+        }
+        .font(.system(size: AgentPanelMetrics.supportingSize))
+        .padding(.horizontal, AgentPanelMetrics.inset)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AgentPanelFill.user)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A step as one quiet line, shared by a session's transcript and an outside client's panel: its mark, the host's sentence, what went wrong in plain words, a warning when the page speaks to AI agents, and Show Tab when it acted in a tab.
+struct AgentStepLine: View {
+    let sentence: String
+    let status: AgentResultStatus
+    var addressesAgents = false
+    let showTab: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: status.symbol)
+                .foregroundStyle(status.tint)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(sentence)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let words = status.plainWords {
+                    Text(words).foregroundStyle(.orange)
+                }
+                if addressesAgents {
+                    Text("This page contains text addressed to AI agents.", bundle: .module).foregroundStyle(.orange)
+                }
+            }
+            Spacer(minLength: 0)
+            if let showTab {
+                Button(localized("Show Tab"), action: showTab)
+                    .buttonStyle(.link)
+                    .help(localized("Show the tab this step used"))
+            }
+        }
+        .font(.system(size: AgentPanelMetrics.detailSize))
+    }
+}
+
 /// Hides details in a disclosure group whose title is secondary; the content keeps its own styles, so controls in it do not read as disabled.
 struct AgentTechnicalDetails<Content: View>: View {
     let title: String

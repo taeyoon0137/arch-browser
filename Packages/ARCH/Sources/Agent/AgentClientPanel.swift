@@ -134,15 +134,16 @@ public struct AgentPanel: View {
 
     public var body: some View {
         VStack(spacing: 0) {
+            // The session panel's frame: a 40-point title row with the panel's inset, the title in the panel's title size, and the access and "Persona / Space" as its detail.
             HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(owner?.name ?? localized("Agent"))
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: AgentPanelMetrics.titleSize, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if let owner {
-                        Text("\(owner.access) \u{2014} \(owner.place)")
-                            .font(.caption)
+                        Text("\(owner.access) \u{00B7} \(owner.place)")
+                            .font(.system(size: AgentPanelMetrics.detailSize))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -157,21 +158,23 @@ public struct AgentPanel: View {
                     .accessibilityLabel(localized("Close Agent Panel"))
                     .help(localized("Close Agent Panel"))
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 8)
-            .frame(height: 44)
+            .padding(.leading, AgentPanelMetrics.inset)
+            .padding(.trailing, 6)
+            .frame(height: 40)
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         if steps.isEmpty, approvals.groups(of: ownerID).isEmpty {
                             Text("The steps of this client show here, with what Arch asks you.", bundle: .module)
-                                .font(.callout)
+                                .font(.system(size: AgentPanelMetrics.supportingSize))
                                 .foregroundStyle(.secondary)
-                                .padding(.top, 8)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        // The session transcript's step line; the tab's handle stays out of view, as there.
                         ForEach(steps) { step in
-                            AgentStepRow(step: step) { if let tabID = step.tabID { model.showTab(tabID) } }
+                            AgentStepLine(sentence: step.sentence, status: step.status, addressesAgents: step.addressesAgents,
+                                          showTab: step.tabHandle != nil && step.tabID != nil ? { if let tabID = step.tabID { model.showTab(tabID) } } : nil)
                         }
                         ForEach(Array(approvals.groups(of: ownerID).enumerated()), id: \.offset) { _, group in
                             VStack(alignment: .leading, spacing: 8) {
@@ -182,49 +185,10 @@ public struct AgentPanel: View {
                         }
                         Color.clear.frame(height: 1).id("end")
                     }
-                    .padding(12)
+                    .padding(AgentPanelMetrics.inset)
                 }
                 .onChange(of: approvals.pending.count) { proxy.scrollTo("end", anchor: .bottom) }
                 .onChange(of: steps.count) { proxy.scrollTo("end", anchor: .bottom) }
-            }
-        }
-    }
-}
-
-/// One step of an outside client in the panel, with its status and a button that shows its tab.
-private struct AgentStepRow: View {
-    let step: AgentStepRecord
-    let show: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: step.status.symbol)
-                    .foregroundStyle(step.status.tint)
-                    .font(.system(size: AgentPanelMetrics.detailSize))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(step.sentence)
-                        .font(.system(size: AgentPanelMetrics.supportingSize))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let words = step.status.plainWords {
-                        Text(words)
-                            .font(.system(size: AgentPanelMetrics.detailSize))
-                            .foregroundStyle(.orange)
-                    }
-                }
-                Spacer(minLength: 0)
-                if let handle = step.tabHandle, step.tabID != nil {
-                    Button(handle, action: show)
-                        .buttonStyle(.link)
-                        .font(.system(size: AgentPanelMetrics.detailSize))
-                        .help(localized("Show this tab"))
-                }
-            }
-            if step.addressesAgents {
-                Text("This page contains text addressed to AI agents.", bundle: .module)
-                    .font(.system(size: AgentPanelMetrics.detailSize))
-                    .foregroundStyle(.orange)
             }
         }
     }
