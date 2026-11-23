@@ -195,7 +195,7 @@ A sidebar item with a `panel` may set `"presentation": "sidebar"`; the default i
 - Built-in plugins run in the app process. They are trusted, reviewed with the app, and limited to `PluginContext` by convention.
 - Script plugins run their background script in a hidden `WKWebView` owned by the `Plugins` module. The code runs in a separate WebKit web content process, regardless of the tabs' engine:
   - Its documents load from `arch-plugin://<plugin id>/` through a `WKURLSchemeHandler` that serves only the installed package. The root of that origin is a document the handler writes, which runs the background script as a classic script; every other path is a package path, and other hosts and paths that name no file of the package get 404.
-  - Every response carries the content security policy `default-src 'self'`, which limits scripts, styles, and connections to the package and allows neither inline code nor `eval`. Network access goes through `arch.net.fetch`, which the host checks against the grant's hosts.
+  - Every response carries the content security policy `default-src 'self'`, which limits scripts, styles, and connections to the package and allows neither inline code nor `eval`. Network access goes only through `arch.net.fetch`, which currently refuses every request with `networkUnavailable` before any network I/O; once enabled, the host checks each request against the grant's hosts.
   - A `WKContentRuleList` blocks every load outside the plugin's scheme as a second layer.
   - Neither the policy nor the rule list covers WebRTC, whose connections would reach any host. The web view runs in Lockdown Mode (`WKWebpagePreferences.isLockdownModeEnabled`), which removes WebRTC from its documents and their frames, along with other web technologies such as JIT compilation, WebAssembly, and WebGL. Whether DNS prefetching and `preconnect` links can still reach a host outside the scheme needs verification.
   - Each of a plugin's web views uses its own `WKWebsiteDataStore.nonPersistent()`, so it shares no cookies or site storage with any Persona, any other plugin, or the plugin's other web views: a panel and the background script share neither `localStorage` nor a `BroadcastChannel`. Its lasting state goes through `arch.storage`.
@@ -701,7 +701,7 @@ public protocol PluginContext: AnyObject {
     func history(matching text: String, limit: Int) throws -> [PluginHistoryEntry]
     func downloads() throws -> [PluginDownload]
     func renameDownload(_ id: UUID, to name: String) throws -> Bool
-    /// Uses an ephemeral session without cookies. The host must be in the grant's `network`.
+    /// Currently throws `networkUnavailable` before any network I/O. Once enabled, it uses an ephemeral session without cookies, and the host must be in the grant's `network`.
     func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 
     // Interface.
