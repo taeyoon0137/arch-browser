@@ -482,9 +482,10 @@ public final class PluginManager: ObservableObject {
         saveList()
     }
 
-    /// Drops the plugin's running instance, whose context stops acting at once and which deactivates once its activation ends.
+    /// Drops the plugin's running instance, whose context stops acting at once and which deactivates once its activation ends. The commands that the run disabled come back, since `setEnabled(_:command:)` lasts only for the run and a plugin without events may have no other way to start again.
     private func stop(_ id: PluginID) {
         guard let stopped = running.removeValue(forKey: id) else { return }
+        restoreCommands(of: id)
         stopped.context.end()
         Task {
             guard (try? await stopped.activation.value) != nil else { return }
@@ -1133,6 +1134,12 @@ public final class PluginManager: ObservableObject {
         contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
     }
 
+    /// Shows again the commands that the plugin's run disabled.
+    private func restoreCommands(of plugin: PluginID) {
+        guard disabledCommands.removeValue(forKey: plugin) != nil else { return }
+        contributions = PluginContributionIndex(plugins, disabledCommands: disabledCommands)
+    }
+
     /// Requests a panel for a contributed sidebar item with a panel action.
     fileprivate func showPanel(_ item: String, of plugin: PluginID) {
         guard let installed = enabledPlugin(plugin), installed.manifest.contributions.sidebarItems.contains(where: {
@@ -1465,7 +1472,10 @@ public final class PluginManager: ObservableObject {
         } catch {
             // The failed instance is dropped, so whatever it left running cannot act for the plugin.
             started.context.end()
-            if running[installed.id]?.plugin === started.plugin { running[installed.id] = nil }
+            if running[installed.id]?.plugin === started.plugin {
+                running[installed.id] = nil
+                restoreCommands(of: installed.id)
+            }
             throw error
         }
         guard running[installed.id]?.plugin === started.plugin else { return nil }

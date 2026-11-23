@@ -313,6 +313,27 @@ private let composition = PluginComposition(requests: ["Copy some text"], model:
         ]))
     }
 
+    /// A command that the plugin disables stays hidden only for the run: once the instance stops, here at its idle limit, the command comes back, so a plugin without events can start again.
+    @Test func showsDisabledCommandsAgainOnceTheInstanceStops() async throws {
+        let root = folder.url.appendingPathComponent("Packages/Hide", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let files = [
+            "plugin.json": #"{"id": "org.example.hide", "name": "Hide", "version": "1", "apiVersion": 1, "summary": "Hides.", "background": "b.js", "contributes": {"commands": [{"id": "hide", "title": "Hide Me"}]}}"#,
+            "b.js": #"arch.commands.onRun("hide", () => arch.ui.setEnabled("hide", false));"#,
+        ]
+        for (path, text) in files {
+            try Data(text.utf8).write(to: root.appendingPathComponent(path))
+        }
+        let manager = manager(ScriptPluginLimits(hang: 10, idle: 0.3))
+        defer { manager.close() }
+        let package = try await manager.stage(root)
+        try manager.install(package, grant: PluginGrant(requestedBy: package.manifest), isEnabled: true)
+        #expect(manager.contributions.paletteCommands(matching: "Hide").count == 1)
+        await manager.run(PluginCommandRef(plugin: package.manifest.id, command: "hide"), PluginInvocation(tab: nil))
+        #expect(await eventually { manager.contributions.paletteCommands(matching: "Hide").isEmpty })
+        #expect(await eventually { manager.contributions.paletteCommands(matching: "Hide").count == 1 })
+    }
+
     /// A panel shows its page with the bridge's calls but not the background script's listeners, and keeps the instance from its idle stop while it shows.
     @Test func showsAPanelAndKeepsTheInstanceWhileItShows() async throws {
         let id = PluginID(rawValue: "org.example.panel")!
