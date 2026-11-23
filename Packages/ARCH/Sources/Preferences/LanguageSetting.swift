@@ -43,9 +43,8 @@ public struct LanguageSetting {
     @MainActor public static func relaunch() {
         let app = Bundle.main.bundleURL.path
         let pid = ProcessInfo.processInfo.processIdentifier
-        var observer: NSObjectProtocol?
-        observer = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in
-            if let observer { NotificationCenter.default.removeObserver(observer) }
+        // The block does not remove its observer: AppKit posts the notification once, right before the process exits.
+        let observer = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in
             let reopen = Process()
             reopen.executableURL = URL(fileURLWithPath: "/bin/sh")
             reopen.arguments = ["-c", "while kill -0 \"$0\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$1\"", String(pid), app]
@@ -53,6 +52,6 @@ public struct LanguageSetting {
         }
         NSApp.terminate(nil)
         // AppKit returns only when the app does not quit, also after a quit it answered later; that quit leaves no reopening behind for a later one.
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        NotificationCenter.default.removeObserver(observer)
     }
 }

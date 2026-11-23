@@ -144,7 +144,7 @@ final class EngineRuntime {
                             chromiumNativeMessagingHosts: URL? = nil, agentOnlyPersonaID: Persona.ID? = nil) throws {
         try self.init(registry: registry, userDataDirectory: userDataDirectory, builtInPlugins: builtInPlugins, cefVersion: cefVersion,
                       nativeMessagingHostFolders: nativeMessagingHostFolders, chromiumNativeMessagingHosts: chromiumNativeMessagingHosts, agentOnlyPersonaID: agentOnlyPersonaID,
-                      sessionSeal: .keychain, removeLiveFolderKeychainItems: RemovedLiveFolders.removeKeychainItems)
+                      sessionSeal: .keychain, removeLiveFolderKeychainItems: { RemovedLiveFolders.removeKeychainItems() })
     }
 
     /// Restores browser state, starts an available engine, and attaches the session's feature hosts. `removeLiveFolderKeychainItems` deletes the removed live folders' Keychain items (`RemovedLiveFolders`); tests pass one that touches no Keychain.

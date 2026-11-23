@@ -725,7 +725,7 @@ import UserNotifications
         let answer = "The previous answer mentioned other.example."
         var start = AgentService.SessionStart(task: "Check last year's terms", personaID: persona, spaceID: space.id, attachedTabIDs: [tab.id],
                                               mode: .readOnly, model: nil, effort: nil)
-        start.readerExcerpt = try #require(AgentReaderExcerpt(tabID: tab.id, documentID: tab.documentID, url: url, selection: selected, reply: answer))
+        start.readerExcerpt = AgentReaderExcerpt(tabID: tab.id, documentID: tab.documentID, url: url, selection: selected, reply: answer)
         let session = try service.startSession(start)
         let runner = try #require(harness.runners.last)
         let first = try #require(runner.sent.first)

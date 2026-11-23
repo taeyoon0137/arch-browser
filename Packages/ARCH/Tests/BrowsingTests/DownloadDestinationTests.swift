@@ -179,7 +179,7 @@ import Testing
             webKit.delegate?.downloads(webKit, didCreate: second)
             let entry = try #require(session.downloads.first { $0.item === first })
             #expect(entry.reserveDestination(alias.appendingPathComponent("REPORT.txt")))
-            let caseSensitive = try #require(directory.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames)
+            let caseSensitive = try #require(directory.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]).volumeSupportsCaseSensitiveNames as Bool?)
             let expected = caseSensitive ? "report.txt" : "report 2.txt"
             #expect(choose(second, in: webKit, name: "report.txt")?.lastPathComponent == expected)
             first.state = .completed

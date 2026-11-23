@@ -68,7 +68,7 @@ final class FakeHookAuthenticator: AgentAuthenticating, @unchecked Sendable {
     private let program = AgentClientIdentity(key: .signed(identifier: "com.example.agent", team: "ABCDE12345"), name: "agent", executablePath: "/Applications/Agent.app/Contents/MacOS/agent",
                                               host: "Agent", isInterpreter: false)
     private let other = AgentClientIdentity(key: .unsigned(path: "/usr/local/bin/other", codeHash: "00"), name: "other", executablePath: "/usr/local/bin/other", host: nil, isInterpreter: false)
-    private static let script = "arch.events.on(\"pageLoaded\", async (event) => { await arch.agent.run({ ...event.hook.agent, tabs: [event.tab.id] }) })"
+    nonisolated private static let script = "arch.events.on(\"pageLoaded\", async (event) => { await arch.agent.run({ ...event.hook.agent, tabs: [event.tab.id] }) })"
 
     private func grant(for client: AgentClientIdentity) -> AgentGrant {
         AgentGrant(client: client, personaID: HookIDs.persona, spaceID: HookIDs.work, level: .readOnly, scopes: AgentGrantScopes(), expiry: .whenRevoked, grantedAt: Date())
