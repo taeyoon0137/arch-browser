@@ -94,9 +94,6 @@ import Terminal
     }
 
     private func startSession(in supportDirectory: URL) {
-        if UserDefaults.standard.bool(forKey: "ARCHSyncApplyingChanges") {
-            UserDefaults.standard.set(false, forKey: SyncController.enabledKey)
-        }
         // Data kept under the previous bundle identifier, then plugin data kept under the previous plugin identifiers, moves before the engines start and the preferences are read.
         BundleIdentifierMigration.runAtLaunch()
         PluginIdentifierMigration.runAtLaunch(in: supportDirectory)
