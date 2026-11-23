@@ -22,10 +22,19 @@ public final class ChromiumEngine: Engine {
         self.helperPath = helperPath
     }
 
-    public enum StartError: Error {
+    /// Why the engine or one of its profiles did not start, which the app shows in its debug window.
+    public enum StartError: LocalizedError {
+        /// `CefInitialize` failed.
         case initializationFailed
         /// CEF refused the profile of a context with a storage identifier.
         case profileUnavailable
+
+        public var errorDescription: String? {
+            switch self {
+            case .initializationFailed: localized("CEF did not initialize.")
+            case .profileUnavailable: localized("CEF refused the Persona's profile folder.")
+            }
+        }
     }
 
     public func makeApplication(configuration: EngineApplicationConfiguration) throws -> any EngineApplication {

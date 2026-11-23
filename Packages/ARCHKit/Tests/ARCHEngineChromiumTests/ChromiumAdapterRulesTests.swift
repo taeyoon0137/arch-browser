@@ -31,6 +31,14 @@ import Testing
         #expect(ChromiumBrowser.bridgeCookie(EngineCookie(name: "id", value: "1", domain: ".example.org", isSecure: true, sameSite: .noRestriction)).sameSite == .noRestriction)
     }
 
+    // MARK: Start
+
+    /// The app's debug window shows why the engine or a Persona's profile did not start, in the interface's language.
+    @Test func aStartErrorNamesItsReason() {
+        #expect(ChromiumEngine.StartError.initializationFailed.localizedDescription == catalogText("CEF did not initialize."))
+        #expect(ChromiumEngine.StartError.profileUnavailable.localizedDescription == catalogText("CEF refused the Persona's profile folder."))
+    }
+
     // MARK: Links opened in a new tab
 
     /// The navigation delegate hears of a modified link as the WebKit adapter reports it: a background tab for Command or the middle button, a foreground tab with Shift as well, and a new window with Shift alone, which is no request for a tab.

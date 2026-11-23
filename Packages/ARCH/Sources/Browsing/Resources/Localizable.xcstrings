@@ -1711,6 +1711,16 @@
         }
       }
     },
+    "Engines That Did Not Start" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작하지 못한 엔진"
+          }
+        }
+      }
+    },
     "Enter a GitHub host, such as github.com." : {
       "localizations" : {
         "ko" : {
@@ -1757,6 +1767,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "매시간"
+          }
+        }
+      }
+    },
+    "Every Persona" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 페르소나"
           }
         }
       }

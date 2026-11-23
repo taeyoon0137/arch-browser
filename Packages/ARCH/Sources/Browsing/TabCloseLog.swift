@@ -1,4 +1,4 @@
-// Tab close log: why each tab closed this launch, with its title, address, and crash counts, shown in a debug window from View ▸ Developer.
+// Tab close log: why each tab closed this launch, with its title, address, and crash counts, and why an engine or a Persona's profile did not start, shown in a debug window from View ▸ Developer.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -98,10 +98,42 @@ public final class TabCloseLog: ObservableObject {
     }
 }
 
-/// Owns the tab close log window, which stays in memory when closed.
+/// An engine that did not start this launch, or did not open a Persona's profile, with the engine's reason.
+public struct EngineStartFailure: Identifiable {
+    public let id = UUID()
+    public let date = Date()
+    public let engine: EngineKind
+    /// The Persona whose profile did not open, or nil when the engine itself did not start.
+    public let personaID: Persona.ID?
+    public let personaName: String?
+    /// The engine's reason in the interface's language.
+    public let reason: String
+    /// The error as the engine names it, such as `ARCHEngineChromium.ChromiumEngine.StartError.initializationFailed`.
+    public let error: String
+
+    init(engine: EngineKind, persona: Persona?, error: any Error) {
+        self.engine = engine
+        personaID = persona?.id
+        personaName = persona?.name
+        reason = error.localizedDescription
+        self.error = String(reflecting: error)
+    }
+}
+
+/// The engines and profiles that did not start this launch, oldest first, in memory only. A failure that repeats with the same reason, as each time a tab asks for the engine again, is kept once.
+public final class EngineStartLog: ObservableObject {
+    @Published public private(set) var failures: [EngineStartFailure] = []
+
+    func record(_ failure: EngineStartFailure) {
+        guard !failures.contains(where: { $0.engine == failure.engine && $0.personaID == failure.personaID && $0.error == failure.error }) else { return }
+        failures.append(failure)
+    }
+}
+
+/// Owns the tab close log window, which stays in memory when closed. Above the closes, it lists the engines and profiles that did not start this launch.
 public final class TabCloseLogWindowController: NSWindowController {
-    public init(log: TabCloseLog) {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: TabCloseLogView(log: log)))
+    public init(log: TabCloseLog, startLog: EngineStartLog) {
+        let window = NSWindow(contentViewController: NSHostingController(rootView: TabCloseLogView(log: log, startLog: startLog)))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.title = localized("Tab Close Log")
         window.isReleasedWhenClosed = false
@@ -122,8 +154,20 @@ public final class TabCloseLogWindowController: NSWindowController {
 
 private struct TabCloseLogView: View {
     @ObservedObject var log: TabCloseLog
+    @ObservedObject var startLog: EngineStartLog
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !startLog.failures.isEmpty {
+                EngineStartFailuresView(failures: startLog.failures)
+                Divider()
+            }
+            closes
+        }
+        .frame(minWidth: 560, minHeight: 240)
+    }
+
+    private var closes: some View {
         Group {
             if log.entries.isEmpty {
                 Text("No Tabs Closed", bundle: .module)
@@ -171,6 +215,33 @@ private struct TabCloseLogView: View {
                 }
             }
         }
-        .frame(minWidth: 560, minHeight: 240)
+        .frame(maxHeight: .infinity)
+    }
+}
+
+/// One line per engine or profile that did not start: when, which engine, which Persona or all of them, and the engine's reason, with the error's name in its help tag.
+private struct EngineStartFailuresView: View {
+    let failures: [EngineStartFailure]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Engines That Did Not Start", bundle: .module)
+                .font(.headline)
+            ForEach(failures) { failure in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(failure.date.formatted(.dateTime.month(.abbreviated).day().hour().minute().second()))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Text(failure.engine.displayName)
+                    Text(failure.personaName ?? localized("Every Persona"))
+                        .foregroundStyle(.secondary)
+                    Text(failure.reason)
+                        .help(failure.error)
+                }
+                .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
