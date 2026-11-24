@@ -103,6 +103,13 @@ Check each item before reporting a task as finished:
   - Planned work: `Task(<ID>): <subject>`. The ID consists of a Roman numeral phase and dotted numbers, such as `I.1.1`.
 - Write non-empty subjects in English. Keep each commit to one purpose. Stage only related hunks.
 
+## Branches
+
+- `main` holds released code only. `develop` holds finished work. Work on `feat/<topic>` branches cut from `develop`.
+- Squash each feature branch into one commit on `develop`: rebase it on `develop`, run `git merge --squash`, commit using the subject format above, and delete the branch. `develop` moves only forward with a single line of history.
+- To release, fast-forward `main` to `develop` (`git merge --ff-only develop`) and push `main`. Each push runs `.github/workflows/release.yml`, which builds, signs, notarizes, and publishes the version tag and GitHub release (`docs/updates.md`, Release pipeline). Push `main` only when the user asks for a release.
+- Push `develop`. Do not push `feat/*` branches unless the user asks.
+
 ## Final response format
 
 When you finish, include:

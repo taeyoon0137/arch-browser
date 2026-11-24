@@ -55,7 +55,8 @@ ditto "$SOURCE" "$APP"
 
 if [ -n "${ARCH_NOTARY_PROFILE:-}" ]; then
   ditto -c -k --keepParent "$APP" "$OUT/notarization.zip"
-  xcrun notarytool submit "$OUT/notarization.zip" --keychain-profile "$ARCH_NOTARY_PROFILE" --wait
+  # `ARCH_NOTARY_KEYCHAIN` names the keychain that holds the profile when it is not the login keychain, as in the release workflow.
+  xcrun notarytool submit "$OUT/notarization.zip" --keychain-profile "$ARCH_NOTARY_PROFILE" ${ARCH_NOTARY_KEYCHAIN:+--keychain "$ARCH_NOTARY_KEYCHAIN"} --wait
   rm -f "$OUT/notarization.zip"
   # Stapling fails unless the service accepted the app.
   xcrun stapler staple "$APP"

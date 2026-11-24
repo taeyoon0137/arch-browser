@@ -31,11 +31,39 @@ The script first signs the bundle with `--deep`, which signs the helper apps and
 
 Sparkle's EdDSA (ed25519) key pair signs and checks the update archives.
 
-- The private key stays with the maintainer and never goes into the repository, a build, or a release. `release_app.sh` gets its location from `ARCH_SPARKLE_KEY_FILE` or `ARCH_SPARKLE_KEY_ACCOUNT`, set in the environment or in git-ignored `.release.env`. The repository does not record the key's location.
+- The private key stays with the maintainer and never goes into the repository, a build, or a release. The release pipeline reads the `ARCH_SPARKLE_PRIVATE_KEY` secret. `release_app.sh` gets its location from `ARCH_SPARKLE_KEY_FILE` or `ARCH_SPARKLE_KEY_ACCOUNT`, set in the environment or in git-ignored `.release.env`. The repository does not record the key's location.
 - The public key is the default value of `SPARKLE_PUBLIC_KEY` in `scripts/bundle_app.sh`. `ARCH_SPARKLE_PUBLIC_KEY` overrides it for one run.
 - If the private key is lost, installed copies can never update again. Keep a copy safe outside the repository, such as in an encrypted backup.
 
+## Release pipeline
+
+Each push to `main` releases Arch. `main` only fast-forwards to `develop` (`AGENTS.md`, Branches), so each push publishes the tested code from `develop`. `.github/workflows/release.yml` runs on a GitHub-hosted Apple silicon runner with Xcode 27, using the `xcode-27` label or the label set in the repository variable `ARCH_RELEASE_RUNNER`. It also runs from the Actions tab (`workflow_dispatch`). Releases run one at a time.
+
+1. It stops with an error naming each missing secret listed below.
+2. It selects the newest Xcode 27, downloads the pinned CEF with `ARCH_CHROMIUM_TOKEN`, and runs `swift build -c release`.
+3. It creates a keychain for the job, imports the Developer ID identity and Apple's Developer ID intermediate certificate, and stores the notary credentials there under the profile `arch-release`.
+4. It runs `ARCH_HARDENED_RUNTIME=1 ./scripts/bundle_app.sh release` with the Developer ID identity and provisioning profile, giving the app the Production CloudKit environment.
+5. It runs `./scripts/release_app.sh --publish` with `ARCH_NOTARY_PROFILE`, `ARCH_NOTARY_KEYCHAIN`, and `ARCH_SPARKLE_KEY_FILE`. The script notarizes and staples the app, signs the archive, tags the pushed commit `v<version>-<build>`, and publishes the release with the job's `GITHUB_TOKEN`.
+6. It deletes the keychain and key files even if a step fails.
+
+The version is `VERSION` in `scripts/bundle_app.sh`; change it on `develop` before releasing a new version. The tag uses the build time as its build number, giving each release a new tag.
+
+The workflow reads these repository secrets (Settings ▸ Secrets and variables ▸ Actions). GitHub never displays their values, even in logs:
+
+| Secret | Contents |
+|---|---|
+| `ARCH_CHROMIUM_TOKEN` | A fine-grained personal access token with read access only to the contents of `taeyoon0137/arch-chromium`, for its engine releases |
+| `ARCH_DEVELOPER_ID_P12` | The Developer ID Application certificate and private key, exported as a .p12 file and base64-encoded |
+| `ARCH_DEVELOPER_ID_P12_PASSWORD` | The .p12 file's export password |
+| `ARCH_PROVISIONING_PROFILE` | The Developer ID provisioning profile for `xyz.taeyoon.arch`, with iCloud and push, encoded in base64 |
+| `ARCH_NOTARY_KEY` | An App Store Connect API key (.p8) with the Developer role |
+| `ARCH_NOTARY_KEY_ID` | That key's ID |
+| `ARCH_NOTARY_ISSUER` | The issuer ID above the App Store Connect key list |
+| `ARCH_SPARKLE_PRIVATE_KEY` | The Sparkle private key exported by `generate_keys -x` |
+
 ## Release steps
+
+To release from this Mac, follow the same steps manually:
 
 1. Commit the change and push it to GitHub. A release's tag points to the build's commit, so the script will not publish a build with uncommitted changes.
 2. Build and bundle the release configuration with `swift build -c release` and then `./scripts/bundle_app.sh release`. For notarization, use `ARCH_HARDENED_RUNTIME=1 ./scripts/bundle_app.sh release` instead.
@@ -68,6 +96,7 @@ These steps require the user's action, credentials, or approval:
 
 1. Keep a safe copy of the private key separate from the release Mac.
 2. Install one hardened build, made with `swift build -c release` and `ARCH_HARDENED_RUNTIME=1 ./scripts/bundle_app.sh release`, and use it for a day before making the hardened runtime the default. Check that pages load and run scripts on Chromium and WebKit, that WebGL and video play, that a page can use the camera, the microphone, and location after you allow them, that iCloud sync and notifications work, that plugin scripts report syntax errors, that `arch-cli` answers, and that Check for Updates… runs.
-3. For notarization, store a profile once with `xcrun notarytool store-credentials <profile name>`, using an app-specific password or an App Store Connect API key, and set `ARCH_NOTARY_PROFILE=<profile name>` when releasing from a hardened build.
-4. Approve and run the first `./scripts/release_app.sh --publish`.
-5. Once a newer release exists, test Check for Updates… and Settings ▸ General ▸ Updates in an installed copy (V.12 in `docs/plan.md`).
+3. To release from this Mac, store a notary profile once with `xcrun notarytool store-credentials <profile name>`, using an app-specific password or an App Store Connect API key, and set `ARCH_NOTARY_PROFILE=<profile name>` when releasing from a hardened build.
+4. Create the Developer ID Application certificate, Developer ID provisioning profile, App Store Connect API key, and token for the release pipeline, then add the secrets listed in Release pipeline.
+5. Approve the first release: a push to `main` or `./scripts/release_app.sh --publish`.
+6. Once a newer release exists, test Check for Updates… and Settings ▸ General ▸ Updates in an installed copy (V.12 in `docs/plan.md`).

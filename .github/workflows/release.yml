@@ -1,0 +1,117 @@
+# Each push to main builds, signs, notarizes, and publishes Arch as the latest GitHub release with its version tag, update archive, and appcast (`docs/updates.md`, Release pipeline). Repository Actions secrets supply the keys; the workflow stops before building if any is missing.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One release at a time, in push order.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # CEF is built for arm64 and the app for the Xcode 27 SDK. The repository variable ARCH_RELEASE_RUNNER can override the runner label.
+    runs-on: ${{ vars.ARCH_RELEASE_RUNNER || 'xcode-27' }}
+    timeout-minutes: 150
+    steps:
+      - name: Check secrets
+        env:
+          ARCH_CHROMIUM_TOKEN: ${{ secrets.ARCH_CHROMIUM_TOKEN }}
+          ARCH_DEVELOPER_ID_P12: ${{ secrets.ARCH_DEVELOPER_ID_P12 }}
+          ARCH_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.ARCH_DEVELOPER_ID_P12_PASSWORD }}
+          ARCH_PROVISIONING_PROFILE: ${{ secrets.ARCH_PROVISIONING_PROFILE }}
+          ARCH_NOTARY_KEY: ${{ secrets.ARCH_NOTARY_KEY }}
+          ARCH_NOTARY_KEY_ID: ${{ secrets.ARCH_NOTARY_KEY_ID }}
+          ARCH_NOTARY_ISSUER: ${{ secrets.ARCH_NOTARY_ISSUER }}
+          ARCH_SPARKLE_PRIVATE_KEY: ${{ secrets.ARCH_SPARKLE_PRIVATE_KEY }}
+        run: |
+          missing=0
+          for name in ARCH_CHROMIUM_TOKEN ARCH_DEVELOPER_ID_P12 ARCH_DEVELOPER_ID_P12_PASSWORD ARCH_PROVISIONING_PROFILE ARCH_NOTARY_KEY ARCH_NOTARY_KEY_ID ARCH_NOTARY_ISSUER ARCH_SPARKLE_PRIVATE_KEY; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "::error::The repository secret $name is not set; docs/updates.md, Release pipeline, says what it holds."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 27
+        run: |
+          [ "$(uname -m)" = arm64 ] || { echo "::error::The release runner must be Apple silicon; CEF is built for arm64 only."; exit 1; }
+          xcode="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -n 1)"
+          [ -n "$xcode" ] || { echo "::error::The runner has no Xcode 27."; exit 1; }
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+          swift --version
+
+      - name: Download CEF
+        env:
+          GH_TOKEN: ${{ secrets.ARCH_CHROMIUM_TOKEN }}
+        run: ./scripts/setup_cef.sh
+
+      - name: Build
+        run: swift build -c release
+
+      # The job's keychain holds the Developer ID identity and notary credentials; the cleanup step deletes it.
+      - name: Install the signing identity and keys
+        env:
+          ARCH_DEVELOPER_ID_P12: ${{ secrets.ARCH_DEVELOPER_ID_P12 }}
+          ARCH_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.ARCH_DEVELOPER_ID_P12_PASSWORD }}
+          ARCH_PROVISIONING_PROFILE: ${{ secrets.ARCH_PROVISIONING_PROFILE }}
+          ARCH_NOTARY_KEY: ${{ secrets.ARCH_NOTARY_KEY }}
+          ARCH_NOTARY_KEY_ID: ${{ secrets.ARCH_NOTARY_KEY_ID }}
+          ARCH_NOTARY_ISSUER: ${{ secrets.ARCH_NOTARY_ISSUER }}
+          ARCH_SPARKLE_PRIVATE_KEY: ${{ secrets.ARCH_SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -eu
+          secrets="$RUNNER_TEMP/arch-secrets"
+          mkdir -m 700 "$secrets"
+          keychain="$RUNNER_TEMP/arch-release.keychain-db"
+          password="$(uuidgen)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$ARCH_DEVELOPER_ID_P12" | base64 -D > "$secrets/identity.p12"
+          security import "$secrets/identity.p12" -k "$keychain" -P "$ARCH_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          # The Developer ID intermediate certificate completes the chain if the exported identity lacks it.
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$secrets/DeveloperIDG2CA.cer"
+          security import "$secrets/DeveloperIDG2CA.cer" -k "$keychain" || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain" | grep -q 'Developer ID Application' || { echo "::error::ARCH_DEVELOPER_ID_P12 holds no Developer ID Application identity."; exit 1; }
+          printf '%s' "$ARCH_PROVISIONING_PROFILE" | base64 -D > "$secrets/Arch.provisionprofile"
+          printf '%s\n' "$ARCH_NOTARY_KEY" > "$secrets/notary.p8"
+          xcrun notarytool store-credentials arch-release --key "$secrets/notary.p8" --key-id "$ARCH_NOTARY_KEY_ID" --issuer "$ARCH_NOTARY_ISSUER" --keychain "$keychain"
+          printf '%s' "$ARCH_SPARKLE_PRIVATE_KEY" > "$secrets/sparkle.key"
+          rm -f "$secrets/identity.p12" "$secrets/notary.p8"
+          echo "ARCH_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "ARCH_SECRETS=$secrets" >> "$GITHUB_ENV"
+
+      - name: Bundle with the hardened runtime
+        run: |
+          ARCH_HARDENED_RUNTIME=1 \
+          ARCH_SIGN_IDENTITY="Developer ID Application" \
+          ARCH_PROVISIONING_PROFILE="$ARCH_SECRETS/Arch.provisionprofile" \
+            ./scripts/bundle_app.sh release
+
+      - name: Notarize and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCH_NOTARY_PROFILE=arch-release \
+          ARCH_NOTARY_KEYCHAIN="$ARCH_KEYCHAIN" \
+          ARCH_SPARKLE_KEY_FILE="$ARCH_SECRETS/sparkle.key" \
+            ./scripts/release_app.sh --publish
+
+      - name: Remove the keychain and keys
+        if: always()
+        run: |
+          [ -z "${ARCH_KEYCHAIN:-}" ] || security delete-keychain "$ARCH_KEYCHAIN" || true
+          [ -z "${ARCH_SECRETS:-}" ] || rm -rf "$ARCH_SECRETS"

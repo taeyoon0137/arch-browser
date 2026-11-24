@@ -139,6 +139,7 @@ git config core.hooksPath .githooks
 
 ```plaintext
 arch-browser
+├── .github/workflows/              # Release pipeline, run by each push to main
 ├── .githooks/                      # Commit subject format hook
 ├── Packages/
 │   ├── ARCH/Sources/               # Feature modules: Agent, AgentControl, AI, Browsing, Events, Extensions, History, Hooks, Import, Plugins, Preferences, Sync, Terminal
