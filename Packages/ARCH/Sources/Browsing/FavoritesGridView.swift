@@ -41,58 +41,272 @@ public enum FavoriteTileLayout {
     }
 }
 
-/// Keeps each favorite in the same view while it crosses rows during a drag.
-struct FavoriteRows: Layout {
+/// The favorites grid's slots, laid out by its row capacities: where each of a number of tiles lies, which slot a dragged item's pointer is over, and the tiles a drag shows. A drag over the grid holds one slot open as a gap, which takes a tile's place, so the other tiles reflow around it and each row keeps equal widths.
+struct FavoriteGridSlots: Equatable {
     let rowSizes: [Int]
     let defaultColumns: Int
 
+    enum NewRow: Equatable { case first, last }
+
+    struct Placement: Equatable {
+        let index: Int
+        let frame: CGRect
+        var newRow: NewRow? = nil
+        var rowSizes: [Int]? = nil
+    }
+
+    /// Only rows in use belong to a saved drop layout; later rows start with the default capacity.
+    private func usedRowSizes(for count: Int) -> [Int] {
+        Array(rowSizes.prefix(rows(for: count).count))
+    }
+
+    /// A boundary drop gives the item its own row. Materializing the last row's occupied size keeps a partial row from absorbing it. The new last row retains room for later additions.
+    func insertingRow(_ edge: NewRow, remaining: Int) -> FavoriteGridSlots {
+        let occupied = rows(for: remaining)
+        let sizes = edge == .first ? [1] + usedRowSizes(for: remaining) : occupied + [FavoriteTileLayout.columnCount(defaultColumns)]
+        return FavoriteGridSlots(rowSizes: sizes, defaultColumns: defaultColumns)
+    }
+
+    /// Drop geometry based on the saved favorites, so closing a gap cannot shrink its return target.
+    struct Target: Equatable {
+        let slots: FavoriteGridSlots
+        let frame: CGRect
+        let viewport: CGRect
+        let count: Int
+
+        func bounds(adding: Bool, holding: NewRow? = nil) -> CGRect {
+            let edge = FavoriteTileLayout.gridHeaderSpacing
+            let total = count + (adding ? 1 : 0)
+            let projected = holding.map { slots.insertingRow($0, remaining: max(0, total - 1)) } ?? slots
+            let grid = CGRect(origin: frame.origin, size: CGSize(width: frame.width, height: projected.height(for: total)))
+            // A held boundary remains reachable if opening its row adds scroll padding. The viewport still limits the accepted margin.
+            let margin = holding == nil ? edge : 2 * edge
+            return grid.insetBy(dx: 0, dy: -margin).intersection(viewport.insetBy(dx: 0, dy: -edge))
+        }
+
+        func placement(at point: CGPoint, adding: Bool, holding: NewRow? = nil) -> Placement? {
+            let total = count + (adding ? 1 : 0)
+            guard total > 0, bounds(adding: adding, holding: holding).contains(point) else { return nil }
+            if total > 1 {
+                func boundary(_ edge: NewRow) -> Placement {
+                    let expanded = slots.insertingRow(edge, remaining: total - 1)
+                    let index = edge == .first ? 0 : total - 1
+                    let tile = expanded.frames(for: total, width: frame.width, origin: frame.origin)[index]
+                    return Placement(index: index, frame: tile, newRow: edge, rowSizes: expanded.rowSizes)
+                }
+                // Keep the boundary through the spacing and the scroll padding that appears when the gap makes the grid scroll.
+                if let holding {
+                    let held = boundary(holding)
+                    if held.frame.insetBy(dx: 0, dy: -(FavoriteTileLayout.spacing + FavoriteTileLayout.gridHeaderSpacing)).contains(point) { return held }
+                }
+                if point.y < frame.minY { return boundary(.first) }
+                if point.y >= frame.minY + slots.height(for: count) { return boundary(.last) }
+            }
+            var sizes = slots.usedRowSizes(for: count)
+            if adding, count > 0 {
+                // Find the row before inserting the gap, then grow its saved capacity for the incoming tile.
+                let occupied = slots.rows(for: count)
+                let row = slots.row(at: point, count: count, origin: frame.origin)
+                if occupied[row] < FavoriteTileLayout.choices.upperBound {
+                    while sizes.count <= row { sizes.append(FavoriteTileLayout.columnCount(slots.defaultColumns)) }
+                    sizes[row] = max(sizes[row], occupied[row] + 1)
+                }
+            }
+            let expanded = FavoriteGridSlots(rowSizes: sizes, defaultColumns: slots.defaultColumns)
+            let index = expanded.slot(at: point, count: total, width: frame.width, origin: frame.origin)
+            return Placement(index: index, frame: expanded.frames(for: total, width: frame.width, origin: frame.origin)[index],
+                             rowSizes: sizes == slots.rowSizes ? nil : sizes)
+        }
+    }
+
+    /// One place in the grid while a drag may hold a gap open: a favorite's tile, or the gap a dragged tab lands in.
+    enum Entry: Hashable {
+        case favorite(UUID)
+        case gap
+    }
+
+    /// An entry and whether it is collapsed: a dragged favorite outside the grid keeps its view, which carries the drag, without a slot.
+    struct Item: Identifiable, Hashable {
+        let entry: Entry
+        var isCollapsed = false
+        var id: Entry { entry }
+    }
+
+    /// The number of tiles in each row for `count` slots.
+    func rows(for count: Int) -> [Int] {
+        FavoriteTileLayout.counts(for: count, rowSizes: rowSizes, defaultColumns: defaultColumns)
+    }
+
+    /// The grid's height with `count` slots.
+    func height(for count: Int) -> CGFloat {
+        let rows = rows(for: count).count
+        return CGFloat(rows) * FavoriteTileLayout.height + CGFloat(max(0, rows - 1)) * FavoriteTileLayout.spacing
+    }
+
+    /// The frames of `count` slots, row by row, in a grid of `width` whose top leading corner is at `origin`.
+    func frames(for count: Int, width: CGFloat, origin: CGPoint) -> [CGRect] {
+        let spacing = FavoriteTileLayout.spacing
+        return rows(for: count).enumerated().flatMap { row, tiles in
+            let tileWidth = Self.tileWidth(tiles, in: width)
+            return (0..<tiles).map { column in
+                CGRect(x: origin.x + CGFloat(column) * (tileWidth + spacing), y: origin.y + CGFloat(row) * (FavoriteTileLayout.height + spacing),
+                       width: tileWidth, height: FavoriteTileLayout.height)
+            }
+        }
+    }
+
+    /// The slot inside the grid, in reading order. Spacing splits at its middle; `Target` handles new rows outside the grid.
+    func slot(at point: CGPoint, count: Int, width: CGFloat, origin: CGPoint) -> Int {
+        let rows = rows(for: count)
+        guard !rows.isEmpty else { return 0 }
+        if point.y < origin.y { return 0 }
+        if point.y >= origin.y + height(for: count) { return count - 1 }
+        let spacing = FavoriteTileLayout.spacing
+        let row = row(at: point, count: count, origin: origin)
+        let tileWidth = Self.tileWidth(rows[row], in: width)
+        let column = Self.clamped(Int(((point.x - origin.x + spacing / 2) / (tileWidth + spacing)).rounded(.down)), below: rows[row])
+        return rows.prefix(row).reduce(0, +) + column
+    }
+
+    private func row(at point: CGPoint, count: Int, origin: CGPoint) -> Int {
+        Self.clamped(Int(((point.y - origin.y + FavoriteTileLayout.spacing / 2) / (FavoriteTileLayout.height + FavoriteTileLayout.spacing)).rounded(.down)), below: rows(for: count).count)
+    }
+
+    /// The grid's entries for the favorites `ids` in order. With `gap`, an index among the favorites other than `dragged`, a dragged favorite's own tile shows there, or the gap for a dragged tab. Without it, a dragged favorite collapses at the end, so its place closes.
+    static func items(_ ids: [UUID], dragged: UUID?, gap: Int?) -> [Item] {
+        let isDragged = dragged.map(ids.contains) == true
+        var items = ids.filter { !isDragged || $0 != dragged }.map { Item(entry: .favorite($0)) }
+        let moving = isDragged ? dragged.map(Entry.favorite) : nil
+        if let gap {
+            items.insert(Item(entry: moving ?? .gap), at: min(max(0, gap), items.count))
+        } else if let moving {
+            items.append(Item(entry: moving, isCollapsed: true))
+        }
+        return items
+    }
+
+    private static func tileWidth(_ tiles: Int, in width: CGFloat) -> CGFloat {
+        max(0, width - CGFloat(tiles - 1) * FavoriteTileLayout.spacing) / CGFloat(tiles)
+    }
+
+    private static func clamped(_ value: Int, below count: Int) -> Int {
+        min(max(0, value), count - 1)
+    }
+}
+
+/// Marks a collapsed tile of `FavoriteRows`, which takes no slot.
+private struct FavoriteTileCollapsed: LayoutValueKey {
+    static let defaultValue = false
+}
+
+/// Places the tiles and the gap in their slots (`FavoriteGridSlots`), keeping each favorite in the same view while it crosses rows during a drag. A collapsed tile takes no slot and sits, without size, at the grid's corner.
+struct FavoriteRows: Layout {
+    let slots: FavoriteGridSlots
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = FavoriteTileLayout.counts(for: subviews.count, rowSizes: rowSizes, defaultColumns: defaultColumns).count
-        return CGSize(width: proposal.width ?? SidebarView.defaultWidth,
-                      height: CGFloat(rows) * FavoriteTileLayout.height + CGFloat(max(0, rows - 1)) * FavoriteTileLayout.spacing)
+        CGSize(width: proposal.width ?? SidebarView.defaultWidth, height: slots.height(for: subviews.filter { !$0[FavoriteTileCollapsed.self] }.count))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let spacing = FavoriteTileLayout.spacing
-        var index = 0
-        for (row, count) in FavoriteTileLayout.counts(for: subviews.count, rowSizes: rowSizes, defaultColumns: defaultColumns).enumerated() {
-            let width = max(0, bounds.width - CGFloat(count - 1) * spacing) / CGFloat(count)
-            for column in 0..<count {
-                let origin = CGPoint(x: bounds.minX + CGFloat(column) * (width + spacing),
-                                     y: bounds.minY + CGFloat(row) * (FavoriteTileLayout.height + spacing))
-                subviews[index].place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(width: width, height: FavoriteTileLayout.height))
-                index += 1
-            }
+        let placed = subviews.filter { !$0[FavoriteTileCollapsed.self] }
+        for (subview, frame) in zip(placed, slots.frames(for: placed.count, width: bounds.width, origin: bounds.origin)) {
+            subview.place(at: frame.origin, anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+        for subview in subviews where subview[FavoriteTileCollapsed.self] {
+            subview.place(at: bounds.origin, anchor: .topLeading, proposal: .zero)
         }
     }
 }
 
-/// Shows the favorites that every space of the window's Persona shares as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a tile moves it among the others, and holding Shift over one previews it.
+/// Shows the favorites that every space of the window's Persona shares as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. While a dragged favorite or a tab that can become one is over the grid, the slot under the pointer opens as a dimmed gap and the other tiles reflow around it, as the tab list's rows move aside; release puts the item there. A favorite dragged out of the grid closes its place until it returns. Holding Shift over a tile previews it.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     let personaID: Persona.ID
+    /// The current space, whose tab rows can drop into this shared grid.
+    let spaceID: UUID
+    let viewport: CGRect
+    let availableHeight: CGFloat
+    @State private var gridViewport = CGRect.zero
     @AppStorage(FavoriteTileLayout.columnsKey) private var columns = FavoriteTileLayout.defaultColumns
     @AppStorage(FavoriteTileLayout.rowSizesKey) private var rowSizes = Data()
     @EnvironmentObject private var windowModel: BrowserWindowModel
     @EnvironmentObject private var sidebarDrag: SidebarDragState
-    /// Each tile's frame in the window, used to find the tile under a dragged favorite.
-    @State private var tileFrames: [UUID: CGRect] = [:]
-    @State private var reorderHover = SidebarReorderHover()
+    private var slots: FavoriteGridSlots {
+        FavoriteGridSlots(rowSizes: FavoriteTileLayout.rowSizes(from: rowSizes), defaultColumns: columns)
+    }
+
+    /// The gap this grid holds open, until release.
+    private var gap: SidebarDragState.FavoriteGap? {
+        guard let gap = sidebarDrag.favoriteGap, gap.spaceID == spaceID, !sidebarDrag.isSettling else { return nil }
+        return gap
+    }
+
+    /// The dragged favorite, until release.
+    private var draggedFavoriteID: UUID? {
+        guard case .favorite(let id) = sidebarDrag.item, !sidebarDrag.isSettling else { return nil }
+        return id
+    }
 
     var body: some View {
         let favorites = session.favorites(in: personaID)
-        FavoriteRows(rowSizes: FavoriteTileLayout.rowSizes(from: rowSizes), defaultColumns: columns) {
-            ForEach(favorites) { favorite in
-                tile(favorite, selected: windowModel.selectedFavoriteID)
+        let byID = Dictionary(favorites.map { ($0.id, $0) }) { first, _ in first }
+        let items = FavoriteGridSlots.items(favorites.map(\.id), dragged: draggedFavoriteID, gap: gap?.index)
+        let layout = gap?.rowSizes.map { FavoriteGridSlots(rowSizes: $0, defaultColumns: columns) } ?? slots
+        let height = layout.height(for: items.filter { !$0.isCollapsed }.count)
+        let limit = max(FavoriteTileLayout.height, availableHeight / 2)
+        let scrolls = height > limit
+        let edge = scrolls ? FavoriteTileLayout.gridHeaderSpacing : 0
+        // Keep the scroll view in place as rows grow or collapse, so the dragged tile keeps its gesture.
+        ScrollView(.vertical) {
+            FavoriteRows(slots: layout) {
+                ForEach(items) { item in
+                    switch item.entry {
+                    case .favorite(let id):
+                        if let favorite = byID[id] {
+                            tile(favorite, selected: windowModel.selectedFavoriteID, collapsed: item.isCollapsed)
+                                .layoutValue(key: FavoriteTileCollapsed.self, value: item.isCollapsed)
+                                .transition(sidebarDrag.item == nil ? .scale(scale: 0) : .identity)
+                        }
+                    case .gap:
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.primary.opacity(0.06))
+                            .accessibilityHidden(true)
+                            .transition(.opacity)
+                    }
+                }
             }
+            .background(GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
+                let visible = scrolls ? gridViewport.intersection(viewport) : viewport
+                let target = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: visible, count: favorites.count)
+                let acceptsDrops = !visible.isEmpty && !favorites.isEmpty
+                Color.clear
+                    .preference(key: FavoriteBarFramesKey.self, value: acceptsDrops ? [spaceID: target.bounds(adding: sidebarDrag.tabID != nil, holding: gap?.newRow)] : [:])
+                    .onAppear { sidebarDrag.favoriteGridTargets[spaceID] = acceptsDrops ? target : nil }
+                    .onChange(of: target) { sidebarDrag.favoriteGridTargets[spaceID] = $1.viewport.isEmpty || $1.count == 0 ? nil : $1 }
+                    .onChange(of: spaceID) { old, new in
+                        sidebarDrag.favoriteGridTargets[old] = nil
+                        sidebarDrag.favoriteGridTargets[new] = acceptsDrops ? target : nil
+                    }
+            })
+            // The visible ends leave room to target a new first or last row after scrolling there.
+            .padding(.vertical, edge)
         }
-        .onPreferenceChange(SidebarItemFramesKey.self) { tileFrames = $0 }
-        .onChange(of: sidebarDrag.item) { _, item in
-            if item == nil { reorderHover = SidebarReorderHover() }
-        }
+        .scrollIndicators(.hidden)
+        .scrollDisabled(!scrolls)
+        .scrollClipDisabled(!scrolls)
+        .frame(height: min(height + 2 * edge, limit))
+        .animation(SidebarDragState.motion, value: favorites.map(\.id))
+        .background(GeometryReader { proxy in
+            let frame = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
+            Color.clear
+                .onAppear { gridViewport = frame }
+                .onChange(of: frame) { gridViewport = $1 }
+        })
+        .onDisappear { sidebarDrag.favoriteGridTargets[spaceID] = nil }
     }
 
-    private func tile(_ favorite: Favorite, selected: Favorite.ID?) -> some View {
+    private func tile(_ favorite: Favorite, selected: Favorite.ID?, collapsed: Bool) -> some View {
         FavoriteTileView(favorite: favorite, isActive: favorite.id == selected, isOpen: session.hasOpenPage(favorite),
                          prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
             // The release that ends a drag does not also open the favorite.
@@ -114,19 +328,40 @@ struct FavoritesGridView: View {
                 Divider()
                 Button(localized("Remove from Favorites")) { session.removeFavorite(favorite) }
             }
-            .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 10) { reorder(favorite, at: $0) })
+            .modifier(SidebarItemDrag(item: .favorite(favorite.id), cornerRadius: 10, showsSlot: !collapsed, release: { release(favorite) }) { updateGap(at: $0) })
             .modifier(ShiftHoverPreview { if sidebarDrag.item == nil { windowModel.previewFavorite(favorite) } })
+            .frame(width: collapsed ? 0 : nil, height: collapsed ? 0 : nil)
+            .accessibilityHidden(collapsed)
     }
 
-    /// The tile under the pointer makes room for the dragged favorite, with a light haptic at each new position.
-    private func reorder(_ favorite: Favorite, at location: CGPoint) {
-        guard sidebarDrag.item == .favorite(favorite.id), personaID == windowModel.personaID,
-              sidebarDrag.favoriteBarFrames[windowModel.currentSpaceID]?.contains(location) == true, reorderHover.canMove(at: location),
-              let target = session.favorites(in: personaID).first(where: { $0.id != favorite.id && tileFrames[$0.id]?.contains(location) == true }),
-              let frame = tileFrames[target.id] else { return }
-        reorderHover.moved(into: frame)
-        withAnimation(.easeInOut(duration: 0.15)) { session.moveFavorite(favorite.id, to: target) }
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    /// The dragged tile keeps its view while its slot opens, moves, or closes.
+    private func updateGap(at point: CGPoint) {
+        guard windowModel.currentSpaceID == spaceID, personaID == windowModel.personaID,
+              case .favorite(let id) = sidebarDrag.item, let favorite = session.favorites(in: personaID).first(where: { $0.id == id }) else { return }
+        sidebarDrag.liftedFavorite = favorite
+        sidebarDrag.liftedTab = session.favoriteTabs[id]
+        sidebarDrag.favoriteRowWidth = sidebarDrag.favoriteGridTargets[spaceID]?.frame.width ?? sidebarDrag.favoriteRowWidth
+        let overTabs = sidebarDrag.favoriteTabTargets[spaceID]?.list.contains(point) == true
+        sidebarDrag.updateFavoriteGap(in: overTabs ? nil : spaceID, at: point, adding: false)
+        sidebarDrag.targetFavoriteSpaceID = sidebarDrag.favoriteGap?.spaceID
+        sidebarDrag.updateFavoriteTabDrop(in: spaceID, at: point, session: session)
+    }
+
+    /// On release, a favorite takes the tab list's slot or the grid's gap. Elsewhere it returns to its original place.
+    private func release(_ favorite: Favorite) -> CGRect? {
+        let favorites = session.favorites(in: personaID)
+        guard sidebarDrag.item == .favorite(favorite.id), let original = favorites.firstIndex(where: { $0.id == favorite.id }) else { return nil }
+        if let frame = sidebarDrag.dropFavoriteIntoTabs(favorite, session: session) { return frame }
+        let destination = gap
+        let index = destination?.index ?? original
+        withAnimation(SidebarDragState.motion) {
+            if index != original { session.moveFavorite(favorite.id, toIndex: index) }
+            if let sizes = destination?.rowSizes { rowSizes = FavoriteTileLayout.encode(rowSizes: sizes) }
+        }
+        guard let target = sidebarDrag.favoriteGridTargets[spaceID] else { return nil }
+        let committedSlots = destination?.rowSizes.map { FavoriteGridSlots(rowSizes: $0, defaultColumns: columns) } ?? slots
+        let frames = committedSlots.frames(for: favorites.count, width: target.frame.width, origin: target.frame.origin)
+        return frames.indices.contains(index) ? frames[index] : nil
     }
 }
 

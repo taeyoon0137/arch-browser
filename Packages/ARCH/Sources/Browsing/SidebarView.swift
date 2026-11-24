@@ -123,8 +123,8 @@ struct SidebarView: View {
                     SidebarTopRow(windowButtons: windowButtons)
                     AddressPillView(session: session, tab: nil)
                 }
-                // Space pages reach the sidebar's edges to slide in from outside. Clip before the negative margin, which would move the clip inward and cut off a lifted tab's shadow.
-                SpacePagesView(session: session, translation: swipeTranslation)
+                // Persona groups and their space pages reach the sidebar's edges. Clip before the negative margin, which would move the clip inward and cut off a lifted tab's shadow.
+                SidebarSpaceContent(session: session, translation: swipeTranslation)
                 .frame(maxHeight: .infinity, alignment: .top)
                 .padding(.top, 6)
                 .clipped()
@@ -139,6 +139,84 @@ struct SidebarView: View {
         .padding(.bottom, Self.bottomMargin)
         // Opening or closing the library by menu or shortcut releases it from any current swipe.
         .onChange(of: windowModel.isLibraryVisible) { isSwipingLibrary = false }
+    }
+}
+
+/// Each Persona shares one grid across its space pages. The grid stays still within that group and travels with the pages when another Persona comes into view.
+struct SidebarSpaceContent: View {
+    @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
+    @Environment(\.sidebarWidth) private var width
+    let translation: CGFloat
+
+    var body: some View {
+        GeometryReader { proxy in
+            let viewport = proxy.frame(in: .named(BrowserWindowView.coordinateSpace))
+            let index = session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
+            let position = CGFloat(index) * width - translation
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(session.personas) { persona in
+                    let spaces = session.spaces(in: persona.id)
+                    let start = session.spaces.firstIndex { $0.resolvedPersonaID == persona.id } ?? 0
+                    let isCurrentPersona = persona.id == windowModel.personaID
+                    let favorites = session.favorites(in: persona.id)
+                    let hidesLastTile = !sidebarDrag.isSettling && favorites.count == 1
+                        && sidebarDrag.item == .favorite(favorites[0].id) && sidebarDrag.favoriteGap == nil
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let first = spaces.first {
+                            FavoritesGridView(session: session, personaID: persona.id,
+                                              spaceID: isCurrentPersona ? windowModel.currentSpaceID : first.id,
+                                              viewport: isCurrentPersona ? viewport : .zero, availableHeight: proxy.size.height)
+                                .padding(.horizontal, SidebarView.inset)
+                                .padding(.bottom, favorites.isEmpty || hidesLastTile ? 0 : FavoriteTileLayout.gridHeaderSpacing + SidebarView.rowSpacing)
+                                .frame(width: width)
+                                // Follow the visible space within this Persona, stopping at either end of its group.
+                                .modifier(PersonaGridOffset(position: position, start: CGFloat(start) * width, travel: CGFloat(max(0, spaces.count - 1)) * width))
+                                .allowsHitTesting(isCurrentPersona)
+                                .accessibilityHidden(!isCurrentPersona)
+                        }
+                        GeometryReader { page in
+                            HStack(alignment: .top, spacing: 0) {
+                                ForEach(spaces) { space in
+                                    let isCurrent = space.id == windowModel.currentSpaceID
+                                    SpaceTabsView(session: session, space: space, pageHeight: page.size.height)
+                                        .frame(width: width, alignment: .topLeading)
+                                        // Clipping alone does not keep offscreen pages from receiving clicks or accessibility actions.
+                                        .allowsHitTesting(isCurrent)
+                                        .accessibilityElement(children: isCurrent ? .contain : .ignore)
+                                        .accessibilityHidden(!isCurrent)
+                                }
+                            }
+                        }
+                    }
+                    .animation(SidebarDragState.motion, value: session.favorites(in: persona.id).map(\.id))
+                    .frame(width: CGFloat(spaces.count) * width, alignment: .leading)
+                }
+            }
+            .onPreferenceChange(FavoriteBarFramesKey.self) { sidebarDrag.favoriteBarFrames = $0 }
+            .offset(x: -position)
+            .frame(width: width, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .clipped()
+            .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
+        }
+    }
+}
+
+/// Clamp the animated page position, so a multi-space switch keeps the grid still until the viewport reaches its Persona's edge.
+private struct PersonaGridOffset: GeometryEffect {
+    var position: CGFloat
+    let start: CGFloat
+    let travel: CGFloat
+
+    var animatableData: CGFloat {
+        get { position }
+        set { position = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: min(max(0, position - start), travel), y: 0))
     }
 }
 

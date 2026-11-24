@@ -95,14 +95,48 @@ struct SidebarReorderHover {
 
     /// The slot a dragged tab takes beside `target`, the tab row under the pointer, or nil while the tab keeps its slot. `current` is the slot shown so far, nil while the tab shows in its own place, and `slotFrame` the frame of that slot. Within the slot's list, pinned or open, the row makes room once the pointer crosses its middle in the direction of travel, and coming from above the tab goes after it only in the row's own folder. The divider always lies between the slot and a row of the other list, so that row takes the tab as soon as the pointer is over it: before the row in its upper half, after it in its lower half, with the middle itself in the far half, as `SidebarReorderHover.crossedMidpoint` counts it, so that the next move at the same point keeps the slot. A pinned tab thus unpins wherever it enters the open tabs' rows, and an open tab pins wherever it enters the pinned tabs' rows. `takesRowsPlace` tells whether the slot lands where the row was, under the pointer, so that the row's frame holds the hysteresis (`SidebarReorderHover.moved(into:)`); a slot placed on the near side of a row of the other list does not, and the row's middle then decides the next move.
     static func placement(beside target: Tab, rowFrame: CGRect, dragging tab: Tab, slotFrame: CGRect, current: SidebarTabSlot?, at point: CGPoint) -> (slot: SidebarTabSlot, takesRowsPlace: Bool)? {
+        placement(beside: target, rowFrame: rowFrame, pinned: current?.pinned ?? tab.isPinned,
+                  folderID: current.map(\.folderID) ?? tab.folderID, slotFrame: slotFrame, at: point)
+    }
+
+    private static func placement(beside target: Tab, rowFrame: CGRect, pinned: Bool?, folderID: UUID?, slotFrame: CGRect?, at point: CGPoint) -> (slot: SidebarTabSlot, takesRowsPlace: Bool)? {
+        guard let slotFrame else {
+            let after = point.y >= rowFrame.midY
+            return (.beside(target.id, folder: target.folderID, pinned: target.isPinned, after: after), !after)
+        }
         let fromAbove = slotFrame.midY < rowFrame.midY
-        guard (current?.pinned ?? tab.isPinned) == target.isPinned else {
+        guard pinned == target.isPinned else {
             let after = fromAbove ? point.y >= rowFrame.midY : point.y > rowFrame.midY
             return (.beside(target.id, folder: target.folderID, pinned: target.isPinned, after: after), after == fromAbove)
         }
         guard SidebarReorderHover.crossedMidpoint(from: slotFrame, into: rowFrame, at: point) else { return nil }
-        let folderID = current.map(\.folderID) ?? tab.folderID
         return (.beside(target.id, folder: target.folderID, pinned: target.isPinned, after: folderID == target.folderID && fromAbove), true)
+    }
+
+    /// A favorite has no row until it enters the list. Its first slot uses the half of the row under the pointer; later moves follow the same crossing rule as tabs.
+    static func next(forFavorite id: UUID, at point: CGPoint, current: SidebarTabSlot?, in spaceID: UUID, tree: FolderTree,
+                     rowFrames: [UUID: CGRect], divider: CGRect, newTabRow: CGRect?, list: CGRect) -> (slot: SidebarTabSlot, holding: CGRect?)? {
+        guard list.contains(point) else { return nil }
+        if let pinned = listEnd(at: point, divider: divider, newTabRow: newTabRow, list: list) {
+            return (.end(pinned: pinned), pinned ? divider : newTabRow)
+        }
+        let tabs = tree.tabs(in: spaceID, pinned: true) + tree.tabs(in: spaceID, pinned: false)
+        guard let target = tabs.first(where: { $0.agentOwnerID == nil && !tree.isInCollapsedFolder($0) && rowFrames[$0.id]?.contains(point) == true }),
+              let row = rowFrames[target.id],
+              let move = placement(beside: target, rowFrame: row, pinned: current?.pinned, folderID: current?.folderID,
+                                   slotFrame: current == nil ? nil : rowFrames[id], at: point) else { return nil }
+        return (move.slot, move.takesRowsPlace ? row : nil)
+    }
+
+    /// Where a slot goes in a rendered list, also before an unopened favorite has a tab to project.
+    func insertionIndex(in rows: [FolderTree.Row]) -> Int? {
+        switch self {
+        case .end: return rows.count
+        case .beside(let id, let folder, let pinned, let after):
+            guard let index = rows.firstIndex(where: { $0.id == id }),
+                  case .tab(let target, _) = rows[index], target.folderID == folder, target.isPinned == pinned else { return nil }
+            return index + (after ? 1 : 0)
+        }
     }
 
     /// The slot of a tab shown among the pinned tabs while the pointer is under the divider and above the New Tab row where no row takes the tab: over an agent folder's row or tabs, which take only their agent's tabs, over a collapsed folder's selected tab, or between two rows. The tab goes before the first of `openTabs`, the open tabs outside folders, whose row is not above the pointer, or to the open list's end without one, so that it unpins wherever it is released among the open tabs. Nil for a slot among the open tabs or a pointer elsewhere. The slot lands away from the pointer, so no row's frame holds the hysteresis.
@@ -177,11 +211,22 @@ struct SidebarReorderHover {
 final class SidebarDragState: ObservableObject {
     /// How long a lifted item's shadow and its slot's dimming take to appear and disappear.
     static let liftDuration = 0.4
+    /// Shared by row settling, favorite morphs, and the grid's tile reflow.
+    static let motion = Animation.spring(response: 0.25, dampingFraction: 0.9)
 
     /// The dragged item.
     @Published private(set) var item: SidebarDragItem?
     /// The lifted row's frame in the window.
     @Published var frame: CGRect = .zero
+    /// Pointer movement stays immediate while the preview changes size around its grab point.
+    @Published private(set) var previewPosition = CGPoint.zero
+    private(set) var previewAnchor = UnitPoint.topLeading
+    @Published private(set) var tileFraction: CGFloat = 0
+    var liftedTab: Tab?
+    @Published private(set) var settlingFavoriteID: UUID?
+    @Published private(set) var settlingTabID: UUID?
+    private var sourceSize = CGSize.zero
+    var favoriteRowWidth: CGFloat = 0
     /// Set after release, while the row returns to its slot.
     @Published var isSettling = false
     /// Shows the lifted row's shadow and backing and the slot's dimming.
@@ -196,16 +241,173 @@ final class SidebarDragState: ObservableObject {
     private var folderDropPinned: Bool?
     /// Set while a row released with its slot scrolled out of sight fades out at the list's edge.
     @Published var isFadingOut = false
-    /// Each space page's favorites grid, or its header while there are none, which accepts a tab from the same page.
+    /// The shared favorites grid, or the current space's header while there are none.
     var favoriteBarFrames: [UUID: CGRect] = [:]
+    /// Stable grid geometry; unlike its animated bounds, this includes the slot a returning favorite needs.
+    var favoriteGridTargets: [UUID: FavoriteGridSlots.Target] = [:]
     @Published var targetFavoriteSpaceID: UUID?
 
+    /// The visible tab lists report geometry for a favorite whose gesture belongs to the shared grid.
+    struct FavoriteTabTarget: Equatable {
+        let pinnedArea: CGRect
+        let pinnedFrames: [UUID: CGRect]
+        let openArea: CGRect
+        let openFrames: [UUID: CGRect]
+        let divider: CGRect
+        let newTabID: UUID
+
+        var list: CGRect { pinnedArea.union(divider).union(openArea) }
+        var frames: [UUID: CGRect] { pinnedFrames.merging(openFrames) { $1 } }
+    }
+
+    struct FavoriteTabDrop: Equatable {
+        let spaceID: UUID
+        let slot: SidebarTabSlot
+        let frame: CGRect
+    }
+
+    var favoriteTabTargets: [UUID: FavoriteTabTarget] = [:]
+    @Published var favoriteTabDrop: FavoriteTabDrop?
+    /// Kept through settling after the favorite leaves the session's grid.
+    var liftedFavorite: Favorite?
+    private var favoriteTabHover = SidebarReorderHover()
+
+    @MainActor
+    func updateFavoriteTabDrop(in spaceID: UUID, at point: CGPoint, session: BrowserSession) {
+        guard case .favorite(let id) = item, favoriteGap == nil,
+              let favorite = session.favorites.first(where: { $0.id == id }),
+              session.spaces.contains(where: { $0.id == spaceID && $0.resolvedPersonaID == favorite.resolvedPersonaID }),
+              let target = favoriteTabTargets[spaceID], target.list.contains(point) else {
+            favoriteTabHover = SidebarReorderHover()
+            if favoriteTabDrop != nil { withAnimation(Self.motion) { favoriteTabDrop = nil } }
+            updateFavoriteShape()
+            return
+        }
+        let current = favoriteTabDrop.flatMap { $0.spaceID == spaceID ? $0 : nil }
+        let frames = SidebarTabSlot.reachableFrames(at: point, pinnedArea: target.pinnedArea, pinnedFrames: target.pinnedFrames,
+                                                   openArea: target.openArea, openFrames: target.openFrames, slotOf: id)
+        if favoriteTabHover.canMove(at: point),
+           let move = SidebarTabSlot.next(forFavorite: id, at: point, current: current?.slot, in: spaceID, tree: session.folderTree,
+                                          rowFrames: frames, divider: target.divider, newTabRow: frames[target.newTabID], list: target.list),
+           move.slot != current?.slot {
+            let row: CGRect
+            switch move.slot {
+            case .end(let pinned): row = (pinned ? target.divider : frames[target.newTabID]) ?? target.openArea
+            case .beside(let neighbor, _, _, let after):
+                let neighborFrame = frames[neighbor] ?? target.openArea
+                row = neighborFrame.offsetBy(dx: 0, dy: after ? neighborFrame.height + SpaceTabsView.rowSpacing : 0)
+            }
+            withAnimation(Self.motion) {
+                favoriteTabDrop = FavoriteTabDrop(spaceID: spaceID, slot: move.slot, frame: CGRect(x: row.minX, y: row.minY, width: row.width, height: 36))
+            }
+            if let holding = move.holding { favoriteTabHover.moved(into: holding) }
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        } else if let current, let frame = target.frames[id], frame != current.frame {
+            favoriteTabDrop = FavoriteTabDrop(spaceID: spaceID, slot: current.slot, frame: frame)
+        }
+        updateFavoriteShape()
+    }
+
+    /// Only release moves the page out of favorites. A stale row target leaves the favorite where it was.
+    @MainActor
+    func dropFavoriteIntoTabs(_ favorite: Favorite, session: BrowserSession) -> CGRect? {
+        guard item == .favorite(favorite.id), favoriteGap == nil, let drop = favoriteTabDrop, favoriteTabTargets[drop.spaceID] != nil,
+              let space = session.spaces.first(where: { $0.id == drop.spaceID }),
+              drop.slot.insertionIndex(in: session.folderTree.rows(in: space.id, pinned: drop.slot.pinned)) != nil else { return nil }
+        if case .beside(let id, _, _, _) = drop.slot {
+            guard let target = session.tabs.first(where: { $0.id == id }), target.agentOwnerID == nil,
+                  !session.folderTree.isInCollapsedFolder(target) else { return nil }
+        }
+        liftedFavorite = favorite
+        guard let tab = session.moveFavoriteToTab(favorite, in: space, pinned: drop.slot.pinned) else { return nil }
+        liftedTab = tab
+        settlingTabID = tab.id
+        favoriteTabDrop = nil
+        drop.slot.commit(tab, in: space, session: session)
+        return drop.frame
+    }
+
+    /// The open place in a space page's favorites grid where a dragged tab or favorite lands on release: its index among the grid's other favorites and its frame in the window (`FavoriteGridSlots`).
+    struct FavoriteGap: Equatable {
+        let spaceID: UUID
+        let index: Int
+        let frame: CGRect
+        let newRow: FavoriteGridSlots.NewRow?
+        let rowSizes: [Int]?
+    }
+
+    /// The gap the favorites grid under the pointer holds open, which the other tiles reflow around.
+    @Published var favoriteGap: FavoriteGap?
     @MainActor
     func favoriteDestination(for tab: Tab, in space: Space, at point: CGPoint, session: BrowserSession) -> UUID? {
         guard tabID == tab.id, tab.spaceID == space.id, tab.personaID == space.resolvedPersonaID,
-              tab.agentOwnerID == nil, session.canAddFavorite(tab),
-              favoriteBarFrames[space.id]?.contains(point) == true else { return nil }
-        return space.id
+              tab.agentOwnerID == nil, session.canAddFavorite(tab) else { return nil }
+        let contains = favoriteGridTargets[space.id].map { $0.placement(at: point, adding: true, holding: favoriteGap?.spaceID == space.id ? favoriteGap?.newRow : nil) != nil }
+            ?? (favoriteBarFrames[space.id]?.contains(point) == true)
+        return contains ? space.id : nil
+    }
+
+    /// Resolves each move and the final release synchronously, before a drop commits its index.
+    func updateFavoriteGap(in spaceID: UUID?, at point: CGPoint, adding: Bool) {
+        defer { updateFavoriteShape() }
+        let next = spaceID.flatMap { spaceID in
+            favoriteGridTargets[spaceID]?.placement(at: point, adding: adding, holding: favoriteGap?.spaceID == spaceID ? favoriteGap?.newRow : nil).map {
+                FavoriteGap(spaceID: spaceID, index: $0.index, frame: $0.frame, newRow: $0.newRow, rowSizes: $0.rowSizes)
+            }
+        }
+        guard next != favoriteGap else { return }
+        guard next?.index != favoriteGap?.index || next?.spaceID != favoriteGap?.spaceID || next?.rowSizes != favoriteGap?.rowSizes else {
+            favoriteGap = next
+            return
+        }
+        withAnimation(Self.motion) { favoriteGap = next }
+        if next != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+    }
+
+    /// Commits the resolved grid gap, or the empty grid's header target, and returns where the lifted tab settles.
+    @MainActor
+    func dropFavorite(_ tab: Tab, in space: Space, session: BrowserSession) -> CGRect? {
+        guard tabID == tab.id, targetFavoriteSpaceID == space.id,
+              tab.spaceID == space.id, tab.personaID == space.resolvedPersonaID,
+              tab.agentOwnerID == nil, session.canAddFavorite(tab) else { return nil }
+        let gap = favoriteGap.flatMap { $0.spaceID == space.id ? $0 : nil }
+        // A grid gap already has its frame; only the empty header needs the separate frame preference.
+        guard var frame = gap?.frame ?? favoriteBarFrames[space.id] else { return nil }
+        // The empty header is the hit target; the first tile fills the grid's width above it.
+        if gap == nil { frame.size.height = FavoriteTileLayout.height }
+        liftedTab = tab
+        session.addFavorite(tab, at: gap?.index)
+        settlingFavoriteID = session.favorites.first { session.favoriteTabs[$0.id] === tab }?.id
+        if let rowSizes = gap?.rowSizes {
+            UserDefaults.standard.set(FavoriteTileLayout.encode(rowSizes: rowSizes), forKey: FavoriteTileLayout.rowSizesKey)
+        }
+        return frame
+    }
+
+    /// Changes only the shape; the pointer's position is not part of the spring.
+    func updateFavoriteShape() {
+        guard !isSettling else { return }
+        switch item {
+        case .tab:
+            let tile = favoriteGap?.frame ?? targetFavoriteSpaceID.flatMap { favoriteBarFrames[$0] }
+            morph(toTile: tile != nil, size: tile.map { CGSize(width: $0.width, height: FavoriteTileLayout.height) } ?? sourceSize)
+        case .favorite:
+            if let tile = favoriteGap?.frame {
+                morph(toTile: true, size: tile.size)
+            } else {
+                morph(toTile: false, size: CGSize(width: favoriteTabDrop?.frame.width ?? max(sourceSize.width, favoriteRowWidth), height: 36))
+            }
+        default: break
+        }
+    }
+
+    private func morph(toTile: Bool, size: CGSize) {
+        guard tileFraction != (toTile ? 1 : 0) || frame.size != size else { return }
+        withAnimation(Self.motion) {
+            tileFraction = toTile ? 1 : 0
+            frame = CGRect(x: previewPosition.x - size.width * previewAnchor.x,
+                           y: previewPosition.y - size.height * previewAnchor.y, width: size.width, height: size.height)
+        }
     }
 
     /// Where a tab released over the page area opens in split view.
@@ -217,8 +419,6 @@ final class SidebarDragState: ObservableObject {
     var paneFrames: [PaneFrame] = []
     /// The list or item that started the drag.
     private(set) var owner: UUID?
-    /// The pointer's position in the row when the drag started.
-    private var grabOffset: CGSize = .zero
 
     /// The dragged tab.
     var tabID: UUID? {
@@ -236,11 +436,16 @@ final class SidebarDragState: ObservableObject {
         self.item = item
         self.owner = owner
         self.frame = frame
-        grabOffset = CGSize(width: point.x - frame.minX, height: point.y - frame.minY)
+        sourceSize = frame.size
+        previewPosition = point
+        previewAnchor = UnitPoint(x: frame.width > 0 ? (point.x - frame.minX) / frame.width : 0,
+                                  y: frame.height > 0 ? (point.y - frame.minY) / frame.height : 0)
+        if case .favorite = item { tileFraction = 1 } else { tileFraction = 0 }
     }
 
     func move(to point: CGPoint) {
-        frame.origin = CGPoint(x: point.x - grabOffset.width, y: point.y - grabOffset.height)
+        previewPosition = point
+        frame.origin = CGPoint(x: point.x - frame.width * previewAnchor.x, y: point.y - frame.height * previewAnchor.y)
     }
 
     /// Ends the drag if `owner` started it, so a list cannot end another list's drag.
@@ -253,6 +458,15 @@ final class SidebarDragState: ObservableObject {
         targetSpaceID = nil
         targetFolderID = nil
         targetFavoriteSpaceID = nil
+        favoriteGap = nil
+        favoriteTabDrop = nil
+        liftedFavorite = nil
+        liftedTab = nil
+        settlingFavoriteID = nil
+        settlingTabID = nil
+        tileFraction = 0
+        favoriteRowWidth = 0
+        favoriteTabHover = SidebarReorderHover()
         isEntering = false
         folderDropPinned = nil
         isFadingOut = false
@@ -322,10 +536,13 @@ final class SidebarDragState: ObservableObject {
     /// On release, the lifted item returns to its slot, and its shadow fades out before the item reappears there. With `list`, the visible part of the slot's list, a slot whose middle lies above or below it takes the item only to that edge of the list, where the item fades out.
     func settle(into slot: CGRect, within list: CGRect? = nil, ownedBy owner: UUID) {
         let isHidden = list.map { slot.midY < $0.minY || slot.midY > $0.maxY } ?? false
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+        withAnimation(Self.motion) {
             isSettling = true
             frame = slot
+            if case .favorite = item { tileFraction = settlingTabID == nil ? 1 : 0 }
+            if settlingFavoriteID != nil { tileFraction = 1 }
             if isHidden, let list { frame.origin.y = max(list.minY, min(slot.minY, list.maxY - slot.height)) }
+            previewPosition = CGPoint(x: frame.minX + frame.width * previewAnchor.x, y: frame.minY + frame.height * previewAnchor.y)
         }
         withAnimation(.easeInOut(duration: Self.liftDuration)) {
             isLifted = false
@@ -347,6 +564,7 @@ final class SidebarDragState: ObservableObject {
             targetSpaceID = nil
             targetFolderID = nil
             frame.origin = CGPoint(x: target.midX - frame.width / 2, y: target.midY - frame.height / 2)
+            previewPosition = CGPoint(x: frame.minX + frame.width * previewAnchor.x, y: frame.minY + frame.height * previewAnchor.y)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.end(ownedBy: owner) }
     }
@@ -361,8 +579,17 @@ struct TabDragLayer: View {
     var body: some View {
         switch sidebarDrag.item {
         case .tab(let id):
-            if let tab = session.tabs.first(where: { $0.id == id }) {
-                lifted(TabRowView(session: session, tab: tab))
+            if let tab = sidebarDrag.liftedTab ?? session.tabs.first(where: { $0.id == id }) {
+                SidebarTabDragPreview(session: session, tab: tab, favorite: nil,
+                                      size: sidebarDrag.frame.size, tileFraction: sidebarDrag.tileFraction,
+                                      isLifted: sidebarDrag.isLifted, anchor: sidebarDrag.previewAnchor,
+                                      scale: sidebarDrag.isEntering ? 0.2 : 1)
+                    .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+                    .opacity(sidebarDrag.isEntering || sidebarDrag.isFadingOut ? 0 : 1)
+                    .offset(x: sidebarDrag.previewPosition.x, y: sidebarDrag.previewPosition.y)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         case .folder(let id):
             if let folder = session.folders.first(where: { $0.id == id }) {

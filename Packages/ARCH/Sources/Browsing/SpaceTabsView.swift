@@ -1,9 +1,9 @@
-// Each sidebar page holds its Persona’s favorites, the space header, and the pinned tabs in place, and below them the open tabs, nested folders, and the new tab row, which scroll. A tab or folder row's drag starts and ends here (`SidebarDragState.swift`), and scrolls the pinned or open area while it is held near the area's top or bottom (`DragAutoScroll.swift`).
+// Each sidebar page holds its space header and pinned tabs in place below the Persona's shared favorites, and below them the open tabs, nested folders, and the new tab row, which scroll. A tab or folder row's drag starts and ends here (`SidebarDragState.swift`), and scrolls the pinned or open area while it is held near the area's top or bottom (`DragAutoScroll.swift`).
 import AppKit
 import SwiftUI
 
-/// Collects each space page's visible favorites grid frame in the window, by space ID, for the drag state's favorites drop area.
-private struct FavoriteBarFramesKey: PreferenceKey {
+/// Collects the shared favorites grid's frame or the current space's empty-grid drop target in the window, by space ID.
+struct FavoriteBarFramesKey: PreferenceKey {
     static let defaultValue: [UUID: CGRect] = [:]
 
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
@@ -63,36 +63,7 @@ private struct SidebarPluginPanelController: NSViewControllerRepresentable {
     func updateNSViewController(_ controller: NSViewController, context: Context) {}
 }
 
-/// Lays out one page per space side by side and shows the current space's page. During a swipe the pages follow the fingers; a change of space slides them into place.
-struct SpacePagesView: View {
-    @ObservedObject var session: BrowserSession
-    @EnvironmentObject private var windowModel: BrowserWindowModel
-    let translation: CGFloat
-    @EnvironmentObject private var sidebarDrag: SidebarDragState
-    @Environment(\.sidebarWidth) private var width
-
-    var body: some View {
-        let index = session.spaces.firstIndex { $0.id == windowModel.currentSpaceID } ?? 0
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(session.spaces) { space in
-                let isCurrent = space.id == windowModel.currentSpaceID
-                SpaceTabsView(session: session, space: space)
-                .frame(width: width, alignment: .topLeading)
-                // Clipping alone does not keep offscreen pages from receiving clicks or accessibility actions.
-                .allowsHitTesting(isCurrent)
-                .accessibilityElement(children: isCurrent ? .contain : .ignore)
-                .accessibilityHidden(!isCurrent)
-            }
-        }
-        .onPreferenceChange(FavoriteBarFramesKey.self) { sidebarDrag.favoriteBarFrames = $0 }
-        .offset(x: -CGFloat(index) * width + translation)
-        .frame(width: width, alignment: .leading)
-        .clipped()
-        .animation(SidebarView.pageSpring, value: windowModel.currentSpaceID)
-    }
-}
-
-/// Measures the existing grid, or the space header while it offers the first favorite.
+/// Measures the space header while it offers the first favorite. An existing grid opens a gap instead (`FavoritesGridView`).
 private struct FavoriteDropArea: ViewModifier {
     let spaceID: UUID
     let viewport: CGRect
@@ -113,11 +84,12 @@ private struct FavoriteDropArea: ViewModifier {
     }
 }
 
-/// Shows a space's favorites, its header, and its pinned tabs fixed under the address pill, and below the divider the remaining tabs and the new tab row, which scroll on their own. A long pinned list scrolls in its own area, at most `pinnedAreaMaxShare` of the page's height. Each of the two lists starts with its folders, each followed, unless collapsed, by its own folders and then its tabs, indented by level (`FolderTree.rows(in:pinned:showingInCollapsedFolders:)`).
+/// Shows a space's header and pinned tabs below the Persona's favorites, and below the divider the remaining tabs and the new tab row, which scroll on their own. A long pinned list scrolls in its own area, at most `pinnedAreaMaxShare` of the tab lists' height after the favorites, fixed rows, and divider. Each of the two lists starts with its folders, each followed, unless collapsed, by its own folders and then its tabs, indented by level (`FolderTree.rows(in:pinned:showingInCollapsedFolders:)`).
 struct SpaceTabsView: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
     let space: Space
+    let pageHeight: CGFloat
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Set during a row's drag gesture. Resets automatically if the gesture is cancelled, such as when its row disappears.
     @GestureState private var isDragGestureActive = false
@@ -170,7 +142,7 @@ struct SpaceTabsView: View {
     static let dividerHeight: CGFloat = 14
     /// The space above the divider while the pinned list has no rows, a row's height, which says that a tab dragged there is pinned; it stays through the drag of a space's first pin.
     static let emptyPinnedEndHeight: CGFloat = 36
-    /// The largest share of the page's height that the pinned area takes; a longer pinned list scrolls within it.
+    /// The largest share of the tab lists' remaining height that the pinned area takes; a longer pinned list scrolls within it.
     static let pinnedAreaMaxShare: CGFloat = 0.5
     /// The frame key for the New Tab row that ends the open list.
     private static let openListEndID = UUID()
@@ -207,6 +179,14 @@ struct SpaceTabsView: View {
         }
         var pinned = listRows(pinned: true, in: tree)
         var open = listRows(pinned: false, in: tree)
+        if let drop = favoriteTabDrop {
+            var pinnedItems = pinned.map(Item.row), openItems = open.map(Item.row)
+            if let index = drop.slot.insertionIndex(in: drop.slot.pinned ? pinned : open) {
+                if drop.slot.pinned { pinnedItems.insert(.slot, at: index) } else { openItems.insert(.slot, at: index) }
+            }
+            let emptyFolders = FolderTree.emptyFolderIDs(in: pinned).union(FolderTree.emptyFolderIDs(in: open))
+            return (pinnedItems, openItems, pinnedItems.isEmpty, emptyFolders, drop.slot.pinned && pinned.isEmpty)
+        }
         if sidebarDrag.owner == dragOwner, !sidebarDrag.isSettling, let tabSlot, let id = sidebarDrag.tabID,
            let tab = session.tabs.first(where: { $0.id == id && $0.spaceID == space.id && $0.isListedInSidebar }) {
             tabSlot.project(tab, pinnedRows: &pinned, openRows: &open)
@@ -259,19 +239,28 @@ struct SpaceTabsView: View {
         pinnedAreaFrame.union(dividerFrame).union(openAreaFrame)
     }
 
-    /// The pinned area's height: its content's, up to its share of the page.
-    private var pinnedAreaHeight: CGFloat {
-        min(max(Self.emptyPinnedEndHeight + Self.rowSpacing, pinnedContentFrame.height), max(0, pageFrame.height * Self.pinnedAreaMaxShare))
+    private var favoriteTabDrop: SidebarDragState.FavoriteTabDrop? {
+        guard !sidebarDrag.isSettling, windowModel.currentSpaceID == space.id,
+              let drop = sidebarDrag.favoriteTabDrop, drop.spaceID == space.id else { return nil }
+        return drop
     }
 
-    /// The favorites, the plugins' items, the connected agents, and the header, which stay in place above the tabs.
+    private var favoriteTabTarget: SidebarDragState.FavoriteTabTarget? {
+        guard windowModel.currentSpaceID == space.id, windowModel.sidebarPanel?.spaceID != space.id else { return nil }
+        return .init(pinnedArea: pinnedAreaFrame, pinnedFrames: pinnedFrames, openArea: openAreaFrame,
+                     openFrames: openFrames, divider: pinnedListEndFrame, newTabID: Self.openListEndID)
+    }
+
+    /// The pinned area's height: its content's, up to its share of the room below the fixed rows and divider.
+    private var pinnedAreaHeight: CGFloat {
+        let fixedHeight = max(0, pinnedAreaFrame.minY - pageFrame.minY)
+        let available = max(0, pageHeight - fixedHeight - Self.dividerHeight - Self.rowSpacing)
+        return min(max(Self.emptyPinnedEndHeight + Self.rowSpacing, pinnedContentFrame.height), available * Self.pinnedAreaMaxShare)
+    }
+
+    /// The plugins' items, the connected agents, and the header, which stay in place above the tabs.
     private var fixedRows: some View {
         VStack(alignment: .leading, spacing: SidebarView.rowSpacing) {
-            if hasFavorites {
-                FavoritesGridView(session: session, personaID: space.resolvedPersonaID)
-                    .modifier(FavoriteDropArea(spaceID: space.id, viewport: pageFrame))
-                    .padding(.bottom, FavoriteTileLayout.gridHeaderSpacing)
-            }
             if windowModel.sidebarPanel?.spaceID != space.id {
                 if let plugins = windowModel.currentSpaceID == space.id ? windowModel.plugins : session.loadedPlugins(in: space.resolvedPersonaID) {
                     PluginSidebarItemsView(plugins: plugins, spaceID: space.id)
@@ -314,7 +303,7 @@ struct SpaceTabsView: View {
                     row(for: tab, collapsed: tab.id == draggedRowID)
                         .padding(.leading, CGFloat(depth) * Self.folderIndent)
                 case .slot:
-                    DraggedSlot(height: draggedRowHeight, isLifted: sidebarDrag.isLifted)
+                    DraggedSlot(height: favoriteTabDrop == nil ? draggedRowHeight : 36, isLifted: sidebarDrag.isLifted)
                         .background(frameReader(for: sidebarDrag.item?.id ?? UUID()))
                         .padding(.bottom, Self.rowSpacing)
                 }
@@ -343,7 +332,7 @@ struct SpaceTabsView: View {
             }
         }
         // A row that closes or opens fades while the rows after it slide into place. Only a change of which rows the list holds animates here, so a drag's moves keep their own timing.
-        .animation(sidebarDrag.item?.isRow == true ? (sidebarDrag.folderID == nil ? .easeOut(duration: 0.15) : .easeInOut(duration: 0.15)) : .easeInOut(duration: 0.2), value: Set(items.map(\.id)))
+        .animation(sidebarDrag.item?.isRow == true ? (sidebarDrag.folderID == nil ? .easeOut(duration: 0.15) : .easeInOut(duration: 0.15)) : (sidebarDrag.item == nil ? .easeInOut(duration: 0.2) : nil), value: Set(items.map(\.id)))
         .padding(.bottom, keptHeight(pinned: pinned))
         // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
         .padding(.horizontal, SidebarView.inset)
@@ -464,7 +453,6 @@ struct SpaceTabsView: View {
                     }
                     .scrollIndicators(.never)
                 }
-                .padding(.top, hasFavorites ? SidebarView.rowSpacing : 0)
             } else {
                 let items = areaItems
                 area(items.pinned, pinned: true, emptyFolders: items.emptyFolders, showsPinTarget: items.pinnedIsEmpty || items.usesEmptyPinTarget, pinTargetIsSlot: items.usesEmptyPinTarget)
@@ -489,8 +477,12 @@ struct SpaceTabsView: View {
                 .onAppear { pageFrame = frame }
                 .onChange(of: frame) { pageFrame = $1 }
         })
+        .onChange(of: favoriteTabTarget, initial: true) { _, target in sidebarDrag.favoriteTabTargets[space.id] = target }
         // Hiding the sidebar or the card mid-drag removes the list without ending its gesture.
-        .onDisappear { sidebarDrag.end(ownedBy: dragOwner) }
+        .onDisappear {
+            sidebarDrag.favoriteTabTargets[space.id] = nil
+            sidebarDrag.end(ownedBy: dragOwner)
+        }
     }
 
     /// A closing row fades and shrinks a little in place; a new row fades in.
@@ -500,7 +492,7 @@ struct SpaceTabsView: View {
     private func row(for tab: Tab, collapsed: Bool) -> some View {
         TabRowView(session: session, tab: tab)
             .background { if !collapsed { frameReader(for: tab.id) } }
-            .modifier(CollapsedWhileDragged(isCollapsed: collapsed, isHidden: sidebarDrag.item?.id == tab.id, isLifted: sidebarDrag.isLifted, isSettling: sidebarDrag.isSettling))
+            .modifier(CollapsedWhileDragged(isCollapsed: collapsed, isHidden: sidebarDrag.item?.id == tab.id || sidebarDrag.settlingTabID == tab.id, isLifted: sidebarDrag.isLifted, isSettling: sidebarDrag.isSettling))
             // Dragging in the name field selects text instead.
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isDragGestureActive) { _, isActive, _ in isActive = true }
@@ -574,6 +566,7 @@ struct SpaceTabsView: View {
             pinnedAutoScrollArmed = false
             openAutoScrollArmed = false
             sidebarDrag.begin(item, frame: frame, grabbedAt: value.startLocation, owner: dragOwner)
+            if case .tab(let id) = item { sidebarDrag.liftedTab = session.tabs.first { $0.id == id } }
             // The row appears without a shadow, which then fades in.
             DispatchQueue.main.async { withAnimation(.easeInOut(duration: SidebarDragState.liftDuration)) { sidebarDrag.isLifted = true } }
         }
@@ -627,6 +620,7 @@ struct SpaceTabsView: View {
 
     private func updateDropTargets(for tab: Tab, at point: CGPoint) {
         setDropTarget(\.targetFavoriteSpaceID, to: sidebarDrag.favoriteDestination(for: tab, in: space, at: point, session: session))
+        sidebarDrag.updateFavoriteGap(in: sidebarDrag.targetFavoriteSpaceID, at: point, adding: true)
         let list = tabsFrame
         let frames = reachableFrames(at: point)
         let tree = session.folderTree
@@ -637,7 +631,7 @@ struct SpaceTabsView: View {
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
         setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && point.x > pageFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: point, in: windowModel) : nil)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. A row of the tab's own list makes room once the pointer crosses its middle, and a row of the other list, past the divider, as soon as the pointer reaches it, so the tab pins or unpins wherever it enters the other list's rows (`SidebarTabSlot.placement`). The divider ends the pinned list; the New Tab row and the empty space below it end the open list. Between them, where no row takes a pinned tab, it goes before the next open tab outside folders (`SidebarTabSlot.unpinning`).
-        guard tabReorder.acceptsRow(at: point, in: list, excluding: sidebarDrag.favoriteBarFrames[space.id]) else {
+        guard tabReorder.acceptsRow(at: point, in: list, excluding: sidebarDrag.targetFavoriteSpaceID == space.id ? sidebarDrag.favoriteBarFrames[space.id] : nil) else {
             if tabSlot != nil { tabSlot = nil }
             return
         }
@@ -734,11 +728,9 @@ struct SpaceTabsView: View {
         if case .tab(let id) = item, !session.tabs.contains(where: { $0.id == id && $0.spaceID == space.id && $0.isListedInSidebar }) {
             return sidebarDrag.end(ownedBy: dragOwner)
         }
-        if sidebarDrag.targetFavoriteSpaceID == space.id, windowModel.currentSpaceID == space.id, case .tab(let id) = item,
-           let tab = session.tabs.first(where: { $0.id == id && $0.spaceID == space.id && $0.agentOwnerID == nil }),
-           let bar = sidebarDrag.favoriteBarFrames[space.id], session.canAddFavorite(tab) {
-            session.addFavorite(tab)
-            return sidebarDrag.settle(shrinkingInto: bar, ownedBy: dragOwner)
+        if case .tab(let id) = item, let tab = session.tabs.first(where: { $0.id == id }),
+           let target = sidebarDrag.dropFavorite(tab, in: space, session: session) {
+            return sidebarDrag.settle(into: target, ownedBy: dragOwner)
         }
         // Over another space's symbol, the tab goes after that space's own tabs, or the folder with what it holds after its folders, and the lifted row shrinks into the symbol. A dropped tab arrives selected in this window, which shows that space.
         if let spaceID = sidebarDrag.targetSpaceID {
@@ -806,7 +798,7 @@ private struct CollapsedWhileDragged: ViewModifier {
 }
 
 /// Collects the frames of an area's tab and folder rows in the window, by row ID, which a drag uses to find its drop target.
-private struct TabRowFramesKey: PreferenceKey {
+struct TabRowFramesKey: PreferenceKey {
     static let defaultValue: [UUID: CGRect] = [:]
 
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {

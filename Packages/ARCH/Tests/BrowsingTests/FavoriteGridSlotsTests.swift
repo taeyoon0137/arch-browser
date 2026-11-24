@@ -1,0 +1,228 @@
+// Grid geometry and drag projection without SwiftUI rendering or a window.
+import Foundation
+import Testing
+@testable import Browsing
+
+@Suite struct FavoriteGridSlotsTests {
+    private let origin = CGPoint(x: 12, y: 80)
+    private let width: CGFloat = 228
+    private let viewport = CGRect(x: 0, y: 80, width: 252, height: 600)
+
+    @Test func mixedRowsShareTheirWidthAndKeepTheSidebarMetrics() {
+        let slots = FavoriteGridSlots(rowSizes: [3, 1, 2], defaultColumns: 4)
+        let frames = slots.frames(for: 8, width: width, origin: origin)
+        #expect(slots.rows(for: 8) == [3, 1, 2, 2])
+        #expect(frames[0] == CGRect(x: 12, y: 80, width: 72, height: 44))
+        #expect(frames[2] == CGRect(x: 168, y: 80, width: 72, height: 44))
+        #expect(frames[3] == CGRect(x: 12, y: 130, width: 228, height: 44))
+        #expect(frames[4] == CGRect(x: 12, y: 180, width: 111, height: 44))
+        #expect(frames[7] == CGRect(x: 129, y: 230, width: 111, height: 44))
+        #expect(slots.height(for: 8) == 194)
+        #expect(slots.height(for: 0) == 0 && slots.frames(for: 0, width: width, origin: origin).isEmpty)
+    }
+
+    @Test(arguments: [[], [1], [3, 1, 2], [4, 2, 1], [1, 4, 1, 1, 1]], 0...12)
+    func incomingTabsCanReachEveryIndexInEveryRow(rowSizes: [Int], count: Int) throws {
+        let slots = FavoriteGridSlots(rowSizes: rowSizes, defaultColumns: 4)
+        let ids = (0..<count).map { _ in UUID() }
+        let target = FavoriteGridSlots.Target(slots: slots, frame: CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: count))), viewport: viewport, count: count)
+        var points: [CGPoint] = []
+        for row in 0..<max(1, slots.rows(for: count).count) {
+            for column in 0..<4 {
+                points.append(CGPoint(x: origin.x + width * (CGFloat(column) + 0.5) / 4,
+                                      y: origin.y + CGFloat(row) * 50 + 22))
+            }
+        }
+        points.append(CGPoint(x: origin.x + width / 2, y: origin.y + slots.height(for: count) + 5))
+        var reached: Set<Int> = []
+        for point in points {
+            let placement = try #require(target.placement(at: point, adding: true))
+            reached.insert(placement.index)
+            let projected = FavoriteGridSlots(rowSizes: placement.rowSizes ?? rowSizes, defaultColumns: 4)
+            #expect(placement.frame == projected.frames(for: count + 1, width: width, origin: origin)[placement.index])
+            let items = FavoriteGridSlots.items(ids, dragged: nil, gap: placement.index)
+            #expect(items[placement.index].entry == .gap)
+            #expect(items.filter { $0.entry != .gap }.map(\.entry) == ids.map(FavoriteGridSlots.Entry.favorite))
+            #expect(items.count == count + 1 && !items.contains { $0.isCollapsed })
+            // Repeating a move does not use the displaced tiles as new targets.
+            #expect(target.placement(at: point, adding: true) == placement)
+        }
+        #expect(reached == Set(0...count))
+    }
+
+    @Test func favoritesReorderAcrossRowsWithoutDuplicatingTheirDragView() {
+        let ids = (0..<7).map { _ in UUID() }
+        for source in ids.indices {
+            for destination in ids.indices {
+                let items = FavoriteGridSlots.items(ids, dragged: ids[source], gap: destination)
+                var expected = ids
+                expected.insert(expected.remove(at: source), at: destination)
+                #expect(items.map(\.entry) == expected.map(FavoriteGridSlots.Entry.favorite))
+                #expect(Set(items.map(\.id)).count == ids.count)
+                #expect(!items.contains { $0.isCollapsed })
+            }
+        }
+    }
+
+    @Test(arguments: [1, 4, 5, 9])
+    func leavingClosesTheGapButKeepsTheDraggedIdentityAndReturnTarget(count: Int) throws {
+        let slots = FavoriteGridSlots(rowSizes: [], defaultColumns: 4)
+        let ids = (0..<count).map { _ in UUID() }, dragged = ids[0]
+        let items = FavoriteGridSlots.items(ids, dragged: dragged, gap: nil)
+        #expect(items.filter { !$0.isCollapsed }.map(\.entry) == ids.dropFirst().map(FavoriteGridSlots.Entry.favorite))
+        #expect(items.last?.entry == .favorite(dragged) && items.last?.isCollapsed == true)
+        #expect(Set(items.map(\.id)).count == ids.count)
+        // The rendered grid has already shrunk, possibly to zero height.
+        let collapsedFrame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: count - 1)))
+        let target = FavoriteGridSlots.Target(slots: slots, frame: collapsedFrame, viewport: viewport, count: count)
+        let lastFrame = try #require(slots.frames(for: count, width: width, origin: origin).last)
+        let returned = try #require(target.placement(at: CGPoint(x: lastFrame.midX, y: lastFrame.midY), adding: false))
+        #expect(returned.index == count - 1)
+        #expect(!FavoriteGridSlots.items(ids, dragged: dragged, gap: returned.index).contains { $0.isCollapsed })
+        #expect(FavoriteGridSlots.items(ids, dragged: nil, gap: nil).map(\.entry) == ids.map(FavoriteGridSlots.Entry.favorite))
+    }
+
+    @Test(arguments: [[], [3, 1, 2], [4, 2, 1]], [false, true])
+    func boundaryDropsOpenSeparateRowsAndKeepTheirVisibleGaps(rowSizes: [Int], adding: Bool) throws {
+        let slots = FavoriteGridSlots(rowSizes: rowSizes, defaultColumns: 4)
+        // Includes both full and partially occupied last rows, for additions and reorders.
+        for count in 2...9 {
+            let total = count + (adding ? 1 : 0)
+            let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: count)))
+            let target = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: count)
+            for edge in [FavoriteGridSlots.NewRow.first, .last] {
+                for x in [frame.minX + 1, frame.midX, frame.maxX - 1] {
+                    let point = CGPoint(x: x, y: edge == .first ? frame.minY - 5 : frame.maxY + 5)
+                    let placement = try #require(target.placement(at: point, adding: adding))
+                    let sizes = try #require(placement.rowSizes)
+                    let projected = FavoriteGridSlots(rowSizes: sizes, defaultColumns: 4)
+                    let others = slots.rows(for: total - 1)
+                    #expect(projected.rows(for: total) == (edge == .first ? [1] + others : others + [1]))
+                    #expect(placement.newRow == edge)
+                    #expect(placement.index == (edge == .first ? 0 : total - 1))
+                    #expect(placement.frame.width == width)
+                    #expect(placement.frame.minY == (edge == .first ? origin.y : origin.y + slots.height(for: total - 1) + FavoriteTileLayout.spacing))
+                    let center = CGPoint(x: placement.frame.midX, y: placement.frame.midY)
+                    #expect(target.placement(at: center, adding: adding, holding: edge) == placement)
+                    // The saved row-size encoding recreates exactly the preview's row break and gap frame.
+                    let saved = FavoriteGridSlots(rowSizes: FavoriteTileLayout.rowSizes(from: FavoriteTileLayout.encode(rowSizes: sizes)), defaultColumns: 4)
+                    #expect(saved.frames(for: total, width: width, origin: origin)[placement.index] == placement.frame)
+                    let ids = (0..<count).map { _ in UUID() }
+                    let dragged = adding ? nil : ids[0]
+                    let items = FavoriteGridSlots.items(ids, dragged: dragged, gap: placement.index)
+                    #expect(items.count == total && Set(items.map(\.id)).count == total)
+                    #expect(items[placement.index].entry == (dragged.map(FavoriteGridSlots.Entry.favorite) ?? .gap))
+                }
+            }
+        }
+    }
+
+    @Test func boundaryRowsDiscardUnusedCapacitiesAndLeaveTheLastRowFillable() throws {
+        let slots = FavoriteGridSlots(rowSizes: [3, 2, 4, 2], defaultColumns: 4)
+        #expect(slots.insertingRow(.first, remaining: 4).rowSizes == [1, 3, 2])
+        #expect(slots.insertingRow(.last, remaining: 4).rowSizes == [3, 1, 4])
+        // A single existing favorite has no other row to separate from during a reorder.
+        let target = FavoriteGridSlots.Target(slots: slots, frame: CGRect(origin: origin, size: CGSize(width: width, height: 44)), viewport: viewport, count: 1)
+        #expect(target.placement(at: CGPoint(x: 120, y: 75), adding: false)?.newRow == nil)
+        #expect(target.placement(at: CGPoint(x: 120, y: 129), adding: false)?.newRow == nil)
+        #expect(try #require(target.placement(at: CGPoint(x: 120, y: 129), adding: true)).rowSizes == [1, 4])
+    }
+
+    @Test(arguments: [[], [1, 4, 1, 1, 1]])
+    func seventhFavoriteCanFillTheLastExistingRow(rowSizes: [Int]) throws {
+        let slots = FavoriteGridSlots(rowSizes: rowSizes, defaultColumns: 4)
+        let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 6)))
+        let target = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: 6)
+        let placement = try #require(target.placement(at: CGPoint(x: frame.maxX - 1, y: frame.maxY - 22), adding: true))
+        let committed = FavoriteGridSlots(rowSizes: placement.rowSizes ?? rowSizes, defaultColumns: 4)
+        #expect(placement.index == 6 && placement.newRow == nil)
+        #expect(committed.rows(for: 7) == (rowSizes.isEmpty ? [4, 3] : [1, 4, 2]))
+        #expect(committed.rowSizes.count <= committed.rows(for: 7).count)
+        #expect(placement.frame == committed.frames(for: 7, width: width, origin: origin)[6])
+    }
+
+    @Test(arguments: [FavoriteGridSlots.NewRow.first, .last])
+    func aNewRowCanAcceptAnotherTab(edge: FavoriteGridSlots.NewRow) throws {
+        let slots = FavoriteGridSlots(rowSizes: [1, 4, 1, 1, 1], defaultColumns: 4).insertingRow(edge, remaining: 6)
+        let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 7)))
+        let target = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: 7)
+        let point = CGPoint(x: frame.maxX - 1, y: edge == .first ? frame.minY + 22 : frame.maxY - 22)
+        let placement = try #require(target.placement(at: point, adding: true))
+        let committed = FavoriteGridSlots(rowSizes: placement.rowSizes ?? slots.rowSizes, defaultColumns: 4)
+        #expect(placement.index == (edge == .first ? 1 : 7) && placement.newRow == nil)
+        #expect(committed.rows(for: 8) == (edge == .first ? [2, 1, 4, 1] : [1, 4, 1, 2]))
+        #expect(committed.rowSizes.count <= committed.rows(for: 8).count)
+    }
+
+    @Test(arguments: [false, true]) func anUnopenedBoundaryDoesNotCoverTheSpaceHeader(adding: Bool) throws {
+        let slots = FavoriteGridSlots(rowSizes: [], defaultColumns: 4)
+        let target = FavoriteGridSlots.Target(slots: slots, frame: CGRect(origin: origin, size: CGSize(width: width, height: 44)), viewport: viewport, count: 3)
+        let below = CGPoint(x: 120, y: 150)
+        #expect(target.placement(at: below, adding: adding) == nil)
+        let gap = try #require(target.placement(at: CGPoint(x: 120, y: 129), adding: adding))
+        #expect(gap.newRow == .last)
+        #expect(target.placement(at: below, adding: adding, holding: gap.newRow) == gap)
+    }
+
+    @MainActor @Test func changingOnlyTheRowBoundaryUpdatesTheGapAndLeavingClearsIt() throws {
+        let slots = FavoriteGridSlots(rowSizes: [3, 2], defaultColumns: 4)
+        let drag = SidebarDragState(), space = UUID(), owner = UUID()
+        let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 4)))
+        drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: 4)
+        drag.begin(.favorite(UUID()), frame: frame, grabbedAt: origin, owner: owner)
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: 20, y: 100), adding: false)
+        #expect(drag.favoriteGap?.index == 0 && drag.favoriteGap?.rowSizes == nil)
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: 20, y: 75), adding: false)
+        let first = try #require(drag.favoriteGap)
+        #expect(first.index == 0 && first.rowSizes == [1, 3])
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: 120, y: 100), adding: false)
+        #expect(drag.favoriteGap == first)
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: -50, y: 100), adding: false)
+        #expect(drag.favoriteGap == nil)
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: 120, y: 179), adding: false)
+        #expect(drag.favoriteGap?.newRow == .last)
+        drag.end(ownedBy: owner)
+        #expect(drag.favoriteGap == nil)
+        #expect(drag.favoriteGridTargets[space]?.slots.rowSizes == [3, 2])
+    }
+
+    @Test func spacingAndOuterEdgesHaveDeterministicInsertionIndexes() {
+        let slots = FavoriteGridSlots(rowSizes: [2, 2], defaultColumns: 4)
+        func index(_ x: CGFloat, _ y: CGFloat) -> Int {
+            slots.slot(at: CGPoint(x: x, y: y), count: 4, width: width, origin: origin)
+        }
+        #expect(index(125.9, 100) == 0 && index(126, 100) == 1)
+        #expect(index(20, 126.9) == 0 && index(20, 127) == 2)
+        #expect(index(239, 79) == 0 && index(13, 174) == 3)
+        #expect(index(-100, 150) == 2 && index(1000, 150) == 3)
+    }
+
+    @Test func targetsRejectPointsOutsideTheVisibleSidebar() {
+        let slots = FavoriteGridSlots(rowSizes: [], defaultColumns: 4)
+        let target = FavoriteGridSlots.Target(slots: slots, frame: CGRect(x: 12, y: 80, width: 228, height: 144),
+                                              viewport: CGRect(x: 0, y: 80, width: 252, height: 80), count: 9)
+        #expect(target.placement(at: CGPoint(x: 11, y: 100), adding: true) == nil)
+        #expect(target.placement(at: CGPoint(x: 241, y: 100), adding: true) == nil)
+        #expect(target.placement(at: CGPoint(x: 120, y: 69), adding: true) == nil)
+        #expect(target.placement(at: CGPoint(x: 120, y: 180), adding: true) == nil)
+    }
+
+    @MainActor @Test func theFinalPointerResolvesTheGapBeforeAnyViewUpdate() throws {
+        let slots = FavoriteGridSlots(rowSizes: [2, 1], defaultColumns: 4)
+        let drag = SidebarDragState(), space = UUID(), owner = UUID()
+        let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 3)))
+        drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: 3)
+        drag.begin(.tab(UUID()), frame: frame, grabbedAt: origin, owner: owner)
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: 230, y: 100), adding: true)
+        #expect(drag.favoriteGap?.index == 2)
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: 120, y: 190), adding: true)
+        let released = try #require(drag.favoriteGap)
+        #expect(released.index == 3 && released.frame.minY == 180)
+        drag.updateFavoriteGap(in: nil, at: .zero, adding: true)
+        #expect(drag.favoriteGap == nil)
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: 230, y: 75), adding: true)
+        #expect(drag.favoriteGap?.index == 0)
+        drag.end(ownedBy: owner)
+        #expect(drag.favoriteGap == nil)
+    }
+}

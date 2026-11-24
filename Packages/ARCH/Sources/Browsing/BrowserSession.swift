@@ -841,11 +841,16 @@ final class EngineRuntime {
         return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
     }
 
-    /// Moves the tab and its live page into the favorites of its Persona, at its saved page's address for a pinned tab, or adds a copy of the page for a tab that stays (`movesIntoFavorites`).
+    /// Moves the tab and its live page into the favorites of its Persona, at its saved page's address for a pinned tab, or adds a copy of the page for a tab that stays (`movesIntoFavorites`). The favorite goes after the Persona's others.
     public func addFavorite(_ tab: Tab) {
+        addFavorite(tab, at: nil)
+    }
+
+    /// Adds the tab's favorite as `addFavorite(_:)` does, at `index` among its Persona's favorites, where the favorites grid's gap shows a dropped tab, or after them for nil.
+    func addFavorite(_ tab: Tab, at index: Int?) {
         guard canAddFavorite(tab), let url = favoriteAddress(of: tab) else { return }
         let favorite = Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID)
-        guard movesIntoFavorites(tab), let spaceID = tab.spaceID else { return favorites.append(favorite) }
+        guard movesIntoFavorites(tab), let spaceID = tab.spaceID else { return favorites = Self.inserting(favorite, at: index, into: favorites) }
         movedFavoriteSources[favorite.id] = MovedFavoriteSource(spaceID: spaceID, savedPage: tab.isPinned ? tab.savedPage : nil)
         leaveSplitView(tab)
         tabs.removeAll { $0 === tab }
@@ -853,7 +858,19 @@ final class EngineRuntime {
         tab.folderID = nil
         tab.isPinned = false
         favoriteTabs[favorite.id] = tab
-        favorites.append(favorite)
+        favorites = Self.inserting(favorite, at: index, into: favorites)
+    }
+
+    /// `list` with `favorite` at `index` among its Persona's favorites there: before the one at that place, or after the Persona's last for nil or a later index, or at the list's end while the Persona has none.
+    static func inserting(_ favorite: Favorite, at index: Int?, into list: [Favorite]) -> [Favorite] {
+        let places = list.indices.filter { list[$0].resolvedPersonaID == favorite.resolvedPersonaID }
+        var list = list
+        if let index, index < places.count {
+            list.insert(favorite, at: places[max(0, index)])
+        } else {
+            list.insert(favorite, at: places.last.map { $0 + 1 } ?? list.endIndex)
+        }
+        return list
     }
 
     /// Gives a favorite's tab back to the space it was moved from, at the end of the list it left, pinned with its saved page if it was pinned. False when the favorite was not made by a move in this session, has no open tab, or its space has gone or belongs to another Persona.
@@ -897,6 +914,26 @@ final class EngineRuntime {
         endFavoriteTab(favorite) { [weak self] in
             self?.favorites.removeAll { $0.id == favorite.id }
         }
+    }
+
+    /// Moves a favorite's page into a space's pinned or open list, keeping its live tab or restoring its saved tab. A pinned destination keeps the favorite's saved page even while its tab shows another address.
+    func moveFavoriteToTab(_ favorite: Favorite, in space: Space, pinned: Bool) -> Tab? {
+        guard let favorite = favorites.first(where: { $0.id == favorite.id }),
+              space.resolvedPersonaID == favorite.resolvedPersonaID,
+              spaces.contains(where: { $0.id == space.id && $0.resolvedPersonaID == favorite.resolvedPersonaID }) else { return nil }
+        let tab = openTab(for: favorite)
+        leaveSplitView(tab)
+        favoriteTabs[favorite.id] = nil
+        savedFavoriteTabs[favorite.id] = nil
+        movedFavoriteSources[favorite.id] = nil
+        favorites.removeAll { $0.id == favorite.id }
+        tab.spaceID = space.id
+        tab.folderID = nil
+        tab.isPinned = pinned
+        tab.savedPage = pinned ? SavedPage(url: favorite.url, title: favorite.title) : nil
+        tab.lastActivatedAt = Date()
+        tabs.append(tab)
+        return tab
     }
 
     /// The favorite's own tab, opened if needed: where it was when Arch last quit, or else at the favorite's address in the default engine.
@@ -1758,6 +1795,13 @@ final class EngineRuntime {
         var reordered = favorites
         reordered.insert(reordered.remove(at: from), at: to)
         favorites = reordered
+    }
+
+    /// Moves a dragged favorite to `index` among the other favorites of its Persona, where the favorites grid's gap shows it.
+    public func moveFavorite(_ id: UUID, toIndex index: Int) {
+        guard let favorite = favorites.first(where: { $0.id == id }) else { return }
+        let reordered = Self.inserting(favorite, at: index, into: favorites.filter { $0.id != id })
+        if reordered != favorites { favorites = reordered }
     }
 
     /// Moves a dragged space to `target`'s place in the switcher, when both belong to the same Persona.

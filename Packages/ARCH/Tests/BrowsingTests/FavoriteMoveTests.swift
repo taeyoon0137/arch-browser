@@ -79,4 +79,90 @@ import Testing
         session.removeFavorite(try #require(session.favorites.first))
         #expect(session.tabs.contains { $0 === small })
     }
+
+    @Test(arguments: [-3, 0, 1, 2, 3, 4, 5, 20])
+    func aDroppedTabTakesAnyIndexAmongItsPersonasFavorites(index: Int) throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["a", "b", "c", "d", "e"] { session.addFavorite(tab(name, in: session, space)) }
+        let originals = session.favorites(in: space.resolvedPersonaID)
+        let other = session.addPersona(named: "Other")
+        let otherSpace = try #require(session.spaces(in: other.id).first)
+        for name in ["foreign-a", "foreign-b"] { session.addFavorite(tab(name, in: session, otherSpace)) }
+        let foreign = session.favorites(in: other.id)
+        // The stored list may interleave Personas even though each grid shows only one.
+        session.moveFavorite(foreign[0].id, to: originals[2])
+        #expect(session.favorites.map(\.id) == [originals[0].id, originals[1].id, foreign[0].id, originals[2].id, originals[3].id, originals[4].id, foreign[1].id])
+
+        let moved = tab("dropped", pinned: true, in: session, space)
+        let saved = SavedPage(url: try #require(URL(string: "https://saved.example/drop")), title: "Saved")
+        moved.savedPage = saved
+        let contents = moved.webContents
+        session.addFavorite(moved, at: index)
+        let favorites = session.favorites(in: space.resolvedPersonaID)
+        let destination = min(max(index, 0), originals.count)
+        let inserted = favorites[destination]
+        var expected = originals.map(\.id)
+        expected.insert(inserted.id, at: destination)
+        #expect(favorites.map(\.id) == expected)
+        #expect(inserted.url == saved.url)
+        #expect(session.favorites(in: other.id) == foreign)
+        #expect(session.favoriteTabs[inserted.id] === moved && moved.webContents === contents)
+        #expect(!session.tabs.contains { $0 === moved } && moved.spaceID == nil && !moved.isPinned)
+
+        session.removeFavorite(inserted)
+        #expect(session.favorites(in: space.resolvedPersonaID) == originals)
+        #expect(moved.spaceID == space.id && moved.isPinned && moved.savedPage == saved && moved.webContents === contents)
+    }
+
+    @Test(arguments: 0..<5, 0..<5)
+    func reorderingUsesTheIndexAmongTheRemainingFavorites(from: Int, to: Int) throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let tabs = ["a", "b", "c", "d", "e"].map { tab($0, in: session, space) }
+        for tab in tabs { session.addFavorite(tab) }
+        let originals = session.favorites(in: space.resolvedPersonaID)
+        let other = session.addPersona(named: "Other")
+        let otherSpace = try #require(session.spaces(in: other.id).first)
+        for name in ["foreign-a", "foreign-b"] { session.addFavorite(tab(name, in: session, otherSpace)) }
+        let foreign = session.favorites(in: other.id)
+        session.moveFavorite(foreign[0].id, to: originals[2])
+
+        session.moveFavorite(originals[from].id, toIndex: to)
+        var expected = originals
+        expected.insert(expected.remove(at: from), at: to)
+        #expect(session.favorites(in: space.resolvedPersonaID) == expected)
+        #expect(session.favorites(in: other.id) == foreign)
+        #expect(session.favorites.count == originals.count + foreign.count)
+        for (favorite, tab) in zip(originals, tabs) {
+            #expect(session.favoriteTabs[favorite.id] === tab)
+        }
+        let settled = session.favorites
+        session.moveFavorite(UUID(), toIndex: 0)
+        #expect(session.favorites == settled)
+    }
+
+    @Test(arguments: [0, 1, 2], [false, true])
+    func aCopiedPageTakesTheRequestedIndexWithoutMovingItsTab(index: Int, agent: Bool) throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["before", "after"] { session.addFavorite(tab(name, in: session, space)) }
+        let originals = session.favorites
+        let copied: Tab
+        if agent {
+            copied = try #require(session.openAgentTab(url: URL(string: "about:blank#agent-copy")!, engine: nil, owner: UUID(), folderName: "Task", in: space.id))
+        } else {
+            copied = tab("small-copy", in: session, space)
+            copied.isInSmallWindow = true
+        }
+        let contents = copied.webContents
+        session.addFavorite(copied, at: index)
+        let inserted = session.favorites[index]
+        var expected = originals
+        expected.insert(inserted, at: index)
+        #expect(session.favorites == expected && inserted.url == copied.url)
+        #expect(session.tabs.contains { $0 === copied })
+        #expect(copied.spaceID == space.id && copied.webContents === contents)
+        #expect(session.favoriteTabs[inserted.id] == nil)
+    }
 }

@@ -6,6 +6,42 @@ import Testing
 
 @MainActor
 @Suite struct SidebarDragTests {
+    @Test func morphingBetweenRowsAndTilesKeepsThePointerAttachedToTheGrabPoint() {
+        let drag = SidebarDragState(), owner = UUID(), space = UUID()
+        let row = CGRect(x: 6, y: 200, width: 240, height: 36)
+        let grabbed = CGPoint(x: row.minX + row.width / 4, y: row.midY)
+        let grid = CGRect(x: 6, y: 40, width: 240, height: 44)
+        drag.favoriteGridTargets[space] = .init(slots: .init(rowSizes: [], defaultColumns: 4), frame: grid,
+                                               viewport: CGRect(x: 0, y: 0, width: 260, height: 600), count: 2)
+        drag.begin(.tab(UUID()), frame: row, grabbedAt: grabbed, owner: owner)
+        defer { drag.end(ownedBy: owner) }
+        #expect(drag.tileFraction == 0 && drag.frame == row)
+        #expect(drag.previewAnchor.x == 0.25 && drag.previewAnchor.y == 0.5)
+        let point = CGPoint(x: grid.midX, y: grid.midY)
+        drag.move(to: point)
+        drag.targetFavoriteSpaceID = space
+        drag.updateFavoriteGap(in: space, at: point, adding: true)
+        #expect(drag.tileFraction == 1 && drag.frame.height == 44)
+        #expect(drag.frame.width == 76)
+        #expect(drag.previewPosition == point)
+        #expect(drag.frame.minX + drag.frame.width / 4 == point.x)
+        #expect(drag.frame.midY == point.y)
+
+        let next = CGPoint(x: point.x + 15, y: point.y + 9)
+        drag.move(to: next)
+        #expect(drag.previewPosition == next)
+        #expect(drag.frame.minX + drag.frame.width / 4 == next.x)
+        #expect(drag.frame.midY == next.y && drag.frame.width == 76)
+
+        drag.targetFavoriteSpaceID = nil
+        drag.updateFavoriteGap(in: nil, at: next, adding: true)
+        #expect(drag.tileFraction == 0 && drag.frame.size == row.size)
+        #expect(drag.previewPosition == next)
+        #expect(drag.frame.minX + drag.frame.width / 4 == next.x && drag.frame.midY == next.y)
+        drag.end(ownedBy: owner)
+        #expect(drag.item == nil && drag.favoriteGap == nil && drag.tileFraction == 0)
+    }
+
     @Test func aTabReordersOnceWhileThePointerStaysOverTheDisplacedRow() {
         let row = CGRect(x: 6, y: 100, width: 224, height: 36)
         let point = CGPoint(x: row.midX, y: row.midY)

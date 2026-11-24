@@ -1,4 +1,4 @@
-// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab and folder rows do, and dragging one over another moves it to that place. A tab or folder released over the symbol of another space of its Persona moves to that space, and one released over a folder's row goes into that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab and folder rows is in `SidebarDragState.swift`.
+// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab and folder rows do. Dragging a space symbol over another moves it to that place; the favorites grid opens a gap where a dragged favorite or tab lands (`FavoritesGridView.swift`). A tab or folder released over the symbol of another space of its Persona moves to that space, and one released over a folder's row goes into that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab and folder rows is in `SidebarDragState.swift`.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -12,11 +12,14 @@ struct SidebarItemFramesKey: PreferenceKey {
     }
 }
 
-/// Drags a favorite or space symbol as a tab row drags: the item lifts into the window's drag layer and follows the pointer, leaves a dimmed slot, and returns to the slot on release. `reorder` receives the pointer's position in the window while the item moves. The item reports its frame through `SidebarItemFramesKey`.
+/// Drags a favorite or space symbol as a tab row drags: the item lifts into the window's drag layer and follows the pointer, leaves a dimmed slot, and returns to the slot on release. `reorder` receives the pointer's position in the window while the item moves. `release`, when given, commits the drop and returns the frame in the window that the item settles into, in place of its own. The item reports its frame through `SidebarItemFramesKey`.
 struct SidebarItemDrag: ViewModifier {
     let item: SidebarDragItem
     /// The corner radius of the slot's dimming.
     let cornerRadius: CGFloat
+    /// Whether the item's own place shows the dimmed slot while it is dragged; false while its layout gives the place no room.
+    var showsSlot = true
+    var release: (() -> CGRect?)? = nil
     let reorder: (CGPoint) -> Void
     @EnvironmentObject private var sidebarDrag: SidebarDragState
     /// Set during the drag gesture. Resets automatically if the gesture is cancelled, such as when the item disappears.
@@ -27,11 +30,11 @@ struct SidebarItemDrag: ViewModifier {
     @State private var owner = UUID()
 
     func body(content: Content) -> some View {
-        let isDragged = sidebarDrag.item == item
+        let isDragged = sidebarDrag.item == item || sidebarDrag.settlingFavoriteID.map { item == .favorite($0) } == true
         content
             .opacity(isDragged ? 0 : 1)
             .background {
-                if isDragged {
+                if isDragged && showsSlot {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(Color.primary.opacity(sidebarDrag.isLifted ? 0.06 : 0))
                 }
             }
@@ -45,7 +48,10 @@ struct SidebarItemDrag: ViewModifier {
             .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(BrowserWindowView.coordinateSpace))
                 .updating($isGestureActive) { _, isActive, _ in isActive = true }
                 .onChanged(dragChanged)
-                .onEnded { _ in dragEnded() })
+                .onEnded { value in
+                    dragChanged(value)
+                    dragEnded()
+                })
             // A cancelled gesture never reports its end. Drop the drag once the gesture is gone and nothing is settling.
             .onChange(of: isGestureActive) { _, isActive in
                 guard !isActive else { return }
@@ -53,7 +59,7 @@ struct SidebarItemDrag: ViewModifier {
                     if !isGestureActive, !sidebarDrag.isSettling { sidebarDrag.end(ownedBy: owner) }
                 }
             }
-            .onDisappear { sidebarDrag.end(ownedBy: owner) }
+            .onDisappear { if !sidebarDrag.isSettling { sidebarDrag.end(ownedBy: owner) } }
     }
 
     private func dragChanged(_ value: DragGesture.Value) {
@@ -69,7 +75,7 @@ struct SidebarItemDrag: ViewModifier {
 
     private func dragEnded() {
         guard sidebarDrag.owner == owner, let frame else { return sidebarDrag.end(ownedBy: owner) }
-        sidebarDrag.settle(into: frame, ownedBy: owner)
+        sidebarDrag.settle(into: release?() ?? frame, ownedBy: owner)
     }
 }
 
@@ -82,25 +88,30 @@ struct SidebarItemDragLayer: View {
 
     var body: some View {
         if let item = sidebarDrag.item, !item.isRow {
-            liftedItem
-                .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
-                .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
-                .offset(x: sidebarDrag.frame.minX, y: sidebarDrag.frame.minY)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            if case .favorite(let id) = item, let favorite = sidebarDrag.liftedFavorite ?? session.favorites.first(where: { $0.id == id }) {
+                SidebarTabDragPreview(session: session, tab: sidebarDrag.liftedTab, favorite: favorite,
+                                      size: sidebarDrag.frame.size, tileFraction: sidebarDrag.tileFraction,
+                                      isLifted: sidebarDrag.isLifted, anchor: sidebarDrag.previewAnchor)
+                    .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+                    .offset(x: sidebarDrag.previewPosition.x, y: sidebarDrag.previewPosition.y)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            } else {
+                liftedItem
+                    .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
+                    .frame(width: sidebarDrag.frame.width, height: sidebarDrag.frame.height)
+                    .offset(x: sidebarDrag.frame.minX, y: sidebarDrag.frame.minY)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         }
     }
 
     // Over the page the item needs a backing of its own.
     @ViewBuilder private var liftedItem: some View {
         switch sidebarDrag.item {
-        case .favorite(let id):
-            if let favorite = session.favorites.first(where: { $0.id == id }) {
-                FavoriteTileView(favorite: favorite, isActive: favorite.id == windowModel.selectedFavoriteID, isOpen: session.hasOpenPage(favorite),
-                                 prompts: session.prompts, tabID: session.favoriteTabs[favorite.id]?.id)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
-            }
         case .space(let id):
             // The symbol keeps the size and color it has in the strip, as a lifted favorite keeps its tile, so it does not jump on lift or when it settles back.
             if let space = session.spaces.first(where: { $0.id == id }) {
@@ -111,7 +122,7 @@ struct SidebarItemDragLayer: View {
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             }
-        case .tab, .folder, nil:
+        case .favorite, .tab, .folder, nil:
             EmptyView()
         }
     }
