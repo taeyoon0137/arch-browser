@@ -101,4 +101,3 @@ These steps require the user's action, credentials, or approval:
 3. To release from this Mac, store a notary profile once with `xcrun notarytool store-credentials <profile name>`, using an app-specific password or an App Store Connect API key, and set `ARCH_NOTARY_PROFILE=<profile name>` when releasing from a hardened build.
 4. For the release pipeline, create the App Store Connect API key and the token, then run `./scripts/set_release_secrets.sh` (Release pipeline). It also needs the Developer ID Application identity and the Developer ID provisioning profile on this Mac.
 5. Approve the first release: a push to `main` or `./scripts/release_app.sh --publish`.
-6. Once a newer release exists, test Check for Updates… and Settings ▸ General ▸ Updates in an installed copy (V.12 in `docs/plan.md`).
