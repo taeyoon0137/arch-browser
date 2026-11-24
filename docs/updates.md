@@ -61,6 +61,8 @@ The workflow reads these repository secrets (Settings ▸ Secrets and variables 
 | `ARCH_NOTARY_ISSUER` | The issuer ID above the App Store Connect key list |
 | `ARCH_SPARKLE_PRIVATE_KEY` | The Sparkle private key exported by `generate_keys -x` |
 
+`./scripts/set_release_secrets.sh` sets them with the GitHub CLI without printing a value. It exports the Developer ID Application identity from the Keychain with a new random password, takes the Developer ID provisioning profile that lists its certificate from Xcode's profile folder, and exports the Sparkle key named in `.release.env`. It asks for the App Store Connect key file, its key ID, the issuer ID, and the token, and deletes its temporary files on exit.
+
 ## Release steps
 
 To release from this Mac, follow the same steps manually:
@@ -97,6 +99,6 @@ These steps require the user's action, credentials, or approval:
 1. Keep a safe copy of the private key separate from the release Mac.
 2. Install one hardened build, made with `swift build -c release` and `ARCH_HARDENED_RUNTIME=1 ./scripts/bundle_app.sh release`, and use it for a day before making the hardened runtime the default. Check that pages load and run scripts on Chromium and WebKit, that WebGL and video play, that a page can use the camera, the microphone, and location after you allow them, that iCloud sync and notifications work, that plugin scripts report syntax errors, that `arch-cli` answers, and that Check for Updates… runs.
 3. To release from this Mac, store a notary profile once with `xcrun notarytool store-credentials <profile name>`, using an app-specific password or an App Store Connect API key, and set `ARCH_NOTARY_PROFILE=<profile name>` when releasing from a hardened build.
-4. Create the Developer ID Application certificate, Developer ID provisioning profile, App Store Connect API key, and token for the release pipeline, then add the secrets listed in Release pipeline.
+4. For the release pipeline, create the App Store Connect API key and the token, then run `./scripts/set_release_secrets.sh` (Release pipeline). It also needs the Developer ID Application identity and the Developer ID provisioning profile on this Mac.
 5. Approve the first release: a push to `main` or `./scripts/release_app.sh --publish`.
 6. Once a newer release exists, test Check for Updates… and Settings ▸ General ▸ Updates in an installed copy (V.12 in `docs/plan.md`).
