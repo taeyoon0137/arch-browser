@@ -1998,6 +1998,11 @@ final class EngineRuntime {
         updateFolder(id) { $0.isCollapsed.toggle() }
     }
 
+    /// The folder menu's Color: one of the space tints, or `nil` for none.
+    public func setTint(_ tint: SpaceTint?, ofFolder id: UUID) {
+        updateFolder(id) { $0.tint = tint }
+    }
+
     /// Expands every collapsed folder that holds the folder `id`, so that the folder's row shows.
     func expandFolders(holding id: UUID) {
         for ancestor in folderTree.ancestors(of: id) where ancestor.isCollapsed {
@@ -2454,10 +2459,11 @@ extension BrowserSession {
                 var updated = moved
                 updated.name = incoming.name
                 updated.parentID = incoming.parentID
+                updated.tint = incoming.tint
                 if moved != updated { updateFolder(moved.id) { $0 = updated } }
             } else {
                 appendFolder(TabFolder(id: incoming.id, spaceID: incoming.spaceID, name: incoming.name, isPinned: true,
-                                       parentID: incoming.parentID))
+                                       parentID: incoming.parentID, tint: incoming.tint))
             }
             appliedFolders.insert(incoming.id)
         }

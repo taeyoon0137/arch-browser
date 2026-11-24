@@ -115,6 +115,20 @@ import Testing
         #expect(plan.repairs.isEmpty && plan.recordsToDelete.isEmpty)
     }
 
+    /// A folder's `tint` gives its color, and a folder without one, as every build before schema version 3 writes, has none. A tint this build does not know holds the folder out with what it holds, as a space's does (`docs/sync.md`, Schema versions).
+    @Test func aFoldersTintGivesItsColorAndAMissingTintGivesNone() throws {
+        var colored = folder(10, 1), older = folder(11, 1), newer = folder(12, 1)
+        colored[.tint] = .text("orange")
+        older.schemaVersion = 2
+        newer[.tint] = .text("ultraviolet")
+        let rows = [persona(), space(1), colored, older, newer, tab(20, 1, 12)]
+        #expect(IncomingSidebarRecords.heldOut(server: rows, local: []) == Set([12, 20].map(name)))
+        let plan = try IncomingSidebarRecords.plan(records: rows, deleted: [:], foundAt: now, defaultEngine: .webKit)
+        let tints = Dictionary(uniqueKeysWithValues: plan.sidebar.folders.map { ($0.id.uuidString, $0.tint) })
+        #expect(tints == [name(10): .orange, name(11): nil])
+        #expect(plan.repairs.isEmpty && plan.recordsToDelete.isEmpty)
+    }
+
     /// A newer build's values and a home page that is not a web page wait with what they hold, so the fetch applies without them; a tab without an engine takes the default one, and a deletion of another type removes nothing.
     @Test func recordsThisBuildCannotApplyWaitWithTheRecordsUnderThem() throws {
         var newer = space(2)

@@ -38,7 +38,8 @@ import Testing
                 "folder": .reference(ordinary.id.uuidString), "url": .text(saved.absoluteString), "title": .text("Saved title"),
                 "engine": .text("chromium"), "customTitle": .text("My tab"), "order": .number(1)])
         let item = try #require(byName[nested.id.uuidString])
-        #expect(item.schemaVersion == 2)
+        #expect(item.schemaVersion == 3)
+        #expect(item[.tint] == nil)
         #expect(item[.parent] == .reference(ordinary.id.uuidString))
         #expect(item[.order] == .number(1))
         #expect(item.fields["live"] == nil)
@@ -46,6 +47,38 @@ import Testing
         let same = try SidebarRecords.records(from: state, foundAt: later)
         let changes = SyncDiff.changes(local: same, scope: { $0.recordType != .setting }, mirror: records, pending: [], foundAt: later)
         #expect(changes.saves.isEmpty && changes.deletions.isEmpty)
+    }
+
+    /// A folder's color goes out as the encrypted text `tint` and comes back through the incoming mapping; clearing it removes the field.
+    @Test func aFoldersTintRoundTripsAndClearingItRemovesTheField() throws {
+        let space = Space(name: "One")
+        var folder = TabFolder(spaceID: space.id, name: "News", isPinned: true)
+        folder.tint = .purple
+        func records(_ folder: TabFolder, at date: Date) throws -> [SyncRecord] {
+            let snapshot = SessionSnapshot(personas: [Persona(id: Persona.defaultID, name: "Home")], spaces: [space], currentSpaceID: space.id,
+                                           favorites: [], tabs: [], folders: [folder])
+            return try SidebarRecords.records(from: SidebarSyncState(snapshot: snapshot, defaultEngine: .webKit), foundAt: date)
+        }
+        let date = Date(timeIntervalSinceReferenceDate: 30)
+        let sent = try records(folder, at: date)
+        let item = try #require(sent.first { $0.recordType == .folder })
+        #expect(item[.tint] == .text("purple"))
+        let ckRecord = SyncCloudKitRecords.ckRecord(from: item)
+        #expect(ckRecord.encryptedValues["tint"] as? String == "purple" && ckRecord["tint"] == nil)
+        let fetched = try #require(SyncCloudKitRecords.syncRecord(from: ckRecord))
+        let plan = try IncomingSidebarRecords.plan(records: sent.map { $0.recordName == item.recordName ? fetched : $0 }, deleted: [:], foundAt: date, defaultEngine: .webKit)
+        #expect(plan.sidebar.folders.map(\.tint) == [.purple])
+        folder.tint = nil
+        let later = date.addingTimeInterval(60)
+        let cleared = SyncDiff.changes(local: try records(folder, at: later), scope: { $0.recordType != .setting }, mirror: sent, pending: [], foundAt: later)
+        #expect(cleared.saves.count == 1 && cleared.saves.first?[.tint] == nil)
+        let clearedRecord = try #require(cleared.saves.first)
+        #expect(clearedRecord.fieldModifiedAt["tint"] == later)
+        let clearedCloud = SyncCloudKitRecords.ckRecord(from: clearedRecord, base: ckRecord)
+        #expect(clearedCloud.encryptedValues["tint"] == nil && clearedCloud["tint"] == nil)
+        let clearedFetched = try #require(SyncCloudKitRecords.syncRecord(from: clearedCloud))
+        let clearedPlan = try IncomingSidebarRecords.plan(records: sent.map { $0.recordName == item.recordName ? clearedFetched : $0 }, deleted: [:], foundAt: later, defaultEngine: .webKit)
+        #expect(clearedPlan.sidebar.folders.map(\.tint) == [nil])
     }
 
     /// Live folders were removed, so this build neither writes nor clears a folder's `live` field: an older Mac's live folder keeps it on the server through this Mac's edits (`docs/sync.md`, Schema versions).

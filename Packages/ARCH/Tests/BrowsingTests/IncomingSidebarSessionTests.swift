@@ -169,6 +169,33 @@ import Testing
         }
     }
 
+    /// An incoming folder's color applies to a new folder and to one this Mac has, and a record without one clears it; the folder menu's Color goes out the same way.
+    @Test func anIncomingFoldersColorAppliesAndClears() async throws {
+        try await temporarySession { session, directory in
+            let current = session.sidebarSyncState, space = try #require(current.spaces.first)
+            let folderID = UUID()
+            func state(_ tint: SpaceTint?) -> SidebarSyncState {
+                let folder = SidebarSyncState.Folder(id: folderID, personaID: space.resolvedPersonaID, spaceID: space.id, parentID: nil, name: "Read", tint: tint)
+                return .init(personas: current.personas, spaces: current.spaces, folders: [folder], favorites: [], pinnedTabs: [])
+            }
+            session.applySidebarSync(state(.orange), deletions: .init())
+            #expect(session.folders.first { $0.id == folderID }?.tint == .orange)
+            session.applySidebarSync(state(.automatic), deletions: .init())
+            #expect(session.folders.first { $0.id == folderID }?.tint == .automatic)
+            session.applySidebarSync(state(nil), deletions: .init())
+            #expect(session.folders.first { $0.id == folderID }?.tint == nil)
+            session.setTint(.green, ofFolder: folderID)
+            #expect(session.sidebarSyncState.folders.map(\.tint) == [.green])
+            try session.saveNow().get()
+            let store = SessionStore(directory: directory, seal: SessionStateSeal { nil })
+            #expect(try #require(store.load()).folders?.map(\.tint) == [.green])
+            session.setTint(nil, ofFolder: folderID)
+            #expect(session.sidebarSyncState.folders.map(\.tint) == [nil])
+            try session.saveNow().get()
+            #expect(try #require(store.load()).folders?.map(\.tint) == [nil])
+        }
+    }
+
     @Test func aNewPinStaysUnloadedWhileAnExistingPageKeepsItsCurrentAddressAndReplayClosesOnlyOnce() async throws {
         try await temporarySession { session, directory in
             let current = session.sidebarSyncState

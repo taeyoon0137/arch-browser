@@ -112,8 +112,8 @@ public enum IncomingSidebarRecords {
             // A home page set here comes only from an http or https page.
             return item[.homeURL] == nil || address(.homeURL).flatMap { $0.scheme?.lowercased() }.map { $0 == "http" || $0 == "https" } == true
         case .folder:
-            // An older build's live folder, whose `live` field this build does not read, applies as an ordinary folder (`docs/sync.md`, Schema versions).
-            return text(.name) != nil
+            // An older build's live folder, whose `live` field this build does not read, applies as an ordinary folder, and a folder without `tint` has no color (`docs/sync.md`, Schema versions).
+            return text(.name) != nil && (item[.tint] == nil || text(.tint).flatMap(SpaceTint.init(rawValue:)) != nil)
         case .favorite:
             return address(.url) != nil && text(.title) != nil
         case .tab:
@@ -315,9 +315,13 @@ public enum IncomingSidebarRecords {
             }
         }
         let folderRows = try folders.map { item in
-            try SidebarSyncState.Folder(id: identifier(item.recordName, type: .folder), personaID: owner(item),
+            let tint = try item[.tint].map { _ in
+                guard let tint = try SpaceTint(rawValue: text(item, .tint)) else { throw InvalidGraph.malformedRecord(item.recordName) }
+                return tint
+            }
+            return try SidebarSyncState.Folder(id: identifier(item.recordName, type: .folder), personaID: owner(item),
                 spaceID: identifier(reference(item, .space), type: .space), parentID: optionalParent(item, .parent),
-                name: text(item, .name))
+                name: text(item, .name), tint: tint)
         }
         let favorites = try SyncOrderKeys.sorted(all.values.filter { $0.recordType == .favorite }).map { item in
             try Favorite(id: identifier(item.recordName, type: .favorite), url: url(item, .url), title: text(item, .title), personaID: owner(item))

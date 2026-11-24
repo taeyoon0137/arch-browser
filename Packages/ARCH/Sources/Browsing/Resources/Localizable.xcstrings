@@ -1031,6 +1031,16 @@
         }
       }
     },
+    "Color" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "색상"
+          }
+        }
+      }
+    },
     "Command argument" : {
       "localizations" : {
         "ko" : {
@@ -2637,6 +2647,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "공유하는 페이지 없음"
+          }
+        }
+      }
+    },
+    "None" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "없음"
           }
         }
       }

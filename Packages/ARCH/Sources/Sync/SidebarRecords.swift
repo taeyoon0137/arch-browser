@@ -30,6 +30,7 @@ public enum SidebarRecords {
             var fields: [String: SyncValue] = ["persona": .reference(personaName(folder.personaID)),
                                                "space": .reference(folder.spaceID.uuidString), "name": .text(folder.name)]
             fields["parent"] = folder.parentID.map { .reference($0.uuidString) }
+            fields["tint"] = folder.tint.map { .text($0.rawValue) }
             append(.folder, folder.id.uuidString, fields)
         }
         for favorite in state.favorites {

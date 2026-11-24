@@ -248,7 +248,7 @@ import Testing
         mirrorFolder.fields["futureField"] = .text("feed-1")
         mirrorFolder.fieldModifiedAt["futureField"] = date(20)
         mirrorFolder.modifiedAt = date(20)
-        mirrorFolder.schemaVersion = 2
+        mirrorFolder.schemaVersion = SyncRecord.currentSchemaVersion + 1
 
         let unchanged = SyncDiff.changes(local: [folder], scope: inSidebar, mirror: [mirrorFolder], pending: [], foundAt: date(100))
         #expect(unchanged == SyncChanges())
@@ -260,6 +260,6 @@ import Testing
         #expect(save?.fields["futureField"] == .text("feed-1"))
         #expect(save?.fieldModifiedAt["futureField"] == date(20))
         #expect(save?[.name] == .text("Reading"))
-        #expect(save?.schemaVersion == 2)
+        #expect(save?.schemaVersion == mirrorFolder.schemaVersion)
     }
 }

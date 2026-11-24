@@ -11,13 +11,16 @@ public struct SidebarSyncState: Equatable {
         public let spaceID: UUID
         public let parentID: UUID?
         public let name: String
+        /// The folder's color, or `nil` for none.
+        public let tint: SpaceTint?
 
-        public init(id: UUID, personaID: UUID, spaceID: UUID, parentID: UUID?, name: String) {
+        public init(id: UUID, personaID: UUID, spaceID: UUID, parentID: UUID?, name: String, tint: SpaceTint? = nil) {
             self.id = id
             self.personaID = personaID
             self.spaceID = spaceID
             self.parentID = parentID
             self.name = name
+            self.tint = tint
         }
     }
 
@@ -76,7 +79,7 @@ public struct SidebarSyncState: Equatable {
         folders = source.compactMap { folder in
             guard allowed.contains(folder.id), let owner = owners[folder.spaceID] else { return nil }
             return Folder(id: folder.id, personaID: owner, spaceID: folder.spaceID, parentID: folder.parentID,
-                          name: folder.name)
+                          name: folder.name, tint: folder.tint)
         }
         let folderSpaces = Dictionary(folders.map { ($0.id, $0.spaceID) }, uniquingKeysWith: { first, _ in first })
         pinnedTabs = Self.firstCopies(snapshot.tabs.compactMap { tab in

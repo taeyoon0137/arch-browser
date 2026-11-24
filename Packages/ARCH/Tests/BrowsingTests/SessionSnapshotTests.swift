@@ -295,6 +295,24 @@ import Testing
         #expect(loaded.folders?.map(\.parentID) == [nil] && loaded.tabs.map(\.folderID) == [docsFolder])
     }
 
+    /// A folder without a color, as every file before version 17 holds it, loads with none and writes no `tint`; a folder's color saves and loads.
+    @Test func folderColorsLoadAndSaveAndOlderFoldersHaveNone() throws {
+        let folder = try SessionFolder()
+        var docs = TabFolder(id: docsFolder, spaceID: spaceA, name: "Docs", isPinned: true)
+        try folder.store.saveNow(SessionSnapshot(version: 16, spaces: [Space(id: spaceA, name: "A")], currentSpaceID: spaceA, favorites: [], tabs: [], folders: [docs])).get()
+        let older = try JSONSerialization.jsonObject(with: folder.contents(of: "session.json")) as? [String: Any]
+        let savedFolders = try #require(older?["folders"] as? [[String: Any]])
+        #expect(savedFolders.count == 1 && savedFolders[0]["tint"] == nil)
+        #expect(try #require(folder.store.load()).folders?.map(\.tint) == [nil])
+        for tint in SpaceTint.allCases {
+            docs.tint = tint
+            try folder.store.saveNow(SessionSnapshot(version: SessionSnapshot.currentVersion, spaces: [Space(id: spaceA, name: "A", tint: .pink)], currentSpaceID: spaceA, favorites: [], tabs: [], folders: [docs])).get()
+            let loaded = try #require(folder.store.load())
+            #expect(loaded.version == 17)
+            #expect(loaded.folders?.map(\.tint) == [tint] && loaded.spaces.map(\.tint) == [.pink])
+        }
+    }
+
     @Test func savedPagesLoadAndSaveWithOpenAndClosedRecords() throws {
         let folder = try SessionFolder()
         try folder.write(version14File)

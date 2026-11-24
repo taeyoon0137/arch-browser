@@ -15,7 +15,7 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
         switch self {
         case .persona: [.name, .order]
         case .space: [.persona, .name, .symbol, .tint, .homeURL, .order]
-        case .folder: [.persona, .space, .parent, .name, .order]
+        case .folder: [.persona, .space, .parent, .name, .tint, .order]
         case .favorite: [.persona, .url, .title, .order]
         case .tab: [.persona, .space, .folder, .url, .title, .customTitle, .engine, .order]
         case .setting: [.value]
@@ -64,7 +64,7 @@ public enum SyncValue: Hashable, Sendable {
 /// One record of the zone. Its record name is unique within the zone whatever its type. A field that the record lacks has no value, such as `folder` on a tab outside folders.
 public struct SyncRecord: Hashable, Sendable {
     /// The record format that this build writes (`docs/sync.md`, Schema versions).
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var recordType: SyncRecordType
     public var recordName: String

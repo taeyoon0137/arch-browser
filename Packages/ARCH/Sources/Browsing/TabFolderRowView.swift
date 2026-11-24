@@ -24,6 +24,11 @@ struct TabFolderRowView: View {
     private var isRenaming: Bool { windowModel.renamingFolderID == folder.id }
     private var isDropTarget: Bool { sidebarDrag.targetFolderID == folder.id }
     private var dropColor: Color { theme.symbolColor(for: windowModel.currentSpace.tint) }
+    /// The folder's color draws as a space's symbol does, in the sidebar's text color where the wash comes too close to it.
+    private var symbolColor: Color {
+        if isDropTarget { return dropColor }
+        return folder.tint.map { theme.symbolColor(for: $0) } ?? .secondary
+    }
 
     /// Rows ignore the pointer while a tab or folder is dragged over them; the folder under it lights up instead.
     private var fill: Color {
@@ -35,7 +40,7 @@ struct TabFolderRowView: View {
         HStack(spacing: 8) {
             Image(systemName: "folder")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isDropTarget ? dropColor : .secondary)
+                .foregroundStyle(symbolColor)
                 .frame(width: 18, height: 18)
                 .accessibilityHidden(true)
             if isRenaming {
@@ -76,6 +81,7 @@ struct TabFolderRowView: View {
                 // An agent folder's tabs are the agent's until the user keeps them, which makes the folder an ordinary one.
                 if folder.isAgentFolder { Button(localized("Keep Tabs")) { session.keepTabs(ofFolder: folder.id) } }
                 Button(localized("Rename Folder")) { windowModel.renamingFolderID = folder.id }
+                if !folder.isAgentFolder { FolderColorPicker(session: session, folder: folder) }
                 FolderNestingItems(session: session, windowModel: windowModel, folder: folder)
                 Divider()
                 Button(localized("Delete Folder")) { withAnimation(.easeInOut(duration: 0.15)) { session.deleteFolder(folder.id) } }
@@ -172,6 +178,22 @@ private struct SessionFolderMenu: View {
         Button(localized("Rename Folder"), action: rename)
         Divider()
         Button(localized("Delete Session…"), role: .destructive, action: delete)
+    }
+}
+
+/// A folder's Color submenu: None, then the space menu's tints, Automatic first.
+private struct FolderColorPicker: View {
+    @ObservedObject var session: BrowserSession
+    let folder: TabFolder
+
+    var body: some View {
+        Picker(localized("Color"), selection: Binding(get: { folder.tint }, set: { session.setTint($0, ofFolder: folder.id) })) {
+            Text(localized("None")).tag(SpaceTint?.none)
+            Divider()
+            ForEach([SpaceTint.automatic] + SpaceTint.colors, id: \.self) { tint in
+                Text(tint.title).tag(SpaceTint?.some(tint))
+            }
+        }
     }
 }
 
