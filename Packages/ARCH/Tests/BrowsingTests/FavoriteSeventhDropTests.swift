@@ -72,7 +72,7 @@ import Testing
                        grabbedAt: CGPoint(x: 100, y: height - 26), owner: owner)
             defer { drag.end(ownedBy: owner) }
             // Opening the new row can enable scrolling and move the grid's origin. Resolve the
-            // same stationary pointer again after every layout, as hover and final release do.
+            // stationary pointer after every layout, as hover and final release do.
             for _ in 0..<3 {
                 let destination = try #require(drag.favoriteDestination(for: tab, in: space, at: point, session: session))
                 drag.targetFavoriteSpaceID = destination

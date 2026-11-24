@@ -841,12 +841,12 @@ final class EngineRuntime {
         return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
     }
 
-    /// Moves the tab and its live page into the favorites of its Persona, at its saved page's address for a pinned tab, or adds a copy of the page for a tab that stays (`movesIntoFavorites`). The favorite goes after the Persona's others.
+    /// Moves the tab and its live page into the favorites of its Persona, at its saved page's address for a pinned tab, or adds a copy of the page for a tab that stays (`movesIntoFavorites`). The favorite follows the Persona's others.
     public func addFavorite(_ tab: Tab) {
         addFavorite(tab, at: nil)
     }
 
-    /// Adds the tab's favorite as `addFavorite(_:)` does, at `index` among its Persona's favorites, where the favorites grid's gap shows a dropped tab, or after them for nil.
+    /// Adds the tab's favorite as `addFavorite(_:)` does, at the grid gap's `index` among its Persona's favorites, or after them for nil.
     func addFavorite(_ tab: Tab, at index: Int?) {
         guard canAddFavorite(tab), let url = favoriteAddress(of: tab) else { return }
         let favorite = Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID)
@@ -861,7 +861,7 @@ final class EngineRuntime {
         favorites = Self.inserting(favorite, at: index, into: favorites)
     }
 
-    /// `list` with `favorite` at `index` among its Persona's favorites there: before the one at that place, or after the Persona's last for nil or a later index, or at the list's end while the Persona has none.
+    /// `list` with `favorite` inserted at `index` among its Persona's favorites: before that favorite, after the Persona's last for nil or a later index, or at the list's end if the Persona has none.
     static func inserting(_ favorite: Favorite, at index: Int?, into list: [Favorite]) -> [Favorite] {
         let places = list.indices.filter { list[$0].resolvedPersonaID == favorite.resolvedPersonaID }
         var list = list
@@ -1797,7 +1797,7 @@ final class EngineRuntime {
         favorites = reordered
     }
 
-    /// Moves a dragged favorite to `index` among the other favorites of its Persona, where the favorites grid's gap shows it.
+    /// Moves a dragged favorite to the grid gap's `index` among its Persona's other favorites.
     public func moveFavorite(_ id: UUID, toIndex index: Int) {
         guard let favorite = favorites.first(where: { $0.id == id }) else { return }
         let reordered = Self.inserting(favorite, at: index, into: favorites.filter { $0.id != id })
@@ -1842,7 +1842,7 @@ final class EngineRuntime {
         return spaceMoveRefusal(ofTab: tab, toPersona: space.resolvedPersonaID) == nil
     }
 
-    /// Move to Space, and a tab dropped on a space's symbol: the tab goes after that space's own pinned or open tabs, outside its folders, with its name, pinned state, and saved page. Within its Persona it keeps its ID and page. In a space of another Persona a new tab of that Persona takes its place (`replacingInPersona(_:_:folderIDs:)`). With `windowsFollow`, as for a drop, a window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. Otherwise, as for the menus, each window keeps its space, and one that selected the tab selects another as closing the tab would, unless its space is the tab's new one. `activating`, the main window where the user moved the tab by a menu, the palette, or a drop, then shows the tab's new space and selects the tab, which loads its page there; moves that the user did not start, such as a plugin's, pass none.
+    /// Move to Space, and a tab dropped on a space's symbol: the tab goes after that space's own pinned or open tabs, outside its folders, with its name, pinned state, and saved page. Within its Persona it keeps its ID and page. In a space of another Persona a new tab of that Persona takes its place (`replacingInPersona(_:_:folderIDs:)`). With `windowsFollow`, as for a drop, a window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. Otherwise, as for the menus, each window keeps its space, and one that selected the tab selects another as closing the tab would, unless its space is the tab's new one. `activating`, the main window where the user moved the tab through a menu, the palette, or a drop, then shows its new space, selects the tab, and loads its page; moves the user did not start, such as a plugin's, pass none.
     public func moveTab(_ id: UUID, toSpace spaceID: UUID, windowsFollow: Bool = true, activating window: BrowserWindowModel? = nil) {
         guard canCarryTab(id, toSpace: spaceID), let moving = tabs.first(where: { $0.id == id }) else { return }
         // The other panes of its split view stay together in the space it leaves.
@@ -1861,7 +1861,7 @@ final class EngineRuntime {
         finishMove(moved, toSpace: spaceID, windowsFollow: windowsFollow, splitNeighbor: splitNeighbor, activating: window)
     }
 
-    /// Move to Space ▸ New Space: makes a space in the Persona, named as a new space is, and moves the tab there as `moveTab(_:toSpace:windowsFollow:activating:)` does for the menus, `activating` showing the new space with the tab selected. Nothing is made for a tab that cannot move there.
+    /// Move to Space ▸ New Space: makes a space in the Persona, named as a new space is, and moves the tab there as `moveTab(_:toSpace:windowsFollow:activating:)` does for the menus, with `activating` showing the new space and selecting the tab. Nothing is made for a tab that cannot move there.
     public func moveTabToNewSpace(_ id: UUID, in personaID: Persona.ID, activating window: BrowserWindowModel? = nil) {
         guard let tab = tabs.first(where: { $0.id == id }), canMoveToAnotherSpace(tab), persona(withID: personaID) != nil,
               spaceMoveRefusal(ofTab: tab, toPersona: personaID) == nil else { return }
@@ -1888,7 +1888,7 @@ final class EngineRuntime {
         return pairs
     }
 
-    /// Ends a move of tabs to the space `spaceID`, given as each old tab with the tab that now holds its place, itself within a Persona. With `windowsFollow`, each window that selects an old tab shows that space and selects its tab. Otherwise each main window that selects one, on another space, selects another tab as closing the tab would (`tabToSelect(after:opener:splitNeighbor:among:spaceID:recentTabs:isShownInAnotherWindow:)`), and one on that space selects its new tab. A window to reopen selects the new tab where it selected the old. `activating`, a main window where the user made the move, instead shows that space and selects the first moved tab, so the tab arrives selected with its page loading. The replaced old tabs then close without joining the closed list, and their pages close through their Persona's runtime, where a page whose downloads still need it stays open on a blank page until they finish (`retire`).
+    /// Ends a move of tabs to the space `spaceID`, given as each old tab with the tab that now holds its place, itself within a Persona. With `windowsFollow`, each window that selects an old tab shows that space and selects its tab. Otherwise each main window that selects one, on another space, selects another tab as closing the tab would (`tabToSelect(after:opener:splitNeighbor:among:spaceID:recentTabs:isShownInAnotherWindow:)`), and one on that space selects its new tab. A window to reopen selects the new tab where it selected the old. `activating`, a main window where the user made the move, instead shows that space, selects the first moved tab, and loads its page. The replaced old tabs then close without joining the closed list, and their pages close through their Persona's runtime, where a page whose downloads still need it stays open on a blank page until they finish (`retire`).
     private func finishMove(_ moved: [(old: Tab, new: Tab)], toSpace spaceID: UUID, windowsFollow: Bool, splitNeighbor: Tab? = nil, activating: BrowserWindowModel? = nil) {
         let activating = activating.flatMap { window in window.kind == .main && windows.contains { $0 === window } ? window : nil }
         for window in windows where window !== activating {
@@ -1979,7 +1979,7 @@ final class EngineRuntime {
         changeFolderTree { $0.moveFolderOut(id) }
     }
 
-    /// A folder's drag among the rows: moves it with everything it holds to where `FolderTree.dropTarget(for:at:)` put it. A move into the space's other list pins or unpins the folder, the folders inside it, and their tabs, so that sync adds or removes their `Folder` and `Tab` records with the next save.
+    /// A folder's drag among the rows: moves it with everything it holds to where `FolderTree.dropTarget(for:at:)` put it. A move into the space's other list pins or unpins the folder, its nested folders, and their tabs, so sync adds or removes their `Folder` and `Tab` records on the next save.
     func moveFolder(_ id: UUID, to target: FolderTree.DropTarget) {
         changeFolderTree { $0.moveFolder(id, to: target) }
     }

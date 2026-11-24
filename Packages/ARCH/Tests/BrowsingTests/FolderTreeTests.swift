@@ -149,7 +149,7 @@ import Testing
         #expect(outline(open) == ["notes"])
         #expect(notes.folderID == work.id && notes.isPinned)
 
-        // Returning to the source clears the preview and shows the committed rows again.
+        // Returning to the source clears the preview and restores the committed rows.
         pinned = tree.rows(in: spaceID, pinned: true)
         #expect(outline(pinned) == ["Work", "  notes"])
         #expect(FolderTree.emptyFolderIDs(in: pinned).isEmpty)
@@ -360,7 +360,7 @@ import Testing
         #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: spaceID, pinned: true)) == .between(parentID: nil, beforeID: nil))
         #expect(tree.dropTarget(for: y.id, at: .onTab(mail.id)) == nil)
         #expect(tree.dropTarget(for: x.id, at: .aboveFolder(y.id)) == nil)
-        // The open list takes it across the divider, at the same places; another space's list refuses it.
+        // The open list accepts it across the divider at the same positions; another space's list refuses it.
         #expect(tree.dropTarget(for: x.id, at: .aboveFolder(open.id)) == .between(parentID: nil, beforeID: open.id, pinned: false))
         #expect(tree.dropTarget(for: x.id, at: .onFolder(open.id)) == .into(open.id))
         #expect(tree.dropTarget(for: x.id, at: .onTab(news.id)) == .between(parentID: nil, beforeID: nil, pinned: false))
@@ -378,7 +378,7 @@ import Testing
         #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["Y", "A", "  B", "    C", "      c", "    b", "  a", "X", "mail"])
     }
 
-    /// A folder dragged across the divider takes everything it holds into the other list: its folders take that list, its tabs are pinned or unpinned in their folders and order, and the drop keeps its place among the folders there. Before release, a preview places only the folders, so the hidden tabs keep their state.
+    /// A folder dragged across the divider moves with all its contents: its folders join the destination list, its tabs pin or unpin without changing folders or order, and the drop preserves its position among the destination folders. Before release, the preview places only folders, so hidden tabs keep their state.
     @Test func aFolderDraggedAcrossTheDividerPinsOrUnpinsWhatItHolds() {
         let a = folder("A")
         let b = folder("B", in: a)
@@ -403,7 +403,7 @@ import Testing
         #expect([a, b].allSatisfy { tree.folder($0.id)?.isPinned == false } && !inA.isPinned && !inB.isPinned)
         #expect(inA.folderID == a.id && inB.folderID == b.id)
 
-        // Into a pinned folder's row, or onto the divider, it pins again with what it holds.
+        // Dropping onto a pinned folder's row or the divider pins it and its contents again.
         let x = folder("X")
         tree = FolderTree(folders: tree.folders + [x], tabs: tree.tabs)
         #expect(tree.dropTarget(for: a.id, at: .onFolder(x.id)) == .into(x.id))

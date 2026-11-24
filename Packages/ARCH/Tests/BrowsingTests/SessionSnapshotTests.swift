@@ -295,7 +295,7 @@ import Testing
         #expect(loaded.folders?.map(\.parentID) == [nil] && loaded.tabs.map(\.folderID) == [docsFolder])
     }
 
-    /// A folder without a color, as every file before version 17 holds it, loads with none and writes no `tint`; a folder's color saves and loads.
+    /// A folder without a color, as in every file before version 17, loads with none and writes no `tint`; folder colors save and load.
     @Test func folderColorsLoadAndSaveAndOlderFoldersHaveNone() throws {
         let folder = try SessionFolder()
         var docs = TabFolder(id: docsFolder, spaceID: spaceA, name: "Docs", isPinned: true)

@@ -46,7 +46,7 @@ public struct TabFolder: Identifiable, Codable, Hashable {
     public var isCollapsed = false
     /// The folder that holds this one, in the same space and list, or `nil` at the top of the list and in files before version 15 (bookmark rule 6). `FolderTree` reads it, and `SessionSnapshot.normalized()` clears one that the file cannot keep.
     public var parentID: UUID?
-    /// The folder's color, from the space tints, which its row's symbol shows. `nil` for no color and in files before version 17.
+    /// The folder's color, chosen from the space tints and shown by its row's symbol. `nil` for no color and in files before version 17.
     public var tint: SpaceTint?
     /// The agent session or outside client's grant whose tabs the folder holds, or nil for a folder of the user's (docs/agents.md, In the browser ▸ Agent folders). It is never encoded, and `session.json` leaves an agent folder out with its tabs (agent decision 10); Keep Tabs clears it, which makes the folder and its tabs the user's.
     public var agentSessionID: UUID?

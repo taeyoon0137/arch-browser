@@ -1,4 +1,4 @@
-// Favorite additions keep wrapping after the configured rows, through both the command and drag paths; command removals reflow the remaining tiles.
+// Favorite additions by command or drag keep wrapping beyond the configured rows; command removals reflow the remaining tiles.
 import AppKit
 import ARCHEngine
 import SwiftUI

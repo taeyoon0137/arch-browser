@@ -1,4 +1,4 @@
-// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab and folder rows do. Dragging a space symbol over another moves it to that place; the favorites grid opens a gap where a dragged favorite or tab lands (`FavoritesGridView.swift`). A tab or folder released over the symbol of another space of its Persona moves to that space, and one released over a folder's row goes into that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab and folder rows is in `SidebarDragState.swift`.
+// Drag and drop in the sidebar. Favorites and space symbols lift into the window's drag layer as tab and folder rows do. Dragging a space symbol over another moves it there; the favorites grid opens a gap where a dragged favorite or tab lands (`FavoritesGridView.swift`). A tab or folder released over the symbol of another space of its Persona moves to that space, and one released over a folder's row goes into that folder. Links, addresses, and files that other apps drop onto the tab list open in new tabs. The drag state that these drags share with tab and folder rows is in `SidebarDragState.swift`.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -12,12 +12,12 @@ struct SidebarItemFramesKey: PreferenceKey {
     }
 }
 
-/// Drags a favorite or space symbol as a tab row drags: the item lifts into the window's drag layer and follows the pointer, leaves a dimmed slot, and returns to the slot on release. `reorder` receives the pointer's position in the window while the item moves. `release`, when given, commits the drop and returns the frame in the window that the item settles into, in place of its own. The item reports its frame through `SidebarItemFramesKey`.
+/// Drags a favorite or space symbol as a tab row drags: the item lifts into the window's drag layer and follows the pointer, leaves a dimmed slot, and returns to the slot on release. `reorder` receives the pointer's position in the window while the item moves. When provided, `release` commits the drop and returns the frame where the item settles, in window coordinates, instead of its own. The item reports its frame through `SidebarItemFramesKey`.
 struct SidebarItemDrag: ViewModifier {
     let item: SidebarDragItem
     /// The corner radius of the slot's dimming.
     let cornerRadius: CGFloat
-    /// Whether the item's own place shows the dimmed slot while it is dragged; false while its layout gives the place no room.
+    /// Whether the item's place shows a dimmed slot during the drag; false when its layout leaves no room for it.
     var showsSlot = true
     var release: (() -> CGRect?)? = nil
     let reorder: (CGPoint) -> Void

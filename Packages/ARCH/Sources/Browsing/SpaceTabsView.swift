@@ -110,7 +110,7 @@ struct SpaceTabsView: View {
     @State private var openContentFrame = CGRect.zero
     @State private var tabReorder = SidebarReorderHover()
     @State private var tabSlot: SidebarTabSlot?
-    /// The place in its space's other list where a dragged folder's slot shows, which the folder moves to, pinning or unpinning what it holds, only on release. Nil while the folder's slot is in its own list, where the folder moves at once.
+    /// The dragged folder's slot in its space's other list. The folder and its contents move there only on release, pinning or unpinning its contents. Nil while the slot is in the folder's own list, where it moves at once.
     @State private var folderSlot: FolderTree.DropTarget?
     /// Lifting a row keeps the original layout until the pointer reaches another slot.
     @State private var hasMovedSlot = false
@@ -136,7 +136,7 @@ struct SpaceTabsView: View {
     private static let folderIndent: CGFloat = 12
     /// The space below each tab, folder, and New Tab row, and below the divider.
     static let rowSpacing: CGFloat = 2
-    /// The room between the space's header and its first row matches the sidebar's sections.
+    /// The room between the space's header and its first row matches the sidebar's section spacing.
     static let headerBottomSpacing: CGFloat = SidebarView.rowSpacing
     /// The divider's height between the pinned and open tabs.
     static let dividerHeight: CGFloat = 14
@@ -662,7 +662,7 @@ struct SpaceTabsView: View {
         return true
     }
 
-    /// `FolderTree.dropTarget(for:at:)` decides each place in the pinned and open lists: the rows make room for the folder between them, with a light haptic at each new position, or a folder's row lights up to take it on release. In its own list the folder moves at once; in the other list its slot shows there (`folderSlot`), and the release moves it with everything it holds, pinning or unpinning its tabs. Back in its own list where no place takes it, the slot returns to the folder's place. Another space's symbol, of any Persona that takes the folder, lights up to take it with what it holds. Where the tree refuses a place, nothing moves, and the row returns to its slot on release.
+    /// `FolderTree.dropTarget(for:at:)` decides each place in the pinned and open lists: the rows make room for the folder between them, with a light haptic at each new position, or a folder's row lights up to take it on release. In its own list the folder moves at once; in the other list a slot previews the move (`folderSlot`), and release moves the folder and its contents, pinning or unpinning its tabs. Returning to its own list without a valid destination restores the slot to the folder's place. Another space's symbol, of any Persona that takes the folder, lights up to take it with what it holds. Where the tree refuses a place, nothing moves, and the row returns to its slot on release.
     private func updateDropTargets(forFolder folderID: UUID, at point: CGPoint) {
         setDropTarget(\.targetSpaceID, to: sidebarDrag.spaceDestination(forFolder: folderID, at: point, session: session))
         let tree = session.folderTree
@@ -693,7 +693,7 @@ struct SpaceTabsView: View {
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
-    /// The list under the pointer: `true` over the pinned area or the divider that ends it, `false` over the open area.
+    /// The list under the pointer: `true` over the pinned area or its ending divider, `false` over the open area.
     private func list(at point: CGPoint) -> Bool? {
         if pinnedAreaFrame.contains(point) || dividerFrame.contains(point) { return true }
         return openAreaFrame.contains(point) ? false : nil
@@ -732,14 +732,14 @@ struct SpaceTabsView: View {
            let target = sidebarDrag.dropFavorite(tab, in: space, session: session) {
             return sidebarDrag.settle(into: target, ownedBy: dragOwner)
         }
-        // Over another space's symbol, the tab goes after that space's own tabs, or the folder with what it holds after its folders, and the lifted row shrinks into the symbol. A dropped tab arrives selected in this window, which shows that space.
+        // Over another space's symbol, the tab goes after that space's own tabs, or the folder with what it holds after its folders, and the lifted row shrinks into the symbol. This window shows that space with the dropped tab selected.
         if let spaceID = sidebarDrag.targetSpaceID {
             withAnimation(.easeInOut(duration: 0.15)) {
                 if case .folder(let id) = item { session.moveFolder(id, toSpace: spaceID) } else { session.moveTab(item.id, toSpace: spaceID, activating: windowModel) }
             }
             return sidebarDrag.settle(intoSpace: spaceID, ownedBy: dragOwner)
         }
-        // Headers and empty child rows share the move. Settle only once the committed child reports its actual frame.
+        // Headers and empty child rows share the move. Settle after the committed child reports its frame.
         if let folderID = sidebarDrag.targetFolderID,
            sidebarDrag.drop(intoFolder: folderID, session: session, ownedBy: dragOwner) {
             return
@@ -751,7 +751,7 @@ struct SpaceTabsView: View {
         } else if case .tab(let id) = item, let tab = session.tabs.first(where: { $0.id == id }) {
             tabSlot?.commit(tab, in: space, session: session)
         } else if case .folder(let id) = item, let folderSlot {
-            // A folder whose slot shows in the other list moves there with what it holds.
+            // A folder with a slot in the other list moves there with its contents.
             withAnimation(.easeInOut(duration: 0.15)) { session.moveFolder(id, to: folderSlot) }
         }
         sidebarDrag.settle(into: slot, within: slotArea, ownedBy: dragOwner)

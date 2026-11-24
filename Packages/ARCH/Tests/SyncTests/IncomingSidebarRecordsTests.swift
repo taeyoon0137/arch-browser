@@ -115,7 +115,7 @@ import Testing
         #expect(plan.repairs.isEmpty && plan.recordsToDelete.isEmpty)
     }
 
-    /// A folder's `tint` gives its color, and a folder without one, as every build before schema version 3 writes, has none. A tint this build does not know holds the folder out with what it holds, as a space's does (`docs/sync.md`, Schema versions).
+    /// A folder's `tint` gives its color; without it, as in every build before schema version 3, the folder has none. An unknown tint holds out the folder and its contents, as for spaces (`docs/sync.md`, Schema versions).
     @Test func aFoldersTintGivesItsColorAndAMissingTintGivesNone() throws {
         var colored = folder(10, 1), older = folder(11, 1), newer = folder(12, 1)
         colored[.tint] = .text("orange")

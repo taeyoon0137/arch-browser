@@ -24,7 +24,7 @@ struct TabFolderRowView: View {
     private var isRenaming: Bool { windowModel.renamingFolderID == folder.id }
     private var isDropTarget: Bool { sidebarDrag.targetFolderID == folder.id }
     private var dropColor: Color { theme.symbolColor(for: windowModel.currentSpace.tint) }
-    /// The folder's color draws as a space's symbol does, in the sidebar's text color where the wash comes too close to it.
+    /// The folder's symbol uses its color like a space symbol, falling back to the sidebar's text color when it is too close to the wash.
     private var symbolColor: Color {
         if isDropTarget { return dropColor }
         return folder.tint.map { theme.symbolColor(for: $0) } ?? .secondary
@@ -203,7 +203,7 @@ private struct SessionFolderMenu: View {
     }
 }
 
-/// A folder's Color submenu: None, then the space menu's tints, Automatic first.
+/// A folder's Color submenu: None, then the space menu's tints with Automatic first.
 private struct FolderColorPicker: View {
     @ObservedObject var session: BrowserSession
     let folder: TabFolder

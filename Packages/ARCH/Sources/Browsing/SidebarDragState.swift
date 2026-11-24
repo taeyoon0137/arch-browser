@@ -128,7 +128,7 @@ struct SidebarReorderHover {
         return (move.slot, move.takesRowsPlace ? row : nil)
     }
 
-    /// Where a slot goes in a rendered list, also before an unopened favorite has a tab to project.
+    /// A slot's position in a rendered list, including before an unopened favorite has a tab to project.
     func insertionIndex(in rows: [FolderTree.Row]) -> Int? {
         switch self {
         case .end: return rows.count
@@ -327,7 +327,7 @@ final class SidebarDragState: ObservableObject {
         return drop.frame
     }
 
-    /// The open place in a space page's favorites grid where a dragged tab or favorite lands on release: its index among the grid's other favorites and its frame in the window (`FavoriteGridSlots`).
+    /// The gap in a space page's favorites grid where a dragged tab or favorite lands on release: its index among the other favorites and its frame in the window (`FavoriteGridSlots`).
     struct FavoriteGap: Equatable {
         let spaceID: UUID
         let index: Int
@@ -336,7 +336,7 @@ final class SidebarDragState: ObservableObject {
         let rowSizes: [Int]?
     }
 
-    /// The gap the favorites grid under the pointer holds open, which the other tiles reflow around.
+    /// The gap held open in the favorites grid under the pointer, around which the other tiles reflow.
     @Published var favoriteGap: FavoriteGap?
     @MainActor
     func favoriteDestination(for tab: Tab, in space: Space, at point: CGPoint, session: BrowserSession) -> UUID? {
@@ -384,7 +384,7 @@ final class SidebarDragState: ObservableObject {
         return frame
     }
 
-    /// Changes only the shape; the pointer's position is not part of the spring.
+    /// Changes only the shape; the spring does not affect pointer position.
     func updateFavoriteShape() {
         guard !isSettling else { return }
         switch item {
@@ -526,7 +526,7 @@ final class SidebarDragState: ObservableObject {
         return true
     }
 
-    /// Only a fresh report from the destination area can finish a folder drop's layout wait.
+    /// A folder drop waits for a fresh layout report from the destination area.
     func settleFolderDrop(in frames: [UUID: CGRect], pinned: Bool, within list: CGRect, ownedBy owner: UUID) {
         guard self.owner == owner, folderDropPinned == pinned, let item, let slot = frames[item.id], slot.height > 0 else { return }
         folderDropPinned = nil

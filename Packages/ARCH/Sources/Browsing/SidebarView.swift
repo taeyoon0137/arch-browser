@@ -142,7 +142,7 @@ struct SidebarView: View {
     }
 }
 
-/// Each Persona shares one grid across its space pages. The grid stays still within that group and travels with the pages when another Persona comes into view.
+/// Each Persona shares one grid across its space pages. The grid stays fixed within that group and moves with the pages when another Persona comes into view.
 struct SidebarSpaceContent: View {
     @ObservedObject var session: BrowserSession
     @EnvironmentObject private var windowModel: BrowserWindowModel
@@ -204,7 +204,7 @@ struct SidebarSpaceContent: View {
     }
 }
 
-/// Clamp the animated page position, so a multi-space switch keeps the grid still until the viewport reaches its Persona's edge.
+/// Clamp the animated page position so a multi-space switch keeps the grid fixed until the viewport reaches its Persona's edge.
 private struct PersonaGridOffset: GeometryEffect {
     var position: CGFloat
     let start: CGFloat

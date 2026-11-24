@@ -85,7 +85,7 @@ import Testing
     @Test(arguments: [[], [3, 1, 2], [4, 2, 1]], [false, true])
     func boundaryDropsOpenSeparateRowsAndKeepTheirVisibleGaps(rowSizes: [Int], adding: Bool) throws {
         let slots = FavoriteGridSlots(rowSizes: rowSizes, defaultColumns: 4)
-        // Includes both full and partially occupied last rows, for additions and reorders.
+        // Includes full and partly filled last rows for additions and reorders.
         for count in 2...9 {
             let total = count + (adding ? 1 : 0)
             let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: count)))
@@ -104,7 +104,7 @@ import Testing
                     #expect(placement.frame.minY == (edge == .first ? origin.y : origin.y + slots.height(for: total - 1) + FavoriteTileLayout.spacing))
                     let center = CGPoint(x: placement.frame.midX, y: placement.frame.midY)
                     #expect(target.placement(at: center, adding: adding, holding: edge) == placement)
-                    // The saved row-size encoding recreates exactly the preview's row break and gap frame.
+                    // The saved row-size encoding reproduces the preview's row break and gap frame exactly.
                     let saved = FavoriteGridSlots(rowSizes: FavoriteTileLayout.rowSizes(from: FavoriteTileLayout.encode(rowSizes: sizes)), defaultColumns: 4)
                     #expect(saved.frames(for: total, width: width, origin: origin)[placement.index] == placement.frame)
                     let ids = (0..<count).map { _ in UUID() }
@@ -121,7 +121,7 @@ import Testing
         let slots = FavoriteGridSlots(rowSizes: [3, 2, 4, 2], defaultColumns: 4)
         #expect(slots.insertingRow(.first, remaining: 4).rowSizes == [1, 3, 2])
         #expect(slots.insertingRow(.last, remaining: 4).rowSizes == [3, 1, 4])
-        // A single existing favorite has no other row to separate from during a reorder.
+        // A single favorite has no other row to separate from during a reorder.
         let target = FavoriteGridSlots.Target(slots: slots, frame: CGRect(origin: origin, size: CGSize(width: width, height: 44)), viewport: viewport, count: 1)
         #expect(target.placement(at: CGPoint(x: 120, y: 75), adding: false)?.newRow == nil)
         #expect(target.placement(at: CGPoint(x: 120, y: 129), adding: false)?.newRow == nil)

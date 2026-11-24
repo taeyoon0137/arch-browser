@@ -59,7 +59,7 @@ import Testing
             let host = hosting(session: session, window: window, drag: drag, frames: frames)
             #expect(await layout(host) { drag.favoriteGridTargets[space.id]?.count == 1 })
 
-            // A programmatic switch may pass more than one space before reaching its target.
+            // A programmatic switch may pass multiple spaces before reaching its target.
             window.switchToSpace(otherNext.id)
             #expect(await layout(host) { drag.favoriteGridTargets[otherNext.id]?.count == 5 })
             #expect(Set(drag.favoriteGridTargets.keys) == [otherNext.id])

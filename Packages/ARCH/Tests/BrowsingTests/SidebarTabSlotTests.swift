@@ -442,7 +442,7 @@ import Testing
         let emptyFrames = [source.id: sourceFrame, other.id: otherFrame]
         let overSource = point(sourceFrame.midY)
 
-        // Both an ordinary move out and a move across the divider leave the stored folder unchanged until release.
+        // Moving out, within the list or across the divider, leaves the stored folder unchanged until release.
         for destination in [SidebarTabSlot.end(pinned: pinned), .end(pinned: !pinned)] {
             var pins = session.folderTree.rows(in: space.id, pinned: true)
             var open = session.folderTree.rows(in: space.id, pinned: false)
@@ -465,7 +465,7 @@ import Testing
         #expect(SidebarTabSlot.end(pinned: !pinned).sourceFolderReturnFrame(for: loose, at: overSource, emptyFolderFrames: emptyFrames) == nil)
     }
 
-    /// The column as the sidebar lays it out with the pinned tabs in place (`SpaceTabsView`). The pinned area starts at 40, keeps at least the empty target's height, and grows with its rows up to `maxPinned`. It scrolls `pinnedScroll` points. The divider follows it at its own fixed height. The open area starts 2 points below the divider and ends at the list's bottom at 540. The New Tab row follows the open rows. `slot` shows the dragged tab where it would land, as the rows do during the drag.
+    /// The column as the sidebar lays it out with the pinned tabs in place (`SpaceTabsView`). The pinned area starts at 40, keeps at least the empty target's height, and grows with its rows up to `maxPinned`. It scrolls `pinnedScroll` points. The divider follows it at a fixed height. The open area starts 2 points below the divider and ends at the list's bottom at 540. The New Tab row follows the open rows. `slot` shows the dragged tab where it would land, as the rows do during the drag.
     private struct TwoAreaColumn {
         let pinnedArea: CGRect, divider: CGRect, openArea: CGRect
         let pinnedListEnd: CGRect
@@ -520,7 +520,7 @@ import Testing
         let committed = column(nil)
         #expect(committed.pinnedArea == empty.pinnedArea && committed.divider == empty.divider && committed.openArea == empty.openArea)
 
-        // The same footprint holds when the existing last pin leaves and comes back.
+        // The same footprint holds when the last pin leaves and returns.
         for slot in [SidebarTabSlot.end(pinned: false), .end(pinned: true), .end(pinned: false)] {
             let shown = column(slot)
             #expect(shown.pinnedArea == committed.pinnedArea)

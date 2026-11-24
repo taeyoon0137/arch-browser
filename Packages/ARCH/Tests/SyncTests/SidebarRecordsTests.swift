@@ -49,7 +49,7 @@ import Testing
         #expect(changes.saves.isEmpty && changes.deletions.isEmpty)
     }
 
-    /// A folder's color goes out as the encrypted text `tint` and comes back through the incoming mapping; clearing it removes the field.
+    /// A folder's color syncs as encrypted text in `tint` and returns through the incoming mapping; clearing it removes the field.
     @Test func aFoldersTintRoundTripsAndClearingItRemovesTheField() throws {
         let space = Space(name: "One")
         var folder = TabFolder(spaceID: space.id, name: "News", isPinned: true)

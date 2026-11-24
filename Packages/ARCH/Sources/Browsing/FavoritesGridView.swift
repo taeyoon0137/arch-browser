@@ -41,7 +41,7 @@ public enum FavoriteTileLayout {
     }
 }
 
-/// The favorites grid's slots, laid out by its row capacities: where each of a number of tiles lies, which slot a dragged item's pointer is over, and the tiles a drag shows. A drag over the grid holds one slot open as a gap, which takes a tile's place, so the other tiles reflow around it and each row keeps equal widths.
+/// The favorites grid's slots, laid out by row capacity: tile positions, the slot under a dragged item's pointer, and the tiles shown during a drag. A drag over the grid holds one slot open as a gap in place of a tile; the other tiles reflow around it, keeping equal widths in each row.
 struct FavoriteGridSlots: Equatable {
     let rowSizes: [Int]
     let defaultColumns: Int
@@ -55,12 +55,12 @@ struct FavoriteGridSlots: Equatable {
         var rowSizes: [Int]? = nil
     }
 
-    /// Only rows in use belong to a saved drop layout; later rows start with the default capacity.
+    /// A saved drop layout includes only rows in use; later rows start with the default capacity.
     private func usedRowSizes(for count: Int) -> [Int] {
         Array(rowSizes.prefix(rows(for: count).count))
     }
 
-    /// A boundary drop gives the item its own row. Materializing the last row's occupied size keeps a partial row from absorbing it. The new last row retains room for later additions.
+    /// A boundary drop gives the item its own row. Setting the last row's capacity to its occupied size keeps a partial row from absorbing it. The new last row leaves room for later additions.
     func insertingRow(_ edge: NewRow, remaining: Int) -> FavoriteGridSlots {
         let occupied = rows(for: remaining)
         let sizes = edge == .first ? [1] + usedRowSizes(for: remaining) : occupied + [FavoriteTileLayout.columnCount(defaultColumns)]
@@ -94,7 +94,7 @@ struct FavoriteGridSlots: Equatable {
                     let tile = expanded.frames(for: total, width: frame.width, origin: frame.origin)[index]
                     return Placement(index: index, frame: tile, newRow: edge, rowSizes: expanded.rowSizes)
                 }
-                // Keep the boundary through the spacing and the scroll padding that appears when the gap makes the grid scroll.
+                // Keep the boundary through the spacing and scroll padding added when the gap makes the grid scroll.
                 if let holding {
                     let held = boundary(holding)
                     if held.frame.insetBy(dx: 0, dy: -(FavoriteTileLayout.spacing + FavoriteTileLayout.gridHeaderSpacing)).contains(point) { return held }
@@ -119,13 +119,13 @@ struct FavoriteGridSlots: Equatable {
         }
     }
 
-    /// One place in the grid while a drag may hold a gap open: a favorite's tile, or the gap a dragged tab lands in.
+    /// A grid position while a drag may hold a gap open: a favorite's tile or the gap a dragged tab lands in.
     enum Entry: Hashable {
         case favorite(UUID)
         case gap
     }
 
-    /// An entry and whether it is collapsed: a dragged favorite outside the grid keeps its view, which carries the drag, without a slot.
+    /// An entry and its collapsed state: a favorite dragged outside the grid keeps the view carrying its drag, without a slot.
     struct Item: Identifiable, Hashable {
         let entry: Entry
         var isCollapsed = false
@@ -172,7 +172,7 @@ struct FavoriteGridSlots: Equatable {
         Self.clamped(Int(((point.y - origin.y + FavoriteTileLayout.spacing / 2) / (FavoriteTileLayout.height + FavoriteTileLayout.spacing)).rounded(.down)), below: rows(for: count).count)
     }
 
-    /// The grid's entries for the favorites `ids` in order. With `gap`, an index among the favorites other than `dragged`, a dragged favorite's own tile shows there, or the gap for a dragged tab. Without it, a dragged favorite collapses at the end, so its place closes.
+    /// The grid's entries for `ids`, in order. `gap` indexes the favorites other than `dragged` and holds the dragged favorite's tile or a gap for a dragged tab. Without it, a dragged favorite collapses at the end, closing its place.
     static func items(_ ids: [UUID], dragged: UUID?, gap: Int?) -> [Item] {
         let isDragged = dragged.map(ids.contains) == true
         var items = ids.filter { !isDragged || $0 != dragged }.map { Item(entry: .favorite($0)) }
@@ -199,7 +199,7 @@ private struct FavoriteTileCollapsed: LayoutValueKey {
     static let defaultValue = false
 }
 
-/// Places the tiles and the gap in their slots (`FavoriteGridSlots`), keeping each favorite in the same view while it crosses rows during a drag. A collapsed tile takes no slot and sits, without size, at the grid's corner.
+/// Places tiles and the gap in their slots (`FavoriteGridSlots`), keeping each favorite in the same view as it crosses rows during a drag. A collapsed tile takes no slot and has zero size at the grid's corner.
 struct FavoriteRows: Layout {
     let slots: FavoriteGridSlots
 
@@ -218,7 +218,7 @@ struct FavoriteRows: Layout {
     }
 }
 
-/// Shows the favorites that every space of the window's Persona shares as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. While a dragged favorite or a tab that can become one is over the grid, the slot under the pointer opens as a dimmed gap and the other tiles reflow around it, as the tab list's rows move aside; release puts the item there. A favorite dragged out of the grid closes its place until it returns. Holding Shift over a tile previews it.
+/// Shows the favorites that every space of the window's Persona shares as a grid of site icons. A favorite that has a tab of its own is marked as open, and clicking it selects that tab. Dragging a favorite or a tab that can become one over the grid opens a dimmed gap under the pointer. The other tiles reflow around it, as tab rows move aside; release puts the item there. A favorite dragged out of the grid closes its place until it returns. Holding Shift over a tile previews it.
 struct FavoritesGridView: View {
     @ObservedObject var session: BrowserSession
     let personaID: Persona.ID
@@ -235,13 +235,13 @@ struct FavoritesGridView: View {
         FavoriteGridSlots(rowSizes: FavoriteTileLayout.rowSizes(from: rowSizes), defaultColumns: columns)
     }
 
-    /// The gap this grid holds open, until release.
+    /// The gap this grid holds open until release.
     private var gap: SidebarDragState.FavoriteGap? {
         guard let gap = sidebarDrag.favoriteGap, gap.spaceID == spaceID, !sidebarDrag.isSettling else { return nil }
         return gap
     }
 
-    /// The dragged favorite, until release.
+    /// The dragged favorite until release.
     private var draggedFavoriteID: UUID? {
         guard case .favorite(let id) = sidebarDrag.item, !sidebarDrag.isSettling else { return nil }
         return id

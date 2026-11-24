@@ -88,7 +88,7 @@ import Testing
         }
     }
 
-    /// The user's report of November 24: a tab moved by Move to Space arrived unselected in a window that stayed on its space, and into another Persona its new tab stayed unloaded until something showed it.
+    /// The user's November 24 report: Move to Space left the tab unselected and the window in its original space. Moving to another Persona left the new tab unloaded until shown.
     @Test func aMenuMoveToAnotherPersonaShowsTheTabSelectedAndLoadedInTheMovingWindow() async throws {
         try await withSession { session, window, space in
             let work = session.addPersona(named: "Work")
@@ -97,7 +97,7 @@ import Testing
             let url = URL(string: "https://example.org/report")!
             let tab = session.openTab(url: url, in: space.id, select: false)
             window.selectTab(tab.id)
-            // Another window on the space that also selected the tab keeps its space and selects another, as before.
+            // Another window in the space with the tab selected keeps its space and selects another tab, as before.
             let other = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
             defer { session.windowWillClose(other) }
             other.selectTab(tab.id)
@@ -154,7 +154,7 @@ import Testing
             let moved = try #require(session.tabs(in: made.id, pinned: false).first)
             #expect(window.currentSpaceID == made.id && window.selectedTabID == moved.id && moved.isLoaded)
 
-            // A move without a moving window, as a plugin's, leaves an unselected tab unselected and unloaded.
+            // A move without a moving window, such as a plugin's, leaves an unselected tab unselected and unloaded.
             let quiet = session.openTab(url: URL(string: "https://example.org/quiet")!, in: made.id, select: false)
             session.moveTab(quiet.id, toSpace: space.id)
             let arrived = try #require(session.tabs(in: space.id, pinned: false).last)

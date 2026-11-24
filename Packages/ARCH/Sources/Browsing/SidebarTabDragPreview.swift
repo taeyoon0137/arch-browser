@@ -1,4 +1,4 @@
-// A dragged tab or favorite keeps one icon and backing while its row becomes a tile, or its tile becomes a row.
+// A dragged tab or favorite keeps one icon and backing as it changes between a row and a tile.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -6,7 +6,7 @@ import SwiftUI
 struct SidebarTabDragPreview: View, Animatable {
     @ObservedObject var session: BrowserSession
     let tab: Tab?
-    /// The source favorite stays present through its transfer to a tab; a drag that started as a tab has none.
+    /// The source favorite remains through its transfer to a tab; a drag started as a tab has none.
     let favorite: Favorite?
     var size: CGSize
     var tileFraction: CGFloat

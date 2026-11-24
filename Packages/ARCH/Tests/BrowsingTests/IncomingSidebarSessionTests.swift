@@ -169,7 +169,7 @@ import Testing
         }
     }
 
-    /// An incoming folder's color applies to a new folder and to one this Mac has, and a record without one clears it; the folder menu's Color goes out the same way.
+    /// An incoming folder color applies to new and existing folders; a record without a color clears it. The folder menu's Color syncs through the same path.
     @Test func anIncomingFoldersColorAppliesAndClears() async throws {
         try await temporarySession { session, directory in
             let current = session.sidebarSyncState, space = try #require(current.spaces.first)
