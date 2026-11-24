@@ -205,9 +205,9 @@ struct CommandPaletteView: View {
             windowModel.dismissCommandPalette()
             windowModel.askAboutPage()
         case .moveTab(let command):
-            // The window keeps its space and selects another tab, as the menus' moves do.
+            // The window shows the tab's new space with the tab selected, as the menus' moves do.
             windowModel.dismissCommandPalette()
-            if let tab = windowModel.selectedTab { session.moveTab(tab.id, toSpace: command.space.id, windowsFollow: false) }
+            if let tab = windowModel.selectedTab { session.moveTab(tab.id, toSpace: command.space.id, windowsFollow: false, activating: windowModel) }
         case .pageStore(let id):
             installFromWebStore(id, fromPage: true)
         case .tab(let tab):

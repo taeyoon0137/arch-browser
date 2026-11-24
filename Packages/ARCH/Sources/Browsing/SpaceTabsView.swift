@@ -636,10 +636,10 @@ struct SpaceTabsView: View {
             session.addFavorite(tab)
             return sidebarDrag.settle(shrinkingInto: bar, ownedBy: dragOwner)
         }
-        // Over another space's symbol, the tab goes after that space's own tabs, or the folder with what it holds after its folders, and the lifted row shrinks into the symbol.
+        // Over another space's symbol, the tab goes after that space's own tabs, or the folder with what it holds after its folders, and the lifted row shrinks into the symbol. A dropped tab arrives selected in this window, which shows that space.
         if let spaceID = sidebarDrag.targetSpaceID {
             withAnimation(.easeInOut(duration: 0.15)) {
-                if case .folder(let id) = item { session.moveFolder(id, toSpace: spaceID) } else { session.moveTab(item.id, toSpace: spaceID) }
+                if case .folder(let id) = item { session.moveFolder(id, toSpace: spaceID) } else { session.moveTab(item.id, toSpace: spaceID, activating: windowModel) }
             }
             return sidebarDrag.settle(intoSpace: spaceID, ownedBy: dragOwner)
         }

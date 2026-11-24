@@ -1798,8 +1798,8 @@ final class EngineRuntime {
         return spaceMoveRefusal(ofTab: tab, toPersona: space.resolvedPersonaID) == nil
     }
 
-    /// Move to Space, and a tab dropped on a space's symbol: the tab goes after that space's own pinned or open tabs, outside its folders, with its name, pinned state, and saved page. Within its Persona it keeps its ID and page. In a space of another Persona a new tab of that Persona takes its place (`replacingInPersona(_:_:folderIDs:)`). With `windowsFollow`, as for a drop, a window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. Otherwise, as for the menus, each window keeps its space, and one that selected the tab selects another as closing the tab would, unless its space is the tab's new one.
-    public func moveTab(_ id: UUID, toSpace spaceID: UUID, windowsFollow: Bool = true) {
+    /// Move to Space, and a tab dropped on a space's symbol: the tab goes after that space's own pinned or open tabs, outside its folders, with its name, pinned state, and saved page. Within its Persona it keeps its ID and page. In a space of another Persona a new tab of that Persona takes its place (`replacingInPersona(_:_:folderIDs:)`). With `windowsFollow`, as for a drop, a window that selects the tab follows it to its new space, so the sidebar keeps showing the page's tab. Otherwise, as for the menus, each window keeps its space, and one that selected the tab selects another as closing the tab would, unless its space is the tab's new one. `activating`, the main window where the user moved the tab by a menu, the palette, or a drop, then shows the tab's new space and selects the tab, which loads its page there; moves that the user did not start, such as a plugin's, pass none.
+    public func moveTab(_ id: UUID, toSpace spaceID: UUID, windowsFollow: Bool = true, activating window: BrowserWindowModel? = nil) {
         guard canCarryTab(id, toSpace: spaceID), let moving = tabs.first(where: { $0.id == id }) else { return }
         // The other panes of its split view stay together in the space it leaves.
         let splitNeighbor = leaveSplitView(moving).flatMap { neighbor in tabs.first { $0.id == neighbor } }
@@ -1814,14 +1814,14 @@ final class EngineRuntime {
         }
         let personaID = self.personaID(ofSpace: spaceID)
         let moved = tab.personaID == personaID ? [(old: tab, new: tab)] : replacingInPersona([tab], personaID, folderIDs: [:])
-        finishMove(moved, toSpace: spaceID, windowsFollow: windowsFollow, splitNeighbor: splitNeighbor)
+        finishMove(moved, toSpace: spaceID, windowsFollow: windowsFollow, splitNeighbor: splitNeighbor, activating: window)
     }
 
-    /// Move to Space ▸ New Space: makes a space in the Persona, named as a new space is, and moves the tab there as `moveTab(_:toSpace:windowsFollow:)` does for the menus. Nothing is made for a tab that cannot move there.
-    public func moveTabToNewSpace(_ id: UUID, in personaID: Persona.ID) {
+    /// Move to Space ▸ New Space: makes a space in the Persona, named as a new space is, and moves the tab there as `moveTab(_:toSpace:windowsFollow:activating:)` does for the menus, `activating` showing the new space with the tab selected. Nothing is made for a tab that cannot move there.
+    public func moveTabToNewSpace(_ id: UUID, in personaID: Persona.ID, activating window: BrowserWindowModel? = nil) {
         guard let tab = tabs.first(where: { $0.id == id }), canMoveToAnotherSpace(tab), persona(withID: personaID) != nil,
               spaceMoveRefusal(ofTab: tab, toPersona: personaID) == nil else { return }
-        moveTab(id, toSpace: makeSpace(in: personaID).id, windowsFollow: false)
+        moveTab(id, toSpace: makeSpace(in: personaID).id, windowsFollow: false, activating: window)
     }
 
     /// For tabs that a move put in a space of the Persona `personaID`: a new tab of that Persona with a new ID takes each one's place in the list, as Merge Into… makes them (`carryContents(ofSpace:toSpace:persona:)`), so sync deletes the old record and uploads a new one in that Persona. It has a stand-in at the old tab's address in the same engine, which loads in the Persona's profile once a window shows it, so the page state, the back and forward list, and the sign-in stay behind, and it keeps the saved page, name, pinned state, and the folder that `folderIDs` maps its old one to. The caller removes the old tabs once the windows have moved their selection (`finishMove(_:toSpace:windowsFollow:splitNeighbor:)`).
@@ -1844,9 +1844,10 @@ final class EngineRuntime {
         return pairs
     }
 
-    /// Ends a move of tabs to the space `spaceID`, given as each old tab with the tab that now holds its place, itself within a Persona. With `windowsFollow`, each window that selects an old tab shows that space and selects its tab. Otherwise each main window that selects one, on another space, selects another tab as closing the tab would (`tabToSelect(after:opener:splitNeighbor:among:spaceID:recentTabs:isShownInAnotherWindow:)`), and one on that space selects its new tab. A window to reopen selects the new tab where it selected the old. The replaced old tabs then close without joining the closed list, and their pages close through their Persona's runtime, where a page whose downloads still need it stays open on a blank page until they finish (`retire`).
-    private func finishMove(_ moved: [(old: Tab, new: Tab)], toSpace spaceID: UUID, windowsFollow: Bool, splitNeighbor: Tab? = nil) {
-        for window in windows {
+    /// Ends a move of tabs to the space `spaceID`, given as each old tab with the tab that now holds its place, itself within a Persona. With `windowsFollow`, each window that selects an old tab shows that space and selects its tab. Otherwise each main window that selects one, on another space, selects another tab as closing the tab would (`tabToSelect(after:opener:splitNeighbor:among:spaceID:recentTabs:isShownInAnotherWindow:)`), and one on that space selects its new tab. A window to reopen selects the new tab where it selected the old. `activating`, a main window where the user made the move, instead shows that space and selects the first moved tab, so the tab arrives selected with its page loading. The replaced old tabs then close without joining the closed list, and their pages close through their Persona's runtime, where a page whose downloads still need it stays open on a blank page until they finish (`retire`).
+    private func finishMove(_ moved: [(old: Tab, new: Tab)], toSpace spaceID: UUID, windowsFollow: Bool, splitNeighbor: Tab? = nil, activating: BrowserWindowModel? = nil) {
+        let activating = activating.flatMap { window in window.kind == .main && windows.contains { $0 === window } ? window : nil }
+        for window in windows where window !== activating {
             guard let pair = moved.first(where: { $0.old.id == window.selectedTabID }) else { continue }
             if windowsFollow || window.currentSpaceID == spaceID {
                 window.currentSpaceID = spaceID
@@ -1855,6 +1856,10 @@ final class EngineRuntime {
                 let next = Self.tabToSelect(after: pair.old, opener: nil, splitNeighbor: splitNeighbor, among: tabs, spaceID: window.currentSpaceID, isShownInAnotherWindow: window.isShownInAnotherWindow)
                 window.selectTab(next?.id)
             }
+        }
+        if let activating, let first = moved.first?.new {
+            activating.currentSpaceID = spaceID
+            activating.selectTab(first.id)
         }
         for (old, new) in moved where new !== old {
             for index in windowsToReopen.indices where windowsToReopen[index].selectedTabID == old.id { windowsToReopen[index].selectedTabID = new.id }

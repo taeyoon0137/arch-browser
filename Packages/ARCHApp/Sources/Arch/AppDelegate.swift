@@ -806,15 +806,15 @@ import Terminal
         }
     }
 
-    /// The window keeps its space and selects another tab, as the tab row's Move to Space does.
+    /// The sidebar target shows the tab's new space with the tab selected, as the tab row's Move to Space does.
     @objc private func moveTabToSpace(_ sender: NSMenuItem) {
         guard let move = sender.representedObject as? SpaceMove else { return }
-        session.moveTab(move.tabID, toSpace: move.spaceID, windowsFollow: false)
+        session.moveTab(move.tabID, toSpace: move.spaceID, windowsFollow: false, activating: session.lastMainWindow)
     }
 
     @objc private func moveTabToNewSpace(_ sender: NSMenuItem) {
         guard let move = sender.representedObject as? NewSpaceMove else { return }
-        session.moveTabToNewSpace(move.tabID, in: move.personaID)
+        session.moveTabToNewSpace(move.tabID, in: move.personaID, activating: session.lastMainWindow)
     }
 
     @objc private func goToRecentPage(_ sender: NSMenuItem) {

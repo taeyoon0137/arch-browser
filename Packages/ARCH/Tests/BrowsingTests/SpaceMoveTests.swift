@@ -88,6 +88,80 @@ import Testing
         }
     }
 
+    /// The user's report of November 24: a tab moved by Move to Space arrived unselected in a window that stayed on its space, and into another Persona its new tab stayed unloaded until something showed it.
+    @Test func aMenuMoveToAnotherPersonaShowsTheTabSelectedAndLoadedInTheMovingWindow() async throws {
+        try await withSession { session, window, space in
+            let work = session.addPersona(named: "Work")
+            let workSpace = try #require(session.spaces(in: work.id).first)
+            let stays = session.openTab(url: URL(string: "https://example.org/stays")!, in: space.id, select: false)
+            let url = URL(string: "https://example.org/report")!
+            let tab = session.openTab(url: url, in: space.id, select: false)
+            window.selectTab(tab.id)
+            // Another window on the space that also selected the tab keeps its space and selects another, as before.
+            let other = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+            defer { session.windowWillClose(other) }
+            other.selectTab(tab.id)
+
+            session.moveTab(tab.id, toSpace: workSpace.id, windowsFollow: false, activating: other)
+            let moved = try #require(session.tabs(in: workSpace.id, pinned: false).first)
+            #expect(moved.id != tab.id && moved.personaID == work.id && !session.tabs.contains { $0 === tab })
+            #expect(other.currentSpaceID == workSpace.id && other.personaID == work.id && other.selectedTabID == moved.id)
+            #expect(moved.isLoaded && moved.url == url)
+            #expect(window.currentSpaceID == space.id && window.selectedTabID == stays.id)
+        }
+    }
+
+    @Test func aMenuMoveWithinThePersonaSelectsAndLoadsAnUnselectedUnloadedTab() async throws {
+        try await withSession { session, window, space in
+            let later = session.makeSpace(in: space.resolvedPersonaID, named: "Later")
+            let current = session.openTab(url: URL(string: "https://example.org/current")!, in: space.id, select: false)
+            let tab = session.openTab(url: URL(string: "https://example.org/pinned")!, in: space.id, pinned: true, select: false)
+            window.selectTab(tab.id)
+            window.selectTab(current.id)
+            // Closing a pinned tab unloads it to its saved page.
+            #expect(session.closeTab(tab))
+            #expect(!tab.isLoaded && window.selectedTabID == current.id)
+
+            session.moveTab(tab.id, toSpace: later.id, windowsFollow: false, activating: window)
+            #expect(tab.spaceID == later.id && tab.isPinned)
+            #expect(window.currentSpaceID == later.id && window.selectedTabID == tab.id && tab.isLoaded)
+        }
+    }
+
+    @Test func aDropOfAnUnselectedTabShowsItSelectedInTheDroppingWindow() async throws {
+        try await withSession { session, window, space in
+            let work = session.addPersona(named: "Work")
+            let workSpace = try #require(session.spaces(in: work.id).first)
+            let current = session.openTab(url: URL(string: "https://example.org/current")!, in: space.id, select: false)
+            let tab = session.openTab(url: URL(string: "https://example.org/dragged")!, in: space.id, select: false)
+            window.selectTab(current.id)
+
+            session.moveTab(tab.id, toSpace: workSpace.id, activating: window)
+            let moved = try #require(session.tabs(in: workSpace.id, pinned: false).first)
+            #expect(window.currentSpaceID == workSpace.id && window.selectedTabID == moved.id && moved.isLoaded)
+            #expect(session.tabs.contains { $0 === current })
+        }
+    }
+
+    @Test func newSpaceShowsTheMovedTabSelectedAndMovesTheUserDidNotStartSelectNothing() async throws {
+        try await withSession { session, window, space in
+            let work = session.addPersona(named: "Work")
+            let current = session.openTab(url: URL(string: "https://example.org/current")!, in: space.id, select: false)
+            let tab = session.openTab(url: URL(string: "https://example.org/new-space")!, in: space.id, select: false)
+            window.selectTab(current.id)
+            session.moveTabToNewSpace(tab.id, in: work.id, activating: window)
+            let made = try #require(session.spaces(in: work.id).last)
+            let moved = try #require(session.tabs(in: made.id, pinned: false).first)
+            #expect(window.currentSpaceID == made.id && window.selectedTabID == moved.id && moved.isLoaded)
+
+            // A move without a moving window, as a plugin's, leaves an unselected tab unselected and unloaded.
+            let quiet = session.openTab(url: URL(string: "https://example.org/quiet")!, in: made.id, select: false)
+            session.moveTab(quiet.id, toSpace: space.id)
+            let arrived = try #require(session.tabs(in: space.id, pinned: false).last)
+            #expect(arrived.personaID == Persona.defaultID && !arrived.isLoaded && window.selectedTabID == moved.id && window.currentSpaceID == made.id)
+        }
+    }
+
     @Test func aFolderMovesWithWhatItHoldsAndItsTabsLoadInTheOtherPersona() async throws {
         try await withSession { session, window, space in
             let work = session.addPersona(named: "Work")

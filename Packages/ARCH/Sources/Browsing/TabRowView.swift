@@ -158,12 +158,12 @@ private struct TabFolderItems: View {
         if tab.folderID != nil {
             Button(localized("Move Out of Folder")) { withAnimation(.easeInOut(duration: 0.15)) { session.moveOutOfFolder(tab) } }
         }
-        // Each window keeps its space, as for the menu bar's and the palette's moves; a window that selected the tab selects another unless the tab comes to its space.
+        // This window shows the tab's new space with the tab selected, as for the menu bar's and the palette's moves; every other window keeps its space, and one that selected the tab selects another unless the tab comes to its space.
         if let spaceID = tab.spaceID {
             MoveToSpaceMenu(sections: session.spaceMoveSections(forTab: tab), currentSpaceID: spaceID) { target in
-                withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toSpace: target, windowsFollow: false) }
+                withAnimation(.easeInOut(duration: 0.15)) { session.moveTab(tab.id, toSpace: target, windowsFollow: false, activating: windowModel) }
             } moveToNewSpace: { personaID in
-                withAnimation(.easeInOut(duration: 0.15)) { session.moveTabToNewSpace(tab.id, in: personaID) }
+                withAnimation(.easeInOut(duration: 0.15)) { session.moveTabToNewSpace(tab.id, in: personaID, activating: windowModel) }
             }
         }
     }
