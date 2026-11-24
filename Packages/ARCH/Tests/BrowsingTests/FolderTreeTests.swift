@@ -136,6 +136,78 @@ import Testing
         #expect([spec, notes, outside].map(inner.isInCollapsedFolder) == [true, false, false])
     }
 
+    @Test func theLastTabsPreviewRevealsItsEmptyFolderBeforeCommitAndRestoresItOnReturn() {
+        let work = folder("Work")
+        let notes = tab("notes", in: work)
+        let tree = FolderTree(folders: [work], tabs: [notes])
+        var pinned = tree.rows(in: spaceID, pinned: true)
+        var open = tree.rows(in: spaceID, pinned: false)
+        #expect(FolderTree.emptyFolderIDs(in: pinned).isEmpty)
+
+        SidebarTabSlot.end(pinned: false).project(notes, pinnedRows: &pinned, openRows: &open)
+        #expect(FolderTree.emptyFolderIDs(in: pinned) == Set([work.id]))
+        #expect(outline(open) == ["notes"])
+        #expect(notes.folderID == work.id && notes.isPinned)
+
+        // Returning to the source clears the preview and shows the committed rows again.
+        pinned = tree.rows(in: spaceID, pinned: true)
+        #expect(outline(pinned) == ["Work", "  notes"])
+        #expect(FolderTree.emptyFolderIDs(in: pinned).isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func aTabPreviewUsesItsDestinationDepthBeforeItsFolderChanges(after: Bool) {
+        let work = folder("Work")
+        let read = folder("Read")
+        let notes = tab("notes", in: work)
+        let article = tab("article", in: read)
+        let tree = FolderTree(folders: [work, read], tabs: [notes, article])
+        var pinned = tree.rows(in: spaceID, pinned: true)
+        var open = tree.rows(in: spaceID, pinned: false)
+
+        SidebarTabSlot.beside(article.id, folder: read.id, pinned: true, after: after)
+            .project(notes, pinnedRows: &pinned, openRows: &open)
+        #expect(FolderTree.emptyFolderIDs(in: pinned) == Set([work.id]))
+        #expect(outline(pinned) == ["Work", "Read"] + (after ? ["  article", "  notes"] : ["  notes", "  article"]))
+        #expect(notes.folderID == work.id)
+    }
+
+    @Test func theLastChildFoldersCrossListPreviewRevealsItsParentWithoutChangingTheTree() {
+        let work = folder("Work")
+        let docs = folder("Docs", in: work)
+        let later = folder("Later", pinned: false)
+        let spec = tab("spec", in: docs)
+        let tree = FolderTree(folders: [work, docs, later], tabs: [spec])
+        let target = FolderTree.DropTarget.between(parentID: later.id, beforeID: nil, pinned: false)
+        let preview = tree.previewingMove(of: docs.id, to: target)
+        let pinned = preview.rows(in: spaceID, pinned: true, hidingContentsOf: docs.id)
+        let open = preview.rows(in: spaceID, pinned: false, hidingContentsOf: docs.id)
+
+        #expect(outline(pinned) == ["Work"])
+        #expect(outline(open) == ["Later", "  Docs"])
+        #expect(FolderTree.emptyFolderIDs(in: pinned, hidingContentsOf: docs.id) == Set([work.id]))
+        #expect(FolderTree.emptyFolderIDs(in: open, hidingContentsOf: docs.id).isEmpty)
+        #expect(tree.folder(docs.id)?.parentID == work.id && spec.isPinned)
+        #expect(FolderTree.emptyFolderIDs(in: tree.rows(in: spaceID, pinned: true)).isEmpty)
+        #expect(FolderTree.emptyFolderIDs(in: tree.rows(in: spaceID, pinned: false)) == Set([later.id]))
+    }
+
+    @Test func collapsedAndDraggedFoldersDoNotShowEmptyRowsForHiddenContents() {
+        var collapsed = folder("Collapsed")
+        collapsed.isCollapsed = true
+        let dragged = folder("Dragged")
+        let empty = folder("Empty")
+        let selected = tab("selected", in: collapsed)
+        let hidden = tab("hidden", in: dragged)
+        let tree = FolderTree(folders: [collapsed, dragged, empty], tabs: [selected, hidden])
+        let rows = tree.rows(in: spaceID, pinned: true, hidingContentsOf: dragged.id)
+        let showingSelected = tree.rows(in: spaceID, pinned: true, hidingContentsOf: dragged.id) { $0.id == selected.id }
+
+        #expect(outline(rows) == ["Collapsed", "Dragged", "Empty"])
+        #expect(FolderTree.emptyFolderIDs(in: rows, hidingContentsOf: dragged.id) == Set([empty.id]))
+        #expect(FolderTree.emptyFolderIDs(in: showingSelected, hidingContentsOf: dragged.id) == Set([empty.id]))
+    }
+
     // MARK: Moves
 
     /// A(1) > B(2) > C(3) and X(1) > Y(2) at the top of the pinned list, with one folder of the open list and one of another space.
@@ -288,12 +360,14 @@ import Testing
         #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: spaceID, pinned: true)) == .between(parentID: nil, beforeID: nil))
         #expect(tree.dropTarget(for: y.id, at: .onTab(mail.id)) == nil)
         #expect(tree.dropTarget(for: x.id, at: .aboveFolder(y.id)) == nil)
-        // The open list and another space's list refuse it.
-        #expect(tree.dropTarget(for: x.id, at: .aboveFolder(open.id)) == nil)
-        #expect(tree.dropTarget(for: x.id, at: .onFolder(open.id)) == nil)
-        #expect(tree.dropTarget(for: x.id, at: .onTab(news.id)) == nil)
-        #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: spaceID, pinned: false)) == nil)
+        // The open list takes it across the divider, at the same places; another space's list refuses it.
+        #expect(tree.dropTarget(for: x.id, at: .aboveFolder(open.id)) == .between(parentID: nil, beforeID: open.id, pinned: false))
+        #expect(tree.dropTarget(for: x.id, at: .onFolder(open.id)) == .into(open.id))
+        #expect(tree.dropTarget(for: x.id, at: .onTab(news.id)) == .between(parentID: nil, beforeID: nil, pinned: false))
+        #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: spaceID, pinned: false)) == .between(parentID: nil, beforeID: nil, pinned: false))
         #expect(tree.dropTarget(for: x.id, at: .listEnd(spaceID: otherSpaceID, pinned: true)) == nil)
+        #expect(!tree.crossesList(x.id, to: .between(parentID: a.id, beforeID: nil)))
+        #expect(tree.crossesList(x.id, to: .into(open.id)))
 
         tree.moveFolder(y.id, to: .between(parentID: a.id, beforeID: b.id))
         #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["A", "  Y", "  B", "    C", "      c", "    b", "  a", "X", "mail"])
@@ -302,6 +376,50 @@ import Testing
         #expect(tree.level(of: y.id) == 4)
         tree.moveFolder(y.id, to: .between(parentID: nil, beforeID: a.id))
         #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["Y", "A", "  B", "    C", "      c", "    b", "  a", "X", "mail"])
+    }
+
+    /// A folder dragged across the divider takes everything it holds into the other list: its folders take that list, its tabs are pinned or unpinned in their folders and order, and the drop keeps its place among the folders there. Before release, a preview places only the folders, so the hidden tabs keep their state.
+    @Test func aFolderDraggedAcrossTheDividerPinsOrUnpinsWhatItHolds() {
+        let a = folder("A")
+        let b = folder("B", in: a)
+        var later = folder("Later", pinned: false), read = folder("Read", pinned: false)
+        later.isCollapsed = true
+        read.isCollapsed = true
+        let inA = tab("a", in: a)
+        let inB = tab("b", in: b)
+        let mail = tab("mail")
+        let news = tab("news", pinned: false)
+        var tree = FolderTree(folders: [a, b, later, read], tabs: [inA, inB, mail, news])
+        let unpin = FolderTree.DropTarget.between(parentID: nil, beforeID: read.id, pinned: false)
+        #expect(tree.dropTarget(for: a.id, at: .aboveFolder(read.id)) == unpin)
+        let preview = tree.previewingMove(of: a.id, to: unpin)
+        #expect(outline(preview.rows(in: spaceID, pinned: false, hidingContentsOf: a.id)) == ["Later", "A", "Read", "news"])
+        #expect(outline(preview.rows(in: spaceID, pinned: true)) == ["mail"])
+        #expect(inA.isPinned && inB.isPinned && tree.folder(a.id)?.isPinned == true)
+
+        tree.moveFolder(a.id, to: unpin)
+        #expect(outline(tree.rows(in: spaceID, pinned: false)) == ["Later", "A", "  B", "    b", "  a", "Read", "news"])
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["mail"])
+        #expect([a, b].allSatisfy { tree.folder($0.id)?.isPinned == false } && !inA.isPinned && !inB.isPinned)
+        #expect(inA.folderID == a.id && inB.folderID == b.id)
+
+        // Into a pinned folder's row, or onto the divider, it pins again with what it holds.
+        let x = folder("X")
+        tree = FolderTree(folders: tree.folders + [x], tabs: tree.tabs)
+        #expect(tree.dropTarget(for: a.id, at: .onFolder(x.id)) == .into(x.id))
+        #expect(tree.dropTarget(for: a.id, at: .listEnd(spaceID: spaceID, pinned: true)) == .between(parentID: nil, beforeID: nil, pinned: true))
+        tree.moveFolder(a.id, to: .into(x.id))
+        #expect(outline(tree.rows(in: spaceID, pinned: true)) == ["X", "  A", "    B", "      b", "    a", "mail"])
+        #expect(inA.isPinned && inB.isPinned)
+    }
+
+    @Test func aFolderHoldingAnAgentsTabStaysInItsList() {
+        let open = folder("Open", pinned: false)
+        let owned = tab("owned", in: open)
+        let ownerID = UUID()
+        owned.agentOwnerOfFolder = { _ in ownerID }
+        let tree = FolderTree(folders: [open], tabs: [owned])
+        #expect(tree.dropTarget(for: open.id, at: .listEnd(spaceID: spaceID, pinned: true)) == nil)
     }
 
     @Test func dropTargetOnAFolderRowPutsTheFolderLastInsideIt() {

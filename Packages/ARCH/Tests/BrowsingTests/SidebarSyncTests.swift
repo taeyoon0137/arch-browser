@@ -69,6 +69,70 @@ import Testing
         #expect(result.pinnedTabs.map(\.id) == [tabs[0].id])
     }
 
+    @Test func aFolderCrossingTheDividerSavesItsContentsAndUpdatesTheSyncableSidebar() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let firstPin = session.makeFolder(in: space.id, pinned: true)
+        let lastPin = session.makeFolder(in: space.id, pinned: true)
+        let firstOpen = session.makeFolder(in: space.id, pinned: false)
+        let lastOpen = session.makeFolder(in: space.id, pinned: false)
+        let outer = session.makeFolder(in: space.id, pinned: false)
+        let inner = session.makeFolder(in: space.id, pinned: false, inside: outer.id)
+        let a = session.openTab(url: page.appendingPathComponent("a"), in: space.id, select: false)
+        let b = session.openTab(url: page.appendingPathComponent("b"), in: space.id, select: false)
+        let c = session.openTab(url: page.appendingPathComponent("c"), in: space.id, select: false)
+        session.moveTab(a.id, toFolder: outer.id)
+        session.moveTab(b.id, toFolder: inner.id)
+        session.moveTab(c.id, toFolder: inner.id)
+        let pages = [a.webContents, b.webContents, c.webContents]
+        let tabOrder = session.tabs.map(\.id)
+        var observed: [SidebarSyncState] = []
+        session.onSidebarSyncSave = { observed.append($0) }
+        defer { session.onSidebarSyncSave = nil }
+
+        let pin = try #require(session.folderTree.dropTarget(for: outer.id, at: .aboveFolder(lastPin.id)))
+        session.moveFolder(outer.id, to: pin)
+        #expect(session.folderTree.topFolders(in: space.id, pinned: true).map(\.id) == [firstPin.id, outer.id, lastPin.id])
+        #expect(session.folderTree.folder(inner.id)?.parentID == outer.id)
+        #expect([outer.id, inner.id].allSatisfy { session.folderTree.folder($0)?.isPinned == true })
+        #expect([a, b, c].allSatisfy { $0.isPinned && $0.savedPage?.url == $0.url })
+        #expect([a.folderID, b.folderID, c.folderID] == [outer.id, inner.id, inner.id])
+        #expect(session.tabs.map(\.id) == tabOrder)
+        try session.saveNow().get()
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+        let pinned = try #require(observed.last)
+        #expect(pinned.folders.filter { $0.parentID == nil }.map(\.id) == [firstPin.id, outer.id, lastPin.id])
+        #expect(pinned.folders.first { $0.id == inner.id }?.parentID == outer.id)
+        #expect(pinned.pinnedTabs.map(\.id) == [a.id, b.id, c.id])
+        #expect(pinned.pinnedTabs.map(\.folderID) == [outer.id, inner.id, inner.id])
+
+        let unpin = try #require(session.folderTree.dropTarget(for: outer.id, at: .aboveFolder(lastOpen.id)))
+        session.moveFolder(outer.id, to: unpin)
+        #expect(session.folderTree.topFolders(in: space.id, pinned: false).map(\.id) == [firstOpen.id, outer.id, lastOpen.id])
+        #expect([outer.id, inner.id].allSatisfy { session.folderTree.folder($0)?.isPinned == false })
+        #expect([a, b, c].allSatisfy { !$0.isPinned && $0.savedPage == nil })
+        #expect([a.folderID, b.folderID, c.folderID] == [outer.id, inner.id, inner.id])
+        #expect(session.tabs.map(\.id) == tabOrder)
+        #expect(a.webContents === pages[0] && b.webContents === pages[1] && c.webContents === pages[2])
+        try session.saveNow().get()
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+        let unpinned = try #require(observed.last)
+        #expect(observed.count == 2)
+        #expect(unpinned.folders.map(\.id) == [firstPin.id, lastPin.id] && unpinned.pinnedTabs.isEmpty)
+
+        let saved = try #require(SessionStore(directory: directory, seal: .fixture).load())
+        #expect(saved.folders?.filter { !$0.isPinned && $0.parentID == nil }.map(\.id) == [firstOpen.id, outer.id, lastOpen.id])
+        #expect(saved.folders?.first { $0.id == inner.id }?.parentID == outer.id)
+        #expect(saved.tabs.map(\.id) == tabOrder.map(Optional.some))
+        #expect(saved.tabs.allSatisfy { !$0.isPinned && $0.savedPage == nil })
+        #expect(saved.tabs.map(\.folderID) == [outer.id, inner.id, inner.id])
+    }
+
     @Test func successfulWritesDeliverCapturedStatesInFileOrderAndFailuresDeliverNothing() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

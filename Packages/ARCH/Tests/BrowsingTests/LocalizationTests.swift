@@ -13,6 +13,7 @@ final class LocalizationTests: XCTestCase {
     func testBrowsingHasKoreanForKeyStrings() throws {
         let strings = try koreanStrings(of: "Browsing")
         XCTAssertEqual(strings["New Tab"], "새 탭")
+        XCTAssertEqual(strings["Empty Folder"], "빈 폴더")
         XCTAssertEqual(strings["Hide Sidebar"], "사이드바 가리기")
         XCTAssertEqual(strings["Open Link in New Tab"], "새 탭에서 링크 열기")
         XCTAssertEqual(strings["%lld of %lld"], "%1$lld/%2$lld")

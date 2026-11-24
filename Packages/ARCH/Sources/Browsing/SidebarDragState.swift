@@ -77,6 +77,13 @@ struct SidebarReorderHover {
         return nil
     }
 
+    /// A preview does not change the tab's stored folder. Its newly empty source row restores that original slot.
+    func sourceFolderReturnFrame(for tab: Tab, at point: CGPoint, emptyFolderFrames: [UUID: CGRect]) -> CGRect? {
+        guard let source = tab.folderID, folderID != source || pinned != tab.isPinned,
+              let frame = emptyFolderFrames[source], frame.contains(point) else { return nil }
+        return frame
+    }
+
     /// The list whose end a dragged tab's pointer is at in the visible `list`, outside which rows are scrolled out of sight: `true` over the divider, which ends the pinned list, and `false` over the New Tab row, which ends the open list, or below it, where no row is, so an open list without tabs takes the tab anywhere under the divider.
     static func listEnd(at point: CGPoint, divider: CGRect?, newTabRow: CGRect?, list: CGRect) -> Bool? {
         guard list.contains(point) else { return nil }
@@ -183,8 +190,10 @@ final class SidebarDragState: ObservableObject {
     @Published var targetSpaceID: UUID?
     /// The folder whose row is under a dragged tab or folder. Releasing the row there moves it into the folder.
     @Published var targetFolderID: UUID?
-    /// Set while a row released over a space's symbol or a folder's row shrinks into it.
+    /// Set while a row released over a space's symbol or the favorites shrinks into it.
     @Published var isEntering = false
+    /// A folder drop waits for its committed row's frame in this area, never its old source frame.
+    private var folderDropPinned: Bool?
     /// Set while a row released with its slot scrolled out of sight fades out at the list's edge.
     @Published var isFadingOut = false
     /// Each space page's favorites grid, or its header while there are none, which accepts a tab from the same page.
@@ -245,6 +254,7 @@ final class SidebarDragState: ObservableObject {
         targetFolderID = nil
         targetFavoriteSpaceID = nil
         isEntering = false
+        folderDropPinned = nil
         isFadingOut = false
         splitDrop = nil
     }
@@ -268,6 +278,47 @@ final class SidebarDragState: ObservableObject {
         space(at: point).flatMap { session.canMoveFolder(id, toSpace: $0) ? $0 : nil }
     }
 
+    /// A visible folder header or empty child row takes a tab through the same folder move.
+    @MainActor
+    func folderDestination(for tab: Tab, at point: CGPoint, in tree: FolderTree,
+                           rowFrames: [UUID: CGRect], emptyFolderFrames: [UUID: CGRect]) -> UUID? {
+        tree.folders.first {
+            (rowFrames[$0.id]?.contains(point) == true || emptyFolderFrames[$0.id]?.contains(point) == true)
+                && tree.canMoveTab(tab, into: $0.id)
+        }?.id
+    }
+
+    /// Commit a folder drop, keeping the lifted row visible until the destination reports its slot.
+    @MainActor
+    func drop(intoFolder folderID: UUID, session: BrowserSession, ownedBy owner: UUID) -> Bool {
+        guard self.owner == owner, !isSettling, let item, let folder = session.folderTree.folder(folderID) else { return false }
+        switch item {
+        case .tab(let id):
+            guard let tab = session.tabs.first(where: { $0.id == id }), session.folderTree.canMoveTab(tab, into: folderID) else { return false }
+        case .folder(let id):
+            guard session.folderTree.canMoveFolder(id, to: .into(folderID)) else { return false }
+        case .favorite, .space:
+            return false
+        }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            folderDropPinned = folder.isPinned
+            isSettling = true
+            targetFolderID = nil
+            // The new row needs a visible slot even when the destination was collapsed.
+            if folder.isCollapsed { session.toggleCollapsed(ofFolder: folderID) }
+            if case .folder(let id) = item { session.moveFolder(id, to: .into(folderID)) }
+            else { session.moveTab(item.id, toFolder: folderID) }
+        }
+        return true
+    }
+
+    /// Only a fresh report from the destination area can finish a folder drop's layout wait.
+    func settleFolderDrop(in frames: [UUID: CGRect], pinned: Bool, within list: CGRect, ownedBy owner: UUID) {
+        guard self.owner == owner, folderDropPinned == pinned, let item, let slot = frames[item.id], slot.height > 0 else { return }
+        folderDropPinned = nil
+        settle(into: slot, within: list, ownedBy: owner)
+    }
+
     /// On release, the lifted item returns to its slot, and its shadow fades out before the item reappears there. With `list`, the visible part of the slot's list, a slot whose middle lies above or below it takes the item only to that edge of the list, where the item fades out.
     func settle(into slot: CGRect, within list: CGRect? = nil, ownedBy owner: UUID) {
         let isHidden = list.map { slot.midY < $0.minY || slot.midY > $0.maxY } ?? false
@@ -288,7 +339,7 @@ final class SidebarDragState: ObservableObject {
         settle(shrinkingInto: spaceSymbolFrames[spaceID] ?? frame, ownedBy: owner)
     }
 
-    /// A row released over a drop target, such as a folder's row, shrinks into the target's frame while its highlight fades.
+    /// A row released over a space symbol or the favorites shrinks into the target's frame while its highlight fades.
     func settle(shrinkingInto target: CGRect, ownedBy owner: UUID) {
         withAnimation(.easeIn(duration: 0.25)) {
             isSettling = true
@@ -328,7 +379,7 @@ struct TabDragLayer: View {
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(SidebarFill.selected.color(in: colorScheme)).opacity(sidebarDrag.isLifted ? 1 : 0))
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(sidebarDrag.isLifted ? 1 : 0))
             .shadow(color: .black.opacity(sidebarDrag.isLifted ? 0.18 : 0), radius: 5, y: 2)
-            // A row released over a space's symbol or a folder's row shrinks into it.
+            // A row released over a space's symbol or the favorites shrinks into it.
             .scaleEffect(sidebarDrag.isEntering ? 0.2 : 1)
             // A row whose slot is out of sight fades out at the list's edge.
             .opacity(sidebarDrag.isEntering || sidebarDrag.isFadingOut ? 0 : 1)

@@ -1935,7 +1935,7 @@ final class EngineRuntime {
         changeFolderTree { $0.moveFolderOut(id) }
     }
 
-    /// A folder's drag among the rows: moves it with everything it holds to where `FolderTree.dropTarget(for:at:)` put it.
+    /// A folder's drag among the rows: moves it with everything it holds to where `FolderTree.dropTarget(for:at:)` put it. A move into the space's other list pins or unpins the folder, the folders inside it, and their tabs, so that sync adds or removes their `Folder` and `Tab` records with the next save.
     func moveFolder(_ id: UUID, to target: FolderTree.DropTarget) {
         changeFolderTree { $0.moveFolder(id, to: target) }
     }

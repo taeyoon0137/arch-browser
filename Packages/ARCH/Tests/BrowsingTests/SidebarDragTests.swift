@@ -107,6 +107,134 @@ import Testing
         #expect(drag.targetFavoriteSpaceID == nil)
     }
 
+    @Test func anEmptyFoldersPlaceholderTakesATabWithoutExtendingItsDropBounds() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let folder = session.makeFolder(in: space.id, pinned: true)
+        let agent = TabFolder(spaceID: space.id, name: "Agent", isPinned: false, agentSessionID: UUID())
+        session.appendFolder(agent)
+        let tab = session.openTab(url: URL(string: "about:blank#folder-drop")!, in: space.id, select: false)
+        let drag = SidebarDragState()
+        let header = CGRect(x: 6, y: 100, width: 224, height: 36)
+        let placeholder = CGRect(x: 18, y: 140, width: 212, height: 36)
+        let agentPlaceholder = placeholder.offsetBy(dx: 0, dy: 100)
+        let stalePlaceholder = placeholder.offsetBy(dx: 0, dy: 200)
+        let headers = [folder.id: header, agent.id: header.offsetBy(dx: 0, dy: 100)]
+        let placeholders = [folder.id: placeholder, agent.id: agentPlaceholder, UUID(): stalePlaceholder]
+        func destination(_ point: CGPoint) -> UUID? {
+            drag.folderDestination(for: tab, at: point, in: session.folderTree, rowFrames: headers, emptyFolderFrames: placeholders)
+        }
+        #expect(destination(CGPoint(x: header.midX, y: header.midY)) == folder.id)
+        let point = CGPoint(x: placeholder.midX, y: placeholder.midY)
+        #expect(destination(point) == folder.id)
+        #expect(destination(CGPoint(x: header.midX, y: 138)) == nil)
+        #expect(destination(CGPoint(x: 10, y: placeholder.midY)) == nil)
+        #expect(destination(CGPoint(x: placeholder.midX, y: placeholder.maxY + 1)) == nil)
+        #expect(destination(CGPoint(x: agentPlaceholder.midX, y: agentPlaceholder.midY)) == nil)
+        #expect(destination(CGPoint(x: stalePlaceholder.midX, y: stalePlaceholder.midY)) == nil)
+
+        let target = try #require(destination(point))
+        let owner = UUID()
+        let lifted = CGRect(x: 6, y: 300, width: 224, height: 36)
+        drag.begin(.tab(tab.id), frame: lifted, grabbedAt: CGPoint(x: lifted.midX, y: lifted.midY), owner: owner)
+        drag.isLifted = true
+        drag.targetFolderID = target
+        let accepted = drag.drop(intoFolder: target, session: session, ownedBy: owner)
+        #expect(accepted && drag.isSettling && drag.isLifted && !drag.isEntering)
+        #expect(drag.frame == lifted && drag.targetFolderID == nil)
+        #expect(tab.folderID == folder.id && tab.isPinned && tab.savedPage?.url == tab.url)
+        #expect(session.folderTree.tabs(inFolder: folder.id).map(\.id) == [tab.id])
+        #expect(destination(point) == nil)
+
+        let area = CGRect(x: 0, y: 80, width: 240, height: 160)
+        // The source can still report the old row before the destination lays out its child.
+        drag.settleFolderDrop(in: [tab.id: lifted], pinned: false, within: area, ownedBy: owner)
+        drag.settleFolderDrop(in: headers, pinned: true, within: area, ownedBy: owner)
+        #expect(drag.frame == lifted && drag.isLifted && !drag.isEntering)
+        drag.settleFolderDrop(in: [tab.id: placeholder], pinned: true, within: area, ownedBy: owner)
+        #expect(drag.frame == placeholder && drag.isSettling && !drag.isLifted)
+        #expect(!drag.isEntering && !drag.isFadingOut && drag.frame.height == lifted.height)
+        drag.end(ownedBy: owner)
+    }
+
+    @Test(arguments: [false, true]) func aDropIntoACollapsedNestedFolderSettlesAfterItsExistingTabs(pinned: Bool) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let parent = session.makeFolder(in: space.id, pinned: pinned)
+        let folder = session.makeFolder(in: space.id, pinned: pinned, inside: parent.id)
+        let existing = session.openTab(url: URL(string: "about:blank#existing"), in: space.id, select: false)
+        session.moveTab(existing.id, toFolder: folder.id)
+        let tab = session.openTab(url: URL(string: "about:blank#nested-drop"), in: space.id, select: false)
+        session.moveTabToListEnd(tab.id, pinned: !pinned)
+        session.toggleCollapsed(ofFolder: folder.id)
+        let originalIDs = Set(session.tabs.map(\.id))
+        let page = tab.webContents
+        let drag = SidebarDragState(), owner = UUID()
+        let lifted = CGRect(x: 6, y: 350, width: 224, height: 36)
+        drag.begin(.tab(tab.id), frame: lifted, grabbedAt: CGPoint(x: lifted.midX, y: lifted.midY), owner: owner)
+        drag.isLifted = true
+
+        let accepted = drag.drop(intoFolder: folder.id, session: session, ownedBy: owner)
+        #expect(accepted && drag.isSettling && drag.frame == lifted && !drag.isEntering)
+        #expect(session.folderTree.folder(folder.id)?.isCollapsed == false)
+        #expect(session.folderTree.tabs(inFolder: folder.id).map(\.id) == [existing.id, tab.id])
+        #expect(Set(session.tabs.map(\.id)) == originalIDs && tab.webContents === page)
+        let rows = session.folderTree.rows(in: space.id, pinned: pinned)
+        #expect(rows.map(\.id) == [parent.id, folder.id, existing.id, tab.id])
+        #expect(rows.last?.depth == 2 && tab.isPinned == pinned)
+
+        let area = CGRect(x: 0, y: 80, width: 240, height: 400)
+        let slot = CGRect(x: 30, y: 214, width: 200, height: 36)
+        drag.settleFolderDrop(in: [tab.id: lifted], pinned: !pinned, within: area, ownedBy: owner)
+        #expect(drag.frame == lifted && drag.isLifted)
+        drag.settleFolderDrop(in: [tab.id: slot], pinned: pinned, within: area, ownedBy: owner)
+        #expect(drag.frame == slot && !drag.isEntering && !drag.isFadingOut)
+        // Later geometry reports must not start another settlement.
+        drag.settleFolderDrop(in: [tab.id: lifted], pinned: pinned, within: area, ownedBy: owner)
+        #expect(drag.frame == slot)
+        drag.end(ownedBy: owner)
+    }
+
+    @Test func aFolderDroppedIntoAnotherFolderUsesItsChildSlotAndKeepsItsContents() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let registry = EngineRegistry()
+        registry.register(SessionTestEngine())
+        let session = try BrowserSession(testRegistry: registry, directory: directory)
+        let space = try #require(session.spaces.first)
+        let target = session.makeFolder(in: space.id, pinned: true)
+        let moved = session.makeFolder(in: space.id, pinned: false)
+        let tab = session.openTab(url: URL(string: "about:blank#carried"), in: space.id, select: false)
+        session.moveTab(tab.id, toFolder: moved.id)
+        session.toggleCollapsed(ofFolder: target.id)
+        let drag = SidebarDragState(), owner = UUID()
+        let lifted = CGRect(x: 6, y: 300, width: 224, height: 36)
+        drag.begin(.folder(moved.id), frame: lifted, grabbedAt: CGPoint(x: lifted.midX, y: lifted.midY), owner: owner)
+        drag.isLifted = true
+
+        let accepted = drag.drop(intoFolder: target.id, session: session, ownedBy: owner)
+        #expect(accepted && drag.isSettling && drag.isLifted && !drag.isEntering)
+        #expect(session.folderTree.folder(moved.id)?.parentID == target.id)
+        #expect(session.folderTree.folder(target.id)?.isCollapsed == false)
+        #expect(session.folderTree.rows(in: space.id, pinned: true).map(\.id) == [target.id, moved.id, tab.id])
+        #expect(tab.isPinned && tab.folderID == moved.id)
+        let slot = CGRect(x: 18, y: 138, width: 212, height: 36)
+        drag.settleFolderDrop(in: [moved.id: slot], pinned: true, within: CGRect(x: 0, y: 80, width: 240, height: 200), ownedBy: owner)
+        #expect(drag.frame == slot && !drag.isEntering && !drag.isFadingOut)
+        drag.end(ownedBy: owner)
+    }
+
     @Test(arguments: [false, true]) func theOtherListsEndShowsAFolderTabThereOnly(pinned: Bool) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

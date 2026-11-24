@@ -104,6 +104,28 @@ struct TabFolderRowView: View {
     }
 }
 
+/// An expanded empty folder's child row, highlighted while it accepts a dragged tab.
+struct EmptyFolderRow: View {
+    let folderID: UUID
+    @EnvironmentObject private var windowModel: BrowserWindowModel
+    @EnvironmentObject private var sidebarDrag: SidebarDragState
+    @Environment(\.spaceTheme) private var theme
+
+    var body: some View {
+        let isDropTarget = sidebarDrag.tabID != nil && sidebarDrag.targetFolderID == folderID
+        Text(localized("Empty Folder"))
+            .font(.system(size: 14))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 36)
+            .padding(.trailing, 6)
+            .frame(height: 36)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isDropTarget ? theme.symbolColor(for: windowModel.currentSpace.tint).opacity(0.15) : .clear))
+    }
+}
+
 /// The agent session's status text on its folder's row, which follows the session as it changes.
 private struct SessionFolderState: View {
     @ObservedObject var owner: AgentSession

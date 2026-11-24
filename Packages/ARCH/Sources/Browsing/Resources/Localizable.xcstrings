@@ -1501,6 +1501,16 @@
         }
       }
     },
+    "Empty Folder" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "빈 폴더"
+          }
+        }
+      }
+    },
     "Engine" : {
       "localizations" : {
         "ko" : {

@@ -431,9 +431,44 @@ import Testing
         #expect(PinState(dragged) == PinState(p1))
     }
 
-    /// The column as the sidebar lays it out with the pinned tabs in place (`SpaceTabsView`). The pinned area starts at 40 and grows with its rows up to `maxPinned`. It scrolls `pinnedScroll` points. The divider follows it. The open area starts 2 points below the divider and ends at the list's bottom at 540. The New Tab row follows the open rows. `slot` shows the dragged tab where it would land, as the rows do during the drag.
+    @Test(arguments: [false, true]) func aTabCanReturnToItsNewlyEmptySourceFolder(pinned: Bool) throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = session.makeFolder(in: space.id, pinned: pinned)
+        let other = session.makeFolder(in: space.id, pinned: pinned)
+        let dragged = tab("source", pinned: pinned, in: session, space)
+        session.moveTab(dragged.id, toFolder: source.id)
+        let sourceFrame = frame(y: 100), otherFrame = frame(y: 200)
+        let emptyFrames = [source.id: sourceFrame, other.id: otherFrame]
+        let overSource = point(sourceFrame.midY)
+
+        // Both an ordinary move out and a move across the divider leave the stored folder unchanged until release.
+        for destination in [SidebarTabSlot.end(pinned: pinned), .end(pinned: !pinned)] {
+            var pins = session.folderTree.rows(in: space.id, pinned: true)
+            var open = session.folderTree.rows(in: space.id, pinned: false)
+            destination.project(dragged, pinnedRows: &pins, openRows: &open)
+            #expect(FolderTree.emptyFolderIDs(in: pinned ? pins : open).contains(source.id))
+            #expect(destination.sourceFolderReturnFrame(for: dragged, at: overSource, emptyFolderFrames: emptyFrames) == sourceFrame)
+            #expect(destination.sourceFolderReturnFrame(for: dragged, at: point(otherFrame.midY), emptyFolderFrames: emptyFrames) == nil)
+            #expect(destination.sourceFolderReturnFrame(for: dragged, at: point(sourceFrame.maxY + 1), emptyFolderFrames: emptyFrames) == nil)
+            #expect(destination.sourceFolderReturnFrame(for: dragged, at: overSource, emptyFolderFrames: [:]) == nil)
+            #expect(dragged.folderID == source.id && dragged.isPinned == pinned)
+        }
+
+        // Clearing the preview restores the original child, and a slot still inside that folder needs no return.
+        let restored = session.folderTree.rows(in: space.id, pinned: pinned)
+        #expect(!FolderTree.emptyFolderIDs(in: restored).contains(source.id))
+        #expect(restored.contains { $0.id == dragged.id })
+        let inside = SidebarTabSlot.beside(dragged.id, folder: source.id, pinned: pinned, after: false)
+        #expect(inside.sourceFolderReturnFrame(for: dragged, at: overSource, emptyFolderFrames: emptyFrames) == nil)
+        let loose = tab("loose", pinned: pinned, in: session, space)
+        #expect(SidebarTabSlot.end(pinned: !pinned).sourceFolderReturnFrame(for: loose, at: overSource, emptyFolderFrames: emptyFrames) == nil)
+    }
+
+    /// The column as the sidebar lays it out with the pinned tabs in place (`SpaceTabsView`). The pinned area starts at 40, keeps at least the empty target's height, and grows with its rows up to `maxPinned`. It scrolls `pinnedScroll` points. The divider follows it at its own fixed height. The open area starts 2 points below the divider and ends at the list's bottom at 540. The New Tab row follows the open rows. `slot` shows the dragged tab where it would land, as the rows do during the drag.
     private struct TwoAreaColumn {
         let pinnedArea: CGRect, divider: CGRect, openArea: CGRect
+        let pinnedListEnd: CGRect
         let pinnedFrames: [UUID: CGRect], openFrames: [UUID: CGRect]
         let newTab: CGRect
         var list: CGRect { pinnedArea.union(divider).union(openArea) }
@@ -443,15 +478,56 @@ import Testing
             var pinned = tree.rows(in: space.id, pinned: true), open = tree.rows(in: space.id, pinned: false)
             slot?.project(tab, pinnedRows: &pinned, openRows: &open)
             let rowFrame = { (y: CGFloat) in CGRect(x: 11, y: y, width: 218, height: 36) }
-            pinnedArea = CGRect(x: 0, y: 40, width: 240, height: min(CGFloat(pinned.count) * 38, maxPinned))
-            pinnedFrames = Dictionary(uniqueKeysWithValues: pinned.enumerated().map { ($1.id, rowFrame(40 + CGFloat($0) * 38 - pinnedScroll)) })
-            divider = CGRect(x: 0, y: pinnedArea.maxY, width: 240, height: pinned.isEmpty ? 36 : 10)
-            let openTop = divider.maxY + 2
+            let rowExtent = SpaceTabsView.emptyPinnedEndHeight + SpaceTabsView.rowSpacing
+            pinnedArea = CGRect(x: 0, y: 40, width: 240, height: min(max(rowExtent, CGFloat(pinned.count) * rowExtent), maxPinned))
+            pinnedFrames = Dictionary(uniqueKeysWithValues: pinned.enumerated().map { ($1.id, rowFrame(40 + CGFloat($0) * rowExtent - pinnedScroll)) })
+            divider = CGRect(x: 0, y: pinnedArea.maxY, width: 240, height: SpaceTabsView.dividerHeight)
+            pinnedListEnd = pinned.isEmpty ? pinnedArea.union(divider) : divider
+            let openTop = divider.maxY + SpaceTabsView.rowSpacing
             openArea = CGRect(x: 0, y: openTop, width: 240, height: 540 - openTop)
-            var openFrames = Dictionary(uniqueKeysWithValues: open.enumerated().map { ($1.id, rowFrame(openTop + CGFloat($0) * 38)) })
-            newTab = rowFrame(openTop + CGFloat(open.count) * 38)
+            var openFrames = Dictionary(uniqueKeysWithValues: open.enumerated().map { ($1.id, rowFrame(openTop + CGFloat($0) * rowExtent)) })
+            newTab = rowFrame(openTop + CGFloat(open.count) * rowExtent)
             openFrames[newTabID] = newTab
             self.openFrames = openFrames
+        }
+    }
+
+    @Test func theFirstAndLastPinUseTheEmptyTargetsHeightInBothDirections() throws {
+        let (session, space, directory) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let dragged = tab("dragged", pinned: false, in: session, space)
+        let newTabID = UUID()
+        func column(_ slot: SidebarTabSlot?) -> TwoAreaColumn {
+            TwoAreaColumn(dragged, slot: slot, in: space, session: session, maxPinned: 500, pinnedScroll: 0, newTabID: newTabID)
+        }
+        let empty = column(nil)
+        #expect(empty.pinnedArea.height == SpaceTabsView.emptyPinnedEndHeight + SpaceTabsView.rowSpacing)
+        #expect(empty.divider.height == SpaceTabsView.dividerHeight)
+        let overTarget = point(empty.pinnedArea.midY)
+        let first = try #require(SidebarTabSlot.next(for: dragged, at: overTarget, current: nil, in: space.id,
+                                                   tree: session.folderTree, rowFrames: empty.openFrames,
+                                                   divider: empty.pinnedListEnd, newTabRow: empty.newTab, list: empty.list))
+        #expect(first.slot == .end(pinned: true) && first.holding == empty.pinnedArea.union(empty.divider))
+
+        // The first slot replaces the empty target, and leaving or returning never shifts either area's boundary.
+        for slot in [first.slot, .end(pinned: false), first.slot] {
+            let shown = column(slot)
+            #expect(shown.pinnedArea == empty.pinnedArea)
+            #expect(shown.divider == empty.divider && shown.openArea == empty.openArea)
+        }
+        first.slot.commit(dragged, in: space, session: session)
+        #expect(dragged.isPinned)
+        let committed = column(nil)
+        #expect(committed.pinnedArea == empty.pinnedArea && committed.divider == empty.divider && committed.openArea == empty.openArea)
+
+        // The same footprint holds when the existing last pin leaves and comes back.
+        for slot in [SidebarTabSlot.end(pinned: false), .end(pinned: true), .end(pinned: false)] {
+            let shown = column(slot)
+            #expect(shown.pinnedArea == committed.pinnedArea)
+            #expect(shown.divider == committed.divider && shown.openArea == committed.openArea)
+            if !slot.pinned {
+                #expect(shown.pinnedFrames.isEmpty && shown.pinnedListEnd.contains(overTarget))
+            }
         }
     }
 
@@ -470,7 +546,7 @@ import Testing
             let frames = SidebarTabSlot.reachableFrames(at: at, pinnedArea: column.pinnedArea, pinnedFrames: column.pinnedFrames, openArea: column.openArea, openFrames: column.openFrames, slotOf: tab.id)
             guard hover.canMove(at: at),
                   let move = SidebarTabSlot.next(for: tab, at: at, current: slot, in: space.id, tree: session.folderTree, rowFrames: frames,
-                                                 divider: column.divider, newTabRow: frames[newTabID], list: column.list),
+                                                 divider: column.pinnedListEnd, newTabRow: frames[newTabID], list: column.list),
                   move.slot != slot else { continue }
             slot = move.slot
             if let frame = move.holding { hover.moved(into: frame) }
@@ -485,7 +561,7 @@ import Testing
         let pins = ["p1", "p2", "p3"].map { tab($0, pinned: true, in: session, space) }
         let open = ["o1", "o2", "o3"].map { tab($0, pinned: false, in: session, space) }
         let dragged = pins[1]
-        // The pinned rows at 40, 78, and 116, the divider at 154, and the open rows from 166, with the New Tab row at 280: among the open tabs, past the last, over the New Tab row, and below it.
+        // The pinned rows at 40, 78, and 116, the divider at 154, and the open rows from 170, with the New Tab row at 284: among the open tabs, past the last, over the New Tab row, and below it.
         let slot = try #require(drag(dragged, toward: y, in: space, session: session))
         #expect(!slot.pinned)
         var shownPins = session.folderTree.rows(in: space.id, pinned: true), shownOpen = session.folderTree.rows(in: space.id, pinned: false)
@@ -505,8 +581,8 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let pinned = tab("pinned", pinned: true, in: session, space)
         let o1 = tab("o1", pinned: false, in: session, space), o2 = tab("o2", pinned: false, in: session, space)
-        // The slot leaves the pinned list and removes the pinned area's row. It makes the divider a row high. The rows below therefore move under the pointer.
-        let slot = try #require(drag(pinned, toward: 140, in: space, session: session))
+        // The empty target keeps the open area at 94. Cross the first displaced open row's middle at 150.
+        let slot = try #require(drag(pinned, toward: 160, in: space, session: session))
         slot.commit(pinned, in: space, session: session)
         #expect(!pinned.isPinned && pinned.savedPage == nil)
         #expect(session.tabsOutsideFolders(in: space.id, pinned: false).map(\.id) == [o1.id, pinned.id, o2.id])
