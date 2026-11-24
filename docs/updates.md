@@ -85,8 +85,8 @@ With `ARCH_HARDENED_RUNTIME=1`, `scripts/bundle_app.sh` drops `--deep` and signs
 | Executable | Entitlements | Reason |
 |---|---|---|
 | `Arch` | The provisioning profile's (iCloud, push), `com.apple.security.device.audio-input`, `com.apple.security.device.camera`, `com.apple.security.personal-information.location` | Pages may use the microphone, camera, and location after the user allows them; the hardened runtime denies access without these keys. Bluetooth, USB, and printing have no hardened runtime key. |
-| `Arch Helper (Renderer)`, `Arch Helper (GPU)` | `com.apple.security.cs.allow-jit` | V8 and WebAssembly in the renderer, and SwiftShader in the GPU process, compile code into memory mapped with `MAP_JIT`. |
-| `Arch Helper`, `Arch Helper (Plugin)`, `Arch Helper (Alerts)`, `arch-cli`, the CEF framework and its libraries | None | The utility processes and the alerts helper compile no code, as in Chromium. The pinned Chromium never launches the Plugin helper. |
+| `Arch Helper`, `Arch Helper (Renderer)`, `Arch Helper (GPU)` | `com.apple.security.cs.allow-jit` | V8 and WebAssembly in the renderer, and SwiftShader in the GPU process, compile code into memory mapped with `MAP_JIT`. The app sets CEF's `browser_subprocess_path` to `Arch Helper`, so it runs every subprocess, renderers included. |
+| `Arch Helper (Plugin)`, `Arch Helper (Alerts)`, `arch-cli`, the CEF framework and its libraries | None | The alerts helper compiles no code, as in Chromium. The pinned Chromium never launches the Plugin helper. |
 
 No executable gets `com.apple.security.cs.allow-unsigned-executable-memory`: every part that writes code maps it with `MAP_JIT`. None gets `com.apple.security.cs.disable-library-validation`, because the script signs the frameworks with the app's identity. The app gets no `allow-jit`: WebKit pages run in the system's WebKit processes, and plugins' JavaScriptCore syntax checks in the app run without its compiler. A hardened build requires a signing identity and stops instead of falling back to ad-hoc signing, because library validation rejects ad-hoc frameworks and the notary service accepts only Developer ID.
 

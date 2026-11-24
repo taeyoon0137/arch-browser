@@ -295,7 +295,7 @@ sign_app() {
 
 # The hardened runtime's entitlements follow Chromium's own macOS signing configuration and entitlement files in the pinned Chromium source. Each key has its reason:
 # - The renderer and GPU helpers get `com.apple.security.cs.allow-jit`. V8 and WebAssembly in the renderer, and SwiftShader's code generator in the GPU process, write code to memory that they map with `MAP_JIT`, which the hardened runtime allows only with this key. Chromium gives these two helpers this key alone: `com.apple.security.cs.allow-unsigned-executable-memory` is not needed, because no part maps executable memory without `MAP_JIT`.
-# - The base helper, which runs the utility processes (network, storage, audio, and video capture), and the Alerts helper get none, as in Chromium. The Plugin helper gets none: the pinned Chromium launches only the base, renderer, and GPU helpers, so CEF's Plugin helper never runs.
+# - The base helper gets the same key. The app sets CEF's `browser_subprocess_path` to it (`CEFBridgeRuntime.mm`), so it runs every subprocess, the renderers and the GPU process among them; without the key, V8 cannot map its code and every page's renderer ends at start. The Alerts helper gets none, as in Chromium. The Plugin helper gets none: the pinned Chromium never launches it.
 # - The app keeps the provisioning profile's entitlements (`docs/sync.md`) and adds the hardened runtime's resource keys for what pages may use after the user allows them, as Chromium's app does: `com.apple.security.device.audio-input` for the microphone, `com.apple.security.device.camera` for the camera, and `com.apple.security.personal-information.location` for location, which the browser process reads through Core Location. Without them, macOS denies those devices to a hardened app whatever the user allows. Bluetooth, USB, and printing have no hardened runtime key; Chromium's keys for them are App Sandbox keys, and Arch has no sandbox. The app sends no Apple Events, so it has no `com.apple.security.automation.apple-events`. It gets no `allow-jit`: WebKit pages run in the system's own WebKit processes, and the plugins' syntax checks run JavaScriptCore in the app, which runs code without its compiler when the process may not map `MAP_JIT` memory.
 # - No executable gets `com.apple.security.cs.disable-library-validation`: the script signs the CEF framework, its libraries, and Sparkle's framework with the app's own identity, so library validation accepts them.
 # Ad-hoc signing has no team, so library validation would refuse the frameworks, and the notary service accepts only Developer ID; a hardened build therefore fails instead of falling back to ad-hoc signing.
@@ -329,7 +329,7 @@ sign_hardened() {
   codesign --force --sign "$1" --options runtime --timestamp "$cef" || return 1
   for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
     case "$suffix" in
-      " (GPU)" | " (Renderer)") helper_entitlements="$JIT_ENTITLEMENTS" ;;
+      "" | " (GPU)" | " (Renderer)") helper_entitlements="$JIT_ENTITLEMENTS" ;;
       *) helper_entitlements="" ;;
     esac
     codesign --force --sign "$1" --options runtime --timestamp ${helper_entitlements:+--entitlements "$helper_entitlements"} "$APP/Contents/Frameworks/Arch Helper$suffix.app" || return 1
@@ -361,7 +361,7 @@ PLIST
     echo "hardened signing failed; the bundle is not signed" >&2
     exit 1
   fi
-  echo "signed with the hardened runtime; the renderer and GPU helpers may compile code, and the app may use the camera, microphone, and location" >&2
+  echo "signed with the hardened runtime; the base, renderer, and GPU helpers may compile code, and the app may use the camera, microphone, and location" >&2
 elif ! SIGN_OUTPUT="$(sign_app "${IDENTITY:--}" "${PROFILE:+$ENTITLEMENTS}" 2>&1)"; then
   printf '%s\n' "$SIGN_OUTPUT" >&2
   echo "signing failed; signing ad hoc instead, without the provisioning profile, so the Keychain items Chromium created under the identity may ask for access" >&2
