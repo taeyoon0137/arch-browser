@@ -2050,7 +2050,6 @@ final class EngineRuntime {
             }
         }
         if let activating, let first = moved.first?.new {
-            activating.currentSpaceID = spaceID
             activating.selectTab(first.id)
         }
         for (old, new) in moved where new !== old {

@@ -119,10 +119,10 @@ struct SidebarTabDragPreview: View, Animatable {
     }
 
     private func loadFavoriteIcon() {
-        let url = favorite.flatMap { FaviconLoader.defaultIconURL(for: $0.url) }
+        let url = favorite?.url
         iconURL = url
         guard let url else { return }
-        FaviconLoader.load(url) { image in
+        FaviconLoader.loadPageIcon(for: url) { image in
             if iconURL == url { favoriteIcon = image }
         }
     }

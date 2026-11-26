@@ -49,10 +49,10 @@ final class UnloadedWebContents: EngineWebContents {
         self.init(url: record.url, title: record.title, engine: record.engine ?? defaultEngine, state: record.state)
     }
 
-    /// Shows the site's usual icon, its `/favicon.ico`, until the page loads and reports its own, so that the tab's row keeps an icon meanwhile. The icon loads as the engines load theirs, without cookies (`FaviconLoader`).
+    /// Finds the saved page's declared site icon without creating an engine page or sending cookies (`FaviconLoader`).
     func loadSiteIcon() {
-        guard let pageURL = url, let iconURL = FaviconLoader.defaultIconURL(for: pageURL) else { return }
-        FaviconLoader.load(iconURL) { [weak self] image in
+        guard let pageURL = url else { return }
+        FaviconLoader.loadPageIcon(for: pageURL) { [weak self] image in
             guard let self, let image, self.url == pageURL else { return }
             self.favicon = image
             self.uiDelegate?.webContentsDidChangeFavicon(self)

@@ -136,6 +136,8 @@ struct SpaceTabsView: View {
     private static let folderIndent: CGFloat = 12
     /// The space below each tab, folder, and New Tab row, and below the divider.
     static let rowSpacing: CGFloat = 2
+    /// Shared by folder disclosure, child transitions, and the layout around them.
+    static let folderMotion = Animation.spring(response: 0.28, dampingFraction: 0.9)
     /// The room between the space's header and its first row matches the sidebar's section spacing.
     static let headerBottomSpacing: CGFloat = SidebarView.rowSpacing
     /// The divider's height between the pinned and open tabs.
@@ -158,6 +160,19 @@ struct SpaceTabsView: View {
             case .slot: return "slot"
             }
         }
+
+        var depth: Int {
+            if case .row(let row) = self { return row.depth }
+            return 0
+        }
+    }
+
+    /// Drag operations retain their timing; folder changes use the shared disclosure spring.
+    private var rowMotion: Animation? {
+        if sidebarDrag.item?.isRow == true {
+            return sidebarDrag.folderID == nil ? .easeOut(duration: 0.15) : .easeInOut(duration: 0.15)
+        }
+        return sidebarDrag.item == nil ? Self.folderMotion : nil
     }
 
     /// The dragged row whose slot has moved, until release.
@@ -309,7 +324,7 @@ struct SpaceTabsView: View {
                 }
             }
             // UUIDs stay with folder children as they move; a drag changes their layout, not their visibility.
-            .transition(sidebarDrag.item?.isRow == true ? .identity : Self.rowTransition)
+            .transition(transition(for: item))
         }
     }
 
@@ -336,8 +351,11 @@ struct SpaceTabsView: View {
                     .transaction { $0.animation = nil }
             }
         }
-        // A row that closes or opens fades while the rows after it slide into place. Only a change of which rows the list holds animates here, so a drag's moves keep their own timing.
-        .animation(sidebarDrag.item?.isRow == true ? (sidebarDrag.folderID == nil ? .easeOut(duration: 0.15) : .easeInOut(duration: 0.15)) : (sidebarDrag.item == nil ? .easeInOut(duration: 0.2) : nil), value: Set(items.map(\.id)))
+        // The selected child keeps its identity while a collapsing ancestor changes its position and indentation.
+        .animation(rowMotion, value: items.map(\.id))
+        .animation(rowMotion, value: items.map(\.depth))
+        // Selection can remove the only visible child of a collapsed folder, including through menus or shortcuts.
+        .animation(rowMotion, value: windowModel.selectedTabID)
         .padding(.bottom, keptHeight(pinned: pinned))
         // The scroll view clips at its edges. Keeping the margin inside it leaves room for the selected row's shadow.
         .padding(.horizontal, SidebarView.inset)
@@ -462,6 +480,8 @@ struct SpaceTabsView: View {
                 let items = areaItems
                 area(items.pinned, pinned: true, emptyFolders: items.emptyFolders, showsPinTarget: items.pinnedIsEmpty || items.usesEmptyPinTarget, pinTargetIsSlot: items.usesEmptyPinTarget)
                     .frame(height: pinnedAreaHeight)
+                    // Geometry reports the new content height after disclosure; move the divider and open list with it.
+                    .animation(sidebarDrag.item == nil ? Self.folderMotion : nil, value: pinnedAreaHeight)
                 divider
                 area(items.open, pinned: false, emptyFolders: items.emptyFolders)
                     .frame(maxHeight: .infinity)
@@ -492,6 +512,14 @@ struct SpaceTabsView: View {
 
     /// A closing row fades and shrinks a little in place; a new row fades in.
     private static let rowTransition = AnyTransition.asymmetric(insertion: .opacity, removal: .opacity.combined(with: .scale(scale: 0.96)))
+
+    private static let folderTransition = AnyTransition.offset(y: -8).combined(with: .opacity)
+
+    private func transition(for item: Item) -> AnyTransition {
+        guard sidebarDrag.item?.isRow != true else { return .identity }
+        if case .row(let row) = item, row.depth > 0 { return Self.folderTransition }
+        return Self.rowTransition
+    }
 
     /// A tab's row. While dragged, it stays collapsed and hidden in the area where its drag started, and its slot shows where it lands.
     private func row(for tab: Tab, collapsed: Bool) -> some View {
@@ -537,16 +565,19 @@ struct SpaceTabsView: View {
                         })
                         .padding(.leading, Self.folderIndent)
                         .padding(.top, Self.rowSpacing)
+                        .transition(sidebarDrag.item == nil ? Self.folderTransition : .identity)
                 }
             }
             .transaction { transaction in
-                transaction.animation = nil
-                transaction.disablesAnimations = true
+                if sidebarDrag.item != nil {
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
             }
         }
         .modifier(CollapsedWhileDragged(isCollapsed: collapsed, isHidden: sidebarDrag.item?.id == folder.id, isLifted: sidebarDrag.isLifted, isSettling: sidebarDrag.isSettling))
-        // The containing folder changes size immediately when its empty child appears or disappears.
-        .animation(nil, value: isEmpty)
+        // Drag previews change emptiness immediately; disclosure shares the children's motion.
+        .animation(sidebarDrag.item == nil ? Self.folderMotion : nil, value: isEmpty)
     }
 
     /// Reports a row's frame in the window to its area, whose own content collects its rows' frames apart from the other area's.

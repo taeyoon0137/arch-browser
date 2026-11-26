@@ -39,6 +39,11 @@ public enum BrowserWindowKind {
     }
     /// The selected tab, or nil for the empty page. Only `selectTab(_:)` changes it, because a selection does more than show the tab.
     @Published public private(set) var selectedTabID: UUID?
+    /// Each window remembers its selected item separately for every space of each Persona.
+    private enum SpaceSelection {
+        case favorite(UUID), tab(UUID), empty
+    }
+    private var spaceSelections: [Persona.ID: [Space.ID: SpaceSelection]] = [:]
     /// Republishes the selected tab's changes, so that views that read the tab through the window refresh.
     private var selectedTabObserver: AnyCancellable?
     /// The tabs whose pages the window shows, left to right: its selected tab and each other pane of its split view that no other window shows. At most one window shows a tab (window rule 1), because a page's view has one superview. The list under Panes and split view tells it from the window's other lists of panes.
@@ -162,6 +167,10 @@ public enum BrowserWindowKind {
     ///
     /// The prompts of the tabs that left the screen wait, and the panes that show a tab with a prompt show its card (`PanePromptLayer`). Step 1 can close another window, so every step reads the selection as it is when the step runs, not `id`.
     public func selectTab(_ id: UUID?) {
+        if let tab = session.allTabs.first(where: { $0.id == id }),
+           tab.personaID != personaID || (tab.spaceID != nil && tab.spaceID != currentSpaceID) {
+            rememberSpaceSelection()
+        }
         let previousID = selectedTabID
         selectedTabID = id
         // 1. Another window that shows the tab lets go of its page fullscreen and docked tools, then the window shows its selected tab (`release` updates every window's panes, this one's too).
@@ -222,14 +231,50 @@ public enum BrowserWindowKind {
         switchToSpace(session.makeSpace(in: personaID).id)
     }
 
-    /// Shows a space and selects one of its free tabs when the current tab belongs elsewhere.
+    /// Shows a space with this window's last selected item there, or its first free tab without a valid memory.
     public func switchToSpace(_ id: UUID) {
-        guard session.spaces.contains(where: { $0.id == id }) else { return }
+        guard let space = session.spaces.first(where: { $0.id == id }) else { return }
         isLibraryVisible = false
-        // A selected favorite's tab belongs to no space and shows in the current one. It stays selected while the space stays, and stays open behind a new space's own tab.
-        let selectedSpaceID = selectedTab.map { $0.spaceID ?? currentSpaceID }
+        guard currentSpaceID != id else { return }
+        rememberSpaceSelection()
         currentSpaceID = id
-        if selectedSpaceID != id { selectTab(firstFreeTab(inSpace: id)?.id) }
+        // Merging or deleting a space moves its tabs first; keep the selected tab as the window follows it.
+        if selectedTab?.spaceID == id { return }
+        if !restoreSelection(in: space) { selectTab(firstFreeTab(inSpace: id)?.id) }
+    }
+
+    private func rememberSpaceSelection() {
+        guard kind == .main, let space = session.spaces.first(where: { $0.id == currentSpaceID }) else { return }
+        let selection: SpaceSelection
+        if let tab = selectedTab {
+            guard tab.personaID == space.resolvedPersonaID else { return }
+            if let favoriteID = selectedFavoriteID {
+                selection = .favorite(favoriteID)
+            } else {
+                guard tab.spaceID == space.id, tab.isListedInSidebar else { return }
+                selection = .tab(tab.id)
+            }
+        } else {
+            selection = .empty
+        }
+        spaceSelections[space.resolvedPersonaID, default: [:]][space.id] = selection
+    }
+
+    private func restoreSelection(in space: Space) -> Bool {
+        guard let selection = spaceSelections[space.resolvedPersonaID]?[space.id] else { return false }
+        switch selection {
+        case .favorite(let id):
+            guard let favorite = session.favorites(in: space.resolvedPersonaID).first(where: { $0.id == id }) else { return false }
+            openFavorite(favorite)
+        case .tab(let id):
+            guard let tab = session.tabs.first(where: {
+                $0.id == id && $0.spaceID == space.id && $0.personaID == space.resolvedPersonaID && $0.isListedInSidebar
+            }) else { return false }
+            selectTab(tab.id)
+        case .empty:
+            selectTab(nil)
+        }
+        return true
     }
 
     /// The first tab row of the space that the sidebar shows and no other window shows, open tabs before pinned ones (window rule 3). Only a space whose free tabs all sit in collapsed folders gives a hidden tab.

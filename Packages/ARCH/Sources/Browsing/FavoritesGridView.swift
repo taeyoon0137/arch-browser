@@ -529,10 +529,9 @@ struct FavoriteTileView: View {
 
     private func loadIcon() {
         guard icon == nil else { return }
-        let url = FaviconLoader.defaultIconURL(for: favorite.url)
+        let url = favorite.url
         iconURL = url
-        guard let url else { return }
-        FaviconLoader.load(url) { image in
+        FaviconLoader.loadPageIcon(for: url) { image in
             if iconURL == url { icon = image }
         }
     }

@@ -51,11 +51,13 @@ import WebKit
         browser = application.createBrowser(context: application.makeBrowserContext(storageIdentifier: nil, dataStore: .nonPersistent()))
     }
 
+    /// A valid data image prevents fallback icon fetches from using a test server's limited replies.
+    private static let iconURL = "data:image/svg+xml;base64," + Data(#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M0 0h16v16H0z"/></svg>"#.utf8).base64EncodedString()
+
     /// Logs each input's `change` with file names or, for a folder, paths within it.
     /// Also logs each input's `cancel`.
-    /// Its icon uses an empty data address to prevent icon fetches for a page with a web address.
     private static let page = """
-        <!doctype html><title>Files</title><link rel="icon" href="data:,">
+        <!doctype html><title>Files</title><link rel="icon" href="\(iconURL)">
         <input type="file" id="one" accept="image/*, .PDF,Application/JSON, bogus"><input type="file" id="many" multiple><input type="file" id="folder" webkitdirectory>
         <script>
           window.log = [];
@@ -272,7 +274,7 @@ import WebKit
     /// Pages that `loadHTMLString` loads get no back-forward item.
     /// Both pages therefore come from local servers on two ports, giving them two origins.
     @Test func aFrameNamesThePageItsMainFrameCommittedWhileTheTabGoesBack() async throws {
-        let bank = try PageServer(page: "<!doctype html><title>Earlier</title><link rel=\"icon\" href=\"data:,\"><script>window.log = [];</script>", answers: 1)
+        let bank = try PageServer(page: "<!doctype html><title>Earlier</title><link rel=\"icon\" href=\"\(Self.iconURL)\"><script>window.log = [];</script>", answers: 1)
         let framed = try PageServer(page: Self.framedPage, answers: 2)
         let earlier = try #require(URL(string: "http://127.0.0.1:\(bank.number)/bank"))
         let page = try #require(URL(string: "http://127.0.0.1:\(framed.number)/framed"))
@@ -296,7 +298,7 @@ import WebKit
 
     /// A page whose only file input is in a frame of the same origin, which logs its `cancel` in the page.
     private static let framedPage = """
-        <!doctype html><title>Framed</title><link rel="icon" href="data:,"><script>window.log = [];</script>
+        <!doctype html><title>Framed</title><link rel="icon" href="\(iconURL)"><script>window.log = [];</script>
         <iframe srcdoc='<input type="file" id="one"><script>document.getElementById("one").addEventListener("cancel", () => parent.log.push("one:cancel"));</script>'></iframe>
         """
 

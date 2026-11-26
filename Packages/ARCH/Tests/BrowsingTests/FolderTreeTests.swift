@@ -136,6 +136,53 @@ import Testing
         #expect([spec, notes, outside].map(inner.isInCollapsedFolder) == [true, false, false])
     }
 
+    @Test(arguments: [false, true])
+    func collapsingAnAncestorKeepsTheSelectedRowsIdentityWhileItsDepthChanges(pinned: Bool) {
+        var work = folder("Work", pinned: pinned)
+        let docs = folder("Docs", in: work)
+        let first = tab("first", in: docs)
+        let selected = tab("selected", in: docs)
+        let last = tab("last", in: work)
+        let outside = tab("outside", pinned: pinned)
+        let tabs = [first, selected, last, outside]
+        let expanded = FolderTree(folders: [work, docs], tabs: tabs).rows(in: spaceID, pinned: pinned) { $0.id == selected.id }
+
+        work.isCollapsed = true
+        let collapsed = FolderTree(folders: [work, docs], tabs: tabs).rows(in: spaceID, pinned: pinned) { $0.id == selected.id }
+        #expect(expanded.map(\.id) == [work.id, docs.id, first.id, selected.id, last.id, outside.id])
+        #expect(collapsed.map(\.id) == [work.id, selected.id, outside.id])
+        #expect(expanded.first { $0.id == selected.id }?.depth == 2)
+        #expect(collapsed.first { $0.id == selected.id }?.depth == 1)
+        #expect(collapsed.filter { $0.id == selected.id }.count == 1)
+        if case .tab(let retained, _) = collapsed[1] { #expect(retained === selected) }
+        else { Issue.record("The selected child must remain a tab row") }
+        #expect(outside.folderID == nil && selected.folderID == docs.id)
+    }
+
+    @Test(arguments: [false, true])
+    func changingSelectionRemovesOrReplacesOnlyTheRetainedChild(pinned: Bool) {
+        var work = folder("Work", pinned: pinned)
+        work.isCollapsed = true
+        let docs = folder("Docs", in: work)
+        let first = tab("first", in: docs)
+        let second = tab("second", in: work)
+        let unrelated = folder("Unrelated", pinned: pinned)
+        let sibling = tab("sibling", in: unrelated)
+        let outside = tab("outside", pinned: pinned)
+        let tree = FolderTree(folders: [work, docs, unrelated], tabs: [first, second, sibling, outside])
+        func rows(selecting id: UUID?) -> [UUID] {
+            tree.rows(in: spaceID, pinned: pinned) { $0.id == id }.map(\.id)
+        }
+        #expect(rows(selecting: first.id) == [work.id, first.id, unrelated.id, sibling.id, outside.id])
+        #expect(rows(selecting: second.id) == [work.id, second.id, unrelated.id, sibling.id, outside.id])
+        // A favorite's tab lives outside the tree, and an empty page has no selected ID.
+        for selection in [outside.id, UUID(), nil] {
+            #expect(rows(selecting: selection) == [work.id, unrelated.id, sibling.id, outside.id])
+        }
+        #expect(tree.folder(work.id)?.isCollapsed == true)
+        #expect(first.folderID == docs.id && second.folderID == work.id)
+    }
+
     @Test func theLastTabsPreviewRevealsItsEmptyFolderBeforeCommitAndRestoresItOnReturn() {
         let work = folder("Work")
         let notes = tab("notes", in: work)

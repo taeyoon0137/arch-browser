@@ -307,10 +307,11 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private(set) weak var context: ChromiumBrowserContext?
     /// The profile the page loads in. Popups load in the same one.
     private let requestContext: ARCHCEFRequestContext
-    /// The icon URL that last gave each host's pages their icon in this tab, by lowercase host.
-    private var iconURLsByHost: [String: URL] = [:]
+    /// The last decoded icon for each host visited in this tab, by lowercase host.
+    private var iconsByHost: [String: NSImage] = [:]
     /// Advances with each icon load and each move to another host, so that only the latest load shows its icon.
     private var iconGeneration = 0
+    private var loadingFavicon = false
     private var findCompletion: ((EngineFindResult) -> Void)?
     private var lastFind: (text: String, matchCase: Bool, forward: Bool)?
     private var lastActiveMatchOrdinal = 0
@@ -621,11 +622,12 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         uiDelegate?.webContentsDidChangeURL(self)
         guard !FaviconLoader.keepsIcon(from: previousURL, to: self.url) else { return }
         iconGeneration += 1
-        if favicon != nil {
-            favicon = nil
+        loadingFavicon = false
+        let remembered = (self.url?.host?.lowercased()).flatMap { iconsByHost[$0] }
+        if favicon !== remembered {
+            favicon = remembered
             uiDelegate?.webContentsDidChangeFavicon(self)
         }
-        if let host = self.url?.host?.lowercased(), let iconURL = iconURLsByHost[host] { loadFavicon(iconURL) }
     }
     public func cefBrowserDidChangeLoadingState(_ isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
         if !isLoading { authenticationAttempts.removeAll() }
@@ -643,19 +645,25 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         pictureInPictureVideoID = nil
         uiDelegate?.webContents(self, didCommitDocumentAt: URL(string: url))
     }
-    public func cefBrowserDidFinishLoadingDocument() { uiDelegate?.webContentsDidFinishLoadingDocument(self) }
-    public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
-        guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
-        loadFavicon(iconURL)
+    public func cefBrowserDidFinishLoadingDocument() {
+        uiDelegate?.webContentsDidFinishLoadingDocument(self)
+        if favicon == nil && !loadingFavicon { loadFavicon([]) }
     }
-    /// Shows the icon at `iconURL` and remembers it for the page's host, unless another icon load starts or the tab moves to another host while it loads, so that an earlier page's icon never replaces a later one's; a page that changes its address on the same host meanwhile, as with `history.pushState`, keeps it.
-    private func loadFavicon(_ iconURL: URL) {
+    public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
+        loadFavicon(urls.compactMap { URL(string: $0, relativeTo: url)?.absoluteURL })
+    }
+    /// Tries every reported icon before page discovery, and ignores a result after a newer report or a move to another host.
+    private func loadFavicon(_ iconURLs: [URL]) {
+        guard let pageURL = url else { return }
         iconGeneration += 1
         let generation = iconGeneration
-        let host = url?.host?.lowercased()
-        FaviconLoader.load(iconURL) { [weak self] image in
-            guard let self, let image, generation == self.iconGeneration else { return }
-            if let host { self.iconURLsByHost[host] = iconURL }
+        loadingFavicon = true
+        let host = pageURL.host?.lowercased()
+        FaviconLoader.loadPageIcon(for: pageURL, iconURLs: iconURLs) { [weak self] image in
+            guard let self, generation == self.iconGeneration else { return }
+            self.loadingFavicon = false
+            guard let image else { return }
+            if let host { self.iconsByHost[host] = image }
             self.favicon = image
             self.uiDelegate?.webContentsDidChangeFavicon(self)
         }

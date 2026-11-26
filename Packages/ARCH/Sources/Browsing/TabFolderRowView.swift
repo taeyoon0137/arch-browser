@@ -60,6 +60,7 @@ struct TabFolderRowView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(folder.isCollapsed ? 0 : 90))
+                .animation(sidebarDrag.item == nil ? SpaceTabsView.folderMotion : nil, value: folder.isCollapsed)
                 .frame(width: 22, height: 22)
                 .accessibilityHidden(true)
         }
@@ -100,7 +101,7 @@ struct TabFolderRowView: View {
     /// A click in the name field while renaming edits the name instead, and the release that ends a drag of the row leaves the folder as it was.
     private func toggleCollapsed() {
         guard !isRenaming, sidebarDrag.item == nil else { return }
-        withAnimation(.easeInOut(duration: 0.2)) { session.toggleCollapsed(ofFolder: folder.id) }
+        withAnimation(SpaceTabsView.folderMotion) { session.toggleCollapsed(ofFolder: folder.id) }
     }
 }
 

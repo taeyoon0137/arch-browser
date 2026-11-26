@@ -128,6 +128,29 @@ import Testing
         }
     }
 
+    @Test(arguments: [false, true])
+    func movingAnUnselectedTabRemembersTheOutgoingFavorite(acrossPersonas: Bool) async throws {
+        try await withSession { session, window, space in
+            let destination: Space
+            if acrossPersonas {
+                let persona = session.addPersona(named: "Work")
+                destination = try #require(session.spaces(in: persona.id).first)
+            } else {
+                destination = session.makeSpace(in: space.resolvedPersonaID, named: "Later")
+            }
+            let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Favorite", personaID: space.resolvedPersonaID)
+            session.addFavorites([favorite], in: space.resolvedPersonaID)
+            let tab = session.openTab(url: URL(string: "about:blank#move")!, in: space.id, select: false)
+            window.openFavorite(favorite)
+            let favoriteTabID = window.selectedTabID
+
+            session.moveTab(tab.id, toSpace: destination.id, windowsFollow: false, activating: window)
+            #expect(window.currentSpaceID == destination.id && window.selectedFavoriteID == nil)
+            window.switchToSpace(space.id)
+            #expect(window.selectedFavoriteID == favorite.id && window.selectedTabID == favoriteTabID)
+        }
+    }
+
     @Test func aDropOfAnUnselectedTabShowsItSelectedInTheDroppingWindow() async throws {
         try await withSession { session, window, space in
             let work = session.addPersona(named: "Work")

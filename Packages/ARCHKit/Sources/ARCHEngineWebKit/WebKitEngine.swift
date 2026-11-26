@@ -373,6 +373,7 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     }
     public var title: String { webView.title ?? "" }
     public private(set) var favicon: NSImage?
+    private var faviconGeneration = 0
     public var isLoading: Bool { webView.isLoading }
     public var canGoBack: Bool { webView.canGoBack }
     public var canGoForward: Bool { webView.canGoForward }
@@ -589,21 +590,21 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
         webView.isInspectable = true
     }
 
-    /// Clears the previous icon, then reads the page's declared icon or `/favicon.ico` as a fallback and sends the result to the UI delegate. The lookup runs in a world of the app's own: `evaluateJavaScript` runs with a user gesture, which in the page's world would reach a DOM method the page replaced, and with it a file chooser or a popup after every load.
+    /// Clears the previous icon, then tries the page's icon declarations, manifest, touch icons, and `/favicon.ico`, sending the first decoded image to the UI delegate. The lookup runs in a world of the app's own: `evaluateJavaScript` runs with a user gesture, which in the page's world would reach a DOM method the page replaced, and with it a file chooser or a popup after every load.
     func refreshFavicon() {
         guard let pageURL = webView.url else { return }
+        faviconGeneration += 1
+        let generation = faviconGeneration
         if favicon != nil {
             favicon = nil
             uiDelegate?.webContentsDidChangeFavicon(self)
         }
-        let script = "(function(){var l=document.querySelector('link[rel~=\"icon\"],link[rel=\"shortcut icon\"],link[rel=\"apple-touch-icon\"]');return l?l.href:null;})()"
+        let script = "document.head ? document.head.innerHTML.slice(0, 1048576) : ''"
         webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { [weak self] result in
-            guard let self else { return }
-            let declared = (try? result.get() as? String).flatMap { URL(string: $0, relativeTo: pageURL)?.absoluteURL }
-            guard let iconURL = declared ?? FaviconLoader.defaultIconURL(for: pageURL) else { return }
-            FaviconLoader.load(iconURL) { [weak self] image in
-                // Ignore icons received after the tab navigates to another page.
-                guard let self, let image, self.webView.url == pageURL else { return }
+            guard let self, self.faviconGeneration == generation, self.webView.url == pageURL else { return }
+            let head = try? result.get() as? String
+            FaviconLoader.loadPageIcon(for: pageURL, headHTML: head) { [weak self] image in
+                guard let self, let image, self.faviconGeneration == generation, self.webView.url == pageURL else { return }
                 self.favicon = image
                 self.uiDelegate?.webContentsDidChangeFavicon(self)
             }
