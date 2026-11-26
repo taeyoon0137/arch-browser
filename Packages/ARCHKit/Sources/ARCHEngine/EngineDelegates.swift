@@ -93,6 +93,8 @@ public struct EngineContextMenuElement: Sendable {
     public var linkURL: URL?
     public var imageURL: URL?
     public var mediaURL: URL?
+    /// Media type and state stay available for streams with no transferable source URL.
+    public var media: EngineContextMenuMedia?
     public var selectedText: String?
     public var isEditable: Bool
     /// Whether the menu opened in the page's main frame, not in a frame inside the page, which can show another site. False when the engine could not tell.
@@ -100,10 +102,11 @@ public struct EngineContextMenuElement: Sendable {
     /// Whether the field holds a password, whose text no item may read, speak, search, or share: a password field, one that has been one, as when a page shows its password as text, or one that masks its text with `-webkit-text-security`. WebKit's script finds such a field under the click; Chromium's page view has no text input context in one.
     public var isPasswordField: Bool
     public init(linkURL: URL? = nil, imageURL: URL? = nil, mediaURL: URL? = nil, selectedText: String? = nil, isEditable: Bool = false, isInMainFrame: Bool = false,
-                isPasswordField: Bool = false) {
+                isPasswordField: Bool = false, media: EngineContextMenuMedia? = nil) {
         self.linkURL = linkURL
         self.imageURL = imageURL
         self.mediaURL = mediaURL
+        self.media = media
         self.selectedText = selectedText
         self.isEditable = isEditable
         self.isInMainFrame = isInMainFrame

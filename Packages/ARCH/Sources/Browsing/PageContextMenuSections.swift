@@ -16,6 +16,8 @@ struct PageContextMenuSections {
     let fieldSubmenus: [NSMenuItem]
     /// Share…, followed outside a field by Speech, as WebKit places it.
     let share: [NSMenuItem]
+    /// Actions aimed at the media element under this click.
+    let media: [NSMenuItem]
 
     /// Takes the handed items out of `menu`, which the delegate fills again, and stops it from enabling items itself, so each item keeps its state.
     init(takingItemsOf menu: NSMenu, for element: EngineContextMenuElement) {
@@ -30,6 +32,13 @@ struct PageContextMenuSections {
             found?.title = title
             return found
         }
+        if let context = element.media {
+            media = [titled(EngineContextMenuMediaAction.playPause.identifier, context.isPaused ? localized("Play") : localized("Pause")),
+                     titled(EngineContextMenuMediaAction.loop.identifier, localized("Loop")),
+                     titled(EngineContextMenuMediaAction.controls.identifier, localized("Show Controls")),
+                     titled(EngineContextMenuMediaAction.pictureInPicture.identifier, context.isInPictureInPicture ? localized("Exit Picture in Picture") : localized("Picture in Picture")),
+                     titled(EngineContextMenuMediaAction.fullscreen.identifier, localized("Enter Full Screen"))].compactMap { $0 }
+        } else { media = [] }
         let guesses = handed.filter { $0.identifier == EngineContextMenuItem.spellingSuggestion }
         if !guesses.isEmpty {
             suggestions = Array(guesses.prefix(5))
@@ -44,7 +53,7 @@ struct PageContextMenuSections {
         if element.isEditable {
             editing = [titled(EngineContextMenuItem.cut, localized("Cut")), titled(EngineContextMenuItem.copy, localized("Copy")), titled(EngineContextMenuItem.paste, localized("Paste")),
                        titled(EngineContextMenuItem.selectAll, localized("Select All"))].compactMap { $0 }
-        } else if element.linkURL == nil, element.imageURL == nil, element.mediaURL == nil, let copy = titled(EngineContextMenuItem.copy, localized("Copy")) {
+        } else if element.linkURL == nil, element.imageURL == nil, element.mediaURL == nil, element.media == nil, let copy = titled(EngineContextMenuItem.copy, localized("Copy")) {
             // WebKit offers Copy outside fields only when the click is not on a link, image, or media, so Chromium follows it.
             editing = [copy]
         } else {

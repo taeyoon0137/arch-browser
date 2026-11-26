@@ -1412,8 +1412,8 @@ public enum BrowserWindowKind {
     /// Selects the tab first, so that only a page the user sees gets the user activation the request needs, then asks its video to enter picture in picture, or to leave it when one already shows. A beep reports a page without a video or one that refused.
     public func togglePictureInPicture(_ tab: Tab) {
         guard canTogglePictureInPicture(tab) else { return NSSound.beep() }
-        if tab !== selectedTab { selectTab(tab.id) }
-        guard selectedTab === tab, !isSelectedPageCovered else { return NSSound.beep() }
+        if tab !== selectedTab || !shows(tab) { selectTab(tab.id) }
+        guard selectedTab === tab, shows(tab), !isSelectedPageCovered else { return NSSound.beep() }
         tab.webContents.togglePictureInPicture { done in if !done { NSSound.beep() } }
     }
 

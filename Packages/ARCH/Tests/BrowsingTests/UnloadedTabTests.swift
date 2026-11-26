@@ -291,6 +291,10 @@ final class PageStub: EngineWebContents {
     let canGoForward = false
     var isAudible = false
     var isInPictureInPicture = false
+    var pictureInPictureRequests = 0
+    var pictureInPictureRequested: (() -> Bool)?
+    var automaticPictureInPictureRequests: [Bool] = []
+    var automaticPictureInPictureRequested: ((Bool, @escaping (Bool) -> Void) -> Void)?
     var zoomFactor = 1.0
     lazy var view = NSView()
     private let navigation = NavigationStub()
@@ -313,6 +317,15 @@ final class PageStub: EngineWebContents {
     func captureFullPage(completion: @escaping (NSImage?) -> Void) {}
     func createPDF(completion: @escaping (Result<Data, Error>) -> Void) {}
     func exitFullscreen() {}
+    func togglePictureInPicture(completion: @escaping (Bool) -> Void) {
+        pictureInPictureRequests += 1
+        completion(pictureInPictureRequested?() ?? true)
+    }
+    func setAutomaticPictureInPicture(_ enabled: Bool, sourceWindow: NSWindow?, completion: @escaping (Bool) -> Void) {
+        automaticPictureInPictureRequests.append(enabled)
+        if let automaticPictureInPictureRequested { automaticPictureInPictureRequested(enabled, completion) }
+        else { isInPictureInPicture = enabled; completion(true) }
+    }
     func tryToClose(completion: @escaping (Bool) -> Void) {}
 }
 

@@ -22,6 +22,7 @@ func formFootnote(_ text: String) -> some View {
 struct GeneralSection: View {
     let updates: AppUpdateControls?
     @State private var isDefaultBrowser = DefaultBrowser.isDefault
+    @AppStorage(AutomaticPictureInPictureSetting.defaultsKey) private var automaticPictureInPicture = AutomaticPictureInPictureSetting.enabledByDefault
     @AppStorage(BrowserSession.opensLinksInSmallWindowKey) private var opensLinksInSmallWindow = BrowserSession.opensLinksInSmallWindowByDefault
     /// The registry keeps the default engine here. The site settings popover can change it while the window is open, and the picker then shows the change (`defaultEngine`).
     @AppStorage(EngineRegistry.defaultEngineKey) private var storedDefaultEngine: String?
@@ -46,6 +47,7 @@ struct GeneralSection: View {
                     }
                 }
                 Toggle(localized("Open links from other apps in a small window when Arch is in the background"), isOn: $opensLinksInSmallWindow)
+                Toggle(AutomaticPictureInPictureSetting.title, isOn: $automaticPictureInPicture)
                 Picker(localized("Engine for new tabs"), selection: defaultEngine) {
                     ForEach(EngineRegistry.shared.registeredKinds, id: \.self) { kind in
                         Text(kind.displayName)

@@ -398,7 +398,19 @@ public final class WebKitWebContents: NSObject, EngineWebContents {
     public func togglePictureInPicture(completion: @escaping (Bool) -> Void) {
         Task { @MainActor [weak self] in
             guard let webView = self?.webView else { return completion(false) }
+            // A tab may predate the user enabling the private preference on flags://.
+            WebKitPictureInPictureAPI.enable(in: webView.configuration.preferences)
             let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.toggle,
+                                                                arguments: [:], in: nil, contentWorld: .defaultClient)
+            completion(result as? Bool == true)
+        }
+    }
+
+    public func setAutomaticPictureInPicture(_ enabled: Bool, sourceWindow: NSWindow?, completion: @escaping (Bool) -> Void) {
+        Task { @MainActor [weak self] in
+            guard let webView = self?.webView else { return completion(false) }
+            WebKitPictureInPictureAPI.enable(in: webView.configuration.preferences)
+            let result = try? await webView.callAsyncJavaScript("return await " + EnginePictureInPictureScript.automatic(starting: enabled),
                                                                 arguments: [:], in: nil, contentWorld: .defaultClient)
             completion(result as? Bool == true)
         }

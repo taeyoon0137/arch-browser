@@ -328,6 +328,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 @property (nonatomic, readonly, copy, nullable) NSString *linkURL;
 @property (nonatomic, readonly, copy, nullable) NSString *imageURL;
 @property (nonatomic, readonly, copy, nullable) NSString *mediaURL;
+/// Video or audio state from CEF's media type and media flags, including streams without a source URL.
+@property (nonatomic, readonly, copy, nullable) NSDictionary<NSString *, id> *mediaState;
 @property (nonatomic, readonly, copy) NSString *selectionText;
 @property (nonatomic, readonly) BOOL isEditable;
 /// Whether the menu opened in the main frame rather than in a frame inside the page.
@@ -541,6 +543,10 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)goToNavigationEntryAtIndex:(NSInteger)index url:(NSString *)url NS_SWIFT_NAME(goToNavigationEntry(at:url:));
 /// Runs one edit command in the frame the last context menu opened on, or in the focused frame once that frame is gone.
 - (void)performEditCommand:(ARCHCEFEditCommand)command NS_SWIFT_NAME(performEditCommand(_:));
+/// Resolves the clicked media, including an overlay inside its player in the main frame, before showing the menu.
+- (void)prepareContextMenuMedia:(ARCHCEFContextMenuParams *)params hitTestFunction:(NSString *)function completion:(void (^)(void))completion NS_SWIFT_NAME(prepareContextMenuMedia(_:hitTestFunction:completion:));
+/// Calls a function with the menu's original media node as `this`, in its frame's isolated world with user activation.
+- (void)performContextMenuMediaFunction:(NSString *)function params:(ARCHCEFContextMenuParams *)params NS_SWIFT_NAME(performContextMenuMediaFunction(_:params:));
 /// Replaces the selected misspelled word with `word`.
 - (void)replaceMisspellingWithWord:(NSString *)word NS_SWIFT_NAME(replaceMisspelling(withWord:));
 /// Call with YES right before the app shows its own context menu for the browser's view with `+[NSMenu popUpContextMenu:withEvent:forView:]`, and with NO right after the menu closes (an experimental CEF API of Arch's engine, VI.9). Meanwhile a focused password field gives the page's view a text input context, so that AppKit adds AutoFill to the menu, and the view offers the field's text to no service; input methods stay off in password fields at all other times. Returns whether the focused field is a password field or has been one. Before CEF has created the browser, it does nothing and returns NO.

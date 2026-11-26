@@ -5130,6 +5130,116 @@
           }
         }
       }
+    },
+    "Automatic Picture in Picture" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "자동 PiP"
+          }
+        }
+      }
+    },
+    "Play" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "재생"
+          }
+        }
+      }
+    },
+    "Copy Audio Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오디오 주소 복사"
+          }
+        }
+      }
+    },
+    "Copy Video Address" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동영상 주소 복사"
+          }
+        }
+      }
+    },
+    "Save Audio As…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오디오를 다른 이름으로 저장…"
+          }
+        }
+      }
+    },
+    "Save Video As…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동영상을 다른 이름으로 저장…"
+          }
+        }
+      }
+    },
+    "Enter Full Screen" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전체 화면 시작"
+          }
+        }
+      }
+    },
+    "Exit Picture in Picture" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "화면 속 화면 종료"
+          }
+        }
+      }
+    },
+    "Show Controls" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제어기 보기"
+          }
+        }
+      }
+    },
+    "Loop" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "반복 재생"
+          }
+        }
+      }
+    },
+    "Chromium picture in picture scaling" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chromium 화면 속 화면 크기 조정"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

@@ -9,6 +9,7 @@ final class WebKitWebView: WKWebView {
     weak var contents: WebKitWebContents?
     /// What the script reported for the click that opens the next menu.
     var pendingElement: EngineContextMenuElement?
+    var pendingMediaFrame: WKFrameInfo?
 
     /// Sends a key event that `WebKitInput` made to WebKit. When WebKit hands the key down back to the application, the application drops it (`WebKitEngine.isTrustedInputKey(_:)`), so it reaches neither the app's monitors and menus nor any view.
     func sendKeyEvent(_ event: NSEvent) {
@@ -26,20 +27,25 @@ final class WebKitWebView: WKWebView {
     // A new click clears the last report, so a menu never shows what an earlier click was on.
     override func rightMouseDown(with event: NSEvent) {
         pendingElement = nil
+        pendingMediaFrame = nil
         super.rightMouseDown(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.control) { pendingElement = nil }
+        if event.modifierFlags.contains(.control) { pendingElement = nil; pendingMediaFrame = nil }
         super.mouseDown(with: event)
     }
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
-        let element = pendingElement ?? EngineContextMenuElement()
+        // A modifier click may bypass our DOM event. Keep WebKit's own menu when it did,
+        // rather than replacing native media controls with a background menu.
+        guard let element = pendingElement else { return }
+        let mediaFrame = pendingMediaFrame
         pendingElement = nil
+        pendingMediaFrame = nil
         guard let contents else { return }
-        contents.prepareContextMenu(menu, for: element, at: contents.view.convert(event.locationInWindow, from: nil))
+        contents.prepareContextMenu(menu, for: element, at: contents.view.convert(event.locationInWindow, from: nil), mediaFrame: mediaFrame)
     }
 
     /// Select All gets its own action, because WebKit's editable menu has none on macOS.

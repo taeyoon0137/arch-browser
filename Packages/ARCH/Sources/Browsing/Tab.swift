@@ -530,6 +530,18 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if let image = element.imageURL {
             sections.append([newTabItem(localized("Open Image in New Tab"), for: image), downloadItem(localized("Download Image"), for: image), EngineActionMenuItem(localized("Copy Image Address")) { Self.copyToPasteboard(image) }].compactMap { $0 })
         }
+        sections.append(handed.media)
+        if let media = element.media, let address = element.mediaURL {
+            let video = media.kind == .video
+            var addresses: [NSMenuItem] = []
+            if media.canSave, ["http", "https"].contains(address.scheme?.lowercased() ?? "") {
+                addresses.append(EngineActionMenuItem(video ? localized("Save Video As…") : localized("Save Audio As…")) { [weak self] in
+                    self?.download(address, savingPage: true)
+                })
+            }
+            addresses.append(EngineActionMenuItem(video ? localized("Copy Video Address") : localized("Copy Audio Address")) { Self.copyToPasteboard(address) })
+            sections.append(addresses)
+        }
         sections.append(handed.lookUp)
         if let selection = EngineTextMenuItems.selection(of: element), let searchInNewTab {
             sections.append([EngineActionMenuItem(localized("Search with \(SearchEngine.current.title)")) { searchInNewTab(selection) }])

@@ -104,6 +104,7 @@ final class EngineRuntime {
     private var archiveTimer: Timer?
     /// Unloads tabs that no window shows when macOS reports memory pressure (bookmark rule 5).
     private var memoryPressure: MemoryPressureMonitor?
+    let automaticPictureInPicture = AutomaticPictureInPicture()
 
     /// The results page of the search engine chosen in Settings.
     public nonisolated static var searchURL: URL { SearchEngine.current.resultsURL }
@@ -249,6 +250,7 @@ final class EngineRuntime {
         }
         memoryPressure = MemoryPressureMonitor { [weak self] in self?.unloadInactiveTabs(pressure: $0) }
         nowPlaying = NowPlaying(session: self)
+        automaticPictureInPicture.observe(self)
         pageAssistant.attach(to: self)
         pluginPages.attach(to: self)
         hooks.attach(to: self)
@@ -358,10 +360,12 @@ final class EngineRuntime {
             windows = reordered
         }
         updateFocusedTab()
+        automaticPictureInPicture.refresh(self)
     }
 
     /// Window rule 5: a main window's tabs stay open, and a small window closes with its tab or once a main window takes it. The window lets go of what it shows and leaves the list, and the panes it showed go to the windows whose split views have them, with their prompts. A main window's record stays for the next main window and, while no main window is open, the saved session, which the change of `windows` saves.
     func windowWillClose(_ window: BrowserWindowModel) {
+        automaticPictureInPicture.windowWillClose(window)
         // The tabs the window showed were in view until now, as the archive timer and the saved session count the tabs of open windows, also when closing the last main window quits.
         window.paneTabs.forEach { $0.lastActivatedAt = Date() }
         window.prepareToClose()
@@ -403,7 +407,10 @@ final class EngineRuntime {
 
     /// Follows a window's new selection.
     func windowDidSelect(_ window: BrowserWindowModel) {
-        if window === activeWindow { updateFocusedTab() }
+        if window === activeWindow {
+            updateFocusedTab()
+            automaticPictureInPicture.refresh(self)
+        }
     }
 
     /// Makes the active window's selected tab the focused tab. Every change of the active window or of its selection goes through here, so `focusedTabID` publishes each one.
@@ -1367,6 +1374,7 @@ final class EngineRuntime {
         if window?.isFindBarVisible == true { window?.hideFindBar() }
         tab.replaceWebContents(with: replacement)
         window?.devToolsDock.track(tab)
+        automaticPictureInPicture.contentsWillBeReplaced(old, with: replacement)
         retire(old, of: tab.personaID)
         scheduleSave()
     }
@@ -1502,6 +1510,7 @@ final class EngineRuntime {
 
     /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
     func retire(_ webContents: any EngineWebContents, of personaID: Persona.ID) {
+        defer { automaticPictureInPicture.contentsDidRetire(webContents) }
         guard !(webContents is UnloadedWebContents), let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
         if webContents.closingStopsDownloads {
             // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers. Its developer tools close with its tab.

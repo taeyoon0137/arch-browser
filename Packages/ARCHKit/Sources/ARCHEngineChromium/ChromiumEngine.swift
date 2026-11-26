@@ -327,6 +327,13 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     private var pageScripts: [EnginePageScript]
     /// The page's video in picture in picture, from the engine's start until AVKit has finished stopping.
     private var pictureInPicture: ChromiumPictureInPicture?
+    private var pictureInPictureGeometry = ChromiumPictureInPictureGeometry()
+    private let pictureInPictureWindows = NSMapTable<NSString, NSWindow>(keyOptions: .strongMemory, valueOptions: .weakMemory)
+    private var pictureInPictureVideoID: String?
+    private var pictureInPictureDocumentGeneration = 0
+    /// Native coordinates only; no page measurement or media pipeline is prepared for inline playback.
+    private var pictureInPictureViewport: ChromiumPictureInPictureGeometry.Viewport?
+    private weak var pictureInPictureSourceWindow: NSWindow?
     public lazy var navigationController: any EngineNavigationController = ChromiumNavigationController(webContents: self)
 
     /// With a `referrer`, the initial address loads with it, as for a link the user opened in a new tab.
@@ -442,7 +449,9 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
         browser?.postPageScriptMessage(json, toWorld: world)
     }
     private static func bridgeScripts(_ scripts: [EnginePageScript]) -> [ARCHCEFPageScript] {
-        scripts.map { ARCHCEFPageScript(world: $0.world, source: $0.source, runsAtDocumentEnd: $0.injectionTime == .documentEnd, mainFrameOnly: $0.mainFrameOnly) }
+        let geometry = EnginePageScript(world: ChromiumPictureInPictureScript.world, source: ChromiumPictureInPictureScript.source,
+                                       injectionTime: .documentStart, mainFrameOnly: false)
+        return ([geometry] + scripts).map { ARCHCEFPageScript(world: $0.world, source: $0.source, runsAtDocumentEnd: $0.injectionTime == .documentEnd, mainFrameOnly: $0.mainFrameOnly) }
     }
     public func captureViewport(completion: @escaping (NSImage?) -> Void) {
         captureScreenshot(beyondViewport: false, completion: completion)
@@ -472,7 +481,97 @@ public final class ChromiumWebContents: NSObject, EngineWebContents {
     }
     public func togglePictureInPicture(completion: @escaping (Bool) -> Void) {
         guard let browser else { return completion(false) }
-        browser.evaluateInIsolatedWorld(withUserGesture: EnginePictureInPictureScript.toggle, completion: completion)
+        let generation = pictureInPictureDocumentGeneration
+        rememberPictureInPictureViewport()
+        refreshPictureInPictureGeometry { [weak self] in
+            guard let self, generation == self.pictureInPictureDocumentGeneration else { return completion(false) }
+            browser.evaluateInIsolatedWorld(withUserGesture: EnginePictureInPictureScript.toggle) { [weak self] result in
+                if !result, generation == self?.pictureInPictureDocumentGeneration, self?.pictureInPicture == nil {
+                    self?.pictureInPictureVideoID = nil
+                    self?.stopPictureInPictureGeometry()
+                }
+                completion(result)
+            }
+        }
+    }
+    public func setAutomaticPictureInPicture(_ enabled: Bool, sourceWindow: NSWindow?, completion: @escaping (Bool) -> Void) {
+        guard let browser else { return completion(false) }
+        let generation = pictureInPictureDocumentGeneration
+        // The actual departure captures only native coordinates before the tab detaches. Its
+        // asynchronous page measurement uses that transform, without measuring at playback start.
+        rememberPictureInPictureViewport()
+        if let sourceWindow, pictureInPictureSourceWindow !== sourceWindow {
+            pictureInPictureViewport = nil
+            pictureInPictureSourceWindow = nil
+        }
+        refreshPictureInPictureGeometry { [weak self] in
+            guard let self, generation == self.pictureInPictureDocumentGeneration else { return completion(false) }
+            browser.evaluateInIsolatedWorld(withUserGesture: EnginePictureInPictureScript.automatic(starting: enabled)) { [weak self] result in
+                if !result || !enabled, generation == self?.pictureInPictureDocumentGeneration, self?.pictureInPicture == nil {
+                    self?.pictureInPictureVideoID = nil
+                    self?.stopPictureInPictureGeometry()
+                }
+                completion(result)
+            }
+        }
+    }
+
+    /// A bounded refresh cannot hold a native transition behind a hidden or stopped renderer.
+    private func refreshPictureInPictureGeometry(completion: @escaping () -> Void) {
+        let generation = pictureInPictureDocumentGeneration
+        var finished = false
+        let finish = {
+            guard !finished else { return }
+            finished = true
+            completion()
+        }
+        executeJavaScriptWithoutUserGesture(ChromiumPictureInPictureScript.refresh, inWorld: ChromiumPictureInPictureScript.world) { [weak self] result in
+            guard let self, generation == self.pictureInPictureDocumentGeneration else { return finish() }
+            if case .success(let json?) = result,
+               let report = try? JSONDecoder().decode(ChromiumPictureInPictureGeometry.Snapshot.self, from: Data(json.utf8)) {
+                self.acceptPictureInPictureGeometry(report)
+            }
+            finish()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: finish)
+    }
+
+    private func rememberPictureInPictureViewport() {
+        let webView = browser?.browserView ?? view
+        guard let window = webView.window, !webView.isHiddenOrHasHiddenAncestor else { return }
+        pictureInPictureViewport = MainActor.assumeIsolated {
+            ChromiumPictureInPictureGeometry.Viewport(webView: webView, pageZoom: zoomFactor)
+        }
+        pictureInPictureSourceWindow = window
+    }
+
+    private func stopPictureInPictureGeometry() {
+        postPageScriptMessage(ChromiumPictureInPictureScript.stop, toWorld: ChromiumPictureInPictureScript.world)
+    }
+
+    private func acceptPictureInPictureGeometry(_ report: ChromiumPictureInPictureGeometry.Snapshot) {
+        let webView = browser?.browserView ?? view
+        let visible = webView.window != nil && !webView.isHiddenOrHasHiddenAncestor
+        if pictureInPictureGeometry.snapshot?.documentID != report.documentID { pictureInPictureWindows.removeAllObjects() }
+        pictureInPictureGeometry.update(report, visible: visible || pictureInPictureSourceWindow != nil) { [zoomFactor] video in
+            MainActor.assumeIsolated {
+                let window = visible ? webView.window : pictureInPictureSourceWindow
+                let rect = visible ? ChromiumPictureInPictureGeometry.windowRect(for: video, in: webView, pageZoom: zoomFactor)
+                    : pictureInPictureViewport?.windowRect(for: video)
+                guard let rect, let window else { return nil }
+                pictureInPictureWindows.setObject(window, forKey: video.id as NSString)
+                return rect
+            }
+        }
+        if let activeID = report.activeID { pictureInPictureVideoID = activeID }
+        updatePictureInPictureSource()
+    }
+
+    private func updatePictureInPictureSource() {
+        guard let videoID = pictureInPictureVideoID,
+              let window = pictureInPictureWindows.object(forKey: videoID as NSString),
+              let rect = pictureInPictureGeometry.rect(for: pictureInPictureVideoID) else { return }
+        MainActor.assumeIsolated { pictureInPicture?.updateSource(windowRect: rect, in: window) }
     }
     /// The tools close with the page. CEF reports their close only once the browser has closed, when this object may be gone, so the app learns of it now. The engine ends the page's picture in picture as the browser closes, also unreported then, so the system's window closes now.
     func discard() {
@@ -535,7 +634,15 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         self.canGoForward = canGoForward
         uiDelegate?.webContentsDidChangeLoadingState(self)
     }
-    public func cefBrowserDidCommitDocument(_ url: String) { uiDelegate?.webContents(self, didCommitDocumentAt: URL(string: url)) }
+    public func cefBrowserDidCommitDocument(_ url: String) {
+        pictureInPictureDocumentGeneration += 1
+        pictureInPictureGeometry = ChromiumPictureInPictureGeometry()
+        pictureInPictureViewport = nil
+        pictureInPictureSourceWindow = nil
+        pictureInPictureWindows.removeAllObjects()
+        pictureInPictureVideoID = nil
+        uiDelegate?.webContents(self, didCommitDocumentAt: URL(string: url))
+    }
     public func cefBrowserDidFinishLoadingDocument() { uiDelegate?.webContentsDidFinishLoadingDocument(self) }
     public func cefBrowserDidChangeFaviconURLs(_ urls: [String]) {
         guard let iconURL = urls.lazy.compactMap(URL.init(string:)).first ?? url.flatMap(FaviconLoader.defaultIconURL(for:)) else { return }
@@ -642,6 +749,14 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
 
     /// Puts the spelling and editing items CEF can run and macOS's text items into the menu, lets the UI delegate add the rest, and shows the menu at the click as a context menu, so that AppKit adds its own items where it adds them on WebKit.
     public func cefBrowserRunContextMenu(_ params: ARCHCEFContextMenuParams, completion: @escaping () -> Void) {
+        guard let browser else { return completion() }
+        browser.prepareContextMenuMedia(params, hitTestFunction: EngineContextMenuMedia.hitTestFunction) { [weak self] in
+            guard let self else { return completion() }
+            self.showContextMenu(params, completion: completion)
+        }
+    }
+
+    private func showContextMenu(_ params: ARCHCEFContextMenuParams, completion: @escaping () -> Void) {
         guard let uiDelegate, view.window != nil else { return completion() }
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -651,10 +766,15 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         var element = EngineContextMenuElement(linkURL: params.linkURL.flatMap(URL.init(engineString:)), imageURL: params.imageURL.flatMap(URL.init(engineString:)),
                                                mediaURL: params.mediaURL.flatMap(URL.init(engineString:)),
                                                selectedText: params.selectionText.isEmpty ? nil : params.selectionText, isEditable: params.isEditable,
-                                               isInMainFrame: params.isInMainFrame)
+                                               isInMainFrame: params.isInMainFrame, media: EngineContextMenuMedia(report: params.mediaState))
         element.isPasswordField = Self.isPasswordField(element, pageView: pageView)
         Self.contextMenuItems(misspelledWord: params.misspelledWord, suggestions: suggestions, element: element, editCommands: params.editCommands, target: self,
                               pageView: pageView, anchor: view, at: params.location).forEach(menu.addItem)
+        if let media = element.media {
+            media.items { [weak browser] action in
+                browser?.performContextMenuMediaFunction(action.function, params: params)
+            }.forEach(menu.addItem)
+        }
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
         guard !menu.items.isEmpty else { return completion() }
         contextMenu = menu
@@ -711,7 +831,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
             (localized("Cut"), EngineContextMenuItem.cut, .cut), (localized("Copy"), EngineContextMenuItem.copy, .copy),
             (localized("Paste"), EngineContextMenuItem.paste, .paste), (localized("Select All"), EngineContextMenuItem.selectAll, .selectAll),
         ]
-        let copiesSelection = !(element.selectedText?.isEmpty ?? true) && element.linkURL == nil && element.imageURL == nil && element.mediaURL == nil
+        let copiesSelection = !(element.selectedText?.isEmpty ?? true) && element.linkURL == nil && element.imageURL == nil && element.mediaURL == nil && element.media == nil
         for (title, identifier, command) in commands where element.isEditable || (command == .copy && copiesSelection) {
             let isEnabled = (element.isEditable && command == .selectAll) || editCommands.contains(command)
             let item = engineMenuItem(title, identifier, #selector(ChromiumWebContents.runEditCommandFromMenu(_:)), isEnabled: isEnabled)
@@ -840,6 +960,9 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
 
     public func cefBrowserDidChangeAudible(_ isAudible: Bool) {
+        // A queued departure may run after detachment. Reuse this existing playback event to
+        // keep its native coordinate transform; this reads no DOM, forces no layout and captures no frames.
+        if isAudible { rememberPictureInPictureViewport() }
         self.isAudible = isAudible
         uiDelegate?.webContentsDidChangeAudibleState(self)
     }
@@ -850,18 +973,31 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         isCapturingMedia = video || audio
     }
 
-    /// The video plays in the system's window from a layer below the page. The window's return button asks the UI delegate to show the page.
+    /// CEF's source rectangle can be relative to a subframe. The page measurement identifies the
+    /// actual video and its top-level viewport rectangle before AVKit chooses an animation source.
     public func cefBrowserDidStartPictureInPicture(naturalSize: NSSize, sourceRect: NSRect) {
         guard let browser else { return }
+        rememberPictureInPictureViewport()
         MainActor.assumeIsolated {
+            // CEF does not identify the video. Only a post-start active-element measurement can
+            // select its cache; a predicted manual or automatic candidate may already have changed.
+            pictureInPictureVideoID = nil
             let session = ChromiumPictureInPicture(browser: browser) { [weak self] in
                 guard let self else { return }
                 self.uiDelegate?.webContentsDidRequestActivation(self)
+            } refreshSource: { [weak self] completion in
+                guard let self else { return completion() }
+                self.refreshPictureInPictureGeometry(completion: completion)
             } didFinish: { [weak self] session in
-                if self?.pictureInPicture === session { self?.pictureInPicture = nil }
+                if self?.pictureInPicture === session {
+                    self?.pictureInPicture = nil
+                    self?.pictureInPictureVideoID = nil
+                    self?.stopPictureInPictureGeometry()
+                }
             }
             pictureInPicture = session
-            session.start(in: view, below: browser.browserView, sourceRect: sourceRect, naturalSize: naturalSize)
+            session.start()
+            refreshPictureInPictureGeometry { [weak self] in self?.updatePictureInPictureSource() }
         }
     }
 
@@ -879,6 +1015,12 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
     }
 
     public func cefBrowserDidReceivePageScriptMessage(_ json: String, world: String, frameURL: String, isMainFrame: Bool, reply: @escaping (String?) -> Void) {
+        if world == ChromiumPictureInPictureScript.world {
+            if isMainFrame, let report = try? JSONDecoder().decode(ChromiumPictureInPictureGeometry.Snapshot.self, from: Data(json.utf8)) {
+                acceptPictureInPictureGeometry(report)
+            }
+            return reply(nil)
+        }
         let reply = EnginePageScriptReply(reply)
         guard let pageScriptDelegate else { return reply.send(nil) }
         pageScriptDelegate.webContents(self, didReceive: EnginePageScriptMessage(world: world, frameURL: URL(engineString: frameURL), isMainFrame: isMainFrame, json: json),

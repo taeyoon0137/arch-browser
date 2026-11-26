@@ -4,6 +4,7 @@
 #include <dispatch/dispatch.h>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <optional>
 #include <string>
@@ -196,6 +197,12 @@ private:
 #pragma mark - Context menu
 
 @interface ARCHCEFContextMenuParams ()
+@property (nonatomic) NSNumber *mediaNodeID;
+@property (nonatomic) NSPoint mediaHitPoint;
+@property (nonatomic) BOOL active;
+@property (nonatomic, copy, readwrite) NSString *mediaURL;
+@property (nonatomic, copy, readwrite) NSDictionary<NSString *, id> *mediaState;
+@property (nonatomic, copy) NSString *mediaFrameID;
 - (instancetype)initWithParams:(CefRefPtr<CefContextMenuParams>)params frame:(CefRefPtr<CefFrame>)frame location:(NSPoint)location;
 @end
 
@@ -207,6 +214,8 @@ private:
         return nil;
     }
     _location = location;
+    _mediaHitPoint = NSMakePoint(params->GetXCoord(), params->GetYCoord());
+    _active = YES;
     // CEF passes the frame the menu opened in.
     _isInMainFrame = frame && frame->IsMain();
     CefString link = params->GetUnfilteredLinkUrl();
@@ -226,6 +235,17 @@ private:
             default:
                 break;
         }
+    }
+    const auto mediaType = params->GetMediaType();
+    if (mediaType == CM_MEDIATYPE_VIDEO || mediaType == CM_MEDIATYPE_AUDIO) {
+        const auto flags = params->GetMediaStateFlags();
+        _mediaState = @{@"kind": mediaType == CM_MEDIATYPE_VIDEO ? @"video" : @"audio",
+                        @"paused": @((flags & CM_MEDIAFLAG_PAUSED) != 0), @"loop": @((flags & CM_MEDIAFLAG_LOOP) != 0),
+                        @"controls": @((flags & CM_MEDIAFLAG_CONTROLS) != 0), @"pip": @((flags & CM_MEDIAFLAG_PICTURE_IN_PICTURE) != 0),
+                        @"canLoop": @((flags & CM_MEDIAFLAG_CAN_LOOP) != 0),
+                        @"canControls": @((flags & CM_MEDIAFLAG_CAN_TOGGLE_CONTROLS) != 0),
+                        @"canPip": @((flags & CM_MEDIAFLAG_CAN_PICTURE_IN_PICTURE) != 0),
+                        @"canSave": @((flags & CM_MEDIAFLAG_CAN_SAVE) != 0), @"error": @((flags & CM_MEDIAFLAG_IN_ERROR) != 0)};
     }
     _selectionText = ToNSString(params->GetSelectionText());
     _isEditable = params->IsEditable();
@@ -1543,6 +1563,7 @@ private:
             return;
         }
         finished = YES;
+        values.active = NO;
         ARCHCEFBrowser *strongSelf = weakSelf;
         if (strongSelf) {
             strongSelf->_pendingContextMenu = nil;
@@ -1560,10 +1581,156 @@ private:
             finish();
             return;
         }
+        if (finished) { return; }
         CefScopedSendingEvent sendingEvent;
         [delegate cefBrowserRunContextMenu:values completion:finish];
     });
     CFRunLoopWakeUp(CFRunLoopGetMain());
+}
+
+// Resolve the media before menu tracking, when the second context click has already reached CEF.
+// Native type/flags remain authoritative; a main-frame player overlay gets a DOM fallback.
+- (void)prepareContextMenuMedia:(ARCHCEFContextMenuParams *)values hitTestFunction:(NSString *)function completion:(void (^)(void))completion {
+    __block BOOL prepared = NO;
+    void (^finish)(void) = ^{
+        if (prepared) { return; }
+        prepared = YES;
+        // DevTools replies run inside CEF work. Menu tracking must begin after that work returns.
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopDefaultMode, ^{
+            if (!values.active) { return; }
+            CefScopedSendingEvent sendingEvent;
+            completion();
+        });
+        CFRunLoopWakeUp(CFRunLoopGetMain());
+    };
+    if (!_browser || !values.active || (!values.mediaState &&
+        (!values.isInMainFrame || values.isEditable || values.linkURL || values.imageURL))) { finish(); return; }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), finish);
+    NSDictionary *nativeState = values.mediaState;
+    // A failed lookup must not leave enabled controls with no target.
+    values.mediaState = nil;
+    CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+    if (!_devToolsObserver) {
+        _devToolsObserver = new BridgeDevToolsObserver;
+        _devToolsRegistration = host->AddDevToolsMessageObserver(_devToolsObserver);
+    }
+    CefRefPtr<BridgeDevToolsObserver> observer = _devToolsObserver;
+    const double zoom = std::pow(1.2, host->GetZoomLevel());
+    if (!std::isfinite(zoom) || zoom <= 0) { finish(); return; }
+    const double x = values.mediaHitPoint.x / zoom, y = values.mediaHitPoint.y / zoom;
+    CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+    params->SetInt("x", static_cast<int>(x));
+    params->SetInt("y", static_cast<int>(y));
+    params->SetBool("includeUserAgentShadowDOM", false);
+    observer->Call(host, "DOM.getNodeForLocation", params, ^(NSDictionary *node) {
+        if (prepared) { return; }
+        id identifier = node[@"backendNodeId"], frame = node[@"frameId"];
+        if (![identifier isKindOfClass:NSNumber.class] || ![frame isKindOfClass:NSString.class] || !values.active) { finish(); return; }
+        CefRefPtr<CefDictionaryValue> world = CefDictionaryValue::Create();
+        world->SetString("frameId", [frame UTF8String]);
+        world->SetString("worldName", "ARCHContextMenu");
+        observer->Call(host, "Page.createIsolatedWorld", world, ^(NSDictionary *created) {
+            if (prepared) { return; }
+            id context = created[@"executionContextId"];
+            if (![context isKindOfClass:NSNumber.class]) { finish(); return; }
+            CefRefPtr<CefDictionaryValue> target = CefDictionaryValue::Create();
+            target->SetInt("backendNodeId", [identifier intValue]);
+            target->SetInt("executionContextId", [context intValue]);
+            observer->Call(host, "DOM.resolveNode", target, ^(NSDictionary *resolved) {
+                id objectID = resolved[@"object"][@"objectId"];
+                if (![objectID isKindOfClass:NSString.class]) { finish(); return; }
+                if (prepared) {
+                    CefRefPtr<CefDictionaryValue> release = CefDictionaryValue::Create();
+                    release->SetString("objectId", [objectID UTF8String]);
+                    observer->Call(host, "Runtime.releaseObject", release, ^(NSDictionary *) {});
+                    return;
+                }
+                CefRefPtr<CefDictionaryValue> call = CefDictionaryValue::Create();
+                call->SetString("objectId", [objectID UTF8String]);
+                call->SetString("functionDeclaration", function.UTF8String);
+                CefRefPtr<CefListValue> arguments = CefListValue::Create();
+                CefRefPtr<CefDictionaryValue> argument = CefDictionaryValue::Create();
+                argument->SetDouble("value", x); arguments->SetDictionary(0, argument);
+                argument = CefDictionaryValue::Create(); argument->SetDouble("value", y); arguments->SetDictionary(1, argument);
+                argument = CefDictionaryValue::Create(); argument->SetBool("value", values.isInMainFrame); arguments->SetDictionary(2, argument);
+                call->SetList("arguments", arguments);
+                observer->Call(host, "Runtime.callFunctionOn", call, ^(NSDictionary *selected) {
+                    id mediaID = selected[@"result"][@"objectId"];
+                    void (^release)(void) = ^{
+                        for (NSString *value in [NSSet setWithArray:[mediaID isKindOfClass:NSString.class] ? @[objectID, mediaID] : @[objectID]]) {
+                            CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+                            params->SetString("objectId", value.UTF8String);
+                            observer->Call(host, "Runtime.releaseObject", params, ^(NSDictionary *) {});
+                        }
+                    };
+                    if (prepared) { release(); return; }
+                    if (![mediaID isKindOfClass:NSString.class]) { release(); finish(); return; }
+                    CefRefPtr<CefDictionaryValue> describe = CefDictionaryValue::Create();
+                    describe->SetString("objectId", [mediaID UTF8String]);
+                    observer->Call(host, "DOM.describeNode", describe, ^(NSDictionary *described) {
+                        if (prepared) { release(); return; }
+                        id mediaNode = described[@"node"][@"backendNodeId"];
+                        if (![mediaNode isKindOfClass:NSNumber.class]) { release(); finish(); return; }
+                        values.mediaNodeID = mediaNode;
+                        values.mediaFrameID = frame;
+                        if (nativeState) { values.mediaState = nativeState; release(); finish(); return; }
+                        CefRefPtr<CefDictionaryValue> report = CefDictionaryValue::Create();
+                        report->SetString("objectId", [mediaID UTF8String]);
+                        report->SetString("functionDeclaration", function.UTF8String);
+                        report->SetBool("returnByValue", true);
+                        CefRefPtr<CefListValue> arguments = CefListValue::Create();
+                        for (int index = 0; index < 4; ++index) {
+                            CefRefPtr<CefDictionaryValue> value = CefDictionaryValue::Create();
+                            value->SetBool("value", index == 3); arguments->SetDictionary(index, value);
+                        }
+                        report->SetList("arguments", arguments);
+                        observer->Call(host, "Runtime.callFunctionOn", report, ^(NSDictionary *reported) {
+                            if (prepared) { release(); return; }
+                            NSDictionary *state = reported[@"result"][@"value"];
+                            if ([state isKindOfClass:NSDictionary.class]) {
+                                values.mediaState = state;
+                                id source = state[@"source"];
+                                if ([source isKindOfClass:NSString.class]) { values.mediaURL = source; }
+                            }
+                            release();
+                            finish();
+                        });
+                    });
+                });
+            });
+        });
+    });
+}
+
+- (void)performContextMenuMediaFunction:(NSString *)function params:(ARCHCEFContextMenuParams *)values {
+    if (!_browser || !values.mediaNodeID || !values.mediaFrameID || !_devToolsObserver) { return; }
+    CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+    CefRefPtr<BridgeDevToolsObserver> observer = _devToolsObserver;
+    CefRefPtr<CefDictionaryValue> world = CefDictionaryValue::Create();
+    world->SetString("frameId", values.mediaFrameID.UTF8String);
+    world->SetString("worldName", "ARCHContextMenu");
+    observer->Call(host, "Page.createIsolatedWorld", world, ^(NSDictionary *created) {
+        id context = created[@"executionContextId"];
+        if (![context isKindOfClass:NSNumber.class]) { return; }
+        CefRefPtr<CefDictionaryValue> node = CefDictionaryValue::Create();
+        node->SetInt("backendNodeId", values.mediaNodeID.intValue);
+        node->SetInt("executionContextId", [context intValue]);
+        observer->Call(host, "DOM.resolveNode", node, ^(NSDictionary *resolved) {
+            id objectID = resolved[@"object"][@"objectId"];
+            if (![objectID isKindOfClass:NSString.class]) { return; }
+            CefRefPtr<CefDictionaryValue> call = CefDictionaryValue::Create();
+            call->SetString("objectId", [objectID UTF8String]);
+            call->SetString("functionDeclaration", function.UTF8String);
+            call->SetBool("userGesture", true);
+            call->SetBool("awaitPromise", true);
+            call->SetBool("returnByValue", true);
+            observer->Call(host, "Runtime.callFunctionOn", call, ^(NSDictionary *) {
+                CefRefPtr<CefDictionaryValue> release = CefDictionaryValue::Create();
+                release->SetString("objectId", [objectID UTF8String]);
+                observer->Call(host, "Runtime.releaseObject", release, ^(NSDictionary *) {});
+            });
+        });
+    });
 }
 
 - (void)finishContextMenu {

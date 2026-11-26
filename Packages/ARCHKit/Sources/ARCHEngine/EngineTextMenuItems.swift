@@ -22,7 +22,7 @@ public enum EngineTextMenuItems {
 
     /// The selected text that Look Up, Translate, Search with, Transformations, and Speech act on: the selection without surrounding spaces and line breaks, in a field, or outside one when the click is not on a link, image, or media, where WebKit's menu offers none of them. Nil in a password field and without a selection.
     public static func selection(of element: EngineContextMenuElement) -> String? {
-        guard !element.isPasswordField, element.isEditable || (element.linkURL == nil && element.imageURL == nil && element.mediaURL == nil),
+        guard !element.isPasswordField, element.isEditable || (element.linkURL == nil && element.imageURL == nil && element.mediaURL == nil && element.media == nil),
               let text = element.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         return text
     }

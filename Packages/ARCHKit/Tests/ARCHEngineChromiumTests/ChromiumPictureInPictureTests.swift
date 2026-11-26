@@ -9,17 +9,43 @@ import Testing
 @Suite struct ChromiumPictureInPictureTests {
     private let container = NSRect(x: 0, y: 0, width: 800, height: 600)
 
-    @Test func theSourceViewTakesTheVideosPlaceFromThePagesTop() {
-        let source = NSRect(x: 10, y: 20, width: 320, height: 180)
-        #expect(ChromiumPictureInPicture.sourceFrame(source, naturalSize: NSSize(width: 1280, height: 720), in: container, isFlipped: false)
-            == NSRect(x: 10, y: 400, width: 320, height: 180))
-        #expect(ChromiumPictureInPicture.sourceFrame(source, naturalSize: NSSize(width: 1280, height: 720), in: container, isFlipped: true) == source)
+    @Test func aStartDeadlineCoversAVKitAcceptingTheCallWithoutCompleting() {
+        #expect(ChromiumPictureInPicture.Phase.waiting.hasPendingStart)
+        #expect(ChromiumPictureInPicture.Phase.starting.hasPendingStart)
+        #expect(!ChromiumPictureInPicture.Phase.active.hasPendingStart)
+        #expect(!ChromiumPictureInPicture.Phase.stopping.hasPendingStart)
+        #expect(!ChromiumPictureInPicture.Phase.finished.hasPendingStart)
     }
 
-    @Test func aVideoWithoutAPlaceInThePageGetsOneOfItsShapeAtTheTop() {
-        #expect(ChromiumPictureInPicture.sourceFrame(.zero, naturalSize: NSSize(width: 960, height: 720), in: container, isFlipped: false)
-            == NSRect(x: 0, y: 360, width: 320, height: 240))
-        #expect(ChromiumPictureInPicture.sourceFrame(.zero, naturalSize: .zero, in: container, isFlipped: true) == NSRect(x: 0, y: 0, width: 320, height: 180))
+    @Test func aVideoSizeMustHaveFinitePositivePixelDimensions() {
+        let invalid = [CGSize.zero, CGSize(width: 320, height: 0), CGSize(width: -1, height: 180),
+                       CGSize(width: CGFloat.nan, height: 180), CGSize(width: 320, height: CGFloat.infinity),
+                       CGSize(width: 0.5, height: 180)]
+        for size in invalid { #expect(!ChromiumPictureInPicture.validSize(size)) }
+        #expect(ChromiumPictureInPicture.validSize(CGSize(width: 1, height: 1)))
+        #expect(ChromiumPictureInPicture.validSize(CGSize(width: 3840, height: 2160)))
+    }
+
+    @Test func aStartRequiresTheFirstSamplesPresentationSizeAndValidViewAndLayerGeometry() {
+        let size = CGSize(width: 1280, height: 720)
+        #expect(ChromiumPictureInPicture.canStart(presentationSize: size, sourceFrame: container, layerBounds: container))
+        #expect(!ChromiumPictureInPicture.canStart(presentationSize: .zero, sourceFrame: container, layerBounds: container))
+        #expect(!ChromiumPictureInPicture.canStart(presentationSize: CGSize(width: CGFloat.nan, height: 720), sourceFrame: container, layerBounds: container))
+        #expect(!ChromiumPictureInPicture.canStart(presentationSize: size, sourceFrame: .zero, layerBounds: container))
+        #expect(!ChromiumPictureInPicture.canStart(presentationSize: size, sourceFrame: container, layerBounds: .zero))
+        let invalidOrigin = CGRect(x: CGFloat.nan, y: 0, width: 320, height: 180)
+        #expect(!ChromiumPictureInPicture.canStart(presentationSize: size, sourceFrame: invalidOrigin, layerBounds: container))
+    }
+
+    @Test func theFirstValidSamplePermitsStartingWithoutWaitingForTheCoveredLayerToDisplay() throws {
+        // Metadata alone does not populate the session's presentation size. It remains zero until enqueue.
+        #expect(!ChromiumPictureInPicture.canStart(presentationSize: .zero, sourceFrame: container, layerBounds: container))
+        let surface = try #require(Self.surface(width: 64, height: 40))
+        let (_, description) = try #require(ChromiumPictureInPicture.sampleBuffer(for: surface,
+            contentRect: CGRect(x: 0, y: 0, width: 64, height: 36), reusing: nil))
+        let size = CMVideoFormatDescriptionGetPresentationDimensions(description, usePixelAspectRatio: true, useCleanAperture: true)
+        #expect(size == CGSize(width: 64, height: 36))
+        #expect(ChromiumPictureInPicture.canStart(presentationSize: size, sourceFrame: container, layerBounds: container))
     }
 
     @Test func aFrameShowsAtOnceWithoutACopy() throws {
@@ -45,6 +71,22 @@ import Testing
         #expect(aperture[kCVImageBufferCleanApertureVerticalOffsetKey] as? Double == -2)
         let shown = CMVideoFormatDescriptionGetPresentationDimensions(description, usePixelAspectRatio: false, useCleanAperture: true)
         #expect(shown == CGSize(width: 64, height: 36))
+    }
+
+    @Test func anInvalidOrEmptyApertureDoesNotBecomeAVKitContent() throws {
+        let surface = try #require(Self.surface(width: 64, height: 40))
+        let invalid = [CGRect.zero, CGRect.null, CGRect.infinite, CGRect(x: CGFloat.nan, y: 0, width: 64, height: 40),
+                       CGRect(x: 0, y: 0, width: 64, height: CGFloat.infinity), CGRect(x: 80, y: 0, width: 64, height: 40),
+                       CGRect(x: 0, y: 0, width: -64, height: 40)]
+        for content in invalid {
+            #expect(ChromiumPictureInPicture.sampleBuffer(for: surface, contentRect: content, reusing: nil) == nil)
+        }
+    }
+
+    @Test func aPartlyOutsideApertureIsClippedToFiniteSurfaceDimensions() throws {
+        let surface = try #require(Self.surface(width: 64, height: 40))
+        let (_, description) = try #require(ChromiumPictureInPicture.sampleBuffer(for: surface, contentRect: CGRect(x: -10, y: -10, width: 100, height: 46), reusing: nil))
+        #expect(CMVideoFormatDescriptionGetPresentationDimensions(description, usePixelAspectRatio: true, useCleanAperture: true) == CGSize(width: 64, height: 36))
     }
 
     @Test func theFormatDescriptionLastsWhileFramesMatchIt() throws {

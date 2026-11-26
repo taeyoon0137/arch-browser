@@ -79,7 +79,8 @@ struct FlagsPageView: View {
                 .disabled(!flags.allowsPrivateAPIs)
                 FlagsSection(title: localized("Features"), emptyText: localized("No feature uses a private API yet."), isEmpty: flags.features.isEmpty) {
                     ForEach(flags.features) { feature in
-                        FlagRow(title: feature.name, detail: featureDetail(feature), isMonospaced: false,
+                        FlagRow(title: Bundle.module.localizedString(forKey: feature.name, value: feature.name, table: nil),
+                                detail: featureDetail(feature), isMonospaced: false,
                                 isOn: Binding(get: { flags.isOn(feature: feature.id) }, set: { flags.setOn($0, feature: feature.id) }))
                     }
                 }

@@ -9,6 +9,14 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
     static let handlerName = "archContextMenu"
     static let source = """
     const archPasswordFields = new WeakSet();
+    let archContextMedia = null;
+    const archMediaAtClick = (event) => {
+      const path = event.composedPath();
+      for (const node of path) if (node instanceof HTMLMediaElement) return node;
+      const target = path[0];
+      if (!target) return null;
+      return (\(EngineContextMenuMedia.hitTestFunction)).call(target, event.clientX, event.clientY, true, false);
+    };
     const archIsPasswordField = (node) => {
       if (archPasswordFields.has(node) || (node instanceof HTMLInputElement && node.type === 'password')) return true;
       const isField = node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || (node instanceof HTMLElement && node.isContentEditable);
@@ -23,7 +31,7 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
         if (record.target instanceof HTMLInputElement && record.oldValue?.toLowerCase() === 'password') archPasswordFields.add(record.target);
       }
     }).observe(document, { subtree: true, attributeFilter: ['type'], attributeOldValue: true });
-    window.addEventListener('contextmenu', (event) => {
+    const archReportContext = (event) => {
       if (!event.isTrusted) return;
       let link = null, image = null, media = null;
       const absolute = (value, node) => { try { return new URL(value, node.baseURI).href; } catch { return null; } };
@@ -46,8 +54,17 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
         }
         if (!media && node instanceof HTMLMediaElement) media = node.currentSrc || null;
       }
+      archContextMedia = archMediaAtClick(event);
+      if (archContextMedia) media = archContextMedia.currentSrc || archContextMedia.src || null;
+      const mediaState = archContextMedia ?
+        (\(EngineContextMenuMedia.hitTestFunction)).call(archContextMedia, 0, 0, false, true) : null;
       const password = archIsPasswordField(event.composedPath()[0]);
-      window.webkit.messageHandlers.\(handlerName).postMessage({ link, image, media, password, selection: String(window.getSelection() ?? '') });
+      window.webkit.messageHandlers.\(handlerName).postMessage({ link, image, media, mediaState, password, selection: String(window.getSelection() ?? '') });
+    };
+    window.addEventListener('contextmenu', archReportContext, true);
+    // Modifier clicks can bypass the DOM contextmenu event. Capture their media before WebKit opens its menu.
+    window.addEventListener('mousedown', (event) => {
+      if (event.button === 2 || (event.button === 0 && event.ctrlKey)) archReportContext(event);
     }, true);
     """
 
@@ -62,9 +79,11 @@ final class WebKitContextMenuScript: NSObject, WKScriptMessageHandler {
         guard let body = message.body as? [String: Any], let webView = message.webView as? WebKitWebView else { return }
         func url(_ key: String) -> URL? { (body[key] as? String).flatMap(URL.init(engineString:)) }
         let selection = body["selection"] as? String
+        let media = EngineContextMenuMedia(report: body["mediaState"])
+        webView.pendingMediaFrame = media == nil ? nil : message.frameInfo
         webView.pendingElement = EngineContextMenuElement(linkURL: url("link"), imageURL: url("image"), mediaURL: url("media"),
                                                           selectedText: selection?.isEmpty == false ? selection : nil, isInMainFrame: message.frameInfo.isMainFrame,
-                                                          isPasswordField: body["password"] as? Bool == true)
+                                                          isPasswordField: body["password"] as? Bool == true, media: media)
     }
 }
 
@@ -75,7 +94,7 @@ extension WebKitWebContents {
 
     /// Keeps WebKit's editing and spelling items, which WebKit runs itself, adds macOS's text items aimed at `pageView` (the web view unless a test names another), opening at `location` in the tab's view, with `panels` (the system's unless a test names them), and lets the UI delegate build the rest, with the selection only when the click is on it. The text items take the place of WebKit's own Look Up, Translate, submenus, and Share…, and the tab adds Search with in the place of WebKit's, so that both engines show the same items. The menu is changed in place, because WebKit tracks the one it passed in. AppKit adds its own items, such as AutoFill and Services, because WebKit shows the menu as a context menu for the web view; they appear on Chromium's menu the same way.
     func prepareContextMenu(_ menu: NSMenu, for element: EngineContextMenuElement, at location: NSPoint = .zero, pageView: NSView? = nil,
-                            panels: EngineTextMenuItems.Panels? = nil) {
+                            panels: EngineTextMenuItems.Panels? = nil, mediaFrame: WKFrameInfo? = nil) {
         guard let uiDelegate, let kept = Self.keptContextMenuItems(of: menu, for: element) else { return }
         menu.removeAllItems()
         for item in kept {
@@ -93,6 +112,13 @@ extension WebKitWebContents {
             item.isEnabled = true
             menu.addItem(item)
         }
+        if let media = element.media {
+            media.items { [weak webView] action in
+                guard let webView else { return }
+                webView.callAsyncJavaScript("return await (" + action.function + ").call(archContextMedia)", arguments: [:],
+                                           in: mediaFrame, in: WebKitContextMenuScript.world, completionHandler: nil)
+            }.forEach(menu.addItem)
+        }
         element.selectedText = Self.selectionUnderClick(element, keptItems: kept)
         EngineTextMenuItems.items(for: element, pageView: pageView ?? webView, anchor: view, at: location, panels: panels).forEach(menu.addItem)
         uiDelegate.webContents(self, willShowContextMenuFor: element, menu: menu)
@@ -101,7 +127,7 @@ extension WebKitWebContents {
     /// The selection when the click is on it, as Chromium hands it (Blink's `IsSelected`), since the script reads the page's selection wherever the click is, as on a part of the page that a click cannot select, which keeps the selection. In a field, WebKit's right click has already selected the word under the click or set the caret there. Outside a field, WebKit's own hit test puts Copy (8) in its menu only for a click on the selection away from links, images, and media; a right click on a text link selects the link's text on both engines; and on an image or media the selection is dropped, since neither engine selects anything there.
     static func selectionUnderClick(_ element: EngineContextMenuElement, keptItems: [NSMenuItem]) -> String? {
         guard !element.isEditable else { return element.selectedText }
-        guard element.imageURL == nil, element.mediaURL == nil, element.linkURL != nil || keptItems.contains(where: { $0.tag == 8 }) else { return nil }
+        guard element.imageURL == nil, element.mediaURL == nil, element.media == nil, element.linkURL != nil || keptItems.contains(where: { $0.tag == 8 }) else { return nil }
         return element.selectedText
     }
 

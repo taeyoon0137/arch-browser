@@ -105,6 +105,8 @@ public protocol EngineWebContents: AnyObject {
     func download(_ url: URL)
     /// Asks the page's video to enter picture in picture as from the user's own act, or to leave it when one of the page's videos shows there; false when the page has no video, refuses, or does not answer within five seconds. The script runs in a world of the engine's own, apart from the page's scripts, though the page's own event handlers still run while the activation lasts.
     func togglePictureInPicture(completion: @escaping (Bool) -> Void)
+    /// Starts only an eligible playing video, or ends only the presentation this automatic request owns. A page or user presentation is never taken over. `sourceWindow` is the existing browser window that showed the video before a tab switch detached its view.
+    func setAutomaticPictureInPicture(_ enabled: Bool, sourceWindow: NSWindow?, completion: @escaping (Bool) -> Void)
     /// Whether closing this web contents now would stop downloads it started. Only Chromium ties downloads to the page that started them.
     var closingStopsDownloads: Bool { get }
     /// Runs the page's `beforeunload` handlers and reports whether the page agreed to close. An engine that cannot run them reports true at once.
@@ -118,6 +120,7 @@ public protocol EngineWebContents: AnyObject {
 public extension EngineWebContents {
     func download(_ url: URL) {}
     func togglePictureInPicture(completion: @escaping (Bool) -> Void) { completion(false) }
+    func setAutomaticPictureInPicture(_ enabled: Bool, sourceWindow: NSWindow?, completion: @escaping (Bool) -> Void) { completion(false) }
     /// A web contents without trusted input, such as a stand-in that has no page yet, offers none.
     var input: (any EngineInput)? { nil }
     /// A web contents keeps its own page scripts unless its engine shares them.
@@ -126,6 +129,117 @@ public extension EngineWebContents {
 
 /// The script that `togglePictureInPicture` runs, in an isolated world so that the page cannot replace the functions it calls. It looks in the page and its same-origin frames: a video already in picture in picture leaves it; otherwise the playing video, or else the largest one with data, enters it.
 public enum EnginePictureInPictureScript {
+    /// Toggles the specified video, including WebKit's documented presentation-mode API. Automatic entry keeps the native completion pending behind its own deadline so that it can close a late presentation.
+    public static let toggleVideo = """
+    (async (video, allowTimeout = true) => {
+      if (!video) return false;
+      const settle = request => new Promise(resolve => {
+        const timer = allowTimeout ? setTimeout(() => resolve(false), 5000) : undefined;
+        Promise.resolve(request).then(() => { clearTimeout(timer); resolve(true); },
+                                      () => { clearTimeout(timer); resolve(false); });
+      });
+      const present = mode => new Promise(resolve => {
+        let timer;
+        const finish = result => {
+          clearTimeout(timer);
+          video.removeEventListener('webkitpresentationmodechanged', changed);
+          resolve(result);
+        };
+        const changed = () => { if (video.webkitPresentationMode === mode) finish(true); };
+        video.addEventListener('webkitpresentationmodechanged', changed);
+        if (allowTimeout) timer = setTimeout(() => finish(false), 5000);
+        try { video.webkitSetPresentationMode(mode); changed(); } catch { finish(false); }
+      });
+      try {
+        const doc = video.ownerDocument;
+        if (doc.pictureInPictureElement === video && typeof doc.exitPictureInPicture === 'function')
+          return await settle(doc.exitPictureInPicture());
+        if (video.webkitPresentationMode === 'picture-in-picture' && typeof video.webkitSetPresentationMode === 'function')
+          return await present('inline');
+        if (video.readyState === 0 || video.disablePictureInPicture) return false;
+        if (typeof video.requestPictureInPicture === 'function')
+          return await settle(video.requestPictureInPicture());
+        if (typeof video.webkitSupportsPresentationMode === 'function' &&
+            video.webkitSupportsPresentationMode('picture-in-picture') && typeof video.webkitSetPresentationMode === 'function')
+          return await present('picture-in-picture');
+      } catch {}
+      return false;
+    })
+    """
+
+    /// Automatic entry requires a playing, audible video at least 160 by 90 CSS pixels and a valid decoded size. Ownership lives in the isolated world, so leaving and reentering PiP manually clears it even for the same video.
+    public static func automatic(starting: Bool) -> String {
+        """
+        (async () => {
+          const key = '__archAutomaticPictureInPicture';
+          const shown = video => video.ownerDocument.pictureInPictureElement === video || video.webkitPresentationMode === 'picture-in-picture';
+          const toggle = \(toggleVideo);
+          const old = globalThis[key];
+          if (!\(starting ? "true" : "false")) {
+            if (!old) return false;
+            old.wanted = false;
+            if (old.video && shown(old.video)) {
+              const stopped = await toggle(old.video);
+              if (stopped || !shown(old.video)) old.clear();
+              return stopped;
+            }
+            return false;
+          }
+          if (old) return false;
+          const documents = [];
+          const collect = doc => {
+            documents.push(doc);
+            for (const frame of doc.querySelectorAll('iframe, frame')) {
+              try { if (frame.contentDocument) collect(frame.contentDocument); } catch {}
+            }
+          };
+          collect(document);
+          const videos = documents.flatMap(doc => [...doc.querySelectorAll('video')]);
+          if (documents.some(doc => doc.pictureInPictureElement) || videos.some(shown)) return false;
+          const eligible = videos.filter(video => {
+            const box = video.getBoundingClientRect();
+            return !video.paused && !video.ended && !video.muted && video.volume > 0 && video.readyState >= 2 &&
+              !video.disablePictureInPicture && Number.isFinite(video.videoWidth) && video.videoWidth > 0 &&
+              Number.isFinite(video.videoHeight) && video.videoHeight > 0 &&
+              Number.isFinite(box.width) && Number.isFinite(box.height) && box.width >= 160 && box.height >= 90 &&
+              (typeof video.requestPictureInPicture === 'function' ||
+               (typeof video.webkitSupportsPresentationMode === 'function' && video.webkitSupportsPresentationMode('picture-in-picture')));
+          });
+          eligible.sort((a, b) => { const x = a.getBoundingClientRect(), y = b.getBoundingClientRect(); return y.width * y.height - x.width * x.height; });
+          const video = eligible[0];
+          if (!video) return false;
+          const state = { video, wanted: true, entered: false };
+          const changed = () => {
+            if (shown(video)) state.entered = true;
+            else if (state.entered) state.clear();
+          };
+          state.clear = () => {
+            if (globalThis[key] === state) delete globalThis[key];
+            for (const name of ['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged']) video.removeEventListener(name, changed);
+          };
+          globalThis[key] = state;
+          for (const name of ['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged']) video.addEventListener(name, changed);
+          let timer;
+          const request = (async () => {
+            const started = await toggle(video, false);
+            if (!started) { state.clear(); return false; }
+            changed();
+            if (!state.wanted && globalThis[key] === state) {
+              const stopped = !shown(video) || await toggle(video);
+              if (stopped || !shown(video)) state.clear();
+              return false;
+            }
+            if (!shown(video)) { state.clear(); return false; }
+            return globalThis[key] === state;
+          })();
+          return await Promise.race([
+            request.finally(() => clearTimeout(timer)),
+            new Promise(resolve => { timer = setTimeout(() => { state.wanted = false; resolve(false); }, 5000); })
+          ]);
+        })()
+        """
+    }
+
     public static let toggle = """
     (async () => {
       const documents = [];
@@ -136,18 +250,18 @@ public enum EnginePictureInPictureScript {
         }
       };
       collect(document);
-      const settle = request => Promise.race([
-        request.then(() => true, () => false),
-        new Promise(resolve => setTimeout(() => resolve(false), 5000)),
-      ]);
+      const toggleVideo = \(toggleVideo);
       const shown = documents.find(doc => doc.pictureInPictureElement);
-      if (shown) return settle(shown.exitPictureInPicture());
-      const videos = documents.flatMap(doc => [...doc.querySelectorAll('video')])
-        .filter(video => video.readyState > 0 && !video.disablePictureInPicture);
+      if (shown) return toggleVideo(shown.pictureInPictureElement);
+      const allVideos = documents.flatMap(doc => [...doc.querySelectorAll('video')]);
+      const presented = allVideos.find(video => video.webkitPresentationMode === 'picture-in-picture');
+      if (presented) return toggleVideo(presented);
+      const videos = allVideos.filter(video => video.readyState > 0 && !video.disablePictureInPicture &&
+        (typeof video.requestPictureInPicture === 'function' ||
+         (typeof video.webkitSupportsPresentationMode === 'function' && video.webkitSupportsPresentationMode('picture-in-picture'))));
       const area = video => { const box = video.getBoundingClientRect(); return box.width * box.height; };
       const video = videos.find(video => !video.paused && !video.ended) || videos.sort((a, b) => area(b) - area(a))[0];
-      if (!video || !video.requestPictureInPicture) return false;
-      return settle(video.requestPictureInPicture());
+      return toggleVideo(video);
     })()
     """
 }
