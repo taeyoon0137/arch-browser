@@ -42,7 +42,7 @@ When the local switch turns off, the controller cancels pending publication work
 
 This build writes `SyncRecord.currentSchemaVersion` **4**. It adds `RemoteTabs` to the existing **private database**, custom zone **`ArchSync1`**, in the container named by the signed app's entitlements. It adds no container or server and changes no existing field's type. Older builds preserve this unknown record type in their mirror.
 
-One record holds one device's publication for one space, split into chunks when necessary. Its record name is `remote-tabs-<device UUID>-<space UUID>-<chunk index>`. The encrypted `tabs` field is a JSON object with `generation`, `index`, `count`, and `tabs`. Its `tabs` array holds only the four values listed above per tab. The generation is a SHA-256 digest of the ordered tab list; index and count identify the complete set of chunks. Each payload is at most 128 KiB. A single encoded tab of 128 KiB minus 512 bytes or more is omitted. Readers show a folder only after all chunks of its latest generation arrive with matching owners and counts, ordered by each tab's encrypted `order` value. Reducing the list deletes unused chunks; an empty list deletes every chunk for that space.
+A publication covers one device and one space and is split into chunks when necessary. Each chunk's record is named `remote-tabs-<device UUID>-<space UUID>-<chunk index>`. The encrypted `tabs` field is a JSON object with `generation`, `index`, `count`, and `tabs`. Its `tabs` array holds only the four values listed above per tab. The generation is a SHA-256 digest of the ordered tab list; index and count identify the complete set of chunks. Each payload is at most 128 KiB. A single encoded tab of 128 KiB minus 512 bytes or more is omitted. Readers show a folder only after all chunks of its latest generation arrive with matching owners and counts, ordered by each tab's encrypted `order` value. Reducing the list deletes unused chunks; an empty list deletes every chunk for that space.
 
 Deploy the following fields on **`RemoteTabs`**, with the spelling, capitalization, and encryption shown:
 
@@ -66,7 +66,7 @@ Before a Production build writes schema version 4:
 3. Deploy the added `RemoteTabs` record type and its fields from **Development to Production**. If `Folder.tint` from schema version 3 is still undeployed, deploy that Encrypted String field too. Changing `schemaVersion` in the app does not deploy a schema.
 4. With provisioned Production builds on two Macs signed in to the same Apple Account, verify publication, appearance in the matching Persona / Space, updates, ordering, and opening a local tab. Verify disabling either switch removes the publishing Mac's folders elsewhere after sync, and exercise offline cleanup and reconnect.
 
-The Production deployment and live two-Mac behavior have not been verified for this feature. A Production server rejects writes to an undeployed type or field; Settings ▸ Sync reports that save error.
+The `RemoteTabs` schema is deployed to Production; live two-Mac behavior remains unverified. A Production server rejects writes to an undeployed type or field; Settings ▸ Sync reports that save error.
 
 ## Verification
 

@@ -1,6 +1,6 @@
 # Site rules design
 
-Status: the user accepted all decisions below on November 24, including the routing toast and Undo. Phase 1 is implemented for feature row 74 in `docs/features.md`. Production sync schema deployment and checks in the running app are pending.
+Status: the user accepted all decisions below on November 24, including the routing toast and Undo. Phase 1 is implemented for feature row 74 in `docs/features.md`. The Production sync schema is deployed; checks in the running app remain pending.
 
 A site rule opens a site's pages in a chosen "Persona / Space". A link to `mail.example.com` from another app then opens in "Work / Mail" with the Work Persona's cookies, regardless of where the user was when they clicked it. The rules in `docs/windows-personas.md` apply unless stated otherwise here: a tab's Persona is fixed when the tab is created (Persona rule 3), and the interface names a Persona as "Persona / Space" (Persona rule 7).
 

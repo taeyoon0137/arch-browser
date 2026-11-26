@@ -254,9 +254,9 @@ A sidebar item with a `panel` may set `"presentation": "sidebar"`; the default i
 
 ## Sync
 
-Settings ▸ Sync groups the Plugins choice under Sync with iCloud alongside Sidebar, Settings, Site Rules, and Open Tabs from Other Macs. Each choice is on by default and disabled while the main switch is off. Its local preference, `ARCHSyncPluginsEnabled`, defaults to true and does not sync. Turning it off pauses plugin uploads and incoming changes, cancels automatic installs, and keeps local plugins and the cloud list. The mirror retains arrivals and tombstones received while paused, including across a relaunch. Sidebar and other settings sync continue. Turning it on fetches before reconciling the plugin list. Matching entries take the server's values; new local installs upload.
+Settings ▸ Sync groups the Plugins choice under Sync with iCloud alongside Sidebar, Settings, Site Rules, and Open Tabs from Other Macs. Each choice is on by default and disabled while the main switch is off. The Plugins preference, `ARCHSyncPluginsEnabled`, defaults to true and does not sync. Turning it off pauses plugin uploads and incoming changes, cancels automatic installs, and keeps local plugins and the cloud list. The mirror retains arrivals and tombstones received while paused, including across a relaunch. Sidebar and other settings sync continue. Turning it on fetches before reconciling the plugin list. Matching entries take the server's values; new local installs upload.
 
-Each Persona has its own list. The optional `syncItems` field in that Persona's `plugins.json` retains received install metadata across relaunches, including missing packages, their settings, and engine assignments while a counterpart is still downloading. Installs, removals, changes to enabled state, and non-secret setting changes apply to the same Persona on the other Macs. A removal uses the normal uninstall path there, including stopping the plugin and removing its local package, storage, and Keychain items. An arriving Persona gets its own plugin manager; a deleted Persona's plugins never move to another Persona.
+Each Persona has its own list. The optional `syncItems` field in that Persona's `plugins.json` retains received install metadata, settings, and engine assignments across relaunches, including for missing packages and while a counterpart is still downloading. Installs, removals, changes to enabled state, and non-secret setting changes apply to the same Persona on the other Macs. A removal uses the normal uninstall path there, including stopping the plugin and removing its local package, storage, and Keychain items. An arriving Persona gets its own plugin manager; a deleted Persona's plugins never move to another Persona.
 
 ### Sources and installation
 
@@ -296,7 +296,7 @@ Deploy this new `Plugin` record type with these fields:
 
 The identity, kind, source, grant, and engine-pair fields merge as one unit; name, enabled state, and the settings object merge independently. Conflict resolution keeps the source with its grant and engine assignment. Deleting the record uninstalls that entry; deleting its Persona removes its plugin records. A record with an unknown kind or engine, an invalid identity, or a value this build cannot read stays in the mirror and is neither applied nor overwritten.
 
-The schema is additive. Deploy the new record type and every listed field from Development to Production in CloudKit Console before a Developer ID build writes them. No new zone is needed. Deployment and two-Mac installation checks remain unverified.
+The schema is additive. Deploy the new record type and every listed field from Development to Production in CloudKit Console before a Developer ID build writes them. No new zone is needed. The `Plugin` schema is deployed to Production; two-Mac installation checks remain unverified.
 
 ## Personas
 
