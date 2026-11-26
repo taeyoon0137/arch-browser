@@ -3111,6 +3111,16 @@
         }
       }
     },
+    "Open Tabs from Other Macs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 Mac의 열린 탭"
+          }
+        }
+      }
+    },
     "Open This Site In" : {
       "localizations" : {
         "ko" : {
@@ -3361,6 +3371,16 @@
         }
       }
     },
+    "Personas, spaces, pinned tabs and folders, and favorites." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나, 스페이스, 고정된 탭과 폴더, 즐겨찾기."
+          }
+        }
+      }
+    },
     "Picture in Picture" : {
       "localizations" : {
         "ko" : {
@@ -3402,6 +3422,16 @@
       }
     },
     "Plugin" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인"
+          }
+        }
+      }
+    },
+    "Plugins" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -3981,6 +4011,16 @@
         }
       }
     },
+    "Sidebar" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이드바"
+          }
+        }
+      }
+    },
     "Site" : {
       "localizations" : {
         "ko" : {
@@ -3997,6 +4037,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "사이트 데이터"
+          }
+        }
+      }
+    },
+    "Site Rules" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이트 규칙"
           }
         }
       }
@@ -4617,6 +4667,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "제목"
+          }
+        }
+      }
+    },
+    "Turning an item off keeps its data in iCloud, except the list of open tabs shared by this Mac. History, website data, plugin storage, and secrets stay on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "항목을 끄면 iCloud의 데이터는 유지되지만, 이 Mac이 공유한 열린 탭 목록은 iCloud에서 삭제됩니다. 방문 기록, 웹사이트 데이터, 플러그인 저장소와 비밀 정보는 이 Mac에만 유지됩니다."
           }
         }
       }

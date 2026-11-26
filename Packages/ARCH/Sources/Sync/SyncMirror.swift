@@ -17,18 +17,21 @@ public struct SyncMirror: Sendable {
     public var unapplied: Set<String>
     /// Plugin tombstones received while plugin sync is paused, with the last identity for removal.
     public var pluginDeletions: [SyncRecord]
+    /// Server deletions waiting for their sync choice to be enabled on this Mac.
+    public var deferredDeletions: [String: SyncRecordType]
 
-    public init(engineState: Data? = nil, records: [String: CKRecord] = [:], pendingSaves: [SyncRecord] = [], unapplied: Set<String> = [], pluginDeletions: [SyncRecord] = []) {
+    public init(engineState: Data? = nil, records: [String: CKRecord] = [:], pendingSaves: [SyncRecord] = [], unapplied: Set<String> = [], pluginDeletions: [SyncRecord] = [], deferredDeletions: [String: SyncRecordType] = [:]) {
         self.engineState = engineState
         self.records = records
         self.pendingSaves = pendingSaves
         self.unapplied = unapplied
         self.pluginDeletions = pluginDeletions
+        self.deferredDeletions = deferredDeletions
     }
 
     /// Whether nothing is kept, as before the first sync.
     public var isEmpty: Bool {
-        engineState == nil && records.isEmpty && pendingSaves.isEmpty && pluginDeletions.isEmpty
+        engineState == nil && records.isEmpty && pendingSaves.isEmpty && pluginDeletions.isEmpty && deferredDeletions.isEmpty
     }
 
     /// Reads the file at `url` for `database`. A missing file reads as empty. A file from a newer format reads as empty and first leaves a copy, `sync-v<version>.json`. One that does not decode or whose records do not unarchive reads as empty, since a partial mirror would disagree with the engine's change token, and moves to `sync.unreadable.json`. One written for another database, such as a build for the other CloudKit environment or another container, reads as empty and moves to `sync.other-database.json`, since its change token and change tags belong to that database and its mirror would keep this Mac's items from uploading. Each copy, like those `SessionStore` makes of `session.json`, keeps the file from the next write and replaces an older copy. A pending save this build cannot read, of a record type or with a kind of value that only a newer build writes, is skipped and the rest reads: its record keeps its mirror copy, so the next comparison that covers its type finds the change again. Records of other zones are skipped (`SyncCloudKitRecords.isInZone(_:)`).
@@ -52,7 +55,8 @@ public struct SyncMirror: Sendable {
             records: Dictionary(records.filter { SyncCloudKitRecords.isInZone($0.recordID) }.map { ($0.recordID.recordName, $0) }) { first, _ in first },
             pendingSaves: file.pendingSaves.compactMap { try? $0.record() },
             unapplied: Set(file.unapplied ?? []),
-            pluginDeletions: (file.pluginDeletions ?? []).compactMap { try? $0.record() }
+            pluginDeletions: (file.pluginDeletions ?? []).compactMap { try? $0.record() },
+            deferredDeletions: (file.deferredDeletions ?? [:]).compactMapValues(SyncRecordType.init(rawValue:))
         )
     }
 
@@ -72,7 +76,8 @@ public struct SyncMirror: Sendable {
             records: try NSKeyedArchiver.archivedData(withRootObject: sortedRecords as NSArray, requiringSecureCoding: true),
             pendingSaves: pendingSaves.map(File.PendingSave.init),
             unapplied: unapplied.isEmpty ? nil : unapplied.sorted(),
-            pluginDeletions: pluginDeletions.isEmpty ? nil : pluginDeletions.map(File.PendingSave.init)
+            pluginDeletions: pluginDeletions.isEmpty ? nil : pluginDeletions.map(File.PendingSave.init),
+            deferredDeletions: deferredDeletions.isEmpty ? nil : deferredDeletions.mapValues(\.rawValue)
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
@@ -111,8 +116,9 @@ public struct SyncMirror: Sendable {
         /// The unapplied record names, sorted, or nil for none. Files before it have none.
         var unapplied: [String]?
         var pluginDeletions: [PendingSave]?
+        var deferredDeletions: [String: String]?
 
-        init(version: Int, database: String, engineState: Data?, records: Data, pendingSaves: [PendingSave], unapplied: [String]?, pluginDeletions: [PendingSave]?) {
+        init(version: Int, database: String, engineState: Data?, records: Data, pendingSaves: [PendingSave], unapplied: [String]?, pluginDeletions: [PendingSave]?, deferredDeletions: [String: String]?) {
             self.version = version
             self.database = database
             self.engineState = engineState
@@ -120,6 +126,7 @@ public struct SyncMirror: Sendable {
             self.pendingSaves = pendingSaves
             self.unapplied = unapplied
             self.pluginDeletions = pluginDeletions
+            self.deferredDeletions = deferredDeletions
         }
 
         init(from decoder: Decoder) throws {
@@ -131,10 +138,11 @@ public struct SyncMirror: Sendable {
             pendingSaves = try container.decode([Readable].self, forKey: .pendingSaves).compactMap(\.save)
             unapplied = try container.decodeIfPresent([String].self, forKey: .unapplied)
             pluginDeletions = try container.decodeIfPresent([Readable].self, forKey: .pluginDeletions)?.compactMap(\.save)
+            deferredDeletions = try container.decodeIfPresent([String: String].self, forKey: .deferredDeletions)
         }
 
         private enum CodingKeys: String, CodingKey {
-            case version, database, engineState, records, pendingSaves, unapplied, pluginDeletions
+            case version, database, engineState, records, pendingSaves, unapplied, pluginDeletions, deferredDeletions
         }
 
         /// One pending save as read, or nil when it does not decode. Decoding never fails, so the list goes on to the next save.

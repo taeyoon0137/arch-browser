@@ -33,8 +33,10 @@ final class EngineRuntime {
 /// Owns engine runtimes, browser state, windows, downloads, and the session's feature hosts.
 @MainActor public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
-    /// Whether this Mac's Persona deletions can sync, including changes made while offline.
+    /// Whether this Mac has opted into iCloud sync, including while offline.
     @Published public var isSyncing = false
+    /// Whether sidebar edits and Persona deletions participate in that sync.
+    @Published public var isSidebarSyncEnabled = false
     @Published public var remoteTabGroups: [RemoteTabGroup] = []
     @Published public var showRemoteTabs = true {
         didSet { if showRemoteTabs != oldValue { onShowRemoteTabsChange?(showRemoteTabs) } }

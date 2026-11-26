@@ -8,6 +8,12 @@ import Foundation
 /// Coordinates account availability, local sidebar saves, and CloudKit sync engine events.
 @MainActor public final class SyncController: ObservableObject {
     public static let enabledKey = "ARCHSyncEnabled"
+    public static let sidebarEnabledKey = "ARCHSyncSidebarEnabled"
+    public static let settingsEnabledKey = "ARCHSyncSettingsEnabled"
+    public static let siteRulesEnabledKey = "ARCHSyncSiteRulesEnabled"
+    @Published public private(set) var isSidebarEnabled: Bool
+    @Published public private(set) var isSettingsEnabled: Bool
+    @Published public private(set) var isSiteRulesEnabled: Bool
     public static let pluginsEnabledKey = "ARCHSyncPluginsEnabled"
     @Published public private(set) var isPluginsEnabled: Bool
     public static let showRemoteTabsKey = "ARCHShowRemoteTabs"
@@ -118,6 +124,9 @@ import Foundation
         url = directory.appendingPathComponent(SyncMirror.fileName)
         settings = SyncedSettings(defaults: defaults)
         isEnabled = defaults.bool(forKey: Self.enabledKey)
+        isSidebarEnabled = defaults.object(forKey: Self.sidebarEnabledKey) as? Bool ?? true
+        isSettingsEnabled = defaults.object(forKey: Self.settingsEnabledKey) as? Bool ?? true
+        isSiteRulesEnabled = defaults.object(forKey: Self.siteRulesEnabledKey) as? Bool ?? true
         isPluginsEnabled = defaults.object(forKey: Self.pluginsEnabledKey) as? Bool ?? true
         offReason = defaults.string(forKey: Self.offReasonKey).flatMap(SyncOffReason.init(rawValue:))
         if defaults.bool(forKey: Self.applyingKey) {
@@ -127,6 +136,7 @@ import Foundation
             lastError = Self.interruptedApplyMessage
         }
         sidebar.showRemoteTabs = showRemoteTabs
+        sidebar.isSidebarSyncEnabled = isEnabled && isSidebarEnabled
         sidebar.onShowRemoteTabsChange = { [weak self] in self?.setShowRemoteTabs($0) }
         observers.append(notifications.addObserver(forName: UserDefaults.didChangeNotification, object: defaults, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.settingsChanged() }
@@ -197,9 +207,15 @@ import Foundation
             updateRemoteFolders()
             return
         }
-        if value {
-            if engine != nil { scheduleRemoteTabs(sidebar.openTabsSyncState) }
-        } else {
+        if value, let engine {
+            // Hold publication immediately; the successful fetch schedules the new snapshot.
+            fetching = true
+            Task { @MainActor [weak self] in
+                guard let self, self.engine === engine else { return }
+                await requestFetch()
+            }
+            return
+        } else if !value {
             outgoingRemoteTabs = []
             publishedOpenTabs = []
             compareRemoteTabs()
@@ -312,7 +328,9 @@ import Foundation
             // mirror could turn every missing row into an outgoing delete. A nil token and
             // first-sync merge restore the complete zone while preserving local-only additions.
             mirror = sidebar.needsFullSidebarSync ? SyncMirror() : SyncMirror.read(from: url, database: target)
-            reapplying = mirror.unapplied.filter { mirror.records[$0] != nil }
+            reapplying = mirror.unapplied.filter {
+                mirror.records[$0].flatMap { SyncRecordType(rawValue: $0.recordType) }.map(syncs) == true
+            }
             for name in reapplying { fetched[name] = mirror.records[name] }
             first = mirror.isEmpty
             fetching = true
@@ -320,14 +338,7 @@ import Foundation
             let delegate = Delegate(self)
             self.delegate = delegate
             engine = factory(target, mirror.engineState, delegate)
-            if !isPluginsEnabled || plugins == nil, let engine {
-                engine.remove(engine.pendingChanges.filter {
-                    switch $0 {
-                    case .saveRecord(let name), .deleteRecord(let name): name.hasPrefix("plugin.")
-                    case .saveZone, .deleteZone: false
-                    }
-                })
-            }
+            discardPendingChanges(for: Set(SyncRecordType.allCases.filter { !syncs($0) && $0 != .remoteTabs }))
             let oldRemoteSaves = mirror.pendingSaves.filter { RemoteTabsRecords.owns($0, deviceID: remoteDeviceID) }
             remoteDeletionCandidates.formUnion((bases.filter { RemoteTabsRecords.owns($0, deviceID: remoteDeviceID) } + oldRemoteSaves).map(\.recordName))
             engine?.remove(oldRemoteSaves.map { .saveRecord($0.recordName) })
@@ -425,7 +436,7 @@ import Foundation
     /// Builds a pending record only after the first fetch and outside an apply or deletion.
     func record(toSave name: String) -> CKRecord? {
         guard canSendRecords, let save = mirror.pendingSaves.first(where: { $0.recordName == name }) else { return nil }
-        guard save.recordType != .plugin || isPluginsEnabled && plugins != nil else { return nil }
+        guard syncs(save.recordType) else { return nil }
         let base = mirror.records[name]
         guard base.map({ $0.recordType == save.recordType.rawValue }) ?? true else { return nil }
         return SyncCloudKitRecords.ckRecord(from: save, base: base)
@@ -468,31 +479,99 @@ import Foundation
         } catch { lastError = localized("The saved sidebar could not be compared.") }
     }
 
-    /// Pausing plugin sync keeps installations and cloud records. The mirror saves incoming
-    /// records and tombstones to apply before publishing resumes.
+    public func setSidebarEnabled(_ enabled: Bool) async {
+        guard isSidebarEnabled != enabled, !isDeletingCloudData else { return }
+        isSidebarEnabled = enabled
+        sidebar.isSidebarSyncEnabled = isEnabled && enabled
+        defaults.set(enabled, forKey: Self.sidebarEnabledKey)
+        await syncChoiceChanged([.persona, .space, .folder, .favorite, .tab], enabled: enabled)
+    }
+
+    public func setSettingsEnabled(_ enabled: Bool) async {
+        guard isSettingsEnabled != enabled, !isDeletingCloudData else { return }
+        isSettingsEnabled = enabled
+        defaults.set(enabled, forKey: Self.settingsEnabledKey)
+        await syncChoiceChanged([.setting], enabled: enabled)
+    }
+
+    public func setSiteRulesEnabled(_ enabled: Bool) async {
+        guard isSiteRulesEnabled != enabled, !isDeletingCloudData else { return }
+        isSiteRulesEnabled = enabled
+        defaults.set(enabled, forKey: Self.siteRulesEnabledKey)
+        await syncChoiceChanged([.siteRule], enabled: enabled)
+    }
+
     public func setPluginsEnabled(_ enabled: Bool) async {
         guard isPluginsEnabled != enabled, !isDeletingCloudData else { return }
         isPluginsEnabled = enabled
         defaults.set(enabled, forKey: Self.pluginsEnabledKey)
         plugins?.setPluginSyncActive(false)
-        guard let engine else { return }
-        let pluginRows = bases.filter { $0.recordType == .plugin }
-        mirror.unapplied.formUnion(pluginRows.map(\.recordName))
-        let names = Set((pluginRows + mirror.pendingSaves.filter { $0.recordType == .plugin }).map(\.recordName))
-        engine.remove(engine.pendingChanges.filter {
-            switch $0 {
-            case .saveRecord(let name), .deleteRecord(let name): return names.contains(name) || name.hasPrefix("plugin.")
-            case .saveZone, .deleteZone: return false
-            }
-        })
+        await syncChoiceChanged([.plugin], enabled: enabled)
+    }
+
+    /// Choices belong to this Mac. Disabled records remain in the mirror for a server-first
+    /// replay, and their queued saves and deletions never reach the engine's next batch.
+    private func syncChoiceChanged(_ types: Set<SyncRecordType>, enabled: Bool) async {
+        guard engine != nil else { return }
+        discardPendingChanges(for: types)
         if canSendRecords { persist() }
         if enabled {
-            for row in pluginRows {
+            for row in bases where types.contains(row.recordType) && !deletedNames.contains(row.recordName) {
                 reapplying.insert(row.recordName)
-                fetched[row.recordName] = mirror.records[row.recordName]
+                if fetched[row.recordName] == nil { fetched[row.recordName] = mirror.records[row.recordName] }
             }
             await requestFetch()
         }
+    }
+
+    private func syncs(_ type: SyncRecordType) -> Bool {
+        switch type {
+        case .persona, .space, .folder, .favorite, .tab: isSidebarEnabled
+        case .setting: isSettingsEnabled
+        case .siteRule: isSiteRulesEnabled && sidebar.sidebarSyncState.canSyncSiteRules
+        case .remoteTabs: showRemoteTabs
+        case .plugin: isPluginsEnabled && plugins != nil
+        }
+    }
+
+    private func discardPendingChanges(for types: Set<SyncRecordType>) {
+        guard let engine, !types.isEmpty else { return }
+        let rows = (bases + mirror.pendingSaves).filter { types.contains($0.recordType) }
+        let names = Set(rows.map(\.recordName))
+        mirror.unapplied.formUnion(bases.filter { types.contains($0.recordType) }.map(\.recordName))
+        mirror.pendingSaves.removeAll { types.contains($0.recordType) }
+        engine.remove(engine.pendingChanges.filter {
+            switch $0 {
+            case .saveRecord(let name), .deleteRecord(let name):
+                return names.contains(name) || types.contains(.plugin) && name.hasPrefix("plugin.")
+                    || types.contains(.setting) && SyncedSettings.setting(forKey: name) != nil
+            case .saveZone, .deleteZone: return false
+            }
+        })
+    }
+
+    /// A disabled graph uses this Mac's destinations as context, never unseen cloud parents.
+    private func graphContext(server: [SyncRecord], local: [SyncRecord]) -> [SyncRecord] {
+        server.filter { syncs($0.recordType) } + local.filter { !syncs($0.recordType) }
+    }
+
+    private var applicableDeletions: [String: SyncRecordType] {
+        mirror.deferredDeletions.merging(deleted) { _, latest in latest }.filter { syncs($0.value) }
+    }
+
+    private func selectedSidebar(_ incoming: SidebarSyncState) -> SidebarSyncState {
+        let local = sidebar.sidebarSyncState
+        let graph = isSidebarEnabled ? incoming : local
+        return SidebarSyncState(personas: graph.personas, spaces: graph.spaces, folders: graph.folders,
+            favorites: graph.favorites, pinnedTabs: graph.pinnedTabs,
+            siteRules: syncs(.siteRule) ? incoming.siteRules : local.siteRules,
+            canSyncSiteRules: local.canSyncSiteRules)
+    }
+
+    private func selectedDeletions(_ incoming: SidebarSyncDeletions) -> SidebarSyncDeletions {
+        var result = isSidebarEnabled ? incoming : SidebarSyncDeletions()
+        result.siteRules = syncs(.siteRule) ? incoming.siteRules : []
+        return result
     }
 
     private func pluginRecords(at date: Date) throws -> [SyncRecord] {
@@ -511,7 +590,8 @@ import Foundation
     }
 
     private func shouldHoldPlugin(_ record: SyncRecord) -> Bool {
-        guard isPluginsEnabled, plugins != nil, PluginRecords.item(from: record) != nil else { return true }
+        guard isPluginsEnabled, plugins != nil, let item = PluginRecords.item(from: record),
+              isSidebarEnabled || sidebar.sidebarSyncState.personas.contains(where: { $0.id == item.personaID }) else { return true }
         if case .reference(let owner) = record[.persona] {
             let current = mirror.records.merging(fetched) { _, incoming in incoming }.values.compactMap(SyncCloudKitRecords.syncRecord(from:))
             return IncomingSidebarRecords.heldOut(server: current, local: []).contains(owner)
@@ -539,7 +619,7 @@ import Foundation
         for (name, type) in deleted where type == .plugin {
             removals[name] = baseByName[name] ?? localByName[name] ?? mirror.pendingSaves.first { $0.recordName == name }
         }
-        let removedOwners = Set(deleted.filter { $0.value == .persona }.keys)
+        let removedOwners = Set(applicableDeletions.filter { $0.value == .persona }.keys)
         for row in base + local + server where row.recordType == .plugin {
             if case .reference(let owner) = row[.persona], removedOwners.contains(owner) { removals[row.recordName] = row }
         }
@@ -682,14 +762,15 @@ import Foundation
         let records = try SidebarRecords.records(from: state, foundAt: date)
         let base = bases
         // What this build cannot apply stays on the server as another build wrote it.
-        let held = IncomingSidebarRecords.heldOut(server: base, local: records)
-        let scope = { (record: SyncRecord) in record.recordType.isSidebar && !held.contains(record.recordName) && (state.canSyncSiteRules || record.recordType != .siteRule) }
+        let held = IncomingSidebarRecords.heldOut(server: graphContext(server: base, local: records), local: records)
+        let scope = { (record: SyncRecord) in record.recordType.isSidebar && self.syncs(record.recordType) && !held.contains(record.recordName) && (state.canSyncSiteRules || record.recordType != .siteRule) }
         let changes = SyncDiff.changes(local: records.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
         reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType.isSidebar })
     }
 
     /// Builds changed setting records against the mirror and pending saves.
     private func compareSettings(publish: Bool? = nil) {
+        guard isSettingsEnabled else { return }
         let comparison = settings.comparison(mirror: bases, pending: mirror.pendingSaves)
         let changes = SyncDiff.changes(local: comparison.records, scope: comparison.contains, mirror: bases, pending: mirror.pendingSaves, foundAt: now())
         reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType == .setting })
@@ -793,6 +874,7 @@ import Foundation
             if reason == .encryptedDataReset {
                 fetched.removeAll(); deleted.removeAll(); deletedNames.removeAll()
                 mirror.records.removeAll()
+                mirror.deferredDeletions.removeAll()
                 unknown.removeAll(); missingZone = false; first = true
             } else { disableAfterLoss(.zoneDeleted) }
         }
@@ -817,6 +899,7 @@ import Foundation
     private func updateEnabled(_ value: Bool) {
         guard isEnabled != value else { return }
         isEnabled = value
+        sidebar.isSidebarSyncEnabled = value && isSidebarEnabled
         defaults.set(value, forKey: Self.enabledKey)
         onEnabledChange?(value)
     }
@@ -867,18 +950,22 @@ import Foundation
             // A defaults notification can still be waiting on the main queue.
             if !settings.changedKeys().isEmpty { compareSettings(publish: false) }
             let local = try SidebarRecords.records(from: sidebar.sidebarSyncState, foundAt: date)
-            // An earlier completed fetch may have delivered a rule before its destination.
-            // Retry it when later records arrive, without waiting for another launch.
+            // Replay paused records and arrivals that were waiting for their destinations.
+            // The current fetch still takes precedence over the saved copy.
             for name in mirror.unapplied where fetched[name] == nil && !deletedNames.contains(name) {
-                guard let record = mirror.records[name], record.recordType == SyncRecordType.siteRule.rawValue else { continue }
+                guard let record = mirror.records[name], let type = SyncRecordType(rawValue: record.recordType), syncs(type) else { continue }
                 fetched[name] = record
                 reapplying.insert(name)
             }
-            let server = fetched.values.compactMap(SyncCloudKitRecords.syncRecord(from:)).filter { sidebar.sidebarSyncState.canSyncSiteRules || $0.recordType != .siteRule }
+            for name in fetched.keys { mirror.deferredDeletions[name] = nil }
+            for (name, type) in deleted where type != .plugin && type != .remoteTabs && !syncs(type) {
+                mirror.deferredDeletions[name] = type
+            }
+            let server = fetched.values.compactMap(SyncCloudKitRecords.syncRecord(from:)).filter { syncs($0.recordType) }
             let localPlugins = try pluginRecords(at: date)
             if first {
                 let comparison = settings.comparison(mirror: base, pending: mirror.pendingSaves)
-                try applyFirst(local: local + comparison.records, server: server, date: date)
+                try applyFirst(local: local + (isSettingsEnabled ? comparison.records : []), server: server, date: date)
             } else {
                 try applyFetched(local: local, server: server, base: base, date: date)
             }
@@ -896,13 +983,15 @@ import Foundation
                 engine.remove([.saveRecord(key), .deleteRecord(key)])
             }
             for (key, row) in fetched { mirror.records[key] = row }
-            mirror.unapplied = IncomingSidebarRecords.heldOut(server: bases, local: try SidebarRecords.records(from: sidebar.sidebarSyncState, foundAt: date))
+            let savedLocal = try SidebarRecords.records(from: sidebar.sidebarSyncState, foundAt: date)
+            mirror.unapplied = IncomingSidebarRecords.heldOut(server: graphContext(server: bases, local: savedLocal), local: savedLocal)
                 .union(mirror.records.compactMap { entry in
                     let unsupported = SyncCloudKitRecords.syncRecord(from: entry.value) == nil
-                    let unreadableRules = !sidebar.sidebarSyncState.canSyncSiteRules && entry.value.recordType == SyncRecordType.siteRule.rawValue
-                    return unsupported || unreadableRules ? entry.key : nil
+                    let paused = SyncRecordType(rawValue: entry.value.recordType).map { !syncs($0) } ?? false
+                    return unsupported || paused ? entry.key : nil
                 })
                 .union(bases.filter { $0.recordType == .plugin && shouldHoldPlugin($0) }.map(\.recordName))
+            mirror.deferredDeletions = mirror.deferredDeletions.filter { !syncs($0.value) }
             reapplying.removeAll()
             if mirror.records.isEmpty {
                 awaitingZoneSave = true
@@ -949,7 +1038,8 @@ import Foundation
 
     /// Merges first-sync identities and applies the resulting sidebar and settings.
     private func applyFirst(local: [SyncRecord], server: [SyncRecord], date: Date) throws {
-        let held = IncomingSidebarRecords.heldOut(server: server, local: local, deleted: deleted)
+        let deletions = applicableDeletions
+        let held = IncomingSidebarRecords.heldOut(server: server, local: local, deleted: deletions)
         let plan = try FirstSyncMerge.plan(local: local.filter { $0.recordType != .plugin && !held.contains($0.recordName) }, server: server.filter { $0.recordType != .plugin && !held.contains($0.recordName) },
                                            samePage: { $0.isSamePage(as: $1) })
         var replacements = SidebarSyncReplacements()
@@ -966,45 +1056,55 @@ import Foundation
         }
         var rows = plan.recordsToApply
         for upload in plan.recordsToUpload { rows[upload.recordName] = upload }
-        let incoming = try IncomingSidebarRecords.plan(records: Array(rows.values), deleted: deleted, foundAt: date, defaultEngine: sidebar.defaultEngine)
-        sidebar.applyFirstSidebarSync(incoming.sidebar, replacements: replacements)
-        for item in plan.recordsToApply.values where item.recordType == .setting { settings.apply(item) }
-        if !deleted.isEmpty || !incoming.recordsToDelete.isEmpty { sidebar.applySidebarSync(incoming.sidebar, deletions: incoming.deletions) }
+        let incoming = try IncomingSidebarRecords.plan(records: Array(rows.values), deleted: deletions, foundAt: date, defaultEngine: sidebar.defaultEngine)
+        sidebar.applyFirstSidebarSync(selectedSidebar(incoming.sidebar), replacements: replacements)
+        for item in plan.recordsToApply.values where item.recordType == .setting && isSettingsEnabled { settings.apply(item) }
+        if !deletions.isEmpty || !incoming.recordsToDelete.isEmpty {
+            sidebar.applySidebarSync(selectedSidebar(incoming.sidebar), deletions: selectedDeletions(incoming.deletions))
+        }
     }
 
     /// Three-way merges fetched sidebar records and settings with local edits.
     private func applyFetched(local: [SyncRecord], server: [SyncRecord], base: [SyncRecord], date: Date) throws {
         // Only a changed local field takes an edit time from this Mac. Preserve the server's
         // times and order keys for unedited values before a three-way merge.
-        let held = IncomingSidebarRecords.heldOut(server: base, local: local)
-        let canSyncSiteRules = sidebar.sidebarSyncState.canSyncSiteRules
-        let scope = { (record: SyncRecord) in record.recordType.isSidebar && !held.contains(record.recordName) && (canSyncSiteRules || record.recordType != .siteRule) }
+        let held = IncomingSidebarRecords.heldOut(server: graphContext(server: base, local: local), local: local)
+        let scope = { (record: SyncRecord) in record.recordType.isSidebar && self.syncs(record.recordType) && !held.contains(record.recordName) }
         let differences = SyncDiff.changes(local: local.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
         // A name listed twice counts by its first copy, as in the comparison itself.
         let changed = Dictionary(differences.saves.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
         let baseByName = Dictionary(base.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
-        let current = local.map { held.contains($0.recordName) ? $0 : changed[$0.recordName] ?? baseByName[$0.recordName] ?? $0 }
+        let serverByName = Dictionary(server.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+        let current = local.map { row in
+            guard syncs(row.recordType), !held.contains(row.recordName) else { return row }
+            if reapplying.contains(row.recordName), let remote = serverByName[row.recordName] { return remote }
+            return changed[row.recordName] ?? baseByName[row.recordName] ?? row
+        }
         // A record already deleted on this Mac must stay absent while its pending delete
         // is being sent. An edit of that same surviving server ID cannot restore it.
         let localDeletions = Set(differences.deletions).subtracting(reapplying)
         let incoming = try IncomingSidebarRecords.plan(local: current, fetched: server.filter { !localDeletions.contains($0.recordName) },
-                                                     mirror: base, deleted: deleted, foundAt: date, defaultEngine: sidebar.defaultEngine)
-        sidebar.applySidebarSync(incoming.sidebar, deletions: incoming.deletions)
-        for item in server where item.recordType == .setting {
-            let pending = mirror.pendingSaves.first { $0.recordName == item.recordName }
+                                                     mirror: base.filter { syncs($0.recordType) }, deleted: applicableDeletions, foundAt: date, defaultEngine: sidebar.defaultEngine)
+        sidebar.applySidebarSync(selectedSidebar(incoming.sidebar), deletions: selectedDeletions(incoming.deletions))
+        for item in server where item.recordType == .setting && isSettingsEnabled {
+            let pending = reapplying.contains(item.recordName) ? nil : mirror.pendingSaves.first { $0.recordName == item.recordName }
             let value = pending.map { SyncMerge.merge(local: $0, server: item, base: baseByName[item.recordName].map(SyncMerge.Base.mirror) ?? .firstWrite).record } ?? item
             settings.apply(value)
         }
         // Persist these times in the next comparisons; the mirror still takes the server's copy.
-        let merged = Set(incoming.repairs.map(\.recordName))
+        let repairs = incoming.repairs.filter { syncs($0.recordType) }
+        let merged = Set(repairs.map(\.recordName))
         mirror.pendingSaves.removeAll { merged.contains($0.recordName) }
-        mirror.pendingSaves.append(contentsOf: incoming.repairs)
+        mirror.pendingSaves.append(contentsOf: repairs)
     }
 
     /// Updates the mirror for sent changes and schedules conflict or missing-zone recovery.
     private func didSend(_ sent: SyncSentChanges) {
         guard let engine else { return }
-        for row in sent.savedRecords where SyncCloudKitRecords.isInZone(row.recordID) { mirror.records[row.recordID.recordName] = row }
+        for row in sent.savedRecords where SyncCloudKitRecords.isInZone(row.recordID) {
+            mirror.records[row.recordID.recordName] = row
+            if let type = SyncRecordType(rawValue: row.recordType), !syncs(type) { mirror.unapplied.insert(row.recordID.recordName) }
+        }
         for key in sent.deletedRecordNames {
             mirror.records[key] = nil
             remoteDeletionCandidates.remove(key)

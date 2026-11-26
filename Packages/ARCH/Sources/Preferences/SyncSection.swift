@@ -58,18 +58,33 @@ struct SyncSection: View {
                     Task { await controller.setEnabled(value) }
                 }))
                 .disabled(!state.canToggle)
-                Text(RemoteTabsStrings.explanation)
-                    .font(.callout).foregroundStyle(.secondary)
-                Toggle(PluginSyncLabels.toggle, isOn: Binding(get: { controller.isPluginsEnabled }, set: { value in
-                    Task { await controller.setPluginsEnabled(value) }
-                }))
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle(isOn: Binding(get: { controller.isSidebarEnabled }, set: { value in
+                        Task { await controller.setSidebarEnabled(value) }
+                    })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(SyncChoiceLabels.sidebar)
+                            Text(SyncChoiceLabels.sidebarDetail)
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                    Toggle(SyncChoiceLabels.settings, isOn: Binding(get: { controller.isSettingsEnabled }, set: { value in
+                        Task { await controller.setSettingsEnabled(value) }
+                    }))
+                    Toggle(SyncChoiceLabels.siteRules, isOn: Binding(get: { controller.isSiteRulesEnabled }, set: { value in
+                        Task { await controller.setSiteRulesEnabled(value) }
+                    }))
+                    Toggle(SyncChoiceLabels.openTabs, isOn: Binding(get: { controller.showRemoteTabs }, set: { value in
+                        controller.setShowRemoteTabs(value)
+                    }))
+                    Toggle(SyncChoiceLabels.plugins, isOn: Binding(get: { controller.isPluginsEnabled }, set: { value in
+                        Task { await controller.setPluginsEnabled(value) }
+                    }))
+                }
+                .padding(.leading, 16)
                 .disabled(!state.isOn || !state.canToggle)
-                Text(PluginSyncLabels.explanation)
+                Text(SyncChoiceLabels.explanation)
                     .font(.callout).foregroundStyle(.secondary)
-                Toggle(RemoteTabsStrings.showTabs, isOn: Binding(get: { controller.showRemoteTabs }, set: { value in
-                    controller.setShowRemoteTabs(value)
-                }))
-                .disabled(!controller.isEnabled || controller.isCheckingAvailability || controller.isDeletingCloudData)
             }
             Section {
                 LabeledContent(localized("iCloud account"), value: state.account)

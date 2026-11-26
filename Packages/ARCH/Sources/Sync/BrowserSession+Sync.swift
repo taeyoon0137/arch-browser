@@ -6,6 +6,7 @@ import Foundation
 /// The session surface used by SyncController. A committed mirror may reference only a sidebar
 /// already saved through saveNow(). Tests supply a sidebar and fail its write without CloudKit.
 @MainActor public protocol SyncedSidebar: AnyObject {
+    var isSidebarSyncEnabled: Bool { get set }
     var needsFullSidebarSync: Bool { get }
     func finishSidebarSyncRecovery()
     var sidebarSyncState: SidebarSyncState { get }
@@ -23,6 +24,7 @@ import Foundation
 }
 
 extension SyncedSidebar {
+    public var isSidebarSyncEnabled: Bool { get { false } set {} }
     public var openTabsSyncState: [OpenTabsSpace] { [] }
     public var onOpenTabsSyncSave: (([OpenTabsSpace]) -> Void)? { get { nil } set {} }
     public var remoteTabGroups: [RemoteTabGroup] { get { [] } set {} }

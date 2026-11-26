@@ -9,7 +9,7 @@ Each space shows the open, unpinned tabs published by other Macs signed in to th
 - Clicking a row opens a new unpinned tab in the displayed space with the published address and engine. The source Mac's tab stays untouched. The new tab uses this Mac's existing Persona profile and its own sign-in state.
 - Remote rows cannot be renamed, moved, pinned, or closed. A remote folder accepts no local tabs or folders. They do not become local bookmarks or live tabs until clicked.
 - A folder disappears when the publishing Mac has no eligible tabs in the space or its publication is at least 14 days old. A Mac that reconnects can publish it again.
-- Settings ▸ Sync and the sidebar's context menu offer Show Tabs from Other Macs. A remote folder's context menu offers Hide Tabs from Other Macs. These control one preference on this Mac, enabled by default when sync is on. Turning it off hides all remote folders and removes this Mac's published records. Turning sync off also removes its publications.
+- Settings ▸ Sync offers Open Tabs from Other Macs under the main iCloud switch, and the sidebar's context menu offers Show Tabs from Other Macs. A remote folder's context menu offers Hide Tabs from Other Macs. These control one preference on this Mac, enabled by default when sync is on. Turning it off hides all remote folders and removes this Mac's published records. Turning sync off also removes its publications.
 
 Interface strings and their Korean translations are in `Packages/ARCH/Sources/Browsing/Resources/Localizable.xcstrings`. Remote folder and tab rows use the neighboring sidebar rows' sizes, weights, and color roles.
 
@@ -61,7 +61,7 @@ Deploy the following fields on **`RemoteTabs`**, with the spelling, capitalizati
 
 Before a Production build writes schema version 4:
 
-1. Use a provisioned Development build as described in `docs/sync.md`, User steps. Enable sync and Show Tabs from Other Macs, and leave an eligible open tab in a space.
+1. Use a provisioned Development build as described in `docs/sync.md`, User steps. Enable sync and Open Tabs from Other Macs, and leave an eligible open tab in a space.
 2. After the debounce and completed sync, inspect `RemoteTabs` in CloudKit Console's Development environment. Check all fields above and confirm that `tabs`, `deviceID`, `deviceName`, and `fieldModifiedAt` are encrypted strings.
 3. Deploy the added `RemoteTabs` record type and its fields from **Development to Production**. If `Folder.tint` from schema version 3 is still undeployed, deploy that Encrypted String field too. Changing `schemaVersion` in the app does not deploy a schema.
 4. With provisioned Production builds on two Macs signed in to the same Apple Account, verify publication, appearance in the matching Persona / Space, updates, ordering, and opening a local tab. Verify disabling either switch removes the publishing Mac's folders elsewhere after sync, and exercise offline cleanup and reconnect.

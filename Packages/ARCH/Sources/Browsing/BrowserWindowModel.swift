@@ -301,7 +301,7 @@ public enum BrowserWindowKind {
         guard canShowPersonaSheet, session.canDeletePersona(id), let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas), let nsWindow else { return }
         let texts = Self.deletePersonaTexts(persona: persona, spaceCount: session.spaces(in: id).count, favoriteCount: session.favorites(in: id).count,
                                             tabCount: session.tabs.filter { $0.personaID == id }.count,
-                                            downloadCount: session.downloads.count { $0.personaID == id && !$0.isFinished }, siteRuleCount: session.siteRules.rules.count { $0.personaID == id }, isSyncing: session.isSyncing)
+                                            downloadCount: session.downloads.count { $0.personaID == id && !$0.isFinished }, siteRuleCount: session.siteRules.rules.count { $0.personaID == id }, isSyncing: session.isSidebarSyncEnabled)
         let alert = NSAlert()
         alert.messageText = texts.message
         alert.informativeText = texts.information
@@ -348,7 +348,7 @@ public enum BrowserWindowKind {
         let targets = session.spaceMergeTargets(for: space.id)
         guard canShowPersonaSheet, !targets.isEmpty else { return }
         let name = { (space: Space) in BrowserSession.displayedPlace(ofPersona: space.resolvedPersonaID, space: space, among: self.session.personas) ?? space.name }
-        let texts = Self.mergeSpaceTexts(space: name(space), isSyncing: session.isSyncing)
+        let texts = Self.mergeSpaceTexts(space: name(space), isSyncing: session.isSidebarSyncEnabled)
         askForMergeTarget(message: texts.message, information: texts.information, targets: targets.map { ($0.id, name($0)) }) { [weak self] target in
             self?.session.mergeSpace(space.id, into: target)
         }
@@ -359,7 +359,7 @@ public enum BrowserWindowKind {
         let id = space.resolvedPersonaID
         let targets = session.personaMergeTargets(for: id)
         guard canShowPersonaSheet, !targets.isEmpty, let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas) else { return }
-        let texts = Self.mergePersonaTexts(persona: persona, isSyncing: session.isSyncing)
+        let texts = Self.mergePersonaTexts(persona: persona, isSyncing: session.isSidebarSyncEnabled)
         askForMergeTarget(message: texts.message, information: texts.information, targets: targets.map { ($0.id, $0.name) }) { [weak self] target in
             Task { @MainActor [weak self] in
                 guard let self else { return }
