@@ -36,6 +36,7 @@ const char kScriptRequest[] = "ARCHScriptRequest";
 const char kScriptReply[] = "ARCHScriptReply";
 
 // A frame's audible state, and its media as the JSON text the media script writes.
+const char kLinkActivation[] = "ARCHLinkActivation";
 const char kAudibleReport[] = "ARCHAudibleReport";
 const char kMediaReport[] = "ARCHMediaReport";
 

@@ -77,7 +77,7 @@ import Foundation
     var routeNewTabLink: ((EngineNavigationAction) -> EngineNavigationPolicy)?
     var pendingSiteRuleOpenings: [(url: URL, disposition: EngineNavigationDisposition, destination: SiteRuleDestination, sourceWindowID: UUID?)] = []
     /// The session sets this callback so popups from this tab open as new tabs, with the address the page opened when the engine reports one.
-    var openNewTab: ((any EngineWebContents, URL?, EngineNavigationDisposition) -> Void)?
+    var openNewTab: ((any EngineWebContents, URL?, EngineNavigationDisposition, Bool) -> Void)?
     /// The session sets this callback to put in the tab's place a web contents that the engine made to load a page the tab's web contents cannot, as WebKit does for a web extension's pages.
     var takeReplacement: ((any EngineWebContents) -> Void)?
     /// The page that opened this tab, which the window returns to when the tab's page closes itself, as a sign-in popup does once it has reported back. The session sets it for a tab a page opens.
@@ -118,6 +118,8 @@ import Foundation
     var addPluginMenuItems: ((EngineContextMenuElement, NSMenu) -> Void)?
     /// The session sets this callback to show a web link the user clicked with Shift in the preview panel instead of opening it.
     var previewLink: ((URL) -> Void)?
+    /// The session permits automatic Peek only while this tab is visible and belongs to the user.
+    var shouldPreviewNavigation: ((EngineNavigationAction) -> Bool)?
     /// The session sets this callback to fill the window with the page while it is in fullscreen. Only engines that leave the transition to the app report it.
     var didChangeFullscreen: ((Bool) -> Void)?
     /// Set while a card asks to open a link in another app, so that a page cannot queue more of them.
@@ -399,9 +401,9 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         if let address, let suggested = suggestedTitle, !suggested.isFor(address) { suggestedTitle = nil }
     }
 
-    public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
+    public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition, isUserInitiatedLink: Bool = false) {
         guard webContents === self.webContents else { return }
-        openNewTab?(newWebContents, targetURL, disposition)
+        openNewTab?(newWebContents, targetURL, disposition, isUserInitiatedLink)
     }
     public func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {
         guard webContents === self.webContents else { return }
@@ -530,7 +532,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         var sections = [handed.suggestions, handed.spelling]
         // WebKit puts a link's items before the selection's in a field; outside one, a click on a link or image gets no selection items.
         if let link = element.linkURL {
-            sections.append([newTabItem(localized("Open Link in New Tab"), for: link), downloadItem(localized("Download Linked File"), for: link), EngineActionMenuItem(localized("Copy Link")) { Self.copyToPasteboard(link) }].compactMap { $0 })
+            sections.append([newTabItem(localized("Open Link in New Tab"), for: link), peekItem(for: link), downloadItem(localized("Download Linked File"), for: link), EngineActionMenuItem(localized("Copy Link")) { Self.copyToPasteboard(link) }].compactMap { $0 })
         }
         if let image = element.imageURL {
             sections.append([newTabItem(localized("Open Image in New Tab"), for: image), downloadItem(localized("Download Image"), for: image), EngineActionMenuItem(localized("Copy Image Address")) { Self.copyToPasteboard(image) }].compactMap { $0 })
@@ -586,6 +588,12 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     private func newTabItem(_ title: String, for url: URL) -> NSMenuItem? {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         return EngineActionMenuItem(title) { [weak self] in self?.openURLInNewTab?(url) }
+    }
+
+    private func peekItem(for url: URL) -> NSMenuItem? {
+        guard !isPrivate, agentOwnerID == nil, previewLink != nil,
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+        return EngineActionMenuItem(localized("Open in Peek")) { [weak self] in self?.previewLink?(url) }
     }
 
     /// Offers an explicit download for an HTTP link or image in the context menu.
@@ -720,11 +728,13 @@ extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
         guard webContents === self.webContents else { return .cancel }
         let kind: AgentLoadKind = action.disposition != .currentTab ? .popup : action.isRedirect ? .redirect : .navigation
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url, kind: kind) == false { return .cancel }
+        if agentOwnerID == nil, action.disposition == .currentTab, !action.isRedirect,
+           shouldPreviewNavigation?(action) == true { return .openLinkInNewTab }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), openNewTab != nil {
             return agentOwnerID == nil ? (routeNewTabLink?(action) ?? .openLinkInNewTab) : .cancel
         }
-        guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
+        guard !isPrivate, agentOwnerID == nil, action.disposition == .newWindow, action.isUserInitiated, action.isLinkActivation, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }
         let url = action.url
         DispatchQueue.main.async { previewLink(url) }

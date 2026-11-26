@@ -95,7 +95,7 @@ import Testing
                 [link, file].map { EngineNavigationAction(url: $0, disposition: disposition, isUserInitiated: true, opensLinkInNewTab: true) }
             }
             #expect(actions.allSatisfy { tab.webContents(page, decidePolicyFor: $0) == .allow })
-            tab.openNewTab = { _, _, _ in Issue.record("The engine reports the new tab") }
+            tab.openNewTab = { _, _, _, _ in Issue.record("The engine reports the new tab") }
             #expect(actions.allSatisfy { tab.webContents(page, decidePolicyFor: $0) == .openLinkInNewTab })
             // An ordinary target=_blank link is adopted as the engine's popup, with its opener intact.
             let popup = EngineNavigationAction(url: link, disposition: .newForegroundTab, isUserInitiated: true)

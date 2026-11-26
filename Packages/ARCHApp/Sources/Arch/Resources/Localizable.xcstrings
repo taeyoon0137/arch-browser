@@ -631,12 +631,12 @@
         }
       }
     },
-    "Move to Main Window" : {
+    "Open in Main Window" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "기본 윈도우로 이동"
+            "value" : "기본 창으로 열기"
           }
         }
       }

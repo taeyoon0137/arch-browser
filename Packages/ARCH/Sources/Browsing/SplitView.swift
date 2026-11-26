@@ -27,7 +27,15 @@ struct PageAreaView: View {
         let isPageFullscreen = windowModel.isPageFullscreen
         panes(isPageFullscreen: isPageFullscreen)
             // A preview floats over the whole page area, whatever its panes.
-            .overlay { if let preview = windowModel.preview { PagePreviewPanel(preview: preview) } }
+            .overlay {
+                if let preview = windowModel.preview {
+                    ZStack {
+                        PageFrameShape().fill(Color.black.opacity(0.25))
+                            .onTapGesture { windowModel.closePreview() }
+                        PagePreviewPanel(preview: preview)
+                    }
+                }
+            }
             .padding(isPageFullscreen ? EdgeInsets() : margins)
             .modifier(DevToolsDockSpace(dock: windowModel.devToolsDock, isHidden: isPageFullscreen, margins: margins))
             // A page that enters fullscreen takes the window into full screen and leaves it with the page; leaving the window's full screen ends the page's.
@@ -113,7 +121,7 @@ private struct PagePaneView: View {
         // The preview panel floats over every pane.
         let isCovered = (isSelected && windowModel.internalPage != nil) || windowModel.preview != nil
         let showsCard = PromptPresentation.shownPrompt(in: prompts, tabID: tab.id, isOnScreen: isOnScreen, isCovered: isCovered) != nil
-        WebContentsHostView(contentView: tab.webContents.view, cornerRadius: cornerRadius, onClick: isSplit ? selectTab : nil, hidesPageFromAccessibility: showsCard)
+        WebContentsHostView(contentView: tab.webContents.view, cornerRadius: cornerRadius, onClick: isSplit ? selectTab : nil, hidesPageFromAccessibility: showsCard || windowModel.preview != nil)
             .background(PageBackgroundView(isEmpty: false))
             .overlay { PageCrashNoticeView(tab: tab) }
             .overlay { if isSelected { InternalPageOverlay() } }

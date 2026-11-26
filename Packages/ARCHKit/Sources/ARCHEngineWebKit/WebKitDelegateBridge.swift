@@ -10,6 +10,7 @@ extension WebKitWebContents {
         bridge = WebKitDelegateBridge(owner: self)
         webView.navigationDelegate = bridge
         webView.uiDelegate = bridge
+        WebKitLinkOpeningScript.install(in: webView.configuration.userContentController)
     }
 }
 
@@ -25,6 +26,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var isProvisional = false
     /// The navigation that made `isProvisional` true, so that the failure of one it replaced, which can come after, leaves it.
     private var provisionalNavigation: WKNavigation?
+    var openerLink: WebKitOpenerLink?
 
     init(owner: WebKitWebContents) {
         self.owner = owner
@@ -70,17 +72,18 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         // The delegate hears of main frame navigations, each server redirect of one included, of navigations to a new web view, and of modified links, as on Chromium; ordinary navigation inside a subframe proceeds without asking.
         let linkTab = Self.linkTabDisposition(of: navigationAction)
         let disposition = linkTab ?? Self.disposition(of: navigationAction)
+        let isUserInitiatedLink = Self.isUserInitiatedLink(navigationType: navigationAction.navigationType, buttonNumber: navigationAction.buttonNumber, shouldPerformDownload: navigationAction.shouldPerformDownload, requiresOpener: requiresNativeOpener(navigationAction))
         if let url = navigationAction.request.url, let delegate = owner.navigationDelegate,
            navigationAction.targetFrame?.isMainFrame != false || disposition == .newWindow || linkTab != nil {
             let isRedirect = isProvisional && disposition == .currentTab && navigationAction.targetFrame?.isMainFrame == true
-            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: navigationAction.navigationType == .linkActivated,
-                                                opensLinkInNewTab: linkTab != nil && navigationAction.targetFrame != nil, isRedirect: isRedirect)
+            let action = EngineNavigationAction(url: url, disposition: disposition, isUserInitiated: isUserInitiatedLink,
+                                                isLinkActivation: navigationAction.navigationType == .linkActivated && !navigationAction.shouldPerformDownload && !requiresNativeOpener(navigationAction), opensLinkInNewTab: linkTab != nil && navigationAction.targetFrame != nil, isRedirect: isRedirect)
             let decision = delegate.webContents(owner, decidePolicyFor: action)
-            if decision == .openLinkInNewTab, let linkTab, let ui = owner.uiDelegate {
+            if decision == .openLinkInNewTab, let ui = owner.uiDelegate {
                 decisionHandler(.cancel)
                 // Use WebKit's own request, including its effective referrer. A new browsing context with a nil target frame is created by WebKit's popup delegate instead.
                 let child = WebKitWebContents(context: owner.context, configuration: EngineWebContentsConfiguration(pageScripts: owner.userContent.pageScripts))
-                ui.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: linkTab)
+                ui.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: linkTab ?? .newForegroundTab, isUserInitiatedLink: isUserInitiatedLink)
                 child.webView.load(navigationAction.request)
                 return
             }
@@ -100,6 +103,17 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
         owner.stopWaitingForExtension()
         decisionHandler(policy)
+    }
+
+    /// WebKit reports a mouse button only for a trusted mouse event. A script can activate a link without one.
+    static func isUserInitiatedLink(navigationType: WKNavigationType, buttonNumber: Int, shouldPerformDownload: Bool = false, requiresOpener: Bool = false) -> Bool {
+        !requiresOpener && !shouldPerformDownload && navigationType == .linkActivated && (buttonNumber == 1 || buttonNumber == 4)
+    }
+
+    private func requiresNativeOpener(_ action: WKNavigationAction) -> Bool {
+        guard action.targetFrame == nil, action.modifierFlags.intersection([.shift, .command, .control, .option]).isEmpty else { return false }
+        return openerLink?.matches(url: action.request.url, frameURL: action.sourceFrame.request.url,
+                                   time: ProcessInfo.processInfo.systemUptime) == true
     }
 
     private static func linkTabDisposition(of action: WKNavigationAction) -> EngineNavigationDisposition? {
@@ -202,6 +216,7 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let delegate = owner.uiDelegate else { return nil }
         let disposition = Self.linkTabDisposition(of: navigationAction) ?? .newForegroundTab
+        let isUserInitiatedLink = Self.isUserInitiatedLink(navigationType: navigationAction.navigationType, buttonNumber: navigationAction.buttonNumber, shouldPerformDownload: navigationAction.shouldPerformDownload, requiresOpener: requiresNativeOpener(navigationAction))
         // A new window for a link that belongs to another app opens no tab, as on the Chromium engine.
         if let url = navigationAction.request.url, Self.opensExternally(url) {
             delegate.webContents(owner, openExternally: url, isUserInitiated: navigationAction.navigationType == .linkActivated)
@@ -211,11 +226,13 @@ final class WebKitDelegateBridge: NSObject, WKNavigationDelegate, WKUIDelegate {
         if let url = navigationAction.request.url, owner.extensionBaseURL != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
             let child = WebKitWebContents(context: owner.context,
                                           configuration: EngineWebContentsConfiguration(initialURL: url, pageScripts: owner.userContent.pageScripts))
-            delegate.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: disposition)
+            delegate.webContents(owner, didCreateNewWebContents: child, targetURL: url, disposition: disposition,
+                                 isUserInitiatedLink: isUserInitiatedLink)
             return nil
         }
         guard let child = WebKitWebContents.makePopup(parentConfiguration: configuration, extensionBaseURL: owner.extensionBaseURL, context: owner.context) else { return nil }
-        delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: disposition)
+        delegate.webContents(owner, didCreateNewWebContents: child, targetURL: navigationAction.request.url, disposition: disposition,
+                             isUserInitiatedLink: isUserInitiatedLink)
         return child.webView
     }
 

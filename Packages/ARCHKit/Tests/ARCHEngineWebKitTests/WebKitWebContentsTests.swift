@@ -137,7 +137,7 @@ import Testing
     private final class PopupRecorder: EngineWebContentsUIDelegate {
         private(set) var popups: [any EngineWebContents] = []
 
-        func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
+        func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition, isUserInitiatedLink: Bool) {
             popups.append(newWebContents)
         }
     }

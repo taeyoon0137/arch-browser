@@ -136,7 +136,7 @@ import Testing
             let slots = FavoriteGridSlots(rowSizes: rows, defaultColumns: 4)
             let frame = CGRect(x: 0, y: 0, width: 240, height: slots.height(for: ids.count))
             let viewport = CGRect(x: 0, y: 0, width: 240, height: 600)
-            let drag = SidebarDragState(), owner = UUID()
+            let drag = SidebarDragState(scheduleHover: { _, action in action() }), owner = UUID()
             drag.favoriteGridTargets[space.id] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport,
                                                                           count: ids.count, favoriteIDs: ids)
             let sourceFrame = slots.frames(for: ids.count, width: frame.width, origin: frame.origin)[source]

@@ -17,7 +17,7 @@ import Testing
         let window = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: space.id, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         defer { session.windowWillClose(window) }
         let tab = session.openTab(url: URL(string: "about:blank#first-favorite")!, in: space.id, select: false)
-        let drag = SidebarDragState(), owner = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), owner = UUID()
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .frame(width: 260, height: 600)
             .padding(.top, 80)
@@ -72,7 +72,7 @@ import Testing
         defer { session.windowWillClose(window) }
         _ = session.addFavorites((0..<5).map { Favorite(url: URL(string: "https://example.org/favorite/\($0)")!, title: "Favorite \($0)") }, in: space.resolvedPersonaID)
         let tab = session.openTab(url: URL(string: "https://example.org/tab")!, in: space.id, select: false)
-        let drag = SidebarDragState()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() })
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .modifier(SidebarDropTarget())
             .frame(width: 260, height: 600)

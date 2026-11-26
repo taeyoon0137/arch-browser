@@ -273,7 +273,7 @@ import Testing
 
     @MainActor @Test func changingOnlyTheRowBoundaryUpdatesTheGapAndLeavingClearsIt() throws {
         let slots = FavoriteGridSlots(rowSizes: [3, 1], defaultColumns: 4)
-        let drag = SidebarDragState(), space = UUID(), owner = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), space = UUID(), owner = UUID()
         let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 4)))
         drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: 4)
         drag.begin(.favorite(UUID()), frame: frame, grabbedAt: origin, owner: owner)
@@ -297,7 +297,7 @@ import Testing
         let slots = FavoriteGridSlots(rowSizes: [1, 2, 1], defaultColumns: 4)
         let ids = (0..<4).map { _ in UUID() }
         let frame = CGRect(origin: origin, size: CGSize(width: width, height: 94))
-        let drag = SidebarDragState(), space = UUID(), owner = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), space = UUID(), owner = UUID()
         drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: 4,
                                                                  favoriteIDs: ids, displayedRows: [1, 2])
         let source = slots.frames(for: 4, width: width, origin: origin)[0]
@@ -336,7 +336,7 @@ import Testing
         let slots = FavoriteGridSlots(rowSizes: [1, 2, 1], defaultColumns: 4)
         let ids = (0..<4).map { _ in UUID() }
         let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 4)))
-        let drag = SidebarDragState(), space = UUID(), owner = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), space = UUID(), owner = UUID()
         drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport,
                                                                   count: 4, favoriteIDs: ids)
         drag.begin(.favorite(ids[0]), frame: frame, grabbedAt: origin, owner: owner)
@@ -363,6 +363,39 @@ import Testing
         #expect(drag.favoriteGap?.newRow == nil)
     }
 
+    @MainActor @Test func aMovedFavoriteGapKeepsItsDwellAcrossRepeatedGeometryUpdates() throws {
+        let slots = FavoriteGridSlots(rowSizes: [1, 2, 1], defaultColumns: 4)
+        let ids = (0..<4).map { _ in UUID() }
+        let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 4)))
+        var callbacks: [() -> Void] = []
+        let drag = SidebarDragState(scheduleHover: { _, action in callbacks.append(action) })
+        let space = UUID(), owner = UUID()
+        drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport,
+                                                                  count: 4, favoriteIDs: ids)
+        let source = slots.frames(for: 4, width: width, origin: origin)[0]
+        drag.begin(.favorite(ids[0]), frame: source, grabbedAt: CGPoint(x: source.midX, y: source.midY), owner: owner)
+        defer { drag.end(ownedBy: owner) }
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: frame.maxX - 1, y: origin.y + 122), adding: false)
+        let confirmFirst = try #require(callbacks.first)
+        confirmFirst()
+        let confirmed = try #require(drag.favoriteGap)
+        #expect(confirmed.rowSizes == [2, 2])
+        callbacks.removeAll()
+
+        let collapsedFrame = CGRect(origin: origin, size: CGSize(width: width, height: 94))
+        drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: collapsedFrame, viewport: viewport,
+                                                                  count: 4, favoriteIDs: ids, displayedRows: [1, 2])
+        let next = CGPoint(x: frame.maxX - 1, y: origin.y + 22)
+        drag.updateFavoriteGap(in: space, at: next, adding: false)
+        #expect(drag.favoriteGap == confirmed)
+        drag.updateFavoriteGap(in: space, at: next, adding: false)
+        #expect(callbacks.count == 1 && drag.favoriteGap == confirmed)
+        let confirmNext = try #require(callbacks.first)
+        confirmNext()
+        #expect(drag.favoriteGap?.rowSizes == [3, 1])
+        #expect(drag.favoriteGap?.index == 2)
+    }
+
     @Test func spacingAndOuterEdgesHaveDeterministicInsertionIndexes() {
         let slots = FavoriteGridSlots(rowSizes: [2, 2], defaultColumns: 4)
         func index(_ x: CGFloat, _ y: CGFloat) -> Int {
@@ -386,7 +419,7 @@ import Testing
 
     @MainActor @Test func theFinalPointerResolvesTheGapBeforeAnyViewUpdate() throws {
         let slots = FavoriteGridSlots(rowSizes: [2, 1], defaultColumns: 4)
-        let drag = SidebarDragState(), space = UUID(), owner = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), space = UUID(), owner = UUID()
         let frame = CGRect(origin: origin, size: CGSize(width: width, height: slots.height(for: 3)))
         drag.favoriteGridTargets[space] = FavoriteGridSlots.Target(slots: slots, frame: frame, viewport: viewport, count: 3)
         drag.begin(.tab(UUID()), frame: frame, grabbedAt: origin, owner: owner)

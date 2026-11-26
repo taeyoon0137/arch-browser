@@ -91,7 +91,7 @@ struct WebKitExtensionTests {
     private final class OpenedWebContents: EngineWebContentsUIDelegate {
         private(set) var webContents: (any EngineWebContents)?
 
-        func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
+        func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition, isUserInitiatedLink: Bool) {
             self.webContents = newWebContents
         }
     }

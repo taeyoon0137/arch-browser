@@ -15,7 +15,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     /// How far a saved frame must reach onto a screen's visible area, across and down, for the window to open there.
     private static let minimumVisibleLength: CGFloat = 100
 
-    /// Builds the window hidden: at the model's saved frame, kept on a screen; without one, at `source`'s size and cascaded from it, or at the kind's default size without a source or while the source is in full screen, a main window centered and a small window centered on the screen with the pointer.
+    /// Builds the window hidden at its saved frame. A new small window opens near the top center of the pointer's screen; a main window cascades from `source` or centers at its default size.
     init(model: BrowserWindowModel, cascadingFrom source: NSWindow?) {
         self.model = model
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: model.kind.defaultContentSize),
@@ -41,16 +41,17 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         window.contentMinSize = model.kind.minimumContentSize
         if let frame = model.restorableFrame {
             window.setFrame(Self.restoredFrame(frame, screens: NSScreen.screens.map(\.visibleFrame)), display: false)
+        } else if model.kind == .small {
+            // Installing the hosting controller may replace the initial content size.
+            window.setContentSize(model.kind.defaultContentSize)
+            window.setFrame(Self.smallWindowFrame(size: window.frame.size, pointer: NSEvent.mouseLocation, screens: NSScreen.screens.map { ($0.frame, $0.visibleFrame) }), display: false)
         } else if let source, !source.styleMask.contains(.fullScreen) {
             window.setFrame(source.frame, display: false)
             // The first call places the window on the source and returns the next cascade point, where the second places it within the screen.
             window.cascadeTopLeft(from: window.cascadeTopLeft(from: NSPoint(x: source.frame.minX, y: source.frame.maxY)))
         } else {
             window.setContentSize(model.kind.defaultContentSize)
-            switch model.kind {
-            case .main: window.center()
-            case .small: window.setFrame(Self.centeredFrame(size: window.frame.size, pointer: NSEvent.mouseLocation, screens: NSScreen.screens.map { ($0.frame, $0.visibleFrame) }), display: false)
-            }
+            window.center()
         }
         super.init(window: window)
         window.delegate = self
@@ -66,6 +67,24 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         return nil
+    }
+
+    /// A new small window slides gently down into place. It remains a normal window when focus moves elsewhere.
+    override func showWindow(_ sender: Any?) {
+        guard model.kind == .small, let window, !window.isVisible,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            super.showWindow(sender)
+            return
+        }
+        let destination = window.frame
+        window.setFrame(destination.offsetBy(dx: 0, dy: 12), display: false)
+        window.alphaValue = 0
+        super.showWindow(sender)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            window.animator().setFrame(destination, display: true)
+            window.animator().alphaValue = 1
+        }
     }
 
     /// The window's content: the main window's sidebar and page, or the small window's row and page.
@@ -92,10 +111,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         return self.frame(of: frame.size, centeredIn: main)
     }
 
-    /// Where a small window opens without another small window to cascade from: at `size`, at most the screen's visible area, centered on the visible area of the screen whose frame holds `pointer`, or of the main screen, the first, when none does.
-    static func centeredFrame(size: CGSize, pointer: CGPoint, screens: [(frame: CGRect, visibleFrame: CGRect)]) -> CGRect {
+    /// A small window opens near the top center of the pointer's screen, within its visible area.
+    static func smallWindowFrame(size: CGSize, pointer: CGPoint, screens: [(frame: CGRect, visibleFrame: CGRect)]) -> CGRect {
         guard let screen = screens.first(where: { $0.frame.contains(pointer) }) ?? screens.first else { return CGRect(origin: .zero, size: size) }
-        return frame(of: size, centeredIn: screen.visibleFrame)
+        let area = screen.visibleFrame
+        var result = frame(of: size, centeredIn: area)
+        let topInset = min(48, max(0, (area.height - result.height) / 2))
+        result.origin.y = area.maxY - result.height - topInset
+        return result
     }
 
     /// `size`, at most `area`'s, centered in `area`.
@@ -178,7 +201,7 @@ extension BrowserWindowKind {
     var defaultContentSize: NSSize {
         switch self {
         case .main: NSSize(width: 1200, height: 800)
-        case .small: NSSize(width: 900, height: 640)
+        case .small: NSSize(width: 800, height: 600)
         }
     }
 

@@ -659,19 +659,28 @@ public enum BrowserWindowKind {
     func showPreview(of url: URL, engine: EngineKind, in personaID: Persona.ID) {
         guard !isPrivate, session.personas.contains(where: { $0.id == personaID }) else { return }
         if let preview, preview.openedURL == url, preview.personaID == personaID, preview.requestedEngine == engine { return }
+        guard let runtime = session.runtime(for: engine, in: personaID) else { return NSSound.beep() }
+        let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
+        showPreview(webContents, openedURL: url, in: personaID, requestedEngine: engine)
+    }
+
+    /// Takes an engine's new page into Peek without reloading, preserving the native request and opener.
+    func showPreview(_ webContents: any EngineWebContents, openedURL: URL, in personaID: Persona.ID,
+                     requestedEngine: EngineKind, opener: (any EngineWebContents)? = nil) {
+        guard !isPrivate, session.personas.contains(where: { $0.id == personaID }) else { return }
         closePreview()
         // The panel covers the page that a search, a region capture, or the question popover belongs to, so all three end.
         hideFindBar()
         cancelRegionCapture()
         closePageQuestion()
-        guard let runtime = session.runtime(for: engine, in: personaID) else { return NSSound.beep() }
-        let webContents = runtime.browser.createWebContents(EngineWebContentsConfiguration(initialURL: url))
-        let preview = PagePreview(webContents: webContents, personaID: personaID, requestedEngine: engine, openedURL: url)
-        // A page the preview opens, as for a link to a new window or a sign-in popup, comes from the preview's runtime and keeps the previewed page as its opener. The previewed page becomes a tab of the preview's Persona, as Open in Tab makes one but without loading again, and the page it opened becomes the selected tab after it, taking the panel's place. The engine is still in its callback, so the panel goes on the next turn of the run loop.
+        guard let runtime = session.runtime(for: webContents.engineKind, in: personaID) else { return NSSound.beep() }
+        let preview = PagePreview(webContents: webContents, personaID: personaID, requestedEngine: requestedEngine, openedURL: openedURL)
+        preview.opener = opener
+        // A page opened by the preview keeps the preview as its native opener. Both become tabs; the panel leaves on the next run loop turn, after the engine's callback.
         preview.openNewTab = { [weak self, weak preview] popup in
             guard let self, let preview else { return }
             runtime.browser.takeOwnership(of: popup)
-            self.showOpenedPage(preview.webContents, personaID: personaID, preferredEngine: preview.requestedEngine)
+            self.showOpenedPage(preview.webContents, personaID: personaID, opener: preview.opener, preferredEngine: preview.requestedEngine)
             self.showOpenedPage(popup, personaID: personaID, opener: preview.webContents, preferredEngine: preview.requestedEngine)
             DispatchQueue.main.async { [weak self] in
                 if let self, self.preview === preview { self.removePreview(closingPage: false) }
@@ -685,15 +694,35 @@ public enum BrowserWindowKind {
         }
         preview.didClose = { [weak self] in self?.closePreview() }
         self.preview = preview
+        nsWindow?.makeFirstResponder(nil)
+        focusPage()
     }
 
-    /// Opens the page the panel shows, wherever the user went in it, in a new tab of the requested engine and Persona with its page focused, and closes the panel.
+    /// Transfers the live page into a tab in the current space, retaining its form state, history, engine, and opener.
     func openPreviewInTab() {
-        guard let preview else { return }
-        closePreview()
-        let page = session.makeWebContents(url: preview.url, engine: preview.requestedEngine, state: nil, in: preview.personaID)
-        showOpenedPage(page, personaID: preview.personaID, preferredEngine: preview.requestedEngine)
-        focusPage()
+        guard let tab = takePreviewAsTab() else { return }
+        let destination = kind == .main ? self : session.regularWindow(in: tab.spaceID ?? currentSpaceID)
+        destination.selectTab(tab.id)
+        if destination !== self { destination.nsWindow?.makeKeyAndOrderFront(nil) }
+        destination.focusPage()
+    }
+
+    /// Moves the same live page into a new regular window in its space.
+    func openPreviewInNewWindow() {
+        guard let tab = takePreviewAsTab(), let spaceID = tab.spaceID else { return }
+        let destination = session.makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: spaceID,
+                                                         selectedTabID: tab.id, isSidebarVisible: true), kind: .main)
+        destination.selectTab(tab.id)
+        destination.nsWindow?.makeKeyAndOrderFront(nil)
+        destination.focusPage()
+    }
+
+    /// Detaches the panel before the page gets another host. No navigation or engine recreation occurs.
+    private func takePreviewAsTab() -> Tab? {
+        guard !isPrivate, let preview, session.personas.contains(where: { $0.id == preview.personaID }) else { return nil }
+        removePreview(closingPage: false)
+        return session.adopt(preview.webContents, spaceID: currentSpaceID, personaID: preview.personaID,
+                             pinned: false, select: false, opener: preview.opener, preferredEngine: preview.requestedEngine)
     }
 
     /// Closes the panel and its page.
@@ -883,16 +912,17 @@ public enum BrowserWindowKind {
     /// Returns keyboard focus to the page after the palette or the question popover closes. Runs after the next layout pass so a new tab's view is in the window, and leaves a page that another window has taken in the meantime alone. Given the view that focus is `leaving`, focus moves only while it is still there or nowhere, so a field the user clicked in the meantime keeps it.
     func focusPage(leaving previous: NSView? = nil) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let view = self.selectedTab?.webContents.view, let window = view.window, window === self.nsWindow else { return }
+            guard let self, let view = self.preview?.webContents.view ?? self.selectedTab?.webContents.view,
+                  let window = view.window, window === self.nsWindow else { return }
             if let previous, let responder = window.firstResponder, responder !== window,
                (responder as? NSView)?.isDescendant(of: previous) != true { return }
             // Keys must not reach a page an internal page covers.
-            guard self.internalPage == nil else {
+            guard self.preview != nil || self.internalPage == nil else {
                 window.makeFirstResponder(nil)
                 return
             }
             // A card over the page takes the keys in its place.
-            if self.hasPromptOnSelectedTab {
+            if self.preview == nil, self.hasPromptOnSelectedTab {
                 self.promptFocusRequests += 1
                 return
             }

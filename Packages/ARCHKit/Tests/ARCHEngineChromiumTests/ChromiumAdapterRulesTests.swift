@@ -41,14 +41,40 @@ import Testing
 
     // MARK: Links opened in a new tab
 
-    /// The navigation delegate hears of a modified link as the WebKit adapter reports it: a background tab for Command or the middle button, a foreground tab with Shift as well, and a new window with Shift alone, which is no request for a tab.
-    @Test func aModifiedLinkReachesTheDelegateAsOnWebKit() throws {
+    /// CEF already applies the click's modifiers; a delayed callback must not read the keyboard's current state.
+    @Test func modifiedLinksCarryTheirGestureAndClickTimeDisposition() throws {
         let link = try #require(URL(string: "https://example.org/next"))
         let cases: [(ARCHCEFPopupDisposition, EngineNavigationDisposition, Bool)] = [(.backgroundTab, .newBackgroundTab, true), (.foregroundTab, .newForegroundTab, true),
-                                                                                     (.window, .newWindow, false), (.popup, .newWindow, false)]
+                                                                                     (.window, .newWindow, false)]
         for (cef, disposition, opensTab) in cases {
-            let action = ChromiumWebContents.linkAction(to: link, disposition: cef)
-            #expect(action.url == link && action.disposition == disposition && action.opensLinkInNewTab == opensTab && action.isUserInitiated && !action.isRedirect)
+            for gesture in [false, true] {
+                let action = ChromiumWebContents.openingAction(to: link, disposition: cef, userGesture: gesture, isPopup: false)
+                #expect(action.url == link && action.disposition == disposition && action.opensLinkInNewTab == opensTab)
+                #expect(action.isUserInitiated == gesture && action.isLinkActivation && !action.isRedirect)
+            }
+        }
+    }
+
+    @Test func aPopupDispositionIsNotARecognizedLink() throws {
+        let link = try #require(URL(string: "https://example.org/sign-in"))
+        for gesture in [false, true] {
+            let action = ChromiumWebContents.openingAction(to: link, disposition: .popup, userGesture: gesture, isPopup: false)
+            #expect(action.disposition == .newPopup && action.isUserInitiated == gesture)
+            #expect(!action.isLinkActivation && !action.opensLinkInNewTab)
+        }
+    }
+
+    /// window.open can inherit a click's gesture and modifiers. Keep its native page and opener even when CEF requests a tab or a window.
+    @Test func nativePopupCreationNeverBecomesALinkEvenWithAUserGesture() throws {
+        let link = try #require(URL(string: "https://example.org/sign-in"))
+        let cases: [(ARCHCEFPopupDisposition, EngineNavigationDisposition)] = [(.backgroundTab, .newBackgroundTab), (.foregroundTab, .newForegroundTab),
+                                                                             (.window, .newWindow), (.popup, .newPopup)]
+        for (cef, disposition) in cases {
+            for gesture in [false, true] {
+                let action = ChromiumWebContents.openingAction(to: link, disposition: cef, userGesture: gesture, isPopup: true)
+                #expect(action.url == link && action.disposition == disposition && action.isUserInitiated == gesture)
+                #expect(!action.isLinkActivation && !action.opensLinkInNewTab && !action.isRedirect)
+            }
         }
     }
 

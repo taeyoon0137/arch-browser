@@ -6,8 +6,91 @@ import Testing
 
 @MainActor
 @Suite struct SidebarDragTests {
-    @Test func morphingBetweenRowsAndTilesKeepsThePointerAttachedToTheGrabPoint() {
+    @Test func aDestinationWaitsForDwellAndChangingOrLeavingCancelsIt() {
+        var callbacks: [() -> Void] = []
+        var delays: [TimeInterval] = []
+        let hover = SidebarHoverDelay<Int> { delay, action in
+            delays.append(delay)
+            callbacks.append(action)
+        }
+        var committed = 0
+        hover.offer(1) { committed = 1 }
+        #expect(committed == 0 && delays == [0.05])
+        // Geometry changes update the action without extending the original dwell.
+        hover.offer(1) { committed = 10 }
+        #expect(callbacks.count == 1)
+        callbacks[0]()
+        #expect(committed == 10)
+        hover.offer(2) { committed = 2 }
+        hover.offer(3) { committed = 3 }
+        callbacks[1]()
+        #expect(committed == 10)
+        callbacks[2]()
+        #expect(committed == 3)
+        hover.offer(4) { committed = 4 }
+        hover.cancel()
+        callbacks[3]()
+        #expect(committed == 3)
+    }
+
+    @Test func sidebarFeedbackHasOneSharedCooldownWithoutTrailingPulses() {
+        var throttle = SidebarHapticThrottle()
+        let accepted = [0, 0.01, 0.05, 0.099, 0.1, 0.15, 0.201].map { throttle.accepts(at: $0) }
+        #expect(accepted == [true, false, false, false, true, false, true])
+    }
+
+    @Test func favoriteGapsConfirmOnceAndDoNotChangeAfterTheDragEnds() throws {
+        var callbacks: [() -> Void] = []
+        let drag = SidebarDragState(scheduleHover: { _, action in callbacks.append(action) })
+        let owner = UUID(), space = UUID()
+        let grid = CGRect(x: 6, y: 40, width: 240, height: 44)
+        drag.favoriteGridTargets[space] = .init(slots: .init(rowSizes: [], defaultColumns: 4), frame: grid,
+                                               viewport: CGRect(x: 0, y: 0, width: 260, height: 600), count: 2)
+        drag.begin(.tab(UUID()), frame: CGRect(x: 6, y: 200, width: 240, height: 36), grabbedAt: .zero, owner: owner)
+        let first = CGPoint(x: 20, y: 60), last = CGPoint(x: 230, y: 60)
+        drag.updateFavoriteGap(in: space, at: first, adding: true)
+        #expect(drag.favoriteGap == nil)
+        drag.updateFavoriteGap(in: space, at: last, adding: true)
+        callbacks[0]()
+        #expect(drag.favoriteGap == nil)
+        callbacks[1]()
+        let accepted = try #require(drag.favoriteGap)
+        #expect(accepted.index == 2)
+        // A small crossing into the neighboring tile stays in the confirmed slot.
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: accepted.frame.minX - 3, y: accepted.frame.midY), adding: true)
+        #expect(callbacks.count == 2 && drag.favoriteGap == accepted)
+        drag.updateFavoriteGap(in: space, at: first, adding: true)
+        #expect(callbacks.count == 3 && drag.favoriteGap == accepted)
+        drag.end(ownedBy: owner)
+        callbacks[2]()
+        #expect(drag.favoriteGap == nil && drag.item == nil)
+    }
+
+    @Test func favoritePickupKeepsItsSlotUntilTheRealDwellConfirmsAnother() async throws {
         let drag = SidebarDragState(), owner = UUID(), space = UUID()
+        let slots = FavoriteGridSlots(rowSizes: [], defaultColumns: 4)
+        let grid = CGRect(x: 6, y: 40, width: 240, height: 44)
+        let tiles = slots.frames(for: 3, width: grid.width, origin: grid.origin)
+        drag.favoriteGridTargets[space] = .init(slots: slots, frame: grid,
+                                               viewport: CGRect(x: 0, y: 0, width: 260, height: 600), count: 3)
+        let original = tiles[1]
+        drag.begin(.favorite(UUID()), frame: original, grabbedAt: CGPoint(x: original.midX, y: original.midY), owner: owner)
+        defer { drag.end(ownedBy: owner) }
+        #expect(drag.favoriteGap?.index == 1 && drag.favoriteGap?.frame == original && drag.tileFraction == 1)
+        let start = ContinuousClock.now
+        drag.updateFavoriteGap(in: space, at: CGPoint(x: tiles[2].midX, y: tiles[2].midY), adding: false)
+        #expect(drag.favoriteGap?.index == 1 && drag.favoriteGap?.frame == original)
+        // Wait through the same main queue as the dwell. Parallel tests can occupy it past a wall-clock deadline.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { continuation.resume() }
+        }
+        #expect(drag.favoriteGap?.index == 2)
+        #expect(start.duration(to: .now) >= .milliseconds(50))
+        #expect(drag.favoriteGap?.frame == tiles[2] && drag.tileFraction == 1)
+    }
+
+    @Test func morphingBetweenRowsAndTilesKeepsThePointerAttachedToTheGrabPoint() {
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), owner = UUID(), space = UUID()
         let row = CGRect(x: 6, y: 200, width: 240, height: 36)
         let grabbed = CGPoint(x: row.minX + row.width / 4, y: row.midY)
         let grid = CGRect(x: 6, y: 40, width: 240, height: 44)
@@ -54,7 +137,7 @@ import Testing
         let initial = drag.canMove(at: point)
         #expect(initial)
         drag.moved(into: row)
-        for y in [row.midY, row.midY + 1, row.maxY, row.maxY + 1] {
+        for y in [row.midY, row.midY + 1, row.maxY, row.maxY + 1, row.maxY + 5] {
             let canRepeat = drag.canMove(at: CGPoint(x: point.x, y: y))
             #expect(!canRepeat)
         }

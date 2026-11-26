@@ -64,6 +64,7 @@ struct SidebarView: View {
     /// How far the space pages follow the fingers during a swipe, in points.
     @State private var swipeTranslation: CGFloat = 0
     @State private var swipePassesHalfway = false
+    @State private var swipeFeedback = SidebarHoverDelay<Bool>()
     /// Set while a swipe moves the library instead of the space pages.
     @State private var isSwipingLibrary = false
 
@@ -81,20 +82,24 @@ struct SidebarView: View {
         guard !windowModel.isLibraryVisible else { return }
         if let librarySwipe, isSwipingLibrary || (currentIndex == 0 && travel > 0) {
             isSwipingLibrary = true
+            swipeFeedback.cancel()
             swipeTranslation = 0
             librarySwipe.changed(travel)
             return
         }
         swipeTranslation = pageTranslation(for: travel)
-        let passesHalfway = abs(swipeTranslation) > width / 2
-        if passesHalfway != swipePassesHalfway {
+        let threshold = width / 2 + (swipePassesHalfway ? -6 : 6)
+        let passesHalfway = abs(swipeTranslation) > threshold
+        guard passesHalfway != swipePassesHalfway else { swipeFeedback.cancel(); return }
+        swipeFeedback.offer(passesHalfway) {
             swipePassesHalfway = passesHalfway
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            SidebarHaptics.alignment()
         }
     }
 
     /// Moves to the neighboring space when the swipe went far or fast enough, otherwise returns to the current one.
     private func swipeEnded(_ travel: CGFloat, velocity: CGFloat) {
+        swipeFeedback.cancel()
         if isSwipingLibrary, let librarySwipe {
             isSwipingLibrary = false
             librarySwipe.ended(travel, velocity)
@@ -154,7 +159,12 @@ struct SidebarView: View {
             if !windowModel.isPrivate { RemoteTabsToggle(session: session) }
         }
         // Opening or closing the library by menu or shortcut releases it from any current swipe.
-        .onChange(of: windowModel.isLibraryVisible) { isSwipingLibrary = false }
+        .onChange(of: windowModel.isLibraryVisible) {
+            isSwipingLibrary = false
+            swipeFeedback.cancel()
+            swipePassesHalfway = false
+        }
+        .onDisappear { swipeFeedback.cancel() }
     }
 
     /// Private windows have one flat list of their own tabs, without Persona content or drop targets.

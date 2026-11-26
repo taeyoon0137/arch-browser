@@ -703,41 +703,60 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         return true
     }
     /// Every main frame navigation reaches the navigation delegate, and each server redirect again before its request, marked as one, as on the WebKit engine, so that a hop the delegate refuses sends nothing. A frame inside the page loads without asking.
-    public func cefBrowserShouldBrowse(toURL url: String, isRedirect: Bool, userGesture: Bool) -> Bool {
+    public func cefBrowserShouldBrowse(toURL url: String, isRedirect: Bool, userGesture: Bool, isLinkActivation: Bool, referrer: ARCHCEFReferrer) -> Bool {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
-        return navigationDelegate.webContents(self, decidePolicyFor: EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture, isRedirect: isRedirect)) == .allow
+        let action = EngineNavigationAction(url: target, disposition: .currentTab, isUserInitiated: userGesture,
+                                            isLinkActivation: isLinkActivation, isRedirect: isRedirect)
+        let decision = navigationDelegate.webContents(self, decidePolicyFor: action)
+        if decision == .openLinkInNewTab, action.isUserInitiated, action.isLinkActivation, !isRedirect {
+            openLink(target, disposition: .newForegroundTab, referrer: referrer, isUserInitiatedLink: true)
+        }
+        return decision == .allow
     }
 
-    /// Asks the navigation delegate about a link the user clicked with Command, the middle button, or Shift, before Alloy loads it in place. As on the WebKit engine, a delegate that answers `openLinkInNewTab` for a Command or middle-button click gets the link in a new web contents of this profile with this page's scripts, loaded with the referrer Chromium gave the link, so that the page's referrer policy and a link's `rel="noreferrer"` apply, through `webContents(_:didCreateNewWebContents:targetURL:disposition:)`; CEF asks while it decides on the navigation, so the report waits until that decision returns. Without a UI delegate, that answer opens nothing.
-    public func cefBrowserShouldOpenURL(_ url: String, disposition: ARCHCEFPopupDisposition, referrer: ARCHCEFReferrer) -> Bool {
+    /// Modified links use CEF's user gesture and click-time disposition for the shared link policy. A new tab keeps Chromium's referrer and this page's profile and scripts. Report it after CEF's policy callback returns; without a UI delegate, open nothing.
+    public func cefBrowserShouldOpenURL(_ url: String, disposition: ARCHCEFPopupDisposition, userGesture: Bool, referrer: ARCHCEFReferrer) -> Bool {
         guard let navigationDelegate, let target = URL(engineString: url) else { return true }
-        let action = Self.linkAction(to: target, disposition: disposition)
+        let action = Self.openingAction(to: target, disposition: disposition, userGesture: userGesture, isPopup: false)
         let decision = navigationDelegate.webContents(self, decidePolicyFor: action)
         guard decision == .openLinkInNewTab, action.opensLinkInNewTab else { return decision == .allow }
-        guard uiDelegate != nil else { return false }
+        openLink(target, disposition: action.disposition, referrer: referrer, isUserInitiatedLink: action.isUserInitiated && action.isLinkActivation)
+        return false
+    }
+
+    private func openLink(_ target: URL, disposition: EngineNavigationDisposition, referrer: ARCHCEFReferrer, isUserInitiatedLink: Bool) {
+        guard uiDelegate != nil else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, let uiDelegate = self.uiDelegate else { return }
             let opened = ChromiumWebContents(context: context, requestContext: requestContext,
                                              configuration: EngineWebContentsConfiguration(initialURL: target, pageScripts: pageScripts), referrer: referrer)
-            uiDelegate.webContents(self, didCreateNewWebContents: opened, targetURL: target, disposition: action.disposition)
+            uiDelegate.webContents(self, didCreateNewWebContents: opened, targetURL: target, disposition: disposition, isUserInitiatedLink: isUserInitiatedLink)
         }
-        return false
     }
 
-    /// Chromium gives a link clicked with Command or the middle button a background tab, with Shift as well a foreground tab, and with Shift alone a new window, as the WebKit adapter reads the click.
-    static func linkAction(to url: URL, disposition: ARCHCEFPopupDisposition) -> EngineNavigationAction {
+    /// Chromium encodes Command/middle as a background tab, with Shift as a foreground tab, and Shift alone as a window. Native popup creation can have any of those dispositions and a gesture, so it never counts as a link request. CEF's gesture is user activation, not a DOM event-trust marker.
+    static func openingAction(to url: URL, disposition: ARCHCEFPopupDisposition, userGesture: Bool, isPopup: Bool) -> EngineNavigationAction {
         let requested: EngineNavigationDisposition = switch disposition {
         case .backgroundTab: .newBackgroundTab
         case .foregroundTab: .newForegroundTab
-        default: .newWindow
+        case .window: .newWindow
+        default: .newPopup
         }
-        return EngineNavigationAction(url: url, disposition: requested, isUserInitiated: true, opensLinkInNewTab: requested != .newWindow)
+        let isLink = !isPopup && requested != .newPopup
+        return EngineNavigationAction(url: url, disposition: requested, isUserInitiated: userGesture, isLinkActivation: isLink,
+                                      opensLinkInNewTab: isLink && (requested == .newForegroundTab || requested == .newBackgroundTab))
     }
 
-    /// Only the UI delegate adopts popups, so without one the page opens none, as on the WebKit engine.
-    public func cefBrowserCanAdoptPopup() -> Bool { uiDelegate != nil }
-    /// A popup keeps its `window.opener`, and it reaches the UI delegate as a WebKit popup does.
-    public func cefBrowserDidOpenPopup(_ popup: ARCHCEFBrowser, targetURL: String, disposition: ARCHCEFPopupDisposition) {
+    /// Native popup pages keep their opener. Only a trusted anchor default action reported by the renderer is eligible for Peek.
+    public func cefBrowserCanAdoptPopup(atURL url: String, disposition: ARCHCEFPopupDisposition, userGesture: Bool, isLinkActivation: Bool) -> Bool {
+        guard uiDelegate != nil else { return false }
+        guard let navigationDelegate, let target = URL(engineString: url) else { return true }
+        var action = Self.openingAction(to: target, disposition: disposition, userGesture: userGesture, isPopup: true)
+        action.isLinkActivation = isLinkActivation
+        return navigationDelegate.webContents(self, decidePolicyFor: action) == .allow
+    }
+    /// A popup keeps its native opener and referrer, with the link evidence recorded when it was requested.
+    public func cefBrowserDidOpenPopup(_ popup: ARCHCEFBrowser, targetURL: String, disposition: ARCHCEFPopupDisposition, isUserInitiatedLink: Bool) {
         guard let uiDelegate else { return }
         let engineDisposition: EngineNavigationDisposition = switch disposition {
         case .backgroundTab: .newBackgroundTab
@@ -746,7 +765,7 @@ extension ChromiumWebContents: ARCHCEFBrowserDelegate {
         default: .newForegroundTab
         }
         uiDelegate.webContents(self, didCreateNewWebContents: ChromiumWebContents(popup: popup, opener: self), targetURL: URL(engineString: targetURL),
-                               disposition: engineDisposition)
+                               disposition: engineDisposition, isUserInitiatedLink: isUserInitiatedLink)
     }
     public func cefBrowserDidClose() {
         contextMenu?.cancelTracking()

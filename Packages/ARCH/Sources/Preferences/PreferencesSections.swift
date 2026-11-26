@@ -59,6 +59,7 @@ struct GeneralSection: View {
                     }
                 }
             }
+            LinkOpeningSettings()
             Section(localized("Downloads")) {
                 LabeledContent(localized("Save downloads to")) {
                     HStack(spacing: 6) {
@@ -96,6 +97,7 @@ struct GeneralSection: View {
         }
         .formStyle(.grouped)
         .frame(width: sectionWidth)
+        .frame(maxHeight: 600)
         // The system's confirmation and System Settings can change the default browser while the window is open.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             isDefaultBrowser = DefaultBrowser.isDefault

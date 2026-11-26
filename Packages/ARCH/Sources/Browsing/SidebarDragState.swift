@@ -3,6 +3,63 @@
 // `SidebarDragAndDrop.swift` starts favorite and space-symbol drags. `SplitView.swift` finds a dragged tab's place in the page area.
 import SwiftUI
 
+/// Confirms a destination only after it stays unchanged for 50 milliseconds.
+/// Updating its geometry keeps the same deadline; leaving or ending the gesture cancels it.
+final class SidebarHoverDelay<Value: Equatable> {
+    typealias Scheduler = (TimeInterval, @escaping () -> Void) -> Void
+    static var delay: TimeInterval { 0.05 }
+    private let schedule: Scheduler
+    private var candidate: Value?
+    private var generation = 0
+    private var action: (() -> Void)?
+
+    init(schedule: @escaping Scheduler = { delay, action in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+    }) {
+        self.schedule = schedule
+    }
+
+    func offer(_ value: Value, commit: @escaping () -> Void) {
+        action = commit
+        guard candidate != value else { return }
+        candidate = value
+        generation += 1
+        let expected = generation
+        schedule(Self.delay) { [weak self] in
+            guard let self, self.generation == expected else { return }
+            let action = self.action
+            self.cancel()
+            action?()
+        }
+    }
+
+    func cancel() {
+        generation += 1
+        candidate = nil
+        action = nil
+    }
+}
+
+/// Drag destinations and space swipes share one cooldown, including simultaneous geometry updates.
+struct SidebarHapticThrottle {
+    private var lastTime: TimeInterval?
+
+    mutating func accepts(at time: TimeInterval) -> Bool {
+        guard lastTime.map({ time - $0 >= 0.1 }) ?? true else { return false }
+        lastTime = time
+        return true
+    }
+}
+
+enum SidebarHaptics {
+    private static var throttle = SidebarHapticThrottle()
+
+    static func alignment() {
+        guard throttle.accepts(at: ProcessInfo.processInfo.systemUptime) else { return }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+}
+
 /// What a drag in the sidebar lifts.
 enum SidebarDragItem: Equatable {
     case tab(UUID)
@@ -45,7 +102,7 @@ struct SidebarReorderHover {
     }
 
     mutating func canMove(at point: CGPoint) -> Bool {
-        if let destination, destination.insetBy(dx: -2, dy: -2).contains(point) { return false }
+        if let destination, destination.insetBy(dx: -6, dy: -6).contains(point) { return false }
         destination = nil
         return true
     }
@@ -271,6 +328,19 @@ final class SidebarDragState: ObservableObject {
     /// Kept through settling after the favorite leaves the session's grid.
     var liftedFavorite: Favorite?
     private var favoriteTabHover = SidebarReorderHover()
+    private struct FavoriteTabCandidate: Equatable {
+        let spaceID: UUID
+        let slot: SidebarTabSlot
+    }
+    private let favoriteTabDelay: SidebarHoverDelay<FavoriteTabCandidate>
+    private let favoriteGapDelay: SidebarHoverDelay<FavoriteGapIdentity>
+
+    init(scheduleHover: @escaping SidebarHoverDelay<Int>.Scheduler = { delay, action in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+    }) {
+        favoriteTabDelay = SidebarHoverDelay(schedule: scheduleHover)
+        favoriteGapDelay = SidebarHoverDelay(schedule: scheduleHover)
+    }
 
     @MainActor
     func updateFavoriteTabDrop(in spaceID: UUID, at point: CGPoint, session: BrowserSession) {
@@ -278,6 +348,7 @@ final class SidebarDragState: ObservableObject {
               let favorite = session.favorites.first(where: { $0.id == id }),
               session.spaces.contains(where: { $0.id == spaceID && $0.resolvedPersonaID == favorite.resolvedPersonaID }),
               let target = favoriteTabTargets[spaceID], target.list.contains(point) else {
+            favoriteTabDelay.cancel()
             favoriteTabHover = SidebarReorderHover()
             if favoriteTabDrop != nil { withAnimation(Self.motion) { favoriteTabDrop = nil } }
             updateFavoriteShape()
@@ -297,13 +368,21 @@ final class SidebarDragState: ObservableObject {
                 let neighborFrame = frames[neighbor] ?? target.openArea
                 row = neighborFrame.offsetBy(dx: 0, dy: after ? neighborFrame.height + SpaceTabsView.rowSpacing : 0)
             }
-            withAnimation(Self.motion) {
-                favoriteTabDrop = FavoriteTabDrop(spaceID: spaceID, slot: move.slot, frame: CGRect(x: row.minX, y: row.minY, width: row.width, height: 36))
+            favoriteTabDelay.offer(FavoriteTabCandidate(spaceID: spaceID, slot: move.slot)) { [weak self] in
+                guard let self, self.item == .favorite(id), !self.isSettling,
+                      self.favoriteTabTargets[spaceID] != nil else { return }
+                withAnimation(Self.motion) {
+                    self.favoriteTabDrop = FavoriteTabDrop(spaceID: spaceID, slot: move.slot, frame: CGRect(x: row.minX, y: row.minY, width: row.width, height: 36))
+                }
+                if let holding = move.holding { self.favoriteTabHover.moved(into: holding) }
+                self.updateFavoriteShape()
+                SidebarHaptics.alignment()
             }
-            if let holding = move.holding { favoriteTabHover.moved(into: holding) }
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-        } else if let current, let frame = target.frames[id], frame != current.frame {
-            favoriteTabDrop = FavoriteTabDrop(spaceID: spaceID, slot: current.slot, frame: frame)
+        } else {
+            favoriteTabDelay.cancel()
+            if let current, let frame = target.frames[id], frame != current.frame {
+                favoriteTabDrop = FavoriteTabDrop(spaceID: spaceID, slot: current.slot, frame: frame)
+            }
         }
         updateFavoriteShape()
     }
@@ -338,6 +417,7 @@ final class SidebarDragState: ObservableObject {
 
     /// The gap held open in the favorites grid under the pointer, around which the other tiles reflow.
     @Published var favoriteGap: FavoriteGap?
+    /// Only a confirmed gap remembers its pointer; pending hover updates must not hold the old gap there.
     private var favoriteGapPoint: CGPoint?
     @MainActor
     func favoriteDestination(for tab: Tab, in space: Space, at point: CGPoint, session: BrowserSession) -> UUID? {
@@ -348,15 +428,22 @@ final class SidebarDragState: ObservableObject {
         return contains ? space.id : nil
     }
 
-    /// Resolves each move and the final release synchronously, before a drop commits its index.
+    private struct FavoriteGapIdentity: Equatable {
+        let spaceID: UUID
+        let index: Int
+        let rowSizes: [Int]?
+    }
+
+    /// A release uses the confirmed gap; a last-moment crossing cannot move it unseen.
     func updateFavoriteGap(in spaceID: UUID?, at point: CGPoint, adding: Bool) {
         defer { updateFavoriteShape() }
+        var nextPoint: CGPoint?
         let next = spaceID.flatMap { spaceID in
             guard let target = favoriteGridTargets[spaceID] else { return nil as FavoriteGap? }
             let sourceIndex: Int?
             if case .favorite(let id) = item { sourceIndex = target.favoriteIDs.firstIndex(of: id) } else { sourceIndex = nil }
             let localPoint = CGPoint(x: point.x - target.frame.minX, y: point.y - target.frame.minY)
-            defer { favoriteGapPoint = localPoint }
+            nextPoint = localPoint
             // Reflow can remove a row under a stationary pointer. Keep its resolved gap until the pointer moves or the grid scrolls.
             if !adding, sourceIndex != nil, favoriteGapPoint == localPoint,
                let gap = favoriteGap, gap.spaceID == spaceID, let sizes = gap.rowSizes,
@@ -371,14 +458,33 @@ final class SidebarDragState: ObservableObject {
                 FavoriteGap(spaceID: spaceID, index: $0.index, frame: $0.frame, newRow: $0.newRow, rowSizes: $0.rowSizes)
             }
         }
-        if next == nil { favoriteGapPoint = nil }
-        guard next != favoriteGap else { return }
-        guard next?.index != favoriteGap?.index || next?.spaceID != favoriteGap?.spaceID || next?.rowSizes != favoriteGap?.rowSizes else {
-            favoriteGap = next
+        guard let next else {
+            favoriteGapPoint = nil
+            favoriteGapDelay.cancel()
+            if favoriteGap != nil { withAnimation(Self.motion) { favoriteGap = nil } }
             return
         }
-        withAnimation(Self.motion) { favoriteGap = next }
-        if next != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+        guard next.index != favoriteGap?.index || next.spaceID != favoriteGap?.spaceID || next.rowSizes != favoriteGap?.rowSizes else {
+            favoriteGapDelay.cancel()
+            favoriteGapPoint = nextPoint
+            if next != favoriteGap { favoriteGap = next }
+            return
+        }
+        if let current = favoriteGap, current.spaceID == next.spaceID,
+           current.newRow == next.newRow, current.rowSizes == next.rowSizes,
+           current.frame.insetBy(dx: -6, dy: -6).contains(point) {
+            favoriteGapDelay.cancel()
+            return
+        }
+        let dragged = item
+        favoriteGapDelay.offer(FavoriteGapIdentity(spaceID: next.spaceID, index: next.index, rowSizes: next.rowSizes)) { [weak self] in
+            guard let self, self.item == dragged, !self.isSettling else { return }
+            self.favoriteGapPoint = nextPoint
+            withAnimation(Self.motion) { self.favoriteGap = next }
+            if case .favorite = self.item { self.targetFavoriteSpaceID = next.spaceID }
+            self.updateFavoriteShape()
+            SidebarHaptics.alignment()
+        }
     }
 
     /// On release, a favorite takes the tab list's slot or the grid's gap. Elsewhere it returns to its original place.
@@ -406,7 +512,8 @@ final class SidebarDragState: ObservableObject {
               tab.spaceID == space.id, tab.personaID == space.resolvedPersonaID,
               tab.agentOwnerID == nil, session.canAddFavorite(tab) else { return nil }
         let gap = favoriteGap.flatMap { $0.spaceID == space.id ? $0 : nil }
-        // A grid gap already has its frame; only the empty header needs the separate frame preference.
+        // A nonempty grid only accepts its confirmed gap; the empty header has no grid slot.
+        guard gap != nil || favoriteGridTargets[space.id] == nil else { return nil }
         guard var frame = gap?.frame ?? favoriteBarFrames[space.id] else { return nil }
         // The empty header is the hit target; the first tile fills the grid's width above it.
         if gap == nil { frame.size.height = FavoriteTileLayout.height }
@@ -465,6 +572,8 @@ final class SidebarDragState: ObservableObject {
     }
 
     func begin(_ item: SidebarDragItem, frame: CGRect, grabbedAt point: CGPoint, owner: UUID) {
+        favoriteGapDelay.cancel()
+        favoriteTabDelay.cancel()
         self.item = item
         self.owner = owner
         self.frame = frame
@@ -472,7 +581,22 @@ final class SidebarDragState: ObservableObject {
         previewPosition = point
         previewAnchor = UnitPoint(x: frame.width > 0 ? (point.x - frame.minX) / frame.width : 0,
                                   y: frame.height > 0 ? (point.y - frame.minY) / frame.height : 0)
-        if case .favorite = item { tileFraction = 1 } else { tileFraction = 0 }
+        if case .favorite = item {
+            tileFraction = 1
+            // Pickup keeps the original tile's slot. Only a different destination needs a dwell.
+            for (spaceID, target) in favoriteGridTargets {
+                let frames = target.slots.frames(for: target.count, width: target.frame.width, origin: target.frame.origin)
+                guard let index = frames.firstIndex(where: {
+                    abs($0.minX - frame.minX) < 1 && abs($0.minY - frame.minY) < 1
+                        && abs($0.width - frame.width) < 1 && abs($0.height - frame.height) < 1
+                }) else { continue }
+                favoriteGap = FavoriteGap(spaceID: spaceID, index: index, frame: frames[index], newRow: nil, rowSizes: nil)
+                targetFavoriteSpaceID = spaceID
+                break
+            }
+        } else {
+            tileFraction = 0
+        }
     }
 
     func move(to point: CGPoint) {
@@ -483,6 +607,8 @@ final class SidebarDragState: ObservableObject {
     /// Ends the drag if `owner` started it, so a list cannot end another list's drag.
     func end(ownedBy owner: UUID) {
         guard self.owner == owner else { return }
+        favoriteGapDelay.cancel()
+        favoriteTabDelay.cancel()
         item = nil
         self.owner = nil
         isSettling = false

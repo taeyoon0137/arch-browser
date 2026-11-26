@@ -346,11 +346,12 @@ CefRefPtr<CefListValue> PageScriptList(NSArray<ARCHCEFPageScript *> *scripts) {
                 ofBrowser:(int)browserIdentifier
                       url:(NSString *)url
               disposition:(cef_window_open_disposition_t)disposition
+      isUserInitiatedLink:(BOOL)isUserInitiatedLink
                windowInfo:(CefWindowInfo &)windowInfo
                    client:(CefRefPtr<CefClient> &)client
                 extraInfo:(CefRefPtr<CefDictionaryValue> &)extraInfo;
 - (BOOL)handleShouldOpenExternally:(NSString *)url userGesture:(BOOL)userGesture;
-- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture;
+- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture isLinkActivation:(BOOL)isLinkActivation referrer:(ARCHCEFReferrer *)referrer;
 - (BOOL)handleMayOpenURL:(NSString *)url referrer:(ARCHCEFReferrer *)referrer disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture;
 - (void)handleMainFrameNavigationPending:(BOOL)pending;
 - (void)handleBeforeClose;
@@ -435,6 +436,7 @@ struct PendingPopup {
     __weak ARCHCEFBrowser *opener;
     NSString *targetURL;
     ARCHCEFPopupDisposition disposition;
+    bool isUserInitiatedLink;
 };
 
 // The popups that CEF has yet to create, by their opener browser's identifier and CEF's popup ID. No app object owns them yet, so each entry holds the popup's browser object, with the client CEF calls and the container view CEF adds the popup's view to, from `OnBeforePopup` until CEF creates the popup or aborts it. CEF calls both on the UI thread, which is the main thread here.
@@ -657,7 +659,9 @@ public:
         NSString *url = ToNSString(request->GetURL());
         bool cancel = owner_ != nil && [owner_ handleShouldOpenExternally:url userGesture:user_gesture];
         if (!cancel && frame->IsMain() && owner_ != nil) {
-            cancel = ![owner_ handleShouldBrowse:url isRedirect:is_redirect userGesture:user_gesture];
+            bool isLink = TakeLinkActivation(frame, request->GetURL());
+            cancel = ![owner_ handleShouldBrowse:url isRedirect:is_redirect userGesture:user_gesture isLinkActivation:isLink && !is_redirect
+                                      referrer:[[ARCHCEFReferrer alloc] initWithURL:ToNSString(request->GetReferrerURL()) policy:request->GetReferrerPolicy()]];
         }
         if (!cancel && frame->IsMain()) {
             [owner_ handleMainFrameNavigationPending:YES];
@@ -714,15 +718,16 @@ public:
         [owner_ handleAfterCreated:browser];
     }
 
-    // A popup that the opener's delegate would adopt, that the delegate allows, and that belongs to no other app opens in a browser object of its own, which CEF creates in the opener's browsing context, so the page keeps the window `window.open` returns and the popup keeps `window.opener`. The runtime opens none while it shuts down. A Document Picture-in-Picture window would become a tab, so the page keeps its own interface instead. Returning true stops the popup. A link the user clicked with Shift opens a window, never a tab, so its question carries no referrer.
+    // CEF creates an allowed popup in the opener's browsing context, preserving the window returned by window.open and window.opener. Pass its gesture and disposition to policy separately from modified links: even a foreground tab with a gesture can come from window.open. A Document Picture-in-Picture window stays with the page's own interface instead of becoming a tab.
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id, const CefString &target_url,
                        const CefString &target_frame_name, CefLifeSpanHandler::WindowOpenDisposition target_disposition,
                        bool user_gesture, const CefPopupFeatures &popupFeatures, CefWindowInfo &windowInfo,
                        CefRefPtr<CefClient> &client, CefBrowserSettings &settings, CefRefPtr<CefDictionaryValue> &extra_info,
                        bool *no_javascript_access) override {
         NSString *url = ToNSString(target_url);
-        if (!gInitialized || target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE || ![owner_.delegate cefBrowserCanAdoptPopup] ||
-            (target_disposition == CEF_WOD_NEW_WINDOW && ![owner_ handleMayOpenURL:url referrer:[[ARCHCEFReferrer alloc] initWithURL:@"" policy:REFERRER_POLICY_DEFAULT] disposition:target_disposition userGesture:user_gesture]) ||
+        bool isLink = TakeLinkActivation(frame, target_url);
+        if (!gInitialized || target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE ||
+            ![owner_.delegate cefBrowserCanAdoptPopupAtURL:url disposition:PopupDisposition(target_disposition) userGesture:user_gesture isLinkActivation:isLink] ||
             [owner_ handleShouldOpenExternally:url userGesture:user_gesture]) {
             return true;
         }
@@ -730,6 +735,7 @@ public:
                         ofBrowser:browser->GetIdentifier()
                               url:url
                       disposition:target_disposition
+              isUserInitiatedLink:isLink && user_gesture
                        windowInfo:windowInfo
                            client:client
                         extraInfo:extra_info];
@@ -777,6 +783,11 @@ public:
 
     bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefProcessId sourceProcess,
                                   CefRefPtr<CefProcessMessage> message) override {
+        if (message->GetName() == kLinkActivation && frame && sourceProcess == PID_RENDERER) {
+            linkFrame_ = frame->GetIdentifier();
+            linkURL_ = message->GetArgumentList()->GetString(0);
+            return true;
+        }
         if (message->GetName() == kAudibleReport && frame) {
             [owner_ handleAudible:message->GetArgumentList()->GetBool(0) frame:ToNSString(frame->GetIdentifier())];
             return true;
@@ -861,6 +872,15 @@ public:
     void OnPictureInPictureStop(CefRefPtr<CefBrowser> browser) override { [owner_.delegate cefBrowserDidStopPictureInPicture]; }
 
 private:
+    bool TakeLinkActivation(CefRefPtr<CefFrame> frame, const CefString &url) {
+        bool matches = frame && linkFrame_ == frame->GetIdentifier() && !linkURL_.empty() && linkURL_ == url;
+        linkURL_.clear();
+        return matches;
+    }
+
+    CefString linkFrame_;
+    CefString linkURL_;
+
     void FinishDevTools() {
         if (!devToolsView_) {
             return;
@@ -1181,7 +1201,7 @@ private:
     _pendingReferrer = nil;
     ExtensionsBrowserDidCreate(self);
     if (popup) {
-        [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition];
+        [popup->opener.delegate cefBrowserDidOpenPopup:self targetURL:popup->targetURL disposition:popup->disposition isUserInitiatedLink:popup->isUserInitiatedLink];
         // CEF activates a page, which document.hasFocus() needs, only after an address the app loads (LoadMainFrameURL) or when its window becomes key while the page holds the first responder, so a popup that opens in the key window gets neither. A UI delegate that gives the popup the keys, as a small window does through focusPage, queues that before this block, so on this turn the page holds the first responder only if it should take the keys.
         __weak ARCHCEFBrowser *weakPopup = self;
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -1321,18 +1341,19 @@ private:
     return delegate != nil && [delegate cefBrowserShouldOpenExternallyURL:url userGesture:userGesture];
 }
 
-- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture {
+- (BOOL)handleShouldBrowse:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture isLinkActivation:(BOOL)isLinkActivation referrer:(ARCHCEFReferrer *)referrer {
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
-    return delegate == nil || [delegate cefBrowserShouldBrowseToURL:url isRedirect:isRedirect userGesture:userGesture];
+    return delegate == nil || [delegate cefBrowserShouldBrowseToURL:url isRedirect:isRedirect userGesture:userGesture isLinkActivation:isLinkActivation referrer:referrer];
 }
 
 // Alloy loads modified links in place unless the app handles their requested disposition.
 - (BOOL)handleMayOpenURL:(NSString *)url referrer:(ARCHCEFReferrer *)referrer disposition:(cef_window_open_disposition_t)disposition userGesture:(BOOL)userGesture {
-    if (!userGesture || (disposition != CEF_WOD_NEW_WINDOW && disposition != CEF_WOD_NEW_BACKGROUND_TAB && disposition != CEF_WOD_NEW_FOREGROUND_TAB)) {
+    if (disposition != CEF_WOD_NEW_WINDOW && disposition != CEF_WOD_NEW_BACKGROUND_TAB &&
+        disposition != CEF_WOD_NEW_FOREGROUND_TAB && disposition != CEF_WOD_NEW_POPUP) {
         return YES;
     }
     id<ARCHCEFBrowserDelegate> delegate = _delegate;
-    return delegate == nil || [delegate cefBrowserShouldOpenURL:url disposition:PopupDisposition(disposition) referrer:referrer];
+    return delegate == nil || [delegate cefBrowserShouldOpenURL:url disposition:PopupDisposition(disposition) userGesture:userGesture referrer:referrer];
 }
 
 /// Fills CEF's parameters for a popup the page opens: CEF creates it in this browser's browsing context, as the bridge's own browser object, with its own client and a container view of this browser's size, and its renderers start with this browser's page scripts. CEF uses this browser's request context and settings. The object waits in `gPendingPopups` until CEF creates the popup or aborts it.
@@ -1340,12 +1361,13 @@ private:
                 ofBrowser:(int)browserIdentifier
                       url:(NSString *)url
               disposition:(cef_window_open_disposition_t)disposition
+      isUserInitiatedLink:(BOOL)isUserInitiatedLink
                windowInfo:(CefWindowInfo &)windowInfo
                    client:(CefRefPtr<CefClient> &)client
                 extraInfo:(CefRefPtr<CefDictionaryValue> &)extraInfo {
     NSView *container = [[NSView alloc] initWithFrame:_parentView.bounds];
     ARCHCEFBrowser *popup = [[ARCHCEFBrowser alloc] initForBrowserInParentView:container url:url pageScripts:_pageScripts delegate:nil];
-    gPendingPopups[{browserIdentifier, popupID}] = {popup, self, url, PopupDisposition(disposition)};
+    gPendingPopups[{browserIdentifier, popupID}] = {popup, self, url, PopupDisposition(disposition), static_cast<bool>(isUserInitiatedLink)};
     [popup placeInWindowInfo:windowInfo];
     client = popup->_client;
     extraInfo = [popup creationExtraInfo];

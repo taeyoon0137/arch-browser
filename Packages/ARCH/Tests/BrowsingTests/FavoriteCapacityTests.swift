@@ -26,7 +26,7 @@ import Testing
         let points = frames.map { CGPoint(x: $0.midX, y: $0.midY) }
             + [CGPoint(x: frame.midX, y: frame.minY - 5), CGPoint(x: frame.midX, y: frame.maxY + 5)]
         for point in points {
-            let drag = SidebarDragState(), owner = UUID()
+            let drag = SidebarDragState(scheduleHover: { _, action in action() }), owner = UUID()
             drag.favoriteGridTargets[space.id] = target
             drag.begin(.tab(tab.id), frame: CGRect(x: 6, y: 500, width: 248, height: 36), grabbedAt: CGPoint(x: 100, y: 518), owner: owner)
             let destination = try #require(drag.favoriteDestination(for: tab, in: space, at: point, session: session))
@@ -91,7 +91,7 @@ import Testing
                 }
             }
         }
-        let drag = SidebarDragState(), frames = CapacityFrames()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), frames = CapacityFrames()
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .frame(width: 260, height: 300)
             .coordinateSpace(name: BrowserWindowView.coordinateSpace)
@@ -193,7 +193,7 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(3, forKey: FavoriteTileLayout.columnsKey)
-        let drag = SidebarDragState(), frames = CapacityFrames()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), frames = CapacityFrames()
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .frame(width: 260, height: 600)
             .coordinateSpace(name: BrowserWindowView.coordinateSpace)

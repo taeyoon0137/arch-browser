@@ -72,6 +72,47 @@ const char kAudibleScript[] = R"JS((() => {
   } });
 })())JS";
 
+// Records the anchor's default action without replacing navigation or creating a second page.
+// The native sender stays in this closure. Script popups clear evidence before calling the original window.open.
+const char kLinkActivationScript[] = R"JS((report => {
+  const apply = Reflect.apply, nativeOpen = window.open, later = setTimeout;
+  const clear = () => report("");
+  for (const type of ["click", "auxclick"]) {
+    addEventListener(type, clear, true);
+    addEventListener(type, event => {
+      if (!event.isTrusted || event.defaultPrevented || (event.button !== 0 && event.button !== 1)) return;
+      const link = event.composedPath().find(node => node instanceof HTMLAnchorElement || node instanceof HTMLAreaElement);
+      if (!link || link.hasAttribute("download") || [...link.relList].some(token => token.toLowerCase() === "opener")) return;
+      const target = (link.target || document.querySelector("base[target]")?.target || "").toLowerCase();
+      if (target && !["_self", "_top", "_parent", "_blank"].includes(target)) return;
+      if (!/^https?:$/.test(link.protocol)) return;
+      report(link.href);
+      later(clear, 0);
+    });
+  }
+  window.open = function open() {
+    clear();
+    return apply(nativeOpen, this, arguments);
+  };
+}))JS";
+
+class LinkActivationReporter : public CefV8Handler {
+public:
+    bool Execute(const CefString &name, CefRefPtr<CefV8Value> object, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &retval,
+                 CefString &exception) override {
+        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
+        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
+        if (frame && arguments.size() == 1 && arguments[0]->IsString()) {
+            CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kLinkActivation);
+            message->GetArgumentList()->SetString(0, arguments[0]->GetStringValue());
+            frame->SendProcessMessage(PID_BROWSER, message);
+        }
+        return true;
+    }
+private:
+    IMPLEMENT_REFCOUNTING(LinkActivationReporter);
+};
+
 // Sends a frame's audible state from its renderer to the browser, which tracks each frame.
 class AudibleReporter : public CefV8Handler {
 public:
@@ -281,6 +322,9 @@ public:
                                        static_cast<cef_v8_propertyattribute_t>(V8_PROPERTY_ATTRIBUTE_READONLY | V8_PROPERTY_ATTRIBUTE_DONTENUM |
                                                                                V8_PROPERTY_ATTRIBUTE_DONTDELETE));
         Evaluate(context, kAudibleScript);
+        if (CefRefPtr<CefV8Value> install = Evaluate(context, kLinkActivationScript); install && install->IsFunction()) {
+            install->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("reportLinkActivation", new LinkActivationReporter())});
+        }
         if (!kHasIsolatedWorlds<CefFrame>) {
             AddOpener(context);
         }

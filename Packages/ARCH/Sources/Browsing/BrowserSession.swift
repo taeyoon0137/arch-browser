@@ -430,7 +430,7 @@ final class EngineRuntime {
         return reopened
     }
 
-    /// Creates a hidden window of `kind` as `record` describes it, on the first space when the record's space is gone. A window without a frame cascades from the window of its kind that last became main. It goes first in `windows`, as it is about to come to the front, before its views exist.
+    /// Creates a hidden window of `kind` as `record` describes it, on the first space when the record's space is gone. A main window without a frame cascades from the main window that last became main; a small window opens near the top center of the pointer's screen. It goes first in `windows`, as it is about to come to the front, before its views exist.
     func makeWindow(from record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) -> BrowserWindowModel {
         let source = windows.first { $0.kind == kind }?.nsWindow
         var record = record
@@ -576,6 +576,44 @@ final class EngineRuntime {
         return opened
     }
 
+    /// A resolved site-rule destination takes precedence over small windows and their host exceptions.
+    @discardableResult
+    public func openExternalLink(_ url: URL, prefersSmallWindow: Bool, destinationSpaceID: UUID? = nil) -> BrowserWindowModel {
+        let spaceID = destinationSpaceID ?? lastMainWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
+        let space = spaces.first { $0.id == spaceID } ?? spaces[0]
+        if destinationSpaceID == nil, let destination = destination(forOpening: space, url: url) {
+            let tab = openRoutedTab(url: url, destination: destination, source: lastMainWindow, background: false)
+            return window(showing: tab) ?? regularWindow(in: destination.space.id)
+        }
+        let hasDestination = destinationSpaceID != nil || siteRule(for: url).flatMap(siteRuleDestination) != nil
+        if RegularWindowSites().opensInSmallWindow(url, prefersSmallWindow: prefersSmallWindow, hasSiteRuleDestination: hasDestination) {
+            return openSmallWindow(url: url, engine: defaultEngine, spaceID: space.id, personaID: space.resolvedPersonaID)
+        }
+        let target = regularWindow(in: space.id)
+        let tab = openTab(url: url, in: space.id, select: false)
+        target.selectTab(tab.id)
+        target.nsWindow?.makeKeyAndOrderFront(nil)
+        target.focusPage()
+        return target
+    }
+
+    /// Prefer the frontmost regular window in the space, then one in that space's Persona.
+    func regularWindow(in spaceID: UUID) -> BrowserWindowModel {
+        let personaID = personaID(ofSpace: spaceID)
+        return windows.first { $0.kind == .main && !$0.isPrivate && $0.currentSpaceID == spaceID }
+            ?? windows.first { $0.kind == .main && !$0.isPrivate && $0.personaID == personaID }
+            ?? makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: true), kind: .main)
+    }
+
+    func alwaysOpenSmallWindowSiteInRegularWindow(_ window: BrowserWindowModel) {
+        guard window.kind == .small, !window.isPrivate, !window.isSelectedPageCovered,
+              let host = RegularWindowSites.host(from: window.selectedTab?.url) else { return }
+        var sites = RegularWindowSites()
+        _ = sites.add(host.contains(":") ? "[\(host)]" : host)
+        sites.save()
+        moveToMainWindow(window, destination: regularWindow(in: window.currentSpaceID))
+    }
+
     /// An address Arch opens keeps its requested engine if this Persona temporarily needs a fallback.
     func openSmallWindow(url: URL?, engine: EngineKind, spaceID: UUID, personaID: Persona.ID) -> BrowserWindowModel {
         let contents = makeWebContents(url: url, engine: engine, state: nil, in: personaID)
@@ -597,22 +635,23 @@ final class EngineRuntime {
         tabs.append(tab)
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: false), kind: .small)
         window.selectTab(tab.id)
+        windowControllers.first { $0.model === window }?.showWindow(nil)
         window.nsWindow?.makeKeyAndOrderFront(nil)
         window.focusPage()
         return window
     }
 
-    /// Move to Main Window: the small window's tab joins the end of its space's open tabs, and the sidebar target selects it, which takes it from the small window (window rule 2) and so closes that window, then comes forward with the page focused. The page moves without loading again. The tab's space is still there, because deleting a space moves its tabs, a small window's among them.
-    public func moveToMainWindow(_ smallWindow: BrowserWindowModel) {
+    /// Open in Main Window: the small window's tab joins the end of its space's open tabs, and the sidebar target selects it, which takes it from the small window (window rule 2) and so closes that window, then comes forward with the page focused. The page moves without loading again. The tab's space is still there, because deleting a space moves its tabs, a small window's among them.
+    public func moveToMainWindow(_ smallWindow: BrowserWindowModel, destination: BrowserWindowModel? = nil) {
         guard smallWindow.kind == .small, !smallWindow.isPrivate, let tab = smallWindow.selectedTab, !tab.isPrivate,
-              let index = tabs.firstIndex(where: { $0 === tab }) else { return }
+              destination?.isPrivate != true, let index = tabs.firstIndex(where: { $0 === tab }) else { return }
         tab.isInSmallWindow = false
         var reordered = tabs
         reordered.append(reordered.remove(at: index))
         tabs = reordered
         let panel = smallWindow.agentPanel
         let draft = smallWindow.resumableAgentDraft
-        var target = sidebarTarget()
+        var target = destination ?? sidebarTarget()
         if let draft, !target.canReceiveAgentDraft(draft) {
             // Another window can hold this space's second draft without replacing the first.
             target = windows.first { $0.kind == .main && $0.personaID == draft.personaID && $0.canReceiveAgentDraft(draft) }
@@ -632,10 +671,23 @@ final class EngineRuntime {
         windows.first { $0.kind == .main && $0.personaID == personaID }?.currentSpace ?? spaces(in: personaID).first ?? preferredSpace(in: personaID)
     }
 
-    /// The small window's Persona menu: the window's page moves to the Persona `personaID`, in a new tab of that Persona at the same address and engine, whose space is `smallWindowDestination(in:)`. A tab's pages keep their Persona's storage, so the page loads again in the Persona's profile, without the old page's back and forward list or sign-in. The old tab ends without joining the closed list, and the window stays open on the new tab.
+    /// Switching Personas uses its preferred destination; the place menu can also choose a specific space.
     public func moveSmallWindow(_ window: BrowserWindowModel, toPersona personaID: Persona.ID) {
-        guard window.kind == .small, let old = window.selectedTab, old.personaID != personaID, personas.contains(where: { $0.id == personaID }) else { return }
-        let space = smallWindowDestination(in: personaID)
+        guard personas.contains(where: { $0.id == personaID }) else { return }
+        moveSmallWindow(window, toSpace: smallWindowDestination(in: personaID).id)
+    }
+
+    /// Within a Persona the live page moves without reloading. A different Persona creates a new page in its own profile.
+    func moveSmallWindow(_ window: BrowserWindowModel, toSpace spaceID: UUID) {
+        guard window.kind == .small, let old = window.selectedTab,
+              let space = spaces.first(where: { $0.id == spaceID }), old.spaceID != spaceID else { return }
+        let personaID = space.resolvedPersonaID
+        if old.personaID == personaID {
+            old.spaceID = spaceID
+            window.currentSpaceID = spaceID
+            scheduleSave()
+            return
+        }
         let engine = old.preferredEngine
         let tab = makeTab(makeWebContents(url: old.url, engine: engine, state: nil, in: personaID), id: UUID(), spaceID: space.id, personaID: personaID, pinned: false)
         tab.preferredEngine = engine
@@ -1257,7 +1309,7 @@ final class EngineRuntime {
             }
             return .cancel
         }
-        tab.openNewTab = { [weak self, weak tab] popup, targetURL, disposition in
+        tab.openNewTab = { [weak self, weak tab] popup, targetURL, disposition, isUserInitiatedLink in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
             // A Persona without a profile, such as one a synced deletion removed, cannot own the popup, which no tab then takes.
             guard let runtime = self.runtime(for: popup.engineKind, in: personaID) else { return }
@@ -1303,6 +1355,12 @@ final class EngineRuntime {
                     }
                     return
                 }
+            }
+            if !isHeld, let window, let url = targetURL ?? popup.url,
+               self.siteRule(for: url).flatMap(self.siteRuleDestination) == nil,
+               PeekPolicy.shouldPeek(from: tab.url, to: url, isPinnedOrFavorite: tab.isPinned || tab.spaceID == nil,
+                                     disposition: disposition, isUserInitiatedLink: isUserInitiatedLink, enabled: PeekPolicy.automaticallyPeeks) {
+                return window.showPreview(popup, openedURL: url, in: personaID, requestedEngine: tab.preferredEngine, opener: tab.webContents)
             }
             if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents, preferredEngine: tab.preferredEngine) }
             let opened = self.adopt(popup, spaceID: tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents, preferredEngine: tab.preferredEngine)
@@ -1401,7 +1459,7 @@ final class EngineRuntime {
                 DispatchQueue.main.async { [weak tab] in tab?.webContents.exitFullscreen() }
             }
         }
-        // A context-menu link opens behind, marked unread, in the source Persona and engine. A link clicked with Command or the middle button opens through `openNewTab`.
+        // Context-menu links follow automatic Peek; other links open in the background in the source Persona and engine. Command-click and middle-click use `openNewTab`.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
             if tab.isPrivate {
@@ -1416,6 +1474,11 @@ final class EngineRuntime {
                 let opened = self.openRoutedTab(url: url, destination: destination, source: source, background: true,
                                                engine: destination.space.resolvedPersonaID == tab.personaID ? tab.preferredEngine : self.defaultEngine)
                 if opened.personaID == tab.personaID { opened.opener = tab.webContents }
+            } else if !tab.pageDownloads.isHeldUntilUserActs, let window = self.window(showing: tab),
+               self.siteRule(for: url).flatMap(self.siteRuleDestination) == nil,
+               PeekPolicy.shouldPeek(from: tab.url, to: url, isPinnedOrFavorite: tab.isPinned || tab.spaceID == nil,
+                                     disposition: .newBackgroundTab, isUserInitiatedLink: true, enabled: PeekPolicy.automaticallyPeeks) {
+                return window.showPreview(of: url, engine: tab.preferredEngine, in: tab.personaID)
             } else {
                 self.openTab(url: url, in: origin.id, select: false, engine: tab.preferredEngine).isUnread = true
             }
@@ -1436,10 +1499,30 @@ final class EngineRuntime {
             }
             self.openTab(url: url, in: tab.spaceID ?? self.preferredSpace(in: tab.personaID).id, select: false, engine: tab.preferredEngine).isUnread = true
         }
-        // A web link the user clicks with Shift opens in the preview panel of the page's window, in the page's engine and Persona.
+        // Automatic Peek leaves private pages and links with a matching site rule in their existing navigation paths.
+        tab.shouldPreviewNavigation = { [weak self, weak tab] action in
+            guard let self, let tab, !tab.isPrivate, self.window(showing: tab) != nil,
+                  !tab.pageDownloads.isHeldUntilUserActs,
+                  self.siteRule(for: action.url).flatMap(self.siteRuleDestination) == nil else { return false }
+            return PeekPolicy.shouldPeek(from: tab.url, to: action.url, isPinnedOrFavorite: tab.isPinned || tab.spaceID == nil,
+                                         disposition: action.disposition, isUserInitiatedLink: action.isUserInitiated && action.isLinkActivation,
+                                         enabled: PeekPolicy.automaticallyPeeks)
+        }
+        // Explicit Peek follows a matching site rule first; private pages never enter the preview panel.
         tab.previewLink = { [weak self, weak tab] url in
-            guard let self, let tab else { return }
-            self.window(showing: tab)?.showPreview(of: url, engine: tab.preferredEngine, in: tab.personaID)
+            guard let self, let tab, !tab.isPrivate, tab.agentOwnerID == nil,
+                  self.allTabs.contains(where: { $0 === tab }), let window = self.window(showing: tab) else { return }
+            if let destination = self.destination(forOpening: window.currentSpace, url: url) {
+                let opened = self.openRoutedTab(url: url, destination: destination, source: window, background: false,
+                                               engine: destination.space.resolvedPersonaID == tab.personaID ? tab.preferredEngine : self.defaultEngine)
+                if opened.personaID == tab.personaID { opened.opener = tab.webContents }
+            } else if self.siteRule(for: url).flatMap(self.siteRuleDestination) != nil {
+                let opened = self.openTab(url: url, in: window.currentSpaceID, select: false, engine: tab.preferredEngine)
+                opened.opener = tab.webContents
+                window.selectTab(opened.id)
+            } else {
+                window.showPreview(of: url, engine: tab.preferredEngine, in: tab.personaID)
+            }
         }
         tab.presentPrompt = { [weak self, weak tab] content, completion in
             guard let self, let tab else { return completion(.dismissed) }
@@ -2776,17 +2859,17 @@ extension BrowserSession {
         for (window, target) in selections where window.selectedTabID.flatMap({ replacedTabs[$0] }) == target { window.selectTab(target) }
         for tab in tabs where replacedTabs[tab.id] != nil { _ = removeTab(tab, closedRecord: nil, reason: .sync) }
         spaces.removeAll { changedSpaces[$0.id] != nil }
-        // Matched favorites temporarily existed under both IDs. Repair the original winning layout against the final set.
-        for persona in state.personas {
-            let rows = persona.favoriteRows ?? before.personas.first { $0.id == persona.id }?.favoriteRows ?? []
-            setFavoriteRows(rows, in: persona.id)
-        }
         let joinedRules = siteRules.rules.filter { replacements.siteRules[$0.id] == nil }.map { rule in
             var rule = rule
             if let space = changedSpaces[rule.spaceID] { rule.spaceID = space }
             return rule
         }
         saveSyncedSiteRules(joinedRules)
+        // Matched favorites temporarily existed under both IDs. Repair the original winning layout against the final set.
+        for persona in state.personas {
+            let rows = persona.favoriteRows ?? before.personas.first { $0.id == persona.id }?.favoriteRows ?? []
+            setFavoriteRows(rows, in: persona.id)
+        }
     }
 
     private func saveSyncedSiteRules(_ rules: [SiteRule]) {

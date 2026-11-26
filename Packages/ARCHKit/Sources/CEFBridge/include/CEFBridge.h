@@ -356,16 +356,16 @@ typedef NS_ENUM(NSInteger, ARCHCEFMediaAction) {
 - (void)cefBrowserDidChangeFaviconURLs:(NSArray<NSString *> *)urls;
 /// Reports the search started by `findText:forward:matchCase:findNext:`. `finalUpdate` marks its last report.
 - (void)cefBrowserDidFindMatches:(NSInteger)count activeMatchOrdinal:(NSInteger)activeMatchOrdinal finalUpdate:(BOOL)finalUpdate;
-/// Asks whether a popup the page opens now would be adopted through `cefBrowserDidOpenPopup:targetURL:disposition:`. Return NO to stop the popup before CEF creates it.
-- (BOOL)cefBrowserCanAdoptPopup;
+/// Asks whether a native popup may open and be adopted through `cefBrowserDidOpenPopup:targetURL:disposition:`. `isLinkActivation` identifies a trusted anchor default action; a user gesture alone can belong to `window.open`. Return NO before CEF creates the popup.
+- (BOOL)cefBrowserCanAdoptPopupAtURL:(NSString *)url disposition:(ARCHCEFPopupDisposition)disposition userGesture:(BOOL)userGesture isLinkActivation:(BOOL)isLinkActivation NS_SWIFT_NAME(cefBrowserCanAdoptPopup(atURL:disposition:userGesture:isLinkActivation:));
 /// Reports a popup the page opened, which CEF has created in this browser's browsing context, so the page reaches it through the window `window.open` returned and the popup reaches the page through `window.opener`. `targetURL` is the address the page opened, empty when it gave none. Set the popup's `delegate` to keep it. A popup that has none when this returns closes on the next turn of the run loop: CEF owns its page only once the opener shows it, after this callback.
-- (void)cefBrowserDidOpenPopup:(ARCHCEFBrowser *)popup targetURL:(NSString *)targetURL disposition:(ARCHCEFPopupDisposition)disposition;
+- (void)cefBrowserDidOpenPopup:(ARCHCEFBrowser *)popup targetURL:(NSString *)targetURL disposition:(ARCHCEFPopupDisposition)disposition isUserInitiatedLink:(BOOL)isUserInitiatedLink;
 /// Asks whether a navigation or popup to `url` belongs to another app. Return YES to stop it; the delegate then offers the link to that app. `userGesture` is true when the user clicked the link.
 - (BOOL)cefBrowserShouldOpenExternallyURL:(NSString *)url userGesture:(BOOL)userGesture;
 /// Asks whether a main frame navigation to `url` may go ahead: each one that does not belong to another app, and again before the request of each server redirect, with `isRedirect` set and the redirect's address. Return NO to stop it before its request. `userGesture` is true when the user clicked a link.
-- (BOOL)cefBrowserShouldBrowseToURL:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture;
-/// Asks the app to handle a modified link before Alloy loads it in place. `referrer` is the one Chromium gives the link. Return NO once the app handles it.
-- (BOOL)cefBrowserShouldOpenURL:(NSString *)url disposition:(ARCHCEFPopupDisposition)disposition referrer:(ARCHCEFReferrer *)referrer;
+- (BOOL)cefBrowserShouldBrowseToURL:(NSString *)url isRedirect:(BOOL)isRedirect userGesture:(BOOL)userGesture isLinkActivation:(BOOL)isLinkActivation referrer:(ARCHCEFReferrer *)referrer;
+/// Asks the app to handle a requested tab or window before Alloy loads it in place. Chromium encodes the click's modifiers in `disposition`; `userGesture` and `referrer` are the values CEF gives the navigation. Return NO once the app handles it.
+- (BOOL)cefBrowserShouldOpenURL:(NSString *)url disposition:(ARCHCEFPopupDisposition)disposition userGesture:(BOOL)userGesture referrer:(ARCHCEFReferrer *)referrer;
 /// Reports that the browser closed, or that its page closed itself with `window.close()` while one of its downloads needs the browser. The browser then stays open, so the download goes on, until `close` or `tryCloseWithCompletion:`.
 - (void)cefBrowserDidClose;
 /// Asks whether a download from `url` may start. `hasDocument` is false when the browser never showed a page.

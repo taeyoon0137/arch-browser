@@ -231,14 +231,14 @@ import Terminal
         while !pendingURLs.isEmpty {
             let batch = pendingURLs
             pendingURLs.removeAll()
-            batch.forEach { session.openExternalTab(url: $0) }
+            batch.forEach { session.openExternalLink($0, prefersSmallWindow: false) }
         }
         acceptsRunningLinks = true
         NSApp.activate(ignoringOtherApps: true)
         promptForDefaultBrowserIfNeeded()
     }
 
-    /// Opens links from other apps and addresses from `open location` scripts. Links received before launch finishes wait for the session and open as tabs of the main window. Afterwards, while Settings ▸ General allows small windows, a link that arrives while Arch is in the background opens in a small window of its own, which comes forward alone; otherwise links open in new tabs of the sidebar target. Only http and https addresses open (`BrowserSession.webAddress(forOpened:)`); a script's text without a scheme is read as the address field reads it, and anything else is dropped.
+    /// Opens web links from other apps and `open location` scripts through the session's window rules. Launch links wait for the session and open as regular tabs; later links may use small windows while Arch is in the background, except for hosts in the regular-window list.
     func application(_ application: NSApplication, open urls: [URL]) {
         guard !isAbandoningLaunch else { return }
         let urls = urls.compactMap(BrowserSession.webAddress(forOpened:))
@@ -248,13 +248,12 @@ import Terminal
             return
         }
         if allowsSmallWindowsForLinks, BrowserSession.opensLinkInSmallWindow(isAppActive: NSApp.isActive, becameActiveAt: becameActiveAt, now: Date()) {
-            urls.forEach { session.openSmallWindow(url: $0) }
+            urls.forEach { session.openExternalLink($0, prefersSmallWindow: true) }
             // Without `.activateAllWindows`, only the key and main windows come forward.
             NSRunningApplication.current.activate(options: [])
             return
         }
-        frontSidebarTarget()
-        urls.forEach { session.openExternalTab(url: $0) }
+        urls.forEach { session.openExternalLink($0, prefersSmallWindow: false) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -577,7 +576,7 @@ import Terminal
         windowMenu.addItem(withTitle: localized("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: localized("Zoom"), action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
-        windowMenu.addItem(withTitle: localized("Move to Main Window"), action: #selector(moveToMainWindow), keyEquivalent: "n").keyEquivalentModifierMask = [.command, .option]
+        windowMenu.addItem(withTitle: localized("Open in Main Window"), action: #selector(moveToMainWindow), keyEquivalent: "o").keyEquivalentModifierMask = [.command]
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: localized("Bring All to Front"), action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         self.windowMenu = windowMenu

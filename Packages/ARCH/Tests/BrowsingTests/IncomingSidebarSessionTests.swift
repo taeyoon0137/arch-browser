@@ -132,7 +132,7 @@ import Testing
         // A popup its page opens joins no list.
         let count = session.tabs.count
         let popup = UnloadedWebContents(url: address.appendingPathComponent("popup"), title: "", engine: engine.engineKind, state: nil)
-        tab.openNewTab?(popup, popup.url, .newForegroundTab)
+        tab.openNewTab?(popup, popup.url, .newForegroundTab, false)
         #expect(session.tabs.count == count && !session.tabs.contains { $0.webContents === popup })
 
         // Once a profile opens, the Persona's pages open as before.

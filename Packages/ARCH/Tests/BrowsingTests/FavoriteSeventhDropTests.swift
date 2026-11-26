@@ -36,7 +36,7 @@ import Testing
         let originals = session.favorites(in: space.resolvedPersonaID)
         let tab = session.openTab(url: URL(string: "https://example.org/seventh")!, in: space.id, select: false)
         let contents = tab.webContents
-        let drag = SidebarDragState(), frames = SeventhFavoriteFrames()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), frames = SeventhFavoriteFrames()
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .frame(width: 260, height: height)
             .coordinateSpace(name: BrowserWindowView.coordinateSpace)

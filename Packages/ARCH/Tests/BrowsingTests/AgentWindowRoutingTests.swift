@@ -151,6 +151,10 @@ import Testing
     }
 
     @Test func tabsCreatedDuringAPersonaEngineOutageRecoverTheirRequestedEngine() throws {
+        // This fixture exercises background-tab recovery independently of automatic Peek routing.
+        let automaticPeek = UserDefaults.standard.object(forKey: PeekPolicy.automaticPeekKey)
+        UserDefaults.standard.set(false, forKey: PeekPolicy.automaticPeekKey)
+        defer { UserDefaults.standard.set(automaticPeek, forKey: PeekPolicy.automaticPeekKey) }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -211,7 +215,7 @@ import Testing
         // A popup renders in the engine that created it and saves its opener's engine choice.
         main.selectTab(pin.id)
         let popupContents = browser.makeWebContents(url: address, engine: .webKit, state: nil, in: persona.id)
-        pin.openNewTab?(popupContents, address, .newForegroundTab)
+        pin.openNewTab?(popupContents, address, .newForegroundTab, false)
         let popup = try #require(main.selectedTab)
         let requested = [pin, externalTab, agentLink, readerLink, research, backgroundLink, search, backgroundSearch, promotedPreview]
         #expect(Set(requested.map(\.id)).count == requested.count)

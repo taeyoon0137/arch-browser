@@ -24,12 +24,7 @@ struct WebContentsHostView: NSViewRepresentable {
         container.layer?.cornerRadius = cornerRadius
         container.onClick = onClick
         container.hidesPageFromAccessibility = hidesPageFromAccessibility
-        if let current = container.subviews.first, current === contentView { return }
-        container.subviews.forEach { $0.removeFromSuperview() }
-        guard let contentView else { return }
-        // A new container has no size yet. The page keeps the size it had until the container gets one, so it never lays out for an empty viewport.
-        if !container.bounds.isEmpty { contentView.frame = container.bounds }
-        container.addSubview(contentView)
+        container.setContentView(contentView)
     }
 
     // The page leaves the window with its pane, as it does when another tab takes its place.
@@ -49,6 +44,19 @@ struct WebContentsHostView: NSViewRepresentable {
             }
         }
         private var clickMonitor: Any?
+        private weak var requestedContentView: NSView?
+
+        /// A retiring host must not reclaim a live page that another host has already adopted.
+        /// SwiftUI can update the old preview during its removal after the tab's host has mounted.
+        func setContentView(_ view: NSView?) {
+            guard requestedContentView !== view else { return }
+            requestedContentView = view
+            subviews.forEach { $0.removeFromSuperview() }
+            guard let view else { return }
+            // Keep the previous viewport until a newly created container receives its size.
+            if !bounds.isEmpty { view.frame = bounds }
+            addSubview(view)
+        }
 
         // The page under a card has no accessibility children, so VoiceOver cannot move into it.
         override func accessibilityChildren() -> [Any]? {

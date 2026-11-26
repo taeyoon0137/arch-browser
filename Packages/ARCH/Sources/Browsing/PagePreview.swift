@@ -1,9 +1,31 @@
-// A preview shows a page in a floating panel without opening a tab. It starts when Shift is held over a favorite or a page link is clicked with Shift.
-// Its web contents belongs to no tab and closes with the panel. The page enters no tab list, saved session, or history unless it opens its own page and becomes a tab.
-// Open in Tab loads the preview in a new tab. Escape or a click outside closes it.
+// Peek reuses the preview panel for links and favorites. Its page belongs to no tab until promoted.
+// Open as Tab and Open in New Window transfer the live page, including its navigation and form state.
 import AppKit
 import ARCHEngine
 import SwiftUI
+
+/// Automatic Peek applies to confirmed links leaving a pinned tab or favorite, and links opening another tab. Explicit Peek does not depend on the setting.
+enum PeekPolicy {
+    static let automaticPeekKey = "ARCHAutomaticPeek"
+    static let automaticPeekByDefault = true
+    static var automaticallyPeeks: Bool {
+        UserDefaults.standard.object(forKey: automaticPeekKey) as? Bool ?? automaticPeekByDefault
+    }
+
+    static func shouldPeek(from source: URL?, to destination: URL?, isPinnedOrFavorite: Bool,
+                           disposition: EngineNavigationDisposition, isUserInitiatedLink: Bool, enabled: Bool) -> Bool {
+        guard enabled, isPinnedOrFavorite, isUserInitiatedLink,
+              disposition == .currentTab || disposition == .newForegroundTab || disposition == .newBackgroundTab,
+              let source, let destination, let sourceHost = host(of: source), let destinationHost = host(of: destination) else { return false }
+        return disposition != .currentTab || sourceHost != destinationHost
+    }
+
+    private static func host(of url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[].")), !host.isEmpty else { return nil }
+        return host
+    }
+}
 
 /// A page in the preview panel. It reports the page's title, address, and loading state to the panel and passes the page's requests to open a tab, to use a permission, or to close on to its window. Dialogs and sign-in requests get the engine protocol's safe answers, so a preview asks the user nothing, and downloads are refused.
 final class PagePreview: ObservableObject {
@@ -14,6 +36,8 @@ final class PagePreview: ObservableObject {
     let requestedEngine: EngineKind
     /// The address the preview opened with, which it keeps across navigation.
     let openedURL: URL
+    /// A native link opening keeps its opener when the user promotes it to a tab.
+    weak var opener: (any EngineWebContents)?
     @Published private(set) var title = ""
     /// The page's address, which follows the page as the user moves around in it.
     @Published private(set) var url: URL
@@ -30,6 +54,7 @@ final class PagePreview: ObservableObject {
         self.personaID = personaID
         self.requestedEngine = requestedEngine
         self.openedURL = openedURL
+        title = webContents.title
         url = webContents.url ?? openedURL
         isLoading = webContents.isLoading
         webContents.uiDelegate = self
@@ -46,7 +71,7 @@ extension PagePreview: EngineWebContentsUIDelegate {
     }
     func webContentsDidChangeLoadingState(_ webContents: any EngineWebContents) { isLoading = webContents.isLoading }
     func webContentsDidClose(_ webContents: any EngineWebContents) { didClose?() }
-    func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
+    func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition, isUserInitiatedLink: Bool = false) {
         openNewTab?(newWebContents)
     }
     func webContents(_ webContents: any EngineWebContents, requestPermission request: EnginePermissionRequest, completion: @escaping (Bool) -> Void) {
@@ -64,7 +89,7 @@ extension PagePreview: EngineWebContentsUIDelegate {
 
 // MARK: Panel
 
-/// The floating panel that shows a preview over the page area. A header with the page's title and site, Open in Tab, and Close sits above the page, which has a rounded frame inside the panel as the page has inside the window.
+/// A floating page over the dimmed page area, with actions that transfer or copy its current address.
 struct PagePreviewPanel: View {
     /// The space between the panel and the edges of the page area.
     static let inset: CGFloat = 32
@@ -93,7 +118,9 @@ struct PagePreviewPanel: View {
         .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
         .background(PreviewDismissal(close: windowModel.closePreview, ignoresEscape: { windowModel.isTabSwitcherVisible }))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(localized("Preview"))
+        .accessibilityLabel(localized("Peek"))
+        .onAppear { windowModel.focusPage() }
+        .onChange(of: ObjectIdentifier(preview)) { _, _ in windowModel.focusPage() }
         .padding(Self.inset)
     }
 
@@ -127,7 +154,20 @@ struct PagePreviewPanel: View {
             .truncationMode(showsSite ? .tail : .middle)
             .help(preview.url.absoluteString)
             Spacer(minLength: 8)
-            Button(localized("Open in Tab"), action: windowModel.openPreviewInTab)
+            Button(localized("Open as Tab"), action: windowModel.openPreviewInTab)
+                .font(.system(size: 13))
+            Menu {
+                Button(localized("Open in New Window"), action: windowModel.openPreviewInNewWindow)
+                Button(localized("Copy Link")) { Tab.copyToPasteboard(preview.url) }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(localized("Peek Actions"))
             SidebarIconButton(symbol: "xmark", label: localized("Close Preview"), action: windowModel.closePreview)
         }
         .padding(.leading, 6)
@@ -137,7 +177,7 @@ struct PagePreviewPanel: View {
     private var showsSite: Bool { !preview.title.isEmpty && preview.title != preview.host }
 }
 
-/// Closes the preview on Escape and on a click in its window outside the panel, which then goes on to whatever it hit. A field of the app's own, such as the palette's or the find bar's, keeps its Escape. Clicks in other windows leave the panel open: the previewed page opens some of them, such as a date picker or the window a fullscreen video moves to.
+/// Closes the preview on Escape or a click outside the panel. The dismissal click is consumed so the covered page cannot act on it. App fields retain Escape, and clicks in other windows leave the panel open.
 struct PreviewDismissal: NSViewRepresentable {
     let close: () -> Void
     /// Whether something above the panel that has no field, such as the tab switcher, takes Escape first.
@@ -173,7 +213,10 @@ struct PreviewDismissal: NSViewRepresentable {
                 return nil
             }
             let click = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-                if let self, self.closesOnClick(event) { self.close?() }
+                if let self, self.closesOnClick(event) {
+                    self.close?()
+                    return nil
+                }
                 return event
             }
             monitors = [escape, click].compactMap { $0 }
@@ -188,7 +231,7 @@ struct PreviewDismissal: NSViewRepresentable {
             return !(responder is NSText) && (responder as? NSTextInputClient)?.hasMarkedText() != true && ignoresEscape?() != true
         }
 
-        private func closesOnClick(_ event: NSEvent) -> Bool {
+        func closesOnClick(_ event: NSEvent) -> Bool {
             guard let window, event.window === window else { return false }
             return !bounds.contains(convert(event.locationInWindow, from: nil))
         }

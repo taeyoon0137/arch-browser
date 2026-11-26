@@ -108,6 +108,17 @@ struct SpaceTabsView: View {
     /// Each area's content in its scroll view's visible area, which tells how much is hidden above and below.
     @State private var pinnedContentFrame = CGRect.zero
     @State private var openContentFrame = CGRect.zero
+    private enum RowDestination: Equatable {
+        case tab(SidebarTabSlot)
+        case sourceFolder
+        case folder(FolderTree.DropTarget)
+        case originalFolder
+    }
+    @State private var rowDelay = SidebarHoverDelay<RowDestination>()
+    @State private var favoriteTargetDelay = SidebarHoverDelay<UUID>()
+    @State private var spaceTargetDelay = SidebarHoverDelay<UUID>()
+    @State private var folderTargetDelay = SidebarHoverDelay<UUID>()
+    @State private var splitTargetDelay = SidebarHoverDelay<SplitDrop>()
     @State private var tabReorder = SidebarReorderHover()
     @State private var tabSlot: SidebarTabSlot?
     /// The dragged folder's slot in its space's other list. The folder and its contents move there only on release, pinning or unpinning its contents. Nil while the slot is in the folder's own list, where it moves at once.
@@ -505,6 +516,7 @@ struct SpaceTabsView: View {
         .onChange(of: favoriteTabTarget, initial: true) { _, target in sidebarDrag.favoriteTabTargets[space.id] = target }
         // Hiding the sidebar or the card mid-drag removes the list without ending its gesture.
         .onDisappear {
+            cancelPendingDestinations()
             sidebarDrag.favoriteTabTargets[space.id] = nil
             sidebarDrag.end(ownedBy: dragOwner)
         }
@@ -591,6 +603,7 @@ struct SpaceTabsView: View {
     private func continueDrag(of item: SidebarDragItem, _ value: DragGesture.Value) -> Bool {
         guard windowModel.currentSpaceID == space.id, !sidebarDrag.isSettling, sidebarDrag.item == nil || (sidebarDrag.item == item && sidebarDrag.owner == dragOwner), let frame = rowFrames[item.id] ?? (sidebarDrag.item == item ? sidebarDrag.frame : nil) else { return false }
         if sidebarDrag.item == nil {
+            cancelPendingDestinations()
             tabReorder = SidebarReorderHover()
             tabSlot = nil
             folderSlot = nil
@@ -655,39 +668,45 @@ struct SpaceTabsView: View {
     }
 
     private func updateDropTargets(for tab: Tab, at point: CGPoint) {
-        setDropTarget(\.targetFavoriteSpaceID, to: sidebarDrag.favoriteDestination(for: tab, in: space, at: point, session: session))
-        sidebarDrag.updateFavoriteGap(in: sidebarDrag.targetFavoriteSpaceID, at: point, adding: true)
+        let favoriteSpace = sidebarDrag.favoriteDestination(for: tab, in: space, at: point, session: session)
+        setDropTarget(\.targetFavoriteSpaceID, to: favoriteSpace, delay: favoriteTargetDelay)
+        sidebarDrag.updateFavoriteGap(in: favoriteSpace, at: point, adding: true)
         let list = tabsFrame
         let frames = reachableFrames(at: point)
         let tree = session.folderTree
         // Another space's symbol, of any Persona, or another folder's row at any level, under the pointer lights up and takes the tab on release. The rows do not make room for it.
-        setDropTarget(\.targetSpaceID, to: sidebarDrag.spaceDestination(forTab: tab, at: point, session: session))
-        setDropTarget(\.targetFolderID, to: list.contains(point) ? sidebarDrag.folderDestination(for: tab, at: point, in: tree,
-                                                                                             rowFrames: frames, emptyFolderFrames: reachableEmptyFolderFrames(at: point)) : nil)
+        setDropTarget(\.targetSpaceID, to: sidebarDrag.spaceDestination(forTab: tab, at: point, session: session), delay: spaceTargetDelay)
+        let folderDestination = list.contains(point) ? sidebarDrag.folderDestination(for: tab, at: point, in: tree,
+                                                                                     rowFrames: frames, emptyFolderFrames: reachableEmptyFolderFrames(at: point)) : nil
+        setDropTarget(\.targetFolderID, to: folderDestination, delay: folderTargetDelay)
         // Over the page area beside the list, the pane under the pointer shows where the tab opens in split view.
-        setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && point.x > pageFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: point, in: windowModel) : nil)
+        setDropTarget(\.splitDrop, to: sidebarDrag.targetSpaceID == nil && point.x > pageFrame.maxX ? sidebarDrag.splitDrop(of: tab, at: point, in: windowModel) : nil, delay: splitTargetDelay)
         // The row under the pointer makes room for the dragged tab, with a light haptic at each new position. A collapsed folder's selected tab does not, since the tab would join the folder and hide on release; the folder's row takes it instead. A row of the tab's own list makes room once the pointer crosses its middle, and a row of the other list, past the divider, as soon as the pointer reaches it, so the tab pins or unpins wherever it enters the other list's rows (`SidebarTabSlot.placement`). The divider ends the pinned list; the New Tab row and the empty space below it end the open list. Between them, where no row takes a pinned tab, it goes before the next open tab outside folders (`SidebarTabSlot.unpinning`).
         guard tabReorder.acceptsRow(at: point, in: list, excluding: sidebarDrag.targetFavoriteSpaceID == space.id ? sidebarDrag.favoriteBarFrames[space.id] : nil) else {
+            rowDelay.cancel()
             if tabSlot != nil { tabSlot = nil }
             return
         }
         if let frame = tabSlot?.sourceFolderReturnFrame(for: tab, at: point, emptyFolderFrames: reachableEmptyFolderFrames(at: point)),
            tabReorder.canMove(at: point) {
-            withAnimation(.easeOut(duration: 0.15)) { tabSlot = nil }
-            tabReorder.moved(into: frame)
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            confirmRowDestination(.sourceFolder) {
+                withAnimation(.easeOut(duration: 0.15)) { tabSlot = nil }
+                tabReorder.moved(into: frame)
+            }
             return
         }
-        guard sidebarDrag.targetSpaceID == nil, sidebarDrag.targetFolderID == nil, tabReorder.canMove(at: point),
+        // A folder waiting for confirmation already owns this hover, so it cannot also open a row slot.
+        guard sidebarDrag.targetSpaceID == nil, folderDestination == nil, tabReorder.canMove(at: point),
               let move = SidebarTabSlot.next(for: tab, at: point, current: tabSlot, in: space.id, tree: tree, rowFrames: frames,
                                              divider: pinnedListEndFrame, newTabRow: frames[Self.openListEndID], list: list),
-              move.slot != tabSlot else { return }
-        withAnimation(.easeOut(duration: 0.15)) {
-            hasMovedSlot = true
-            tabSlot = move.slot
+              move.slot != tabSlot else { rowDelay.cancel(); return }
+        confirmRowDestination(.tab(move.slot)) {
+            withAnimation(.easeOut(duration: 0.15)) {
+                hasMovedSlot = true
+                tabSlot = move.slot
+            }
+            if let frame = move.holding { tabReorder.moved(into: frame) }
         }
-        if let frame = move.holding { tabReorder.moved(into: frame) }
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
     /// The lifted folder row follows the pointer anywhere in the window.
@@ -700,33 +719,56 @@ struct SpaceTabsView: View {
 
     /// `FolderTree.dropTarget(for:at:)` decides each place in the pinned and open lists: the rows make room for the folder between them, with a light haptic at each new position, or a folder's row lights up to take it on release. In its own list the folder moves at once; in the other list a slot previews the move (`folderSlot`), and release moves the folder and its contents, pinning or unpinning its tabs. Returning to its own list without a valid destination restores the slot to the folder's place. Another space's symbol, of any Persona that takes the folder, lights up to take it with what it holds. Where the tree refuses a place, nothing moves, and the row returns to its slot on release.
     private func updateDropTargets(forFolder folderID: UUID, at point: CGPoint) {
-        setDropTarget(\.targetSpaceID, to: sidebarDrag.spaceDestination(forFolder: folderID, at: point, session: session))
+        setDropTarget(\.targetSpaceID, to: sidebarDrag.spaceDestination(forFolder: folderID, at: point, session: session), delay: spaceTargetDelay)
         let tree = session.folderTree
-        let target = tabsFrame.contains(point) ? dropPosition(at: point, in: tree).flatMap { tree.dropTarget(for: folderID, at: $0) } : nil
+        let acceptsRow = tabReorder.acceptsRow(at: point, in: tabsFrame, excluding: nil)
+        let target = acceptsRow ? dropPosition(at: point, in: tree).flatMap { tree.dropTarget(for: folderID, at: $0) } : nil
         if case .into(let parentID)? = target {
-            setDropTarget(\.targetFolderID, to: parentID)
+            setDropTarget(\.targetFolderID, to: parentID, delay: folderTargetDelay)
         } else {
-            setDropTarget(\.targetFolderID, to: nil)
+            setDropTarget(\.targetFolderID, to: nil, delay: folderTargetDelay)
         }
         guard let target, case .between = target else {
-            guard target == nil, folderSlot != nil, let folder = tree.folder(folderID), list(at: point) == folder.isPinned else { return }
-            withAnimation(.easeInOut(duration: 0.15)) { folderSlot = nil }
-            return NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            guard target == nil, folderSlot != nil, let folder = tree.folder(folderID), list(at: point) == folder.isPinned else {
+                rowDelay.cancel()
+                return
+            }
+            confirmRowDestination(.originalFolder) {
+                withAnimation(.easeInOut(duration: 0.15)) { folderSlot = nil }
+            }
+            return
         }
-        if tree.crossesList(folderID, to: target) {
-            guard target != folderSlot else { return }
+        guard target != folderSlot, tabReorder.canMove(at: point) else { rowDelay.cancel(); return }
+        let holding = reachableFrames(at: point).first { $0.value.contains(point) }?.value
+        confirmRowDestination(.folder(target)) {
             withAnimation(.easeInOut(duration: 0.15)) {
                 hasMovedSlot = true
-                folderSlot = target
+                if session.folderTree.crossesList(folderID, to: target) {
+                    folderSlot = target
+                } else {
+                    folderSlot = nil
+                    session.moveFolder(folderID, to: target)
+                }
             }
-        } else {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                hasMovedSlot = true
-                folderSlot = nil
-                session.moveFolder(folderID, to: target)
-            }
+            if let holding { tabReorder.moved(into: holding) }
         }
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    private func confirmRowDestination(_ destination: RowDestination, commit: @escaping () -> Void) {
+        let item = sidebarDrag.item
+        rowDelay.offer(destination) {
+            guard sidebarDrag.owner == dragOwner, sidebarDrag.item == item, !sidebarDrag.isSettling else { return }
+            commit()
+            SidebarHaptics.alignment()
+        }
+    }
+
+    private func cancelPendingDestinations() {
+        rowDelay.cancel()
+        favoriteTargetDelay.cancel()
+        spaceTargetDelay.cancel()
+        folderTargetDelay.cancel()
+        splitTargetDelay.cancel()
     }
 
     /// The list under the pointer: `true` over the pinned area or its ending divider, `false` over the open area.
@@ -748,15 +790,25 @@ struct SpaceTabsView: View {
         SidebarTabSlot.listEnd(at: point, divider: pinnedListEndFrame, newTabRow: openFrames[Self.openListEndID], list: tabsFrame)
     }
 
-    /// Lights up a drop target newly under the dragged row, with a light haptic, or turns off the one it left.
-    private func setDropTarget<Target: Equatable>(_ keyPath: ReferenceWritableKeyPath<SidebarDragState, Target?>, to target: Target?) {
-        guard sidebarDrag[keyPath: keyPath] != target else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { sidebarDrag[keyPath: keyPath] = target }
-        if target != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+    /// Highlights a confirmed target; leaving clears it immediately without feedback.
+    private func setDropTarget<Target: Equatable>(_ keyPath: ReferenceWritableKeyPath<SidebarDragState, Target?>, to target: Target?, delay: SidebarHoverDelay<Target>) {
+        guard sidebarDrag[keyPath: keyPath] != target else { delay.cancel(); return }
+        guard let target else {
+            delay.cancel()
+            withAnimation(.easeInOut(duration: 0.15)) { sidebarDrag[keyPath: keyPath] = target }
+            return
+        }
+        let item = sidebarDrag.item
+        delay.offer(target) {
+            guard sidebarDrag.owner == dragOwner, sidebarDrag.item == item, !sidebarDrag.isSettling else { return }
+            withAnimation(.easeInOut(duration: 0.15)) { sidebarDrag[keyPath: keyPath] = target }
+            SidebarHaptics.alignment()
+        }
     }
 
     /// On release, the lifted row returns to its slot, wherever the pointer is, and its shadow fades out before the row reappears in the list, unless a drop target under it takes it. A slot that its area scrolled out of sight takes the row only to the area's edge, where it fades out.
     private func dragEnded() {
+        cancelPendingDestinations()
         guard sidebarDrag.owner == dragOwner, windowModel.currentSpaceID == space.id, let item = sidebarDrag.item else { return sidebarDrag.end(ownedBy: dragOwner) }
         // Between the reports of the two areas as the slot moves from one to the other, the lifted row's frame stands in for it.
         let slot = rowFrames[item.id] ?? sidebarDrag.frame

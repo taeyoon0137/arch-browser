@@ -27,7 +27,7 @@ import Testing
         }, in: space.resolvedPersonaID)
         session.setFavoriteRows([1, 2, 1], in: space.resolvedPersonaID)
         let favorites = session.favorites(in: space.resolvedPersonaID)
-        let drag = SidebarDragState(), frames = FavoriteRowDragFrames(), owner = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), frames = FavoriteRowDragFrames(), owner = UUID()
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .frame(width: 260, height: 600)
             .coordinateSpace(name: BrowserWindowView.coordinateSpace)

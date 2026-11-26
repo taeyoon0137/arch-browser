@@ -2741,16 +2741,6 @@
         }
       }
     },
-    "Move to Main Window" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "메인 윈도우로 이동"
-          }
-        }
-      }
-    },
     "Move to Space" : {
       "localizations" : {
         "ko" : {
@@ -5417,6 +5407,136 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "어제"
+          }
+        }
+      }
+    },
+    "Add" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추가"
+          }
+        }
+      }
+    },
+    "Always Open This Site in a Regular Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 사이트는 항상 일반 창에서 열기"
+          }
+        }
+      }
+    },
+    "Automatically open links from pinned tabs and favorites in Peek" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "고정 탭과 즐겨찾기의 링크를 자동으로 피크에서 열기"
+          }
+        }
+      }
+    },
+    "Links from other apps open in a regular window for these sites and their subdomains." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 앱에서 보낸 링크가 이 사이트 또는 하위 도메인에 해당하면 일반 창에서 엽니다."
+          }
+        }
+      }
+    },
+    "Open in Main Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기본 창으로 열기"
+          }
+        }
+      }
+    },
+    "Open as Tab" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭으로 열기"
+          }
+        }
+      }
+    },
+    "Open in Peek" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "피크로 열기"
+          }
+        }
+      }
+    },
+    "Open in a Regular Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일반 창에서 열기"
+          }
+        }
+      }
+    },
+    "Page Actions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페이지 동작"
+          }
+        }
+      }
+    },
+    "Peek" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "피크"
+          }
+        }
+      }
+    },
+    "Peek Actions" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "피크 동작"
+          }
+        }
+      }
+    },
+    "Remove %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 제거"
+          }
+        }
+      }
+    },
+    "Site or URL" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사이트 또는 URL"
           }
         }
       }

@@ -6,7 +6,7 @@ public enum EngineNavigationDisposition: String, Codable, Sendable {
     case currentTab
     case newForegroundTab
     case newBackgroundTab
-    /// Where browsers open a link the user clicked with Shift. Both engines report such a link to the navigation delegate with this disposition.
+    /// A requested window. A recognized Shift-clicked link uses this disposition with `isLinkActivation` set.
     case newWindow
     case newPopup
 }
@@ -16,15 +16,18 @@ public struct EngineNavigationAction: Sendable {
     public var url: URL
     public var disposition: EngineNavigationDisposition
     public var isUserInitiated: Bool
+    /// The engine recognized a link request: WebKit's link navigation type, Chromium's modified-link callback, or trusted anchor evidence from its renderer. CEF's user gesture alone is activation, not proof of a trusted DOM event. Unknown sources are false.
+    public var isLinkActivation: Bool
     /// The user asked to open this link in a tab with Command-click or the middle button.
     public var opensLinkInNewTab: Bool
     /// A server redirect of a main frame navigation, asked about before the hop's request.
     public var isRedirect: Bool
 
-    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool, opensLinkInNewTab: Bool = false, isRedirect: Bool = false) {
+    public init(url: URL, disposition: EngineNavigationDisposition, isUserInitiated: Bool, isLinkActivation: Bool = false, opensLinkInNewTab: Bool = false, isRedirect: Bool = false) {
         self.url = url
         self.disposition = disposition
         self.isUserInitiated = isUserInitiated
+        self.isLinkActivation = isLinkActivation
         self.opensLinkInNewTab = opensLinkInNewTab
         self.isRedirect = isRedirect
     }
@@ -34,7 +37,7 @@ public struct EngineNavigationAction: Sendable {
 public enum EngineNavigationPolicy: Sendable {
     case allow
     case cancel
-    /// Open the original link request in the tab disposition requested by the user.
+    /// Open the original link request in its requested tab disposition, or a foreground tab for a current-tab link.
     case openLinkInNewTab
 }
 
@@ -131,7 +134,8 @@ public protocol EngineWebContentsUIDelegate: AnyObject {
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents)
     /// `isAudible` changed.
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents)
-    func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition)
+    /// `isUserInitiatedLink` marks an engine-reported user-initiated link request. Chromium requires a gesture on its modified-link path and excludes native popup creation; CEF reports activation, not DOM event trust.
+    func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition, isUserInitiatedLink: Bool)
     /// The engine cannot load a main frame navigation in this web contents and made `replacement`, in the same browser context and with the same page scripts, which loads it instead with a back-forward list of its own, as WebKit does for a navigation into or out of a web extension's pages. The delegate puts `replacement` in this web contents' place, hands it to its browser with `takeOwnership(of:)`, and closes this one, which keeps its page until then. Without a delegate, or with one that drops `replacement`, the navigation loads nothing.
     func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents)
     func webContentsDidClose(_ webContents: any EngineWebContents)
@@ -170,7 +174,7 @@ public extension EngineWebContentsUIDelegate {
     func webContentsDidFinishLoadingDocument(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeFavicon(_ webContents: any EngineWebContents) {}
     func webContentsDidChangeAudibleState(_ webContents: any EngineWebContents) {}
-    func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {}
+    func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition, isUserInitiatedLink: Bool) {}
     func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {}
     func webContentsDidClose(_ webContents: any EngineWebContents) {}
     func webContentsDidRequestActivation(_ webContents: any EngineWebContents) {}

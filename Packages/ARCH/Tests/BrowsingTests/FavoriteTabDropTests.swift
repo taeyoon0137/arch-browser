@@ -20,7 +20,7 @@ import Testing
         let neighbor = session.openTab(url: URL(string: "about:blank#neighbor")!, in: space.id, pinned: pinned, select: false)
         let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Favorite", personaID: space.resolvedPersonaID)
         session.addFavorites([favorite], in: space.resolvedPersonaID)
-        let drag = SidebarDragState(), owner = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), owner = UUID()
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .frame(width: 260, height: 600)
             .coordinateSpace(name: BrowserWindowView.coordinateSpace)
@@ -58,6 +58,7 @@ import Testing
         try await layout { drag.favoriteGridTargets[space.id]?.frame.height == 44 && drag.favoriteTabTargets[space.id]?.frames[favorite.id] == nil }
         #expect(session.favorites == [favorite] && session.favoriteTabs.isEmpty)
         drag.begin(.favorite(favorite.id), frame: tile, grabbedAt: CGPoint(x: tile.midX, y: tile.midY), owner: owner)
+        drag.updateFavoriteGap(in: nil, at: .zero, adding: false)
         try await layout { drag.favoriteGridTargets[space.id]?.frame.height == 0 }
         let returnedRow = try #require(drag.favoriteTabTargets[space.id]?.frames[neighbor.id])
         drag.updateFavoriteTabDrop(in: space.id, at: CGPoint(x: returnedRow.midX, y: after ? returnedRow.maxY - 4 : returnedRow.minY + 4), session: session)
@@ -86,7 +87,7 @@ import Testing
         let space = try #require(session.spaces.first)
         let favorite = Favorite(url: URL(string: "about:blank#cancel")!, title: "Favorite", personaID: space.resolvedPersonaID)
         session.addFavorites([favorite], in: space.resolvedPersonaID)
-        let drag = SidebarDragState(), owner = UUID(), newTab = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), owner = UUID(), newTab = UUID()
         drag.favoriteTabTargets[space.id] = .init(pinnedArea: CGRect(x: 6, y: 100, width: 248, height: 0), pinnedFrames: [:],
             openArea: CGRect(x: 6, y: 148, width: 248, height: 452), openFrames: [newTab: CGRect(x: 6, y: 148, width: 248, height: 36)],
             divider: CGRect(x: 6, y: 100, width: 248, height: 46), newTabID: newTab)
@@ -120,7 +121,7 @@ import Testing
         let neighbor = session.openTab(url: URL(string: "about:blank#neighbor")!, in: space.id, select: false)
         let favorite = Favorite(url: URL(string: "about:blank#favorite")!, title: "Favorite", personaID: space.resolvedPersonaID)
         session.addFavorites([favorite], in: space.resolvedPersonaID)
-        let drag = SidebarDragState(), owner = UUID(), newTab = UUID()
+        let drag = SidebarDragState(scheduleHover: { _, action in action() }), owner = UUID(), newTab = UUID()
         let row = CGRect(x: 6, y: 150, width: 248, height: 36)
         func target(showingSlot: Bool) -> SidebarDragState.FavoriteTabTarget {
             var frames = [neighbor.id: row, newTab: row.offsetBy(dx: 0, dy: showingSlot ? 76 : 38)]
