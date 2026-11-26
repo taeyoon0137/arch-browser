@@ -112,7 +112,7 @@ import Testing
         #expect(FavoriteTileLayout.counts(for: 5, rowSizes: sizes, defaultColumns: 4) == [3, 2])
         #expect(FavoriteTileLayout.counts(for: 11, rowSizes: sizes, defaultColumns: 4) == [3, 2, 4, 2])
         #expect(FavoriteTileLayout.counts(for: 4, rowSizes: [1, 4], defaultColumns: 4) == [1, 3])
-        #expect(FavoriteTileLayout.rowSizes(from: Data("[0,9]".utf8)) == [1, 4])
+        #expect(FavoriteTileLayout.rowSizes(from: Data("[0,9]".utf8)) == [4])
         #expect(FavoriteTileLayout.rowSizes(from: Data("invalid".utf8)).isEmpty)
     }
 

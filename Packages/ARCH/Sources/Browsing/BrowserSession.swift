@@ -177,7 +177,18 @@ final class EngineRuntime {
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
         let loaded = store.load()
         needsFullSidebarSync = loaded?.needsFullSidebarSync == true || loaded == nil
-        let snapshot = loaded ?? SessionSnapshot.empty.normalized()
+        var snapshot = loaded ?? SessionSnapshot.empty.normalized()
+        // Each older Persona adopts the shared rows once. Saving even an empty layout prevents later launches from adopting them again.
+        let legacyRows = FavoriteTileLayout.rowSizes(from: UserDefaults.standard.data(forKey: FavoriteTileLayout.rowSizesKey) ?? Data())
+        let columns = UserDefaults.standard.object(forKey: FavoriteTileLayout.columnsKey) as? Int ?? FavoriteTileLayout.defaultColumns
+        let repairedPersonas = snapshot.personas?.map { persona in
+            var persona = persona
+            persona.favoriteRows = FavoriteTileLayout.normalizedRows(for: snapshot.favorites.filter { $0.resolvedPersonaID == persona.id }.count,
+                                                                    rowSizes: persona.favoriteRows ?? legacyRows, defaultColumns: columns)
+            return persona
+        }
+        let repairsFavoriteRows = repairedPersonas != snapshot.personas
+        snapshot.personas = repairedPersonas
         // Live folders were removed: once `session.json` holds a loaded file's live folders as ordinary folders without their item tabs, their stored items and Keychain items go (`RemovedLiveFolders`). The save comes at the end of startup.
         let removesLiveFolderData = store.loadedLiveFolders || RemovedLiveFolders.hasStoredFiles(in: userDataDirectory)
         if removesLiveFolderData {
@@ -246,7 +257,7 @@ final class EngineRuntime {
             AIService.shared.hooks.scheduler.cancel(subject: tab, otherThan: address, documentID: documentID)
         }
         eventSource.attach(to: self)
-        if removesLiveFolderData { scheduleSave() }
+        if removesLiveFolderData || repairsFavoriteRows { scheduleSave() }
     }
 
     /// An error that prevents a browser session from starting.
@@ -870,9 +881,10 @@ final class EngineRuntime {
     }
 
     /// Adds the tab's favorite as `addFavorite(_:)` does, at the grid gap's `index` among its Persona's favorites, or after them for nil.
-    func addFavorite(_ tab: Tab, at index: Int?) {
+    func addFavorite(_ tab: Tab, at index: Int?, rowSizes: [Int]? = nil) {
         guard canAddFavorite(tab), let url = favoriteAddress(of: tab) else { return }
         let favorite = Favorite(url: url, title: tab.shownTitle, personaID: tab.personaID)
+        saveFavoriteAddition(1, in: tab.personaID, rowSizes: rowSizes)
         guard movesIntoFavorites(tab), let spaceID = tab.spaceID else { return favorites = Self.inserting(favorite, at: index, into: favorites) }
         movedFavoriteSources[favorite.id] = MovedFavoriteSource(spaceID: spaceID, savedPage: tab.isPinned ? tab.savedPage : nil)
         leaveSplitView(tab)
@@ -882,6 +894,47 @@ final class EngineRuntime {
         tab.isPinned = false
         favoriteTabs[favorite.id] = tab
         favorites = Self.inserting(favorite, at: index, into: favorites)
+    }
+
+    /// The saved layout shared by every window and space of this Persona.
+    public func favoriteRows(in personaID: Persona.ID) -> [Int] {
+        persona(withID: personaID)?.favoriteRows ?? []
+    }
+
+    /// Saves a row-only edit through the same session change stream as the favorites.
+    public func setFavoriteRows(_ rows: [Int], in personaID: Persona.ID) {
+        storeFavoriteRows(FavoriteTileLayout.normalizedRows(for: favorites(in: personaID).count, rowSizes: rows,
+                                                           defaultColumns: favoriteSlots(in: personaID).defaultColumns), in: personaID)
+    }
+
+    private func storeFavoriteRows(_ rows: [Int], in personaID: Persona.ID) {
+        guard let index = personas.firstIndex(where: { $0.id == personaID }), personas[index].favoriteRows != rows else { return }
+        personas[index].favoriteRows = rows
+    }
+
+    private func favoriteSlots(in personaID: Persona.ID) -> FavoriteGridSlots {
+        let defaults = UserDefaults.standard
+        return FavoriteGridSlots(rowSizes: favoriteRows(in: personaID),
+                                 defaultColumns: defaults.object(forKey: FavoriteTileLayout.columnsKey) as? Int ?? FavoriteTileLayout.defaultColumns)
+    }
+
+    /// A drop saves its displayed rows; commands fill only the last row. Both discard stale saved entries.
+    private func saveFavoriteAddition(_ additions: Int, in personaID: Persona.ID, rowSizes: [Int]? = nil) {
+        guard additions > 0 else { return }
+        let count = favorites(in: personaID).count
+        let slots = favoriteSlots(in: personaID)
+        let sizes = rowSizes.map { FavoriteTileLayout.counts(for: count + additions, rowSizes: $0, defaultColumns: slots.defaultColumns) }
+            ?? slots.appending(additions, count: count).rowSizes
+        storeFavoriteRows(sizes, in: personaID)
+    }
+
+    /// Keep every other row intact when a favorite is removed or becomes a tab again.
+    private func removeFavoriteEntry(_ favorite: Favorite) {
+        let local = favorites(in: favorite.resolvedPersonaID)
+        guard let index = local.firstIndex(where: { $0.id == favorite.id }) else { return }
+        let sizes = favoriteSlots(in: favorite.resolvedPersonaID).removing(at: index, count: local.count).rowSizes
+        storeFavoriteRows(sizes, in: favorite.resolvedPersonaID)
+        favorites.removeAll { $0.id == favorite.id }
     }
 
     /// `list` with `favorite` inserted at `index` among its Persona's favorites: before that favorite, after the Persona's last for nil or a later index, or at the list's end if the Persona has none.
@@ -902,7 +955,7 @@ final class EngineRuntime {
               spaces.contains(where: { $0.id == source.spaceID && $0.resolvedPersonaID == tab.personaID }) else { return false }
         favoriteTabs[favorite.id] = nil
         savedFavoriteTabs[favorite.id] = nil
-        favorites.removeAll { $0.id == favorite.id }
+        removeFavoriteEntry(favorite)
         tab.spaceID = source.spaceID
         if let savedPage = source.savedPage {
             tab.isPinned = true
@@ -921,6 +974,7 @@ final class EngineRuntime {
             favorite.personaID = personaID
             return favorite
         }
+        saveFavoriteAddition(added.count, in: personaID)
         favorites += added
         return added.count
     }
@@ -935,7 +989,7 @@ final class EngineRuntime {
     public func removeFavorite(_ favorite: Favorite) {
         if returnMovedFavoriteTab(favorite) { return }
         endFavoriteTab(favorite) { [weak self] in
-            self?.favorites.removeAll { $0.id == favorite.id }
+            self?.removeFavoriteEntry(favorite)
         }
     }
 
@@ -949,7 +1003,7 @@ final class EngineRuntime {
         favoriteTabs[favorite.id] = nil
         savedFavoriteTabs[favorite.id] = nil
         movedFavoriteSources[favorite.id] = nil
-        favorites.removeAll { $0.id == favorite.id }
+        removeFavoriteEntry(favorite)
         tab.spaceID = space.id
         tab.folderID = nil
         tab.isPinned = pinned
@@ -1879,10 +1933,13 @@ final class EngineRuntime {
         favorites = reordered
     }
 
-    /// Moves a dragged favorite to the grid gap's `index` among its Persona's other favorites.
-    public func moveFavorite(_ id: UUID, toIndex index: Int) {
+    /// Moves a dragged favorite to the gap's index among its Persona's other favorites, saving the preview's rows before publishing the order.
+    public func moveFavorite(_ id: UUID, toIndex index: Int, rowSizes: [Int]? = nil) {
         guard let favorite = favorites.first(where: { $0.id == id }) else { return }
         let reordered = Self.inserting(favorite, at: index, into: favorites.filter { $0.id != id })
+        if let rowSizes {
+            setFavoriteRows(rowSizes, in: favorite.resolvedPersonaID)
+        }
         if reordered != favorites { favorites = reordered }
     }
 
@@ -2551,6 +2608,11 @@ extension BrowserSession {
         for (window, target) in selections where window.selectedTabID.flatMap({ replacedTabs[$0] }) == target { window.selectTab(target) }
         for tab in tabs where replacedTabs[tab.id] != nil { _ = removeTab(tab, closedRecord: nil, reason: .sync) }
         spaces.removeAll { changedSpaces[$0.id] != nil }
+        // Matched favorites temporarily existed under both IDs. Repair the original winning layout against the final set.
+        for persona in state.personas {
+            let rows = persona.favoriteRows ?? before.personas.first { $0.id == persona.id }?.favoriteRows ?? []
+            setFavoriteRows(rows, in: persona.id)
+        }
         let joinedRules = siteRules.rules.filter { replacements.siteRules[$0.id] == nil }.map { rule in
             var rule = rule
             if let space = changedSpaces[rule.spaceID] { rule.spaceID = space }
@@ -2689,6 +2751,11 @@ extension BrowserSession {
             else { rules.append(incoming) }
         }
         saveSyncedSiteRules(rules)
+        // Normalize only after all favorite additions and deletions. An older sender has no layout to replace ours with.
+        let incomingRows = Dictionary(uniqueKeysWithValues: state.personas.compactMap { persona in persona.favoriteRows.map { (persona.id, $0) } })
+        for persona in personas {
+            setFavoriteRows(incomingRows[persona.id] ?? favoriteRows(in: persona.id), in: persona.id)
+        }
         applyPendingSyncEngines()
     }
 
@@ -2810,6 +2877,7 @@ extension BrowserSession {
             joining.append(Favorite(url: favorite.url, title: favorite.title, personaID: targetID))
         }
         favorites.removeAll { $0.resolvedPersonaID == id }
+        saveFavoriteAddition(joining.count, in: targetID)
         favorites += joining
         // History and remembered site permissions are kept per Persona (Persona rule 6), so they join the target's before the Persona's data goes.
         history.moveVisits(from: id, to: targetID)

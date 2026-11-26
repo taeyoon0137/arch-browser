@@ -160,7 +160,7 @@ struct SessionSnapshot: Codable {
         var listed: Set<UUID> = []
         var personas = (self.personas ?? []).filter { listed.insert($0.id).inserted }
         if !listed.contains(Persona.defaultID) {
-            personas.insert(Persona(id: Persona.defaultID, name: localized("Default")), at: 0)
+            personas.insert(Persona(id: Persona.defaultID, name: localized("Default"), favoriteRows: nil), at: 0)
             listed.insert(Persona.defaultID)
         }
         let firstPersonaID = personas[0].id

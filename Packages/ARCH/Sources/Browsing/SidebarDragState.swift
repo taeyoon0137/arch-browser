@@ -338,6 +338,7 @@ final class SidebarDragState: ObservableObject {
 
     /// The gap held open in the favorites grid under the pointer, around which the other tiles reflow.
     @Published var favoriteGap: FavoriteGap?
+    private var favoriteGapPoint: CGPoint?
     @MainActor
     func favoriteDestination(for tab: Tab, in space: Space, at point: CGPoint, session: BrowserSession) -> UUID? {
         guard tabID == tab.id, tab.spaceID == space.id, tab.personaID == space.resolvedPersonaID,
@@ -351,10 +352,26 @@ final class SidebarDragState: ObservableObject {
     func updateFavoriteGap(in spaceID: UUID?, at point: CGPoint, adding: Bool) {
         defer { updateFavoriteShape() }
         let next = spaceID.flatMap { spaceID in
-            favoriteGridTargets[spaceID]?.placement(at: point, adding: adding, holding: favoriteGap?.spaceID == spaceID ? favoriteGap?.newRow : nil).map {
+            guard let target = favoriteGridTargets[spaceID] else { return nil as FavoriteGap? }
+            let sourceIndex: Int?
+            if case .favorite(let id) = item { sourceIndex = target.favoriteIDs.firstIndex(of: id) } else { sourceIndex = nil }
+            let localPoint = CGPoint(x: point.x - target.frame.minX, y: point.y - target.frame.minY)
+            defer { favoriteGapPoint = localPoint }
+            // Reflow can remove a row under a stationary pointer. Keep its resolved gap until the pointer moves or the grid scrolls.
+            if !adding, sourceIndex != nil, favoriteGapPoint == localPoint,
+               let gap = favoriteGap, gap.spaceID == spaceID, let sizes = gap.rowSizes,
+               target.bounds(adding: false, holding: gap.newRow, sourceIndex: sourceIndex).contains(point) {
+                let frames = FavoriteGridSlots(rowSizes: sizes, defaultColumns: target.slots.defaultColumns)
+                    .frames(for: target.count, width: target.frame.width, origin: target.frame.origin)
+                if frames.indices.contains(gap.index) {
+                    return FavoriteGap(spaceID: spaceID, index: gap.index, frame: frames[gap.index], newRow: gap.newRow, rowSizes: sizes)
+                }
+            }
+            return target.placement(at: point, adding: adding, holding: favoriteGap?.spaceID == spaceID ? favoriteGap?.newRow : nil, sourceIndex: sourceIndex).map {
                 FavoriteGap(spaceID: spaceID, index: $0.index, frame: $0.frame, newRow: $0.newRow, rowSizes: $0.rowSizes)
             }
         }
+        if next == nil { favoriteGapPoint = nil }
         guard next != favoriteGap else { return }
         guard next?.index != favoriteGap?.index || next?.spaceID != favoriteGap?.spaceID || next?.rowSizes != favoriteGap?.rowSizes else {
             favoriteGap = next
@@ -362,6 +379,24 @@ final class SidebarDragState: ObservableObject {
         }
         withAnimation(Self.motion) { favoriteGap = next }
         if next != nil { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+    }
+
+    /// On release, a favorite takes the tab list's slot or the grid's gap. Elsewhere it returns to its original place.
+    @MainActor
+    func dropFavoriteTile(_ favorite: Favorite, in spaceID: UUID, session: BrowserSession) -> CGRect? {
+        let favorites = session.favorites(in: favorite.resolvedPersonaID)
+        guard item == .favorite(favorite.id), let original = favorites.firstIndex(where: { $0.id == favorite.id }) else { return nil }
+        if let frame = dropFavoriteIntoTabs(favorite, session: session) { return frame }
+        let destination = favoriteGap.flatMap { $0.spaceID == spaceID && !isSettling ? $0 : nil }
+        let index = destination?.index ?? original
+        withAnimation(Self.motion) {
+            // Crossing a row boundary can change the counts without changing the flattened index.
+            if let destination { session.moveFavorite(favorite.id, toIndex: destination.index, rowSizes: destination.rowSizes) }
+        }
+        guard let target = favoriteGridTargets[spaceID] else { return nil }
+        let committedSlots = destination?.rowSizes.map { FavoriteGridSlots(rowSizes: $0, defaultColumns: target.slots.defaultColumns) } ?? target.slots
+        let frames = committedSlots.frames(for: favorites.count, width: target.frame.width, origin: target.frame.origin)
+        return frames.indices.contains(index) ? frames[index] : nil
     }
 
     /// Commits the resolved grid gap, or the empty grid's header target, and returns where the lifted tab settles.
@@ -376,11 +411,8 @@ final class SidebarDragState: ObservableObject {
         // The empty header is the hit target; the first tile fills the grid's width above it.
         if gap == nil { frame.size.height = FavoriteTileLayout.height }
         liftedTab = tab
-        session.addFavorite(tab, at: gap?.index)
+        session.addFavorite(tab, at: gap?.index, rowSizes: gap?.rowSizes)
         settlingFavoriteID = session.favorites.first { session.favoriteTabs[$0.id] === tab }?.id
-        if let rowSizes = gap?.rowSizes {
-            UserDefaults.standard.set(FavoriteTileLayout.encode(rowSizes: rowSizes), forKey: FavoriteTileLayout.rowSizesKey)
-        }
         return frame
     }
 
@@ -459,6 +491,7 @@ final class SidebarDragState: ObservableObject {
         targetFolderID = nil
         targetFavoriteSpaceID = nil
         favoriteGap = nil
+        favoriteGapPoint = nil
         favoriteTabDrop = nil
         liftedFavorite = nil
         liftedTab = nil

@@ -188,16 +188,25 @@ private struct UpdatesSettings: View {
 
 /// How long an unpinned tab stays open without being selected, and how long pinned tabs and favorites keep their pages without being shown (bookmark rule 5).
 struct SidebarSection: View {
+    @ObservedObject var session: BrowserSession
+    @State private var personaID = Persona.defaultID
     @AppStorage(FavoriteTileLayout.columnsKey) private var favoriteColumns = FavoriteTileLayout.defaultColumns
-    @AppStorage(FavoriteTileLayout.rowSizesKey) private var favoriteRowData = Data()
 
-    private var favoriteRows: [Int] { FavoriteTileLayout.rowSizes(from: favoriteRowData) }
+    private var shownPersonaID: Persona.ID {
+        session.personas.contains { $0.id == personaID } ? personaID : Persona.defaultID
+    }
+    private var favoriteRows: [Int] { session.favoriteRows(in: shownPersonaID) }
     @AppStorage(BrowserSession.archiveAfterHoursKey) private var archiveAfterHours = BrowserSession.archiveAfterHoursByDefault
     @AppStorage(TabUnloading.unloadAfterHoursKey) private var unloadAfterHours = TabUnloading.unloadAfterHoursByDefault
 
     var body: some View {
         Form {
             Section {
+                if session.personas.count > 1 {
+                    Picker(localized("Persona"), selection: $personaID) {
+                        ForEach(session.personas) { Text($0.name).tag($0.id) }
+                    }
+                }
                 ForEach(favoriteRows.indices, id: \.self) { index in
                     HStack {
                         favoriteCountPicker(localized("Row \(index + 1)"), selection: Binding(
@@ -206,17 +215,16 @@ struct SidebarSection: View {
                                 var rows = favoriteRows
                                 guard rows.indices.contains(index) else { return }
                                 rows[index] = count
-                                favoriteRowData = FavoriteTileLayout.encode(rowSizes: rows)
+                                session.setFavoriteRows(FavoriteTileLayout.counts(for: session.favorites(in: shownPersonaID).count,
+                                                                                 rowSizes: rows, defaultColumns: favoriteColumns), in: shownPersonaID)
                             }))
                         Button {
-                            var rows = favoriteRows
-                            guard rows.indices.contains(index) else { return }
-                            rows.remove(at: index)
-                            favoriteRowData = FavoriteTileLayout.encode(rowSizes: rows)
+                            session.setFavoriteRows(rows(removing: index), in: shownPersonaID)
                         } label: {
                             Image(systemName: "minus.circle")
                         }
                         .buttonStyle(.borderless)
+                        .disabled(rows(removing: index) == favoriteRows)
                         .accessibilityLabel(localized("Remove row \(index + 1)"))
                     }
                 }
@@ -225,12 +233,14 @@ struct SidebarSection: View {
                     get: { FavoriteTileLayout.columnCount(favoriteColumns) },
                     set: { favoriteColumns = $0 }))
                 Button(localized("Add Row")) {
-                    favoriteRowData = FavoriteTileLayout.encode(rowSizes: favoriteRows + [favoriteColumns])
+                    var rows = favoriteRows
+                    guard let last = rows.lastIndex(where: { $0 > 1 }) else { return }
+                    rows[last] -= 1
+                    session.setFavoriteRows(rows + [1], in: shownPersonaID)
                 }
+                .disabled(!favoriteRows.contains { $0 > 1 })
             } header: {
                 Text("Favorites per row", bundle: .module)
-            } footer: {
-                if !favoriteRows.isEmpty { formFootnote(localized("Rows after these use this number.")) }
             }
 
             Section {
@@ -260,6 +270,18 @@ struct SidebarSection: View {
         }
         .formStyle(.grouped)
         .frame(width: sectionWidth)
+        .onAppear { personaID = session.activeWindow?.personaID ?? Persona.defaultID }
+        .onChange(of: session.personas.map(\.id)) {
+            if !session.personas.contains(where: { $0.id == personaID }) { personaID = Persona.defaultID }
+        }
+    }
+
+    private func rows(removing index: Int) -> [Int] {
+        var rows = favoriteRows
+        guard rows.indices.contains(index) else { return rows }
+        rows.remove(at: index)
+        return FavoriteTileLayout.normalizedRows(for: session.favorites(in: shownPersonaID).count,
+                                                 rowSizes: rows, defaultColumns: favoriteColumns)
     }
 
     private func favoriteCountPicker(_ title: String, selection: Binding<Int>) -> some View {

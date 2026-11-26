@@ -16,7 +16,7 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
     /// The fields this build reads and writes for the type. Any other field in a record came from a newer build, or from an older build, as a removed live folder's `live` does, and this build keeps it unchanged (`docs/sync.md`, Schema versions).
     public var fields: Set<SyncField> {
         switch self {
-        case .persona: [.name, .order]
+        case .persona: [.name, .order, .favoriteRows]
         case .space: [.persona, .name, .symbol, .tint, .homeURL, .order]
         case .folder: [.persona, .space, .parent, .name, .tint, .order]
         case .favorite: [.persona, .url, .title, .order]
@@ -60,6 +60,7 @@ public enum SyncField: String, CaseIterable, Hashable, Sendable {
     case customTitle
     case engine
     case order
+    case favoriteRows
     case value
     case pluginID
     case manifestID

@@ -302,7 +302,7 @@ import Testing
     @Test func aStateThatListsAnIDTwiceAppliesItsFirstCopy() async throws {
         try await temporarySession { session, _ in
             let original = session.sidebarSyncState
-            let persona = Persona(name: "Work")
+            let persona = Persona(name: "Work", favoriteRows: [1])
             let space = Space(name: "Room", personaID: persona.id)
             var laterSpace = space
             laterSpace.name = "Later"
@@ -371,7 +371,12 @@ import Testing
                                                      parentID: nil, name: oldFolder.name)
             let newPin = SidebarSyncState.PinnedTab(id: UUID(), personaID: oldSpace.resolvedPersonaID, spaceID: newSpace.id,
                                                      folderID: newFolder.id, savedPage: pin.savedPage, customTitle: nil, engine: .webKit)
-            let state = SidebarSyncState(personas: original.personas, spaces: [newSpace], folders: [newFolder], favorites: [remoteFavorite], pinnedTabs: [newPin])
+            let personas = original.personas.map { persona in
+                var persona = persona
+                if persona.id == oldSpace.resolvedPersonaID { persona.favoriteRows = [1] }
+                return persona
+            }
+            let state = SidebarSyncState(personas: personas, spaces: [newSpace], folders: [newFolder], favorites: [remoteFavorite], pinnedTabs: [newPin])
             let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: oldSpace.id, selectedTabID: nil, isSidebarVisible: true)
             let window = session.makeWindow(from: record, kind: .main)
             defer { session.windowWillClose(window) }

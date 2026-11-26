@@ -1,4 +1,4 @@
-// Favorite additions by command or drag keep wrapping beyond the configured rows; command removals reflow the remaining tiles.
+// Favorite additions keep wrapping beyond the configured rows; removals shrink only their source row.
 import AppKit
 import ARCHEngine
 import SwiftUI
@@ -25,8 +25,6 @@ import Testing
         let frames = slots.frames(for: count + 1, width: frame.width, origin: frame.origin)
         let points = frames.map { CGPoint(x: $0.midX, y: $0.midY) }
             + [CGPoint(x: frame.midX, y: frame.minY - 5), CGPoint(x: frame.midX, y: frame.maxY + 5)]
-        let savedRows = UserDefaults.standard.object(forKey: FavoriteTileLayout.rowSizesKey)
-        defer { UserDefaults.standard.set(savedRows, forKey: FavoriteTileLayout.rowSizesKey) }
         for point in points {
             let drag = SidebarDragState(), owner = UUID()
             drag.favoriteGridTargets[space.id] = target
@@ -48,8 +46,7 @@ import Testing
             let committed = FavoriteGridSlots(rowSizes: gap.rowSizes ?? rowSizes, defaultColumns: 3)
             #expect(committed.frames(for: count + 1, width: frame.width, origin: frame.origin)[index] == gap.frame)
             if let sizes = gap.rowSizes {
-                let data = try #require(UserDefaults.standard.data(forKey: FavoriteTileLayout.rowSizesKey))
-                #expect(FavoriteTileLayout.rowSizes(from: data) == sizes)
+                #expect(session.favoriteRows(in: space.resolvedPersonaID) == sizes)
                 #expect(sizes.count <= committed.rows(for: count + 1).count)
                 if let edge = gap.newRow {
                     #expect(committed.rows(for: count + 1) == (edge == .first ? [1] + slots.rows(for: count) : slots.rows(for: count) + [1]))
@@ -79,10 +76,12 @@ import Testing
         defaults.set(1, forKey: FavoriteTileLayout.columnsKey)
         let favorites = (0..<7).map { Favorite(url: URL(string: "https://example.org/favorite/\($0)")!, title: "Favorite \($0)") }
         session.addFavorites(favorites, in: space.resolvedPersonaID)
+        session.setFavoriteRows(Array(repeating: 1, count: favorites.count), in: space.resolvedPersonaID)
         let tab = session.openTab(url: URL(string: "https://example.org/tab")!, in: space.id, select: false)
         let other = session.addPersona(named: "Other")
         let otherSpace = try #require(session.spaces(in: other.id).first)
         session.addFavorites((0..<7).map { Favorite(url: URL(string: "https://example.org/other/\($0)")!, title: "Other \($0)") }, in: other.id)
+        session.setFavoriteRows(Array(repeating: 1, count: 7), in: other.id)
         let otherTab = session.openTab(url: URL(string: "https://example.org/other-tab")!, in: otherSpace.id, select: false)
         if pinnedTabs {
             for targetSpace in [space, otherSpace] {
@@ -171,8 +170,6 @@ import Testing
         #expect(current.viewport.contains(gapCenter))
         drag.updateFavoriteGap(in: space.id, at: gapCenter, adding: true)
         #expect(drag.favoriteGap?.index == 7 && drag.favoriteGap?.newRow == .last)
-        let savedRows = UserDefaults.standard.object(forKey: FavoriteTileLayout.rowSizesKey)
-        defer { UserDefaults.standard.set(savedRows, forKey: FavoriteTileLayout.rowSizesKey) }
         #expect(drag.dropFavorite(tab, in: space, session: session) == drag.favoriteGap?.frame)
         #expect(session.favorites(in: space.resolvedPersonaID).count == 8)
         #expect(session.favorites(in: space.resolvedPersonaID).last?.url == tab.url)
@@ -196,7 +193,6 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(3, forKey: FavoriteTileLayout.columnsKey)
-        defaults.set(FavoriteTileLayout.encode(rowSizes: [3, 3]), forKey: FavoriteTileLayout.rowSizesKey)
         let drag = SidebarDragState(), frames = CapacityFrames()
         let host = NSHostingView(rootView: SidebarSpaceContent(session: session, translation: 0)
             .frame(width: 260, height: 600)
@@ -208,6 +204,15 @@ import Testing
             .onPreferenceChange(SidebarItemFramesKey.self) { frames.items = $0 }
             .transaction { $0.animation = nil; $0.disablesAnimations = true })
         host.frame = CGRect(x: 0, y: 0, width: 260, height: 600)
+        func mutateFavorites(_ change: () -> Void) {
+            let standard = UserDefaults.standard
+            let savedColumns = standard.object(forKey: FavoriteTileLayout.columnsKey)
+            defer {
+                standard.set(savedColumns, forKey: FavoriteTileLayout.columnsKey)
+            }
+            standard.set(3, forKey: FavoriteTileLayout.columnsKey)
+            change()
+        }
         func checkLayout(count: Int) async throws {
             let deadline = ContinuousClock.now + .seconds(5)
             repeat {
@@ -236,14 +241,14 @@ import Testing
         for count in 1...13 {
             let tab = session.openTab(url: URL(string: "https://example.org/favorite/\(count)")!, in: space.id, select: false)
             #expect(session.canAddFavorite(tab))
-            session.addFavorite(tab)
+            mutateFavorites { session.addFavorite(tab) }
             #expect(session.favorites.count == count)
             try await checkLayout(count: count)
         }
         for count in stride(from: 12, through: 0, by: -1) {
-            // Removing from the middle moves later tiles across row boundaries as the grid shrinks.
+            // Removing from the middle keeps each remaining tile in its own row.
             let favorite = session.favorites[session.favorites.count / 2]
-            session.removeFavorite(favorite)
+            mutateFavorites { session.removeFavorite(favorite) }
             #expect(session.favorites.count == count && !session.favorites.contains { $0.id == favorite.id })
             try await checkLayout(count: count)
         }

@@ -122,7 +122,7 @@ public enum IncomingSidebarRecords {
         }
         switch item.recordType {
         case .persona:
-            return text(.name) != nil
+            return text(.name) != nil && (item[.favoriteRows] == nil || (try? favoriteRows(item)) != nil)
         case .space:
             guard text(.name) != nil, text(.symbol) != nil, text(.tint).flatMap(SpaceTint.init(rawValue:)) != nil else { return false }
             // A home page set here comes only from an http or https page.
@@ -310,6 +310,17 @@ public enum IncomingSidebarRecords {
         return name
     }
 
+    /// Missing on records from before per-Persona layouts. The session preserves its local rows
+    /// for that case and normalizes a present layout against the final favorite count.
+    private static func favoriteRows(_ item: SyncRecord) throws -> [Int]? {
+        guard let value = item[.favoriteRows] else { return nil }
+        guard case .text(let text) = value,
+              let rows = try? JSONDecoder().decode([Int].self, from: Data(text.utf8)) else {
+            throw InvalidGraph.malformedRecord(item.recordName)
+        }
+        return rows
+    }
+
     /// Converts repaired records into the sidebar's Personas, spaces, folders, favorites, and pinned tabs.
     private static func sidebar(personas: [SyncRecord], spaces: [SyncValue?: [SyncRecord]], folders: [SyncRecord],
                                 all: [String: SyncRecord], defaultEngine: EngineKind) throws -> SidebarSyncState {
@@ -327,7 +338,9 @@ public enum IncomingSidebarRecords {
         func optionalParent(_ item: SyncRecord, _ field: SyncField) throws -> UUID? {
             try item[field].map { _ in try identifier(reference(item, field), type: .folder) }
         }
-        let people = try personas.map { try Persona(id: identifier($0.recordName, type: .persona), name: text($0, .name)) }
+        let people = try personas.map {
+            try Persona(id: identifier($0.recordName, type: .persona), name: text($0, .name), favoriteRows: favoriteRows($0))
+        }
         let spaceRows = try personas.flatMap { persona in
             try (spaces[.reference(persona.recordName)] ?? []).map { item in
                 guard let tint = try SpaceTint(rawValue: text(item, .tint)) else { throw InvalidGraph.malformedRecord(item.recordName) }

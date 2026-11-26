@@ -342,7 +342,7 @@ import Testing
 
     @Test func eachTypeListsTheFieldsOfTheSchema() {
         // docs/sync.md, Record types. Deployed record types and fields can never be removed or change type, so these lists only grow, apart from `Folder`'s `live`, which stays in the schema and on the server while this build no longer reads or writes it (live folders were removed).
-        #expect(SyncRecordType.persona.fields == [.name, .order])
+        #expect(SyncRecordType.persona.fields == [.name, .order, .favoriteRows])
         #expect(SyncRecordType.space.fields == [.persona, .name, .symbol, .tint, .homeURL, .order])
         #expect(SyncRecordType.folder.fields == [.persona, .space, .parent, .name, .tint, .order])
         #expect(SyncRecordType.favorite.fields == [.persona, .url, .title, .order])
@@ -350,6 +350,49 @@ import Testing
         #expect(SyncRecordType.setting.fields == [.value])
         #expect(SyncRecordType.siteRule.fields == [.host, .pathPrefix, .persona, .space, .window])
         #expect(SyncRecordType.allCases.map(\.rawValue) == ["Persona", "Space", "Folder", "Favorite", "Tab", "Setting", "Plugin", "RemoteTabs", "SiteRule"])
+    }
+
+    @Test(arguments: [(local: 30.0, server: 20.0), (local: 20.0, server: 30.0), (local: 30.0, server: 30.0)])
+    func theLaterFavoriteLayoutWinsAsAWholeWithoutLosingARename(times: (local: Double, server: Double)) {
+        let original = record(type: .persona, name: "default", ["name": .text("Home"), "favoriteRows": .text("[2,2]")],
+                              times: ["name": 10, "favoriteRows": 10], at: 10)
+        let local = record(type: .persona, name: "default", ["name": .text("Personal"), "favoriteRows": .text("[1,2,1]")],
+                           times: ["name": 50, "favoriteRows": times.local], at: 50)
+        let server = record(type: .persona, name: "default", ["name": .text("Home"), "favoriteRows": .text("[3,1]")],
+                            times: ["name": 10, "favoriteRows": times.server], at: times.server)
+        let result = SyncMerge.merge(local: local, server: server, base: .mirror(original))
+        let winner = times.local > times.server ? local : server
+        #expect(result.record[.favoriteRows] == winner[.favoriteRows])
+        #expect(result.record.fieldModifiedAt["favoriteRows"] == winner.fieldModifiedAt["favoriteRows"])
+        #expect(result.record[.name] == .text("Personal"))
+        #expect(result.needsSend)
+    }
+
+    @Test func firstSyncKeepsTheServerLayoutOrFillsALegacyPersonasMissingLayout() {
+        let local = record(type: .persona, name: "default", ["name": .text("Home"), "favoriteRows": .text("[1,2,1]")], at: 30)
+        var server = record(type: .persona, name: "default", ["name": .text("Personal"), "favoriteRows": .text("[3,1]")], at: 10)
+        let present = SyncMerge.merge(local: local, server: server, base: .firstSync)
+        #expect(present.record == server && !present.needsSend)
+        server[.favoriteRows] = nil
+        let absent = SyncMerge.merge(local: local, server: server, base: .firstSync)
+        #expect(absent.record[.favoriteRows] == local[.favoriteRows])
+        #expect(absent.record[.name] == server[.name] && absent.needsSend)
+    }
+
+    @Test func anOlderBuildsRenameKeepsTheLayoutAndItsEditTime() {
+        let original = record(type: .persona, name: "default", ["name": .text("Home"), "favoriteRows": .text("[1,2,1]")],
+                              times: ["name": 10, "favoriteRows": 20], at: 20, schemaVersion: 4)
+        // Older builds retain unknown fields and their timestamps in their mirror-backed writes.
+        var older = original
+        older[.name] = .text("Personal")
+        older.fieldModifiedAt["name"] = date(30)
+        older.modifiedAt = date(30)
+        older.schemaVersion = 3
+        let result = SyncMerge.merge(local: original, server: older, base: .mirror(original))
+        #expect(result.record[.name] == .text("Personal"))
+        #expect(result.record[.favoriteRows] == original[.favoriteRows])
+        #expect(result.record.fieldModifiedAt["favoriteRows"] == date(20))
+        #expect(!result.needsSend)
     }
 
     @Test func eachTypeListsItsMergeUnits() {

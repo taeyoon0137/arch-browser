@@ -19,7 +19,13 @@ public enum SidebarRecords {
             records.append(record)
         }
 
-        for persona in state.personas { append(.persona, personaName(persona.id), ["name": .text(persona.name)]) }
+        for persona in state.personas {
+            var fields: [String: SyncValue] = ["name": .text(persona.name)]
+            if let rows = persona.favoriteRows {
+                fields["favoriteRows"] = .text(String(decoding: try JSONEncoder().encode(rows), as: UTF8.self))
+            }
+            append(.persona, personaName(persona.id), fields)
+        }
         for space in state.spaces {
             var fields: [String: SyncValue] = ["persona": .reference(personaName(space.resolvedPersonaID)), "name": .text(space.name),
                                                "symbol": .text(space.symbol), "tint": .text(space.tint.rawValue)]

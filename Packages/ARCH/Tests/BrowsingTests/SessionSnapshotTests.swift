@@ -101,7 +101,7 @@ import Testing
         let folder = try SessionFolder()
         try folder.write(try #require(filesWithoutPersonas[version]))
         let snapshot = try #require(folder.store.load())
-        #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default")])
+        #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default", favoriteRows: nil)])
         #expect(snapshot.spaces.map(\.id) == [spaceA, spaceB])
         #expect(snapshot.spaces.map(\.personaID) == [Persona.defaultID, Persona.defaultID])
         #expect(snapshot.favorites.map(\.personaID) == [Persona.defaultID])
@@ -130,7 +130,7 @@ import Testing
         let folder = try SessionFolder()
         try folder.write(version9File.replacingOccurrences(of: #"{ "id": "\#(Persona.defaultID)", "name": "Default" }"#, with: #"{ "id": "\#(workPersona)", "name": "Repeated" }"#))
         let snapshot = try #require(folder.store.load())
-        #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default"), Persona(id: workPersona, name: "Work"), Persona(id: homePersona, name: "Home")])
+        #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default", favoriteRows: nil), Persona(id: workPersona, name: "Work", favoriteRows: nil), Persona(id: homePersona, name: "Home", favoriteRows: nil)])
         // The default Persona is now first, so the space of an unlisted Persona joins it.
         #expect(Array(snapshot.spaces.map(\.id).prefix(4)) == [spaceA, spaceB, spaceC, spaceW])
         #expect(snapshot.spaces.map(\.personaID) == [Persona.defaultID, Persona.defaultID, Persona.defaultID, workPersona, homePersona])
@@ -190,7 +190,7 @@ import Testing
 
     @Test func anEmptySnapshotGetsTheDefaultPersonaAndOneSpace() {
         let snapshot = SessionSnapshot.empty.normalized()
-        #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default")])
+        #expect(snapshot.personas == [Persona(id: Persona.defaultID, name: "Default", favoriteRows: nil)])
         #expect(snapshot.spaces.map(\.name) == ["Personal"])
         #expect(snapshot.spaces.map(\.personaID) == [Persona.defaultID])
         #expect(snapshot.windows?.map(\.currentSpaceID) == snapshot.spaces.map(\.id))

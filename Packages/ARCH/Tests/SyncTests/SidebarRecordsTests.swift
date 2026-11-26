@@ -27,7 +27,7 @@ import Testing
         let tabName = try #require(tab.id?.uuidString)
         #expect(records.map(\.recordName) == ["default", work.id.uuidString, first.id.uuidString, second.id.uuidString,
                                               nested.id.uuidString, ordinary.id.uuidString, favorite.id.uuidString, tabName])
-        #expect(byName["default"]?.fields == ["name": .text("Home"), "order": .number(1)])
+        #expect(byName["default"]?.fields == ["name": .text("Home"), "order": .number(1), "favoriteRows": .text("[]")])
         #expect(byName[work.id.uuidString]?[.order] == .number(2))
         #expect(byName[first.id.uuidString]?.fields == ["persona": .reference(work.id.uuidString), "name": .text("One"),
                 "symbol": .text("star"), "tint": .text("green"), "homeURL": .text(saved.absoluteString), "order": .number(1)])
@@ -47,6 +47,61 @@ import Testing
         let same = try SidebarRecords.records(from: state, foundAt: later)
         let changes = SyncDiff.changes(local: same, scope: { $0.recordType != .setting }, mirror: records, pending: [], foundAt: later)
         #expect(changes.saves.isEmpty && changes.deletions.isEmpty)
+    }
+
+    @Test func favoriteRowsRoundTripAsAnEncryptedLayoutForEachPersona() throws {
+        let home = Persona(id: Persona.defaultID, name: "Home", favoriteRows: [1, 2, 1])
+        let work = Persona(name: "Work", favoriteRows: [3, 1])
+        let spaces = [Space(name: "Personal", personaID: home.id), Space(name: "Projects", personaID: work.id)]
+        let favorites = [home, work].flatMap { persona in
+            (0..<4).map { Favorite(url: URL(string: "https://example.test/\(persona.id)/\($0)")!, title: "Favorite \($0)", personaID: persona.id) }
+        }
+        let state = SidebarSyncState(personas: [home, work], spaces: spaces, folders: [], favorites: favorites, pinnedTabs: [])
+        let date = Date(timeIntervalSinceReferenceDate: 30)
+        let records = try SidebarRecords.records(from: state, foundAt: date)
+        let cloud = records.map { SyncCloudKitRecords.ckRecord(from: $0) }
+        let homeRecord = try #require(cloud.first { $0.recordID.recordName == "default" })
+        let workRecord = try #require(cloud.first { $0.recordID.recordName == work.id.uuidString })
+        #expect(homeRecord.encryptedValues["favoriteRows"] as? String == "[1,2,1]")
+        #expect(workRecord.encryptedValues["favoriteRows"] as? String == "[3,1]")
+        #expect(homeRecord["favoriteRows"] == nil && workRecord["favoriteRows"] == nil)
+        let fetched = try cloud.map { try #require(SyncCloudKitRecords.syncRecord(from: $0)) }
+        let plan = try IncomingSidebarRecords.plan(records: fetched, deleted: [:], foundAt: date, defaultEngine: .webKit)
+        #expect(plan.sidebar.personas == [home, work])
+        for persona in [home, work] {
+            #expect(plan.sidebar.favorites.filter { $0.resolvedPersonaID == persona.id } == favorites.filter { $0.resolvedPersonaID == persona.id })
+        }
+        #expect(plan.repairs.isEmpty && plan.recordsToDelete.isEmpty)
+    }
+
+    @Test func aLegacyPersonaHasNoIncomingLayoutAndAnEmptyLayoutStaysExplicit() throws {
+        let space = Space(name: "Personal")
+        let date = Date(timeIntervalSinceReferenceDate: 30)
+        func mapped(_ rows: [Int]?) throws -> Persona {
+            let persona = Persona(id: Persona.defaultID, name: "Home", favoriteRows: rows)
+            let state = SidebarSyncState(personas: [persona], spaces: [space], folders: [], favorites: [], pinnedTabs: [])
+            let records = try SidebarRecords.records(from: state, foundAt: date)
+            let record = try #require(records.first { $0.recordType == .persona })
+            #expect((record[.favoriteRows] == nil) == (rows == nil))
+            let plan = try IncomingSidebarRecords.plan(records: records, deleted: [:], foundAt: date, defaultEngine: .webKit)
+            return try #require(plan.sidebar.personas.first)
+        }
+        #expect(try mapped(nil).favoriteRows == nil)
+        #expect(try mapped([]).favoriteRows == [])
+    }
+
+    @Test(arguments: [SyncValue.text("not JSON"), .text("[1,\"two\"]"), .number(2)])
+    func anUnreadableFavoriteLayoutWaitsWithItsPersona(_ value: SyncValue) throws {
+        let persona = Persona(name: "Work", favoriteRows: [1, 2])
+        let space = Space(name: "Projects", personaID: persona.id)
+        let date = Date(timeIntervalSinceReferenceDate: 30)
+        let state = SidebarSyncState(personas: [persona], spaces: [space], folders: [], favorites: [], pinnedTabs: [])
+        var records = try SidebarRecords.records(from: state, foundAt: date)
+        records[0][.favoriteRows] = value
+        #expect(IncomingSidebarRecords.heldOut(server: records, local: []) == [persona.id.uuidString, space.id.uuidString])
+        let plan = try IncomingSidebarRecords.plan(records: records, deleted: [:], foundAt: date, defaultEngine: .webKit)
+        #expect(!plan.sidebar.personas.contains { $0.id == persona.id })
+        #expect(plan.repairs.isEmpty && plan.recordsToDelete.isEmpty)
     }
 
     /// A folder's color syncs as encrypted text in `tint` and returns through the incoming mapping; clearing it removes the field.

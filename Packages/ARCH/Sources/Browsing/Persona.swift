@@ -5,10 +5,13 @@ import Foundation
 public struct Persona: Identifiable, Codable, Hashable {
     public var id: UUID
     public var name: String
+    /// Actual favorite tile counts by row. Nil in older snapshots and sync records; an empty array belongs to a Persona with no favorites.
+    public var favoriteRows: [Int]?
 
-    public init(id: UUID = UUID(), name: String) {
+    public init(id: UUID = UUID(), name: String, favoriteRows: [Int]? = []) {
         self.id = id
         self.name = name
+        self.favoriteRows = favoriteRows
     }
 
     /// The Persona that holds everything from builds before Personas. It keeps each engine's default storage and cannot be deleted. Sync names its record `default`, and its plugins live in `Plugins/<id>/`.

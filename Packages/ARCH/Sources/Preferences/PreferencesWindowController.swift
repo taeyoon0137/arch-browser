@@ -87,7 +87,9 @@ public final class PreferencesWindowController: NSWindowController {
         if let session {
             sections.addTabViewItem(Self.section(localized("Site Search"), symbol: "magnifyingglass", SiteSearchSection(store: session.siteSearch)))
         }
-        sections.addTabViewItem(Self.section(localized("Sidebar"), symbol: "sidebar.left", SidebarSection()))
+        if let session {
+            sections.addTabViewItem(Self.section(localized("Sidebar"), symbol: "sidebar.left", SidebarSection(session: session)))
+        }
         sections.addTabViewItem(Self.section(localized("Appearance"), symbol: "paintpalette", AppearanceSection()))
         sections.addTabViewItem(Self.section(localized("Shortcuts"), symbol: "keyboard", ShortcutsSection()))
         if let session {

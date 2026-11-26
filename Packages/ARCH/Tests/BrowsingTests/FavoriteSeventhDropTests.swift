@@ -29,10 +29,10 @@ import Testing
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(4, forKey: FavoriteTileLayout.columnsKey)
-        defaults.set(FavoriteTileLayout.encode(rowSizes: rowSizes), forKey: FavoriteTileLayout.rowSizesKey)
         session.addFavorites((0..<6).map {
             Favorite(url: URL(string: "https://example.org/favorite/\($0)")!, title: "Favorite \($0)")
         }, in: space.resolvedPersonaID)
+        session.setFavoriteRows(rowSizes.isEmpty ? [4, 2] : rowSizes, in: space.resolvedPersonaID)
         let originals = session.favorites(in: space.resolvedPersonaID)
         let tab = session.openTab(url: URL(string: "https://example.org/seventh")!, in: space.id, select: false)
         let contents = tab.webContents
@@ -56,13 +56,20 @@ import Testing
         }
         try await layout { drag.favoriteGridTargets[space.id]?.count == 6 && frames.items.count == 6 }
         let target = try #require(drag.favoriteGridTargets[space.id])
-        #expect(target.slots.rowSizes == rowSizes)
+        #expect(target.slots.rowSizes == (rowSizes.isEmpty ? [4, 2] : [1, 4, 1]))
         #expect(session.canAddFavorite(tab))
         let expectedIndex = addition == .firstRow ? 0 : 6
         var landing: CGRect?
         if addition == .menu {
             // Both the context menu and the menu bar call this overload after canAddFavorite.
-            session.addFavorite(tab)
+            let savedColumns = UserDefaults.standard.object(forKey: FavoriteTileLayout.columnsKey)
+            do {
+                defer {
+                    UserDefaults.standard.set(savedColumns, forKey: FavoriteTileLayout.columnsKey)
+                }
+                UserDefaults.standard.set(4, forKey: FavoriteTileLayout.columnsKey)
+                session.addFavorite(tab)
+            }
         } else {
             let last = try #require(frames.items[originals[5].id])
             let point = CGPoint(x: target.frame.maxX - target.frame.width / 4,
@@ -96,22 +103,12 @@ import Testing
             drag.updateFavoriteGap(in: destination, at: point, adding: true)
             let gap = try #require(drag.favoriteGap)
             #expect(gap.index == expectedIndex)
-            let saved = UserDefaults.standard.object(forKey: FavoriteTileLayout.rowSizesKey)
-            // The drag commits to the app's store. Restore it before the next suspension, and
-            // copy the committed value into this host's isolated AppStorage suite.
-            let data: Data?
-            do {
-                defer { UserDefaults.standard.set(saved, forKey: FavoriteTileLayout.rowSizesKey) }
-                UserDefaults.standard.set(FavoriteTileLayout.encode(rowSizes: rowSizes), forKey: FavoriteTileLayout.rowSizesKey)
-                landing = try #require(drag.dropFavorite(tab, in: space, session: session))
-                data = UserDefaults.standard.data(forKey: FavoriteTileLayout.rowSizesKey)
-            }
+            landing = drag.dropFavorite(tab, in: space, session: session)
             #expect(landing == gap.frame)
-            let committed = FavoriteTileLayout.rowSizes(from: try #require(data))
+            let committed = session.favoriteRows(in: space.resolvedPersonaID)
             let layout = FavoriteGridSlots(rowSizes: committed, defaultColumns: 4)
             #expect(committed.count <= layout.rows(for: 7).count)
-            if addition == .newRow { #expect((committed.last ?? 4) > 1) }
-            defaults.set(data, forKey: FavoriteTileLayout.rowSizesKey)
+            if addition == .newRow { #expect(committed.last == 1) }
             drag.end(ownedBy: owner)
         }
         let favorites = session.favorites(in: space.resolvedPersonaID)
@@ -123,6 +120,7 @@ import Testing
         #expect(!session.canAddFavorite(tab))
         try await layout { drag.favoriteGridTargets[space.id]?.count == 7 && frames.items.count == 7 }
         let committed = try #require(drag.favoriteGridTargets[space.id])
+        if addition == .menu { #expect(committed.slots.rowSizes == (rowSizes.isEmpty ? [4, 3] : [1, 4, 2])) }
         let expected = committed.slots.frames(for: 7, width: committed.frame.width, origin: committed.frame.origin)
         for (favorite, frame) in zip(favorites, expected) {
             let rendered = try #require(frames.items[favorite.id])
