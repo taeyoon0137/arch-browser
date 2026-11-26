@@ -1,4 +1,5 @@
 // Settings ▸ Sync uses only the account state and controls of this Mac's sync controller.
+import Browsing
 import SwiftUI
 import Sync
 
@@ -56,8 +57,12 @@ struct SyncSection: View {
                     Task { await controller.setEnabled(value) }
                 }))
                 .disabled(!state.canToggle)
-                Text("Personas, spaces, favorites, pinned tabs and their folders, and some settings. Open tabs, history, and website data stay on this Mac.", bundle: .module)
+                Text(RemoteTabsStrings.explanation)
                     .font(.callout).foregroundStyle(.secondary)
+                Toggle(RemoteTabsStrings.showTabs, isOn: Binding(get: { controller.showRemoteTabs }, set: { value in
+                    controller.setShowRemoteTabs(value)
+                }))
+                .disabled(!controller.isEnabled || controller.isCheckingAvailability || controller.isDeletingCloudData)
             }
             Section {
                 LabeledContent(localized("iCloud account"), value: state.account)

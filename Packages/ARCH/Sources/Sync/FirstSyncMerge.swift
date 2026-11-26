@@ -31,12 +31,13 @@ public enum FirstSyncMerge {
     public static func plan(local: [SyncRecord], server: [SyncRecord], samePage: (URL, URL) -> Bool) throws -> Plan {
         var serverByName: [String: SyncRecord] = [:]
         let server = server.filter { record in
+            guard record.recordType != .remoteTabs else { return false }
             guard serverByName[record.recordName] == nil else { return false }
             serverByName[record.recordName] = record
             return true
         }
         var localNames = Set<String>()
-        let local = local.filter { localNames.insert($0.recordName).inserted }
+        let local = local.filter { $0.recordType != .remoteTabs && localNames.insert($0.recordName).inserted }
         for record in local {
             if let other = serverByName[record.recordName], other.recordType != record.recordType {
                 throw InvalidRecords.conflictingTypes(record.recordName)
@@ -134,7 +135,7 @@ public enum FirstSyncMerge {
         case .siteRule:
             guard case .text(let host) = record[.host], case .text(let prefix) = record[.pathPrefix] else { return nil }
             return .siteRule(persona: persona, host: host, pathPrefix: prefix)
-        case .persona, .setting:
+        case .persona, .setting, .remoteTabs:
             return nil
         }
     }

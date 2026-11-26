@@ -127,10 +127,10 @@ public final class CloudKitSyncEngine: SyncEngineClient {
     }
 
     /// The sent batch as Arch reports it: the records saved, the names of the records deleted, and the refused saves that the engine does not retry.
-    nonisolated static func sentChanges(savedRecords: [CKRecord], deletedRecordIDs: [CKRecord.ID], failedSaves: [(record: CKRecord, error: CKError)]) -> SyncSentChanges {
+    nonisolated static func sentChanges(savedRecords: [CKRecord], deletedRecordIDs: [CKRecord.ID], failedSaves: [(record: CKRecord, error: CKError)], failedDeletes: [CKRecord.ID: CKError] = [:]) -> SyncSentChanges {
         SyncSentChanges(
             savedRecords: savedRecords,
-            deletedRecordNames: deletedRecordIDs.map(\.recordName),
+            deletedRecordNames: deletedRecordIDs.map(\.recordName) + failedDeletes.filter { $0.value.code == .unknownItem }.keys.map(\.recordName).sorted(),
             failedSaves: failedSaves.compactMap { failed in
                 guard let refusal = failure(for: failed.error) else { return nil }
                 if case .other = refusal {
@@ -159,7 +159,7 @@ public final class CloudKitSyncEngine: SyncEngineClient {
         case .didFetchChanges:
             return [.fetchEnded(failure: fetchFailure)]
         case .sentRecordZoneChanges(let sent):
-            return [.sentChanges(sentChanges(savedRecords: sent.savedRecords, deletedRecordIDs: sent.deletedRecordIDs, failedSaves: sent.failedRecordSaves.map { ($0.record, $0.error) }))]
+            return [.sentChanges(sentChanges(savedRecords: sent.savedRecords, deletedRecordIDs: sent.deletedRecordIDs, failedSaves: sent.failedRecordSaves.map { ($0.record, $0.error) }, failedDeletes: sent.failedRecordDeletes))]
         case .sentDatabaseChanges(let sent):
             let zoneChanges = sentZoneChanges(savedZoneIDs: sent.savedZones.map(\.zoneID), deletedZoneIDs: sent.deletedZoneIDs, failedSaves: sent.failedZoneSaves.map { ($0.zone.zoneID, $0.error) }, failedDeletes: sent.failedZoneDeletes)
             return zoneChanges.map { [.sentZoneChanges($0)] } ?? []

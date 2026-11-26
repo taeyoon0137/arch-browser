@@ -8,6 +8,11 @@ import Foundation
 /// Coordinates account availability, local sidebar saves, and CloudKit sync engine events.
 @MainActor public final class SyncController: ObservableObject {
     public static let enabledKey = "ARCHSyncEnabled"
+    public static let showRemoteTabsKey = "ARCHShowRemoteTabs"
+    static let remoteDeviceIDKey = "ARCHRemoteTabsDeviceID"
+    static let remoteCleanupKey = "ARCHRemoteTabsCleanupPending"
+    static let remoteCleanupDatabaseKey = "ARCHRemoteTabsCleanupDatabase"
+    @Published public private(set) var showRemoteTabs: Bool
     @Published public private(set) var availability: SyncAvailability.Status = .unavailable(.temporarilyUnavailable)
     @Published public private(set) var isEnabled: Bool
     @Published public private(set) var isDeletingCloudData = false
@@ -28,6 +33,16 @@ import Foundation
     private let check: () async -> SyncAvailability.Status
     private let factory: SyncEngineFactory
     private let now: () -> Date
+    private let remoteDeviceID: String
+    private let remoteDeviceName: () -> String
+    private let remoteDebounce: Duration
+    private var remoteDebounceTask: Task<Void, Never>?
+    private var remoteHeartbeatTask: Task<Void, Never>?
+    private var pendingOpenTabs: [OpenTabsSpace]?
+    private var publishedOpenTabs: [OpenTabsSpace] = []
+    private var outgoingRemoteTabs: [SyncRecord]?
+    private var remoteDeletionCandidates = Set<String>()
+    private var remoteCleanup: RemoteTabsCleanup?
     private let notifications: NotificationCenter
     private var observers: [NSObjectProtocol] = []
     private var accountContainer: (() -> AnyObject?)?
@@ -83,13 +98,19 @@ import Foundation
 
     init(sidebar: any SyncedSidebar, directory: URL, defaults: UserDefaults,
          notifications: NotificationCenter = .default, check: @escaping () async -> SyncAvailability.Status,
-         factory: @escaping SyncEngineFactory, now: @escaping () -> Date = Date.init) {
+         factory: @escaping SyncEngineFactory, now: @escaping () -> Date = Date.init,
+         remoteDebounce: Duration = .seconds(10), remoteDeviceName: @escaping () -> String = { Host.current().localizedName ?? "Mac" }) {
         self.sidebar = sidebar
         self.defaults = defaults
         self.notifications = notifications
         self.check = check
         self.factory = factory
         self.now = now
+        self.remoteDebounce = remoteDebounce
+        self.remoteDeviceName = remoteDeviceName
+        remoteDeviceID = defaults.string(forKey: Self.remoteDeviceIDKey).flatMap(UUID.init(uuidString:))?.uuidString ?? UUID().uuidString
+        defaults.set(remoteDeviceID, forKey: Self.remoteDeviceIDKey)
+        showRemoteTabs = defaults.object(forKey: Self.showRemoteTabsKey) as? Bool ?? true
         url = directory.appendingPathComponent(SyncMirror.fileName)
         settings = SyncedSettings(defaults: defaults)
         isEnabled = defaults.bool(forKey: Self.enabledKey)
@@ -100,6 +121,8 @@ import Foundation
             defaults.set(false, forKey: Self.enabledKey)
             lastError = Self.interruptedApplyMessage
         }
+        sidebar.showRemoteTabs = showRemoteTabs
+        sidebar.onShowRemoteTabsChange = { [weak self] in self?.setShowRemoteTabs($0) }
         observers.append(notifications.addObserver(forName: UserDefaults.didChangeNotification, object: defaults, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.settingsChanged() }
         })
@@ -108,6 +131,10 @@ import Foundation
     /// Only while an engine runs, so that a session save with sync off builds no projection.
     private func observeSidebarSaves() {
         sidebar.onSidebarSyncSave = { [weak self] state in self?.sidebarSaved(state) }
+        sidebar.onOpenTabsSyncSave = { [weak self] state in
+            guard let self, !applying else { return }
+            scheduleRemoteTabs(state)
+        }
     }
 
     // The account notification's object is the entitled container. Retain it as long as the observer.
@@ -117,23 +144,62 @@ import Foundation
             Task { @MainActor [weak self] in await self?.refresh() }
         })
     }
-    deinit { for observer in observers { notifications.removeObserver(observer) } }
+    deinit {
+        remoteDebounceTask?.cancel()
+        remoteHeartbeatTask?.cancel()
+        for observer in observers { notifications.removeObserver(observer) }
+    }
 
     /// Saves the user's sync choice, checking availability when turning it on and stopping the engine when turning it off.
     public func setEnabled(_ enabled: Bool) async {
         guard !isDeletingCloudData else { return }
+        checkNumber += 1
+        let requestNumber = checkNumber
         if guardHolds == 0, defaults.bool(forKey: Self.applyingKey) {
             // The user's choice ends the hold: turning sync on applies the changes again.
             defaults.removeObject(forKey: Self.applyingKey)
             lastError = nil
         }
-        if enabled { recordOffReason(nil) }
+        if enabled {
+            recordOffReason(nil)
+            await remoteCleanup?.stop()
+            guard requestNumber == checkNumber else { return }
+            remoteCleanup = nil
+        }
         updateEnabled(enabled)
         if enabled { await refresh() } else {
             checkNumber += 1
             isCheckingAvailability = false
+            let target = database
             await stop()
+            if let target { await cleanUpRemoteTabs(in: target) }
         }
+    }
+
+    /// This Mac's preference controls both publishing and displaying other Macs' tabs.
+    public func setShowRemoteTabs(_ value: Bool) {
+        guard showRemoteTabs != value else { return }
+        showRemoteTabs = value
+        defaults.set(value, forKey: Self.showRemoteTabsKey)
+        sidebar.showRemoteTabs = value
+        remoteDebounceTask?.cancel()
+        remoteDebounceTask = nil
+        pendingOpenTabs = nil
+        if isDeletingCloudData {
+            outgoingRemoteTabs = value ? nil : []
+            updateRemoteFolders()
+            return
+        }
+        if value {
+            if engine != nil { scheduleRemoteTabs(sidebar.openTabsSyncState) }
+        } else {
+            outgoingRemoteTabs = []
+            publishedOpenTabs = []
+            compareRemoteTabs()
+            persist()
+            if let engine { flushHeldChanges(on: engine) }
+        }
+        updateRemoteFolders()
     }
 
     /// Called after the user confirms the deletion. Keep the previous file until the server
@@ -182,7 +248,7 @@ import Foundation
     /// Launch and activation can read the local toggle and entitlements. The first account
     /// request comes from an explicit opt-in or an existing enabled preference.
     public func refreshIfRequested() async {
-        guard isEnabled || requestedAccountCheck else { return }
+        guard isEnabled || requestedAccountCheck || defaults.bool(forKey: Self.remoteCleanupKey) else { return }
         await refresh()
     }
 
@@ -208,7 +274,22 @@ import Foundation
             disableAfterLoss(.accountChanged)
             return
         }
-        guard isEnabled, case .available(let target) = result else { await stop(); return }
+        guard case .available(let target) = result else {
+            if case .unavailable(.noAccount) = result {
+                defaults.removeObject(forKey: Self.remoteCleanupKey)
+                defaults.removeObject(forKey: Self.remoteCleanupDatabaseKey)
+                await remoteCleanup?.stop()
+                guard number == checkNumber else { return }
+                remoteCleanup = nil
+            }
+            await stop()
+            return
+        }
+        guard isEnabled else {
+            await stop()
+            await cleanUpRemoteTabs(in: target)
+            return
+        }
         if database != target || engine == nil {
             await stop()
             guard number == checkNumber, isEnabled else { return }
@@ -231,7 +312,12 @@ import Foundation
             let delegate = Delegate(self)
             self.delegate = delegate
             engine = factory(target, mirror.engineState, delegate)
+            let oldRemoteSaves = mirror.pendingSaves.filter { RemoteTabsRecords.owns($0, deviceID: remoteDeviceID) }
+            remoteDeletionCandidates.formUnion((bases.filter { RemoteTabsRecords.owns($0, deviceID: remoteDeviceID) } + oldRemoteSaves).map(\.recordName))
+            engine?.remove(oldRemoteSaves.map { .saveRecord($0.recordName) })
+            mirror.pendingSaves.removeAll { RemoteTabsRecords.owns($0, deviceID: remoteDeviceID) }
             observeSidebarSaves()
+            startRemoteHeartbeat()
             if defaults.bool(forKey: Self.deletionRequestedKey) {
                 // The deletion never reached the server: `sync.json` kept its state from before it.
                 defaults.removeObject(forKey: Self.deletionRequestedKey)
@@ -245,6 +331,7 @@ import Foundation
         refusedSaves.removeAll()
         if awaitingZoneSave { engine?.add([.saveZone]) }
         await requestFetch()
+        refreshRemoteTabsLiveness()
         if let quit = quitBeforeDeletion, quit === engine {
             quitBeforeDeletion = nil
             lastError = localized("Arch quit before it deleted its iCloud data. Delete it again to remove it.")
@@ -260,6 +347,16 @@ import Foundation
     private func detach() -> (any SyncEngineClient)? {
         let previous = engine
         sidebar.onSidebarSyncSave = nil
+        sidebar.onOpenTabsSyncSave = nil
+        sidebar.remoteTabGroups = []
+        remoteDebounceTask?.cancel()
+        remoteDebounceTask = nil
+        remoteHeartbeatTask?.cancel()
+        remoteHeartbeatTask = nil
+        pendingOpenTabs = nil
+        publishedOpenTabs = []
+        outgoingRemoteTabs = nil
+        remoteDeletionCandidates.removeAll()
         quitBeforeDeletion = nil
         engine = nil
         delegate = nil
@@ -351,6 +448,101 @@ import Foundation
         } catch { lastError = localized("The saved sidebar could not be compared.") }
     }
 
+    private func scheduleRemoteTabs(_ state: [OpenTabsSpace]) {
+        guard engine != nil, !first, isEnabled, showRemoteTabs, pendingOpenTabs != state else { return }
+        pendingOpenTabs = state
+        remoteDebounceTask?.cancel()
+        let delay = remoteDebounce
+        remoteDebounceTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard let self, !Task.isCancelled, isEnabled, showRemoteTabs, engine != nil else { return }
+            remoteDebounceTask = nil
+            publishedOpenTabs = state
+            outgoingRemoteTabs = RemoteTabsRecords.records(from: state, deviceID: remoteDeviceID, deviceName: remoteDeviceName(), at: now())
+            compareRemoteTabs()
+            persist()
+            if let engine { flushHeldChanges(on: engine) }
+        }
+    }
+
+    /// This Mac never edits or deletes other devices' records.
+    private func compareRemoteTabs() {
+        guard let outgoingRemoteTabs, engine != nil else { return }
+        let own = { (record: SyncRecord) in RemoteTabsRecords.owns(record, deviceID: self.remoteDeviceID) }
+        let base = bases
+        var changes = SyncDiff.changes(local: outgoingRemoteTabs, scope: own, mirror: base, pending: mirror.pendingSaves, foundAt: now())
+        let changedNames = Set(changes.saves.map(\.recordName))
+        let byName = Dictionary(base.map { ($0.recordName, $0) }) { first, _ in first }
+        // A heartbeat changes only the publication time. SyncDiff otherwise ignores an unchanged payload.
+        for record in outgoingRemoteTabs where !changedNames.contains(record.recordName) {
+            if var previous = byName[record.recordName], record.modifiedAt > previous.modifiedAt {
+                previous.modifiedAt = record.modifiedAt
+                changes.saves.append(previous)
+            }
+        }
+        remoteDeletionCandidates.formUnion(base.filter(own).map(\.recordName))
+        remoteDeletionCandidates.formUnion(changes.saves.map(\.recordName))
+        changes.deletions = Set(changes.deletions).union(remoteDeletionCandidates.subtracting(outgoingRemoteTabs.map(\.recordName))).sorted()
+        if !changes.saves.isEmpty {
+            defaults.set(true, forKey: Self.remoteCleanupKey)
+            defaults.set(database?.digest, forKey: Self.remoteCleanupDatabaseKey)
+        }
+        reconcile(changes, publish: canSendRecords, includes: own)
+        if canSendRecords && outgoingRemoteTabs.isEmpty && remoteDeletionCandidates.isEmpty && !base.contains(where: own) && !mirror.pendingSaves.contains(where: own) {
+            defaults.removeObject(forKey: Self.remoteCleanupKey)
+            defaults.removeObject(forKey: Self.remoteCleanupDatabaseKey)
+        }
+    }
+
+    private func updateRemoteFolders() {
+        sidebar.remoteTabGroups = isEnabled && showRemoteTabs
+            ? RemoteTabsRecords.groups(from: bases, excluding: remoteDeviceID, at: now()) : []
+    }
+
+    private func startRemoteHeartbeat() {
+        remoteHeartbeatTask?.cancel()
+        remoteHeartbeatTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                guard let self, engine != nil else { return }
+                refreshRemoteTabsLiveness()
+            }
+        }
+    }
+
+    func refreshRemoteTabsLiveness() {
+        updateRemoteFolders()
+        guard showRemoteTabs, isEnabled, let outgoingRemoteTabs,
+              let oldest = outgoingRemoteTabs.map(\.modifiedAt).min(),
+              now().timeIntervalSince(oldest) >= RemoteTabsRecords.heartbeatInterval else { return }
+        self.outgoingRemoteTabs = RemoteTabsRecords.records(from: publishedOpenTabs, deviceID: remoteDeviceID,
+                                                           deviceName: remoteDeviceName(), at: now())
+        compareRemoteTabs()
+        persist()
+        if let engine { flushHeldChanges(on: engine) }
+    }
+
+    private func cleanUpRemoteTabs(in target: SyncDatabase) async {
+        guard !isEnabled, defaults.bool(forKey: Self.remoteCleanupKey) else { return }
+        guard defaults.string(forKey: Self.remoteCleanupDatabaseKey) == target.digest else {
+            defaults.removeObject(forKey: Self.remoteCleanupKey)
+            defaults.removeObject(forKey: Self.remoteCleanupDatabaseKey)
+            return
+        }
+        // A full fetch on each retry drops deletions the server already processed.
+        let generation = checkNumber
+        await remoteCleanup?.stop()
+        guard !isEnabled, generation == checkNumber,
+              defaults.bool(forKey: Self.remoteCleanupKey),
+              defaults.string(forKey: Self.remoteCleanupDatabaseKey) == target.digest else { return }
+        let cleanup = RemoteTabsCleanup(database: target, deviceID: remoteDeviceID, factory: factory) { [weak self] in
+            self?.defaults.removeObject(forKey: Self.remoteCleanupKey)
+            self?.defaults.removeObject(forKey: Self.remoteCleanupDatabaseKey)
+        }
+        remoteCleanup = cleanup
+        await cleanup.run()
+    }
+
     func settingsChanged() {
         let keys = settings.changedKeys()
         guard engine != nil, !keys.isEmpty, !applying else { return }
@@ -365,9 +557,9 @@ import Foundation
         let base = bases
         // What this build cannot apply stays on the server as another build wrote it.
         let held = IncomingSidebarRecords.heldOut(server: base, local: records)
-        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) && (state.canSyncSiteRules || record.recordType != .siteRule) }
+        let scope = { (record: SyncRecord) in record.recordType.isSidebar && !held.contains(record.recordName) && (state.canSyncSiteRules || record.recordType != .siteRule) }
         let changes = SyncDiff.changes(local: records.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
-        reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType != .setting })
+        reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType.isSidebar })
     }
 
     /// Builds changed setting records against the mirror and pending saves.
@@ -512,6 +704,11 @@ import Foundation
     private func disableAfterLoss(_ reason: SyncOffReason) {
         recordOffReason(reason)
         defaults.removeObject(forKey: Self.deletionRequestedKey)
+        defaults.removeObject(forKey: Self.remoteCleanupKey)
+        defaults.removeObject(forKey: Self.remoteCleanupDatabaseKey)
+        let cleanup = remoteCleanup
+        remoteCleanup = nil
+        Task { await cleanup?.stop() }
         lastError = nil
         lastSync = nil
         isCheckingAvailability = false
@@ -564,6 +761,7 @@ import Foundation
             for key in unknown where fetched[key] == nil && !deletedNames.contains(key) { mirror.records[key] = nil }
             unknown.removeAll()
             for key in deletedNames {
+                remoteDeletionCandidates.remove(key)
                 mirror.records[key] = nil
                 mirror.pendingSaves.removeAll { $0.recordName == key }
                 engine.remove([.saveRecord(key), .deleteRecord(key)])
@@ -596,6 +794,19 @@ import Foundation
             applying = false
             lastError = nil
             lastSync = date
+            updateRemoteFolders()
+            if showRemoteTabs {
+                let state = sidebar.openTabsSyncState
+                scheduleRemoteTabs(state)
+                if publishedOpenTabs == state {
+                    compareRemoteTabs()
+                    persist()
+                }
+            } else {
+                outgoingRemoteTabs = []
+                compareRemoteTabs()
+                persist()
+            }
             flushHeldChanges(on: engine)
         } catch {
             applying = false
@@ -618,7 +829,7 @@ import Foundation
             case .tab: replacements.tabs[old] = new
             case .favorite: replacements.favorites[old] = new
             case .siteRule: replacements.siteRules[old] = new
-            case .persona, .setting: break
+            case .persona, .setting, .remoteTabs: break
             }
         }
         var rows = plan.recordsToApply
@@ -635,7 +846,7 @@ import Foundation
         // times and order keys for unedited values before a three-way merge.
         let held = IncomingSidebarRecords.heldOut(server: base, local: local)
         let canSyncSiteRules = sidebar.sidebarSyncState.canSyncSiteRules
-        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) && (canSyncSiteRules || record.recordType != .siteRule) }
+        let scope = { (record: SyncRecord) in record.recordType.isSidebar && !held.contains(record.recordName) && (canSyncSiteRules || record.recordType != .siteRule) }
         let differences = SyncDiff.changes(local: local.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
         // A name listed twice counts by its first copy, as in the comparison itself.
         let changed = Dictionary(differences.saves.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
@@ -662,7 +873,10 @@ import Foundation
     private func didSend(_ sent: SyncSentChanges) {
         guard let engine else { return }
         for row in sent.savedRecords where SyncCloudKitRecords.isInZone(row.recordID) { mirror.records[row.recordID.recordName] = row }
-        for key in sent.deletedRecordNames { mirror.records[key] = nil }
+        for key in sent.deletedRecordNames {
+            mirror.records[key] = nil
+            remoteDeletionCandidates.remove(key)
+        }
         var conflicts: [CKRecord] = []
         for refused in sent.failedSaves {
             switch refused.failure {
@@ -694,6 +908,8 @@ import Foundation
             do {
                 if let durableSidebar { try compareSidebar(durableSidebar) }
                 compareSettings()
+                compareRemoteTabs()
+                updateRemoteFolders()
                 persist()
             }
             catch { lastError = localized("The pending sidebar changes could not be compared.") }

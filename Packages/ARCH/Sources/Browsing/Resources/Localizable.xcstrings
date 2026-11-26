@@ -1,6 +1,46 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Sync Personas, spaces, favorites, pinned tabs and their folders, and some settings. Optionally share open tab addresses and titles with your other Macs. Cookies, website data, history, and sign-in state stay on this Mac." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페르소나, 스페이스, 즐겨찾기, 고정된 탭과 폴더, 일부 설정을 동기화합니다. 원하는 경우 다른 Mac과 열려 있는 탭의 주소와 제목을 공유할 수 있습니다. 쿠키, 웹사이트 데이터, 방문 기록 및 로그인 상태는 이 Mac에만 유지됩니다."
+          }
+        }
+      }
+    },
+    "Hide Tabs from Other Macs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 Mac의 탭 가리기"
+          }
+        }
+      }
+    },
+    "Show Tabs from Other Macs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 Mac의 탭 보기"
+          }
+        }
+      }
+    },
+    "%@'s Tabs" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 탭"
+          }
+        }
+      }
+    },
     "%@\n%@" : {
       "localizations" : {
         "ko" : {

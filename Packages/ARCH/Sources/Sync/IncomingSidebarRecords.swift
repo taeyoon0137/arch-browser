@@ -27,7 +27,7 @@ public enum IncomingSidebarRecords {
     public static func plan(local: [SyncRecord], fetched: [SyncRecord], mirror: [SyncRecord],
                             deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind) throws -> Plan {
         func byName(_ records: [SyncRecord]) -> [String: SyncRecord] {
-            Dictionary(records.filter { $0.recordType != .setting }.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
+            Dictionary(records.filter { $0.recordType.isSidebar }.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })
         }
         var combined = byName(local)
         let bases = byName(mirror)
@@ -66,7 +66,7 @@ public enum IncomingSidebarRecords {
     private static func heldRecords(server: [SyncRecord], local: [SyncRecord], deleted: [String: SyncRecordType] = [:]) -> [String: SyncRecord] {
         let localByName = Dictionary(local.map { ($0.recordName, $0) }) { first, _ in first }
         var held: [String: SyncRecord] = [:]
-        for item in server where item.recordType != .setting {
+        for item in server where item.recordType.isSidebar {
             let moved = localByName[item.recordName].map { $0.recordType != item.recordType || (item.recordType != .siteRule && $0[.persona] != item[.persona]) } ?? false
             if moved || !canApply(item) { held[item.recordName] = item }
         }
@@ -95,7 +95,7 @@ public enum IncomingSidebarRecords {
         var grew = !held.isEmpty
         while grew {
             grew = false
-            for item in server + local where item.recordType != .setting && held[item.recordName] == nil {
+            for item in server + local where item.recordType.isSidebar && held[item.recordName] == nil {
                 let parents = [SyncField.persona, .space, .parent, .folder].compactMap { field -> String? in
                     if case .reference(let name) = item[field] { name } else { nil }
                 }
@@ -142,7 +142,7 @@ public enum IncomingSidebarRecords {
                   text(.window).flatMap(SiteRule.Window.init(rawValue:)) != nil,
                   case .reference(let space) = item[.space], (try? identifier(space, type: .space)) != nil else { return false }
             return true
-        case .setting:
+        case .setting, .remoteTabs:
             return true
         }
     }
@@ -150,12 +150,12 @@ public enum IncomingSidebarRecords {
     /// Repairs missing spaces, invalid parent links, cycles, and excessive folder depth, then builds the sidebar and tombstones.
     private static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind, held: [String: SyncRecord]) throws -> Plan {
         var all: [String: SyncRecord] = [:]
-        var removed = deleted.filter { $0.value != .setting }
+        var removed = deleted.filter { $0.value.isSidebar }
         // The fixed default profile owns the platform's default storage and cannot be removed.
         removed.removeValue(forKey: "default")
         // A name listed twice counts by its first copy.
         var listed = Set<String>()
-        for item in records where item.recordType != .setting && held[item.recordName] == nil && listed.insert(item.recordName).inserted {
+        for item in records where item.recordType.isSidebar && held[item.recordName] == nil && listed.insert(item.recordName).inserted {
             if let removal = removed[item.recordName] {
                 if removal == item.recordType { continue }
                 // A deletion of another type names some other record; it removes nothing here.
@@ -278,7 +278,7 @@ public enum IncomingSidebarRecords {
             case .favorite: tombstones.favorites.insert(id)
             case .tab: tombstones.tabs.insert(id)
             case .siteRule: tombstones.siteRules.insert(id)
-            case .setting: break
+            case .setting, .remoteTabs: break
             }
         }
         let repairDeletions = removed.keys.filter { deleted[$0] == nil }.sorted()

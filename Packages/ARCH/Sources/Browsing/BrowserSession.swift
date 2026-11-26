@@ -34,7 +34,13 @@ final class EngineRuntime {
 @MainActor public final class BrowserSession: ObservableObject {
     private let registry: EngineRegistry
     /// Whether this Mac's Persona deletions can sync, including changes made while offline.
-    public var isSyncing = false
+    @Published public var isSyncing = false
+    @Published public var remoteTabGroups: [RemoteTabGroup] = []
+    @Published public var showRemoteTabs = true {
+        didSet { if showRemoteTabs != oldValue { onShowRemoteTabsChange?(showRemoteTabs) } }
+    }
+    public var onShowRemoteTabsChange: ((Bool) -> Void)?
+    @Published var collapsedRemoteTabGroupIDs = Set<String>()
     public private(set) var needsFullSidebarSync: Bool
     /// The folder that holds every file the session keeps: `session.json`, Chromium's profiles in `Cache/Chromium`, the plugins, the browser import's record, and the files of `history`, `sitePermissions`, and `siteSearch`. WebKit keeps its website data where the system puts it for the app.
     public let userDataDirectory: URL
@@ -2391,18 +2397,29 @@ final class EngineRuntime {
     /// Observes successful saves on the main queue in file order. With no observer, saving does
     /// not construct the projection. Replacing the observer drops its outstanding callbacks.
     public var onSidebarSyncSave: ((SidebarSyncState) -> Void)? {
-        didSet {
-            guard let observer = onSidebarSyncSave else { store.didWrite = nil; return }
-            store.didWrite = { [weak self] snapshot in
-                guard let self else { return }
-                // Rules save separately and may be newer than this captured session.
-                // Wait for the next save when their new destination is not in this capture.
-                let ready = !self.siteRules.isReadOnly && self.siteRules.rules.allSatisfy { rule in
-                    (snapshot.personas ?? []).contains { $0.id == rule.personaID }
-                        && (!self.spaces.contains { $0.id == rule.spaceID } || snapshot.spaces.contains { $0.id == rule.spaceID })
-                }
-                observer(SidebarSyncState(snapshot: snapshot, defaultEngine: self.defaultEngine, siteRules: self.siteRules.rules, canSyncSiteRules: ready))
+        didSet { observeSyncSaves() }
+    }
+
+    public var openTabsSyncState: [OpenTabsSpace] { OpenTabsSpace.project(snapshot(), defaultEngine: defaultEngine) }
+
+    /// Captures only the open-tab fields after the same successful write as the sidebar observer.
+    public var onOpenTabsSyncSave: (([OpenTabsSpace]) -> Void)? {
+        didSet { observeSyncSaves() }
+    }
+
+    private func observeSyncSaves() {
+        let sidebar = onSidebarSyncSave, openTabs = onOpenTabsSyncSave
+        guard sidebar != nil || openTabs != nil else { store.didWrite = nil; return }
+        store.didWrite = { [weak self] snapshot in
+            guard let self else { return }
+            // Rules save separately and may be newer than this captured session.
+            // Wait for the next save when their new destination is not in this capture.
+            let ready = !self.siteRules.isReadOnly && self.siteRules.rules.allSatisfy { rule in
+                (snapshot.personas ?? []).contains { $0.id == rule.personaID }
+                    && (!self.spaces.contains { $0.id == rule.spaceID } || snapshot.spaces.contains { $0.id == rule.spaceID })
             }
+            sidebar?(SidebarSyncState(snapshot: snapshot, defaultEngine: self.defaultEngine, siteRules: self.siteRules.rules, canSyncSiteRules: ready))
+            openTabs?(OpenTabsSpace.project(snapshot, defaultEngine: self.defaultEngine))
         }
     }
 

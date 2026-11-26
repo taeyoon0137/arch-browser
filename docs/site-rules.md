@@ -82,7 +82,7 @@ A rule's site is a host and an optional path prefix.
 - Accepted: rules sync with the sidebar while sync is on, as a new record type, and stay local while it is off.
   - `SiteRule`, named by the rule's UUID, with `host`, `pathPrefix`, and `window` in `encryptedValues`, so CloudKit encrypts them end to end as it does pinned tabs' addresses. `persona` and `space` are references, which CloudKit cannot encrypt and which contain no names.
   - Merge units: the site (`host` with `pathPrefix`) and the destination (`persona` with `space` and `window`), each by its edit time (sync decision 3). The first sync on a Mac joins rules with the same site within the same Persona (sync decision 4).
-  - `SiteRule` is an additive record type in `schemaVersion` 3 (also used by folder tint). Deploy it to the Production schema before a build writes it (`docs/sync.md`, Schema versions).
+  - `SiteRule` is an additive record type in `schemaVersion` 4 (shared with other Macs' open tabs). Deploy it to the Production schema before a build writes it (`docs/sync.md`, Schema versions).
 - Alternative: rules stay on each Mac, like remembered permissions. Rules resemble pinned tabs more than permissions: they name sites the user chose and spaces that already sync.
 
 ## Hooks or a built-in table

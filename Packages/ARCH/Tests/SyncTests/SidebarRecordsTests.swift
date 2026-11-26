@@ -38,7 +38,7 @@ import Testing
                 "folder": .reference(ordinary.id.uuidString), "url": .text(saved.absoluteString), "title": .text("Saved title"),
                 "engine": .text("chromium"), "customTitle": .text("My tab"), "order": .number(1)])
         let item = try #require(byName[nested.id.uuidString])
-        #expect(item.schemaVersion == 3)
+        #expect(item.schemaVersion == 4)
         #expect(item[.tint] == nil)
         #expect(item[.parent] == .reference(ordinary.id.uuidString))
         #expect(item[.order] == .number(1))

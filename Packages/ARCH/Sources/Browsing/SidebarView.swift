@@ -137,6 +137,7 @@ struct SidebarView: View {
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, Self.bottomMargin)
+        .contextMenu { RemoteTabsToggle(session: session) }
         // Opening or closing the library by menu or shortcut releases it from any current swipe.
         .onChange(of: windowModel.isLibraryVisible) { isSwipingLibrary = false }
     }

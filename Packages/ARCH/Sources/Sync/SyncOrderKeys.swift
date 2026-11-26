@@ -22,7 +22,7 @@ public enum SyncOrderKeys {
             case .space, .favorite: parent = Self.reference(record[.persona])
             case .folder: parent = Self.reference(record[.parent]) ?? Self.reference(record[.space])
             case .tab: parent = Self.reference(record[.folder]) ?? Self.reference(record[.space])
-            case .setting, .siteRule: return nil
+            case .setting, .siteRule, .remoteTabs: return nil
             }
             self.recordType = record.recordType
             self.parent = parent

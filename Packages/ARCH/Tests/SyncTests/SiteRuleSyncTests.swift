@@ -16,7 +16,7 @@ import Testing
         let rule = SiteRule(host: "mail.example.test", pathPrefix: "/work", spaceID: space.id, personaID: persona.id, window: .newWindow, modifiedAt: now)
         let rows = try records(persona: persona, space: space, rules: [rule])
         let record = try #require(rows.first { $0.recordType == .siteRule })
-        #expect(record.schemaVersion == 3 && record[.order] == nil)
+        #expect(record.schemaVersion == 4 && record[.order] == nil)
         #expect(SyncOrderKeys.SiblingList(of: record) == nil)
         let cloud = SyncCloudKitRecords.ckRecord(from: record)
         for field in ["host", "pathPrefix", "window", "fieldModifiedAt"] {

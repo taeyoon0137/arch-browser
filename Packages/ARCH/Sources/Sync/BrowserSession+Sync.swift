@@ -15,6 +15,19 @@ import Foundation
     func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions)
     func applyFirstSidebarSync(_ state: SidebarSyncState, replacements: SidebarSyncReplacements)
     func saveNow() -> Result<Void, Error>
+    var openTabsSyncState: [OpenTabsSpace] { get }
+    var onOpenTabsSyncSave: (([OpenTabsSpace]) -> Void)? { get set }
+    var remoteTabGroups: [RemoteTabGroup] { get set }
+    var showRemoteTabs: Bool { get set }
+    var onShowRemoteTabsChange: ((Bool) -> Void)? { get set }
+}
+
+extension SyncedSidebar {
+    public var openTabsSyncState: [OpenTabsSpace] { [] }
+    public var onOpenTabsSyncSave: (([OpenTabsSpace]) -> Void)? { get { nil } set {} }
+    public var remoteTabGroups: [RemoteTabGroup] { get { [] } set {} }
+    public var showRemoteTabs: Bool { get { true } set {} }
+    public var onShowRemoteTabsChange: ((Bool) -> Void)? { get { nil } set {} }
 }
 
 extension BrowserSession: SyncedSidebar {}

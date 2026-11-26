@@ -317,7 +317,12 @@ struct SpaceTabsView: View {
     private func areaContent(_ items: [Item], pinned: Bool, emptyFolders: Set<UUID>, showsPinTarget: Bool, pinTargetIsSlot: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             rows(items, emptyFolders: emptyFolders)
-            if !pinned {
+            if pinned {
+                if showsPinTarget && !pinTargetIsSlot {
+                    Color.clear.frame(height: Self.emptyPinnedEndHeight + Self.rowSpacing)
+                }
+                RemoteTabsFolders(session: session, space: space)
+            } else {
                 NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
                     .background(frameReader(for: Self.openListEndID))
                     .padding(.bottom, Self.rowSpacing)
@@ -970,6 +975,8 @@ struct SpaceMenuItems: View {
             .disabled(!session.canDeletePersona(space.resolvedPersonaID))
         Button(localized("Merge Persona Into\u{2026}")) { windowModel.confirmMergePersona(ofSpace: space) }
             .disabled(session.personaMergeTargets(for: space.resolvedPersonaID).isEmpty)
+        Divider()
+        RemoteTabsToggle(session: session)
         PluginMenuSections(plugins: session.plugins(in: space.resolvedPersonaID), location: .spaceMenu) { windowModel.runPluginCommand($0, inSpace: space) }
     }
 }

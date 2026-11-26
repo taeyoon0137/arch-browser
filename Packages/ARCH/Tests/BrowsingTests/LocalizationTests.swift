@@ -17,5 +17,8 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Hide Sidebar"], "사이드바 가리기")
         XCTAssertEqual(strings["Open Link in New Tab"], "새 탭에서 링크 열기")
         XCTAssertEqual(strings["%lld of %lld"], "%1$lld/%2$lld")
+        XCTAssertEqual(strings["Show Tabs from Other Macs"], "다른 Mac의 탭 보기")
+        XCTAssertEqual(strings["Hide Tabs from Other Macs"], "다른 Mac의 탭 가리기")
+        XCTAssertEqual(strings["%@'s Tabs"], "%@의 탭")
     }
 }
