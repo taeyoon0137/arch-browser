@@ -29,4 +29,17 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(strings["Hide Tabs from Other Macs"], "다른 Mac의 탭 가리기")
         XCTAssertEqual(strings["%@'s Tabs"], "%@의 탭")
     }
+
+    func testLibraryHistoryHasKoreanForTabsSearchAndDeletion() throws {
+        let strings = try koreanStrings(of: "Browsing")
+        XCTAssertEqual(strings["Downloads"], "다운로드")
+        XCTAssertEqual(strings["History"], "방문 기록")
+        XCTAssertEqual(strings["Search History"], "방문 기록 검색")
+        XCTAssertEqual(strings["Clear History…"], "방문 기록 지우기…")
+        XCTAssertEqual(strings["Delete from History"], "방문 기록에서 삭제")
+        XCTAssertEqual(strings["The Last Hour"], "지난 1시간")
+        XCTAssertEqual(strings["Today"], "오늘")
+        XCTAssertEqual(strings["Yesterday"], "어제")
+        XCTAssertEqual(strings["All History"], "모든 방문 기록")
+    }
 }

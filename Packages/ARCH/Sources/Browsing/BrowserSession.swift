@@ -3038,7 +3038,7 @@ extension BrowserSession: @preconcurrency EngineBrowserContextDelegate {
 // MARK: Downloads
 
 extension BrowserSession {
-    /// Opening the library marks every finished download as seen, which clears the library button's count.
+    /// Showing the library's Downloads tab clears the library button's count.
     func markDownloadsSeen() {
         unseenDownloadIDs.removeAll()
     }
@@ -3122,7 +3122,7 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
         let wasFinished = entry.isFinished
         entry.refresh()
         downloadSummary.refresh(from: self.downloads)
-        if !wasFinished, entry.state == .completed, !windows.contains(where: \.isLibraryVisible) { unseenDownloadIDs.insert(entry.id) }
+        if !wasFinished, entry.state == .completed, !windows.contains(where: { $0.isLibraryVisible && $0.libraryTab == .downloads }) { unseenDownloadIDs.insert(entry.id) }
         if !wasFinished, entry.state == .completed { downloadNotifier.downloadDidFinish(entry) }
         closeDownloadPagesIfIdle()
     }

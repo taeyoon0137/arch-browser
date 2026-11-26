@@ -64,9 +64,21 @@ public enum BrowserWindowKind {
     @Published public var isSidebarVisible = true {
         didSet { if !isSidebarVisible { closeSidebarPanel() } }
     }
-    /// The library takes the place of the space pages in the sidebar: downloads first, then other tools. Opening it marks every finished download as seen.
+    /// The selected library tab. Each window keeps its choice; new windows and launches use the last saved choice.
+    @Published var libraryTab = LibraryTab(rawValue: UserDefaults.standard.string(forKey: LibraryTab.defaultsKey) ?? "") ?? .downloads {
+        didSet {
+            UserDefaults.standard.set(libraryTab.rawValue, forKey: LibraryTab.defaultsKey)
+            if isLibraryVisible && libraryTab == .downloads { session.markDownloadsSeen() }
+        }
+    }
+    /// Opening the library marks downloads as seen only when Downloads is selected.
     @Published public var isLibraryVisible = false {
-        didSet { if isLibraryVisible { session.markDownloadsSeen(); closeSidebarPanel() } }
+        didSet {
+            if isLibraryVisible {
+                if libraryTab == .downloads { session.markDownloadsSeen() }
+                closeSidebarPanel()
+            }
+        }
     }
     /// A plugin panel shown in place of the current space's tab list.
     @Published private(set) var sidebarPanel: SidebarPluginPanel?

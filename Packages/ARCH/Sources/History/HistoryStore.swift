@@ -4,7 +4,7 @@ import os
 import SQLite3
 
 /// A page visited in one Persona: its address, its title, and its visit count and latest visit time in that Persona.
-public struct HistoryEntry: Hashable, Identifiable {
+public struct HistoryEntry: Hashable, Identifiable, Sendable {
     public var id: URL { url }
     public let url: URL
     public let title: String
@@ -21,6 +21,8 @@ public struct HistoryEntry: Hashable, Identifiable {
 
 /// Safe to use from any thread: outside `init` and `deinit`, only blocks on `queue` touch the database. Every visit belongs to one Persona, by its UUID, and every read and removal names the Persona it covers.
 public final class HistoryStore: @unchecked Sendable {
+    /// Posted on the main queue after a write. The object is this store; `userInfo["persona"]` is the affected UUID, or absent when every Persona may have changed.
+    public static let didChange = Notification.Name("ARCHHistoryStoreDidChange")
     /// The pages an import writes in one transaction.
     static let importBatchSize = 1_000
     /// The schema version that `PRAGMA user_version` records: 1 since visits record their Persona.
@@ -73,8 +75,10 @@ public final class HistoryStore: @unchecked Sendable {
     /// Counts one visit in the Persona of the tab that made it, and preserves the stored title if the supplied title is empty.
     public func record(_ url: URL, title: String, persona: UUID) {
         queue.async {
-            self.execute("INSERT INTO visits (url, persona, title, visit_count, last_visit) VALUES (?1, ?4, ?2, 1, ?3) ON CONFLICT(url, persona) DO UPDATE SET visit_count = visit_count + 1, last_visit = excluded.last_visit, title = CASE WHEN excluded.title = '' THEN visits.title ELSE excluded.title END",
-                         bindings: [.text(url.absoluteString), .text(title), .double(Date().timeIntervalSince1970), .text(persona.uuidString)])
+            if self.execute("INSERT INTO visits (url, persona, title, visit_count, last_visit) VALUES (?1, ?4, ?2, 1, ?3) ON CONFLICT(url, persona) DO UPDATE SET visit_count = visit_count + 1, last_visit = excluded.last_visit, title = CASE WHEN excluded.title = '' THEN visits.title ELSE excluded.title END",
+                            bindings: [.text(url.absoluteString), .text(title), .double(Date().timeIntervalSince1970), .text(persona.uuidString)]) != nil {
+                self.notifyChange(in: persona)
+            }
         }
     }
 
@@ -107,6 +111,7 @@ public final class HistoryStore: @unchecked Sendable {
         let batch = pending.remaining.prefix(Self.importBatchSize)
         if let changedURLs = commit(batch, into: pending.persona) {
             pending.changedURLs.formUnion(changedURLs)
+            if !changedURLs.isEmpty { notifyChange(in: pending.persona) }
             pending.remaining = pending.remaining.dropFirst(batch.count)
             if !pending.remaining.isEmpty {
                 queue.async { self.importNextBatch(of: pending) }
@@ -168,6 +173,25 @@ public final class HistoryStore: @unchecked Sendable {
         "%" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_") + "%"
     }
 
+    /// Reads one page of title or address matches on the store's queue, newest first. Entries with equal visit times sort by address, so using the last entry as `before` skips none. A cursor still works after its row is removed; callers reload the first page when visits change.
+    public func entries(in persona: UUID, matching query: String = "", limit: Int, before cursor: HistoryEntry? = nil) async -> [HistoryEntry] {
+        guard limit > 0 else { return [] }
+        let pattern = Self.containing(query.trimmingCharacters(in: .whitespacesAndNewlines))
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                var sql = "SELECT url, title, visit_count, last_visit FROM visits WHERE persona = ?1 AND (url LIKE ?2 ESCAPE '\\' OR title LIKE ?2 ESCAPE '\\')"
+                var bindings: [Binding] = [.text(persona.uuidString), .text(pattern)]
+                if let cursor {
+                    sql += " AND (last_visit < ?3 OR (last_visit = ?3 AND url > ?4))"
+                    bindings += [.double(cursor.lastVisit.timeIntervalSince1970), .text(cursor.url.absoluteString)]
+                }
+                sql += " ORDER BY last_visit DESC, url ASC LIMIT ?\(bindings.count + 1)"
+                bindings.append(.integer(limit))
+                continuation.resume(returning: self.entries(sql, bindings: bindings))
+            }
+        }
+    }
+
     /// Passes the Persona's entries visited at or after `date`, newest first, to `completion` on the main queue. The read sees the changes asked for before it, waits for one import batch at most, and completes in the order of the calls.
     public func entries(since date: Date, in persona: UUID, completion: @escaping ([HistoryEntry]) -> Void) {
         queue.async {
@@ -187,6 +211,7 @@ public final class HistoryStore: @unchecked Sendable {
             }
             guard self.execute("COMMIT") != nil else { return self.rollBack() }
             self.removeFromRunningImports(into: persona) { addresses.contains($0.url.absoluteString) }
+            self.notifyChange(in: persona)
         }
     }
 
@@ -209,6 +234,7 @@ public final class HistoryStore: @unchecked Sendable {
                 guard let urls = removed[pending.persona] else { continue }
                 pending.remaining.removeAll { $0.lastVisit >= date || urls.contains($0.url.absoluteString) }
             }
+            self.notifyChange(in: persona)
         }
     }
 
@@ -221,6 +247,8 @@ public final class HistoryStore: @unchecked Sendable {
                                   bindings: [.text(source.uuidString), .text(target.uuidString)]) != nil,
                   self.execute("DELETE FROM visits WHERE persona = ?1", bindings: [.text(source.uuidString)]) != nil,
                   self.execute("COMMIT") != nil else { return self.rollBack() }
+            self.notifyChange(in: source)
+            self.notifyChange(in: target)
         }
     }
 
@@ -233,12 +261,19 @@ public final class HistoryStore: @unchecked Sendable {
                 guard self.execute("DELETE FROM visits") != nil else { return }
             }
             self.removeFromRunningImports(into: persona) { _ in true }
+            self.notifyChange(in: persona)
         }
     }
 
     /// Runs on `queue` after a removal: takes the pages `shouldRemove` accepts out of the batches that running imports into the Persona, or into any Persona for nil, have not written yet.
     private func removeFromRunningImports(into persona: UUID?, where shouldRemove: (HistoryEntry) -> Bool) {
         for pending in runningImports where persona == nil || pending.persona == persona { pending.remaining.removeAll(where: shouldRemove) }
+    }
+
+    private func notifyChange(in persona: UUID?) {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: Self.didChange, object: self, userInfo: persona.map { ["persona": $0] })
+        }
     }
 
     // MARK: SQLite

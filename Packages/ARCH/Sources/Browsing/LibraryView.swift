@@ -1,4 +1,4 @@
-// The bottom-left button opens the library and pushes the sidebar aside. It lists downloads at the top and other tools at the bottom. The button shows download progress while files download and a badge for the finished downloads the user has not seen.
+// The bottom-left button opens the library and pushes the sidebar aside. Downloads and history share the top of the panel, with other tools below. The button shows download progress and a badge for unseen finished downloads.
 import SwiftUI
 
 /// A library column with room for the window buttons. The library button stays in its sidebar position, under the pointer.
@@ -25,14 +25,29 @@ struct LibraryPanel: View {
     }
 }
 
-/// The library's contents beside the sidebar: the downloads list at the top and the tool rows below it.
+/// The library's two lists share one panel and keep the window's last selection.
 struct LibraryView: View {
     @ObservedObject var session: BrowserSession
+    @EnvironmentObject private var windowModel: BrowserWindowModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            DownloadsSectionView(session: session)
-                .frame(maxHeight: .infinity, alignment: .top)
+            Picker(localized("Library"), selection: $windowModel.libraryTab) {
+                Text("Downloads", bundle: .module).tag(LibraryTab.downloads)
+                Text("History", bundle: .module).tag(LibraryTab.history)
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .padding(.horizontal, 6)
+            Group {
+                if windowModel.libraryTab == .downloads {
+                    DownloadsSectionView(session: session)
+                } else if windowModel.isLibraryVisible {
+                    LibraryHistoryView(store: session.history, persona: windowModel.personaID)
+                        .id(windowModel.personaID)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
             Divider().padding(.horizontal, 10)
             VStack(spacing: 2) {
                 LibraryToolRow(symbol: "arrow.uturn.backward", title: localized("Reopen Last Closed Tab"), action: session.reopenLastClosedTab)

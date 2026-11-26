@@ -5240,6 +5240,166 @@
           }
         }
       }
+    },
+    "All History" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 방문 기록"
+          }
+        }
+      }
+    },
+    "Clear History" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록 지우기"
+          }
+        }
+      }
+    },
+    "Clear History…" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록 지우기…"
+          }
+        }
+      }
+    },
+    "Delete from History" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록에서 삭제"
+          }
+        }
+      }
+    },
+    "History" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록"
+          }
+        }
+      }
+    },
+    "Library" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "보관함"
+          }
+        }
+      }
+    },
+    "No History" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록 없음"
+          }
+        }
+      }
+    },
+    "No Results" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "결과 없음"
+          }
+        }
+      }
+    },
+    "Open in New Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 윈도우에서 열기"
+          }
+        }
+      }
+    },
+    "Search History" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방문 기록 검색"
+          }
+        }
+      }
+    },
+    "The Last Hour" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지난 1시간"
+          }
+        }
+      }
+    },
+    "This removes pages last visited in the selected range from history and address suggestions in %@. This cannot be undone." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 선택한 기간에 마지막으로 방문한 페이지를 방문 기록과 주소 제안에서 삭제합니다. 이 작업은 되돌릴 수 없습니다."
+          }
+        }
+      }
+    },
+    "This removes pages last visited in the selected range from history and address suggestions. This cannot be undone." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 기간에 마지막으로 방문한 페이지를 방문 기록과 주소 제안에서 삭제합니다. 이 작업은 되돌릴 수 없습니다."
+          }
+        }
+      }
+    },
+    "Time Range" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기간"
+          }
+        }
+      }
+    },
+    "Today" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘"
+          }
+        }
+      }
+    },
+    "Yesterday" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "어제"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
