@@ -112,6 +112,7 @@ public struct BrowserWindowView: View {
                 TabSwitcherView(session: session)
             }
         }
+        .overlay(alignment: .bottom) { SiteRuleToastView(window: windowModel) }
         .coordinateSpace(name: Self.coordinateSpace)
         .environmentObject(sidebarDrag)
         .environmentObject(windowModel)

@@ -81,6 +81,7 @@ public enum BrowserWindowKind {
     // MARK: State: what the user does in the window
 
     /// `nil` when the command palette is hidden.
+    @Published var siteRuleToast: SiteRuleToast?
     @Published public var commandPaletteMode: CommandPaletteMode?
     /// Counts palette openings and mode changes so each gets a fresh view.
     @Published public private(set) var commandPaletteGeneration = 0
@@ -300,7 +301,7 @@ public enum BrowserWindowKind {
         guard canShowPersonaSheet, session.canDeletePersona(id), let persona = Self.sheetName(ofPersona: id, space: space, among: session.personas), let nsWindow else { return }
         let texts = Self.deletePersonaTexts(persona: persona, spaceCount: session.spaces(in: id).count, favoriteCount: session.favorites(in: id).count,
                                             tabCount: session.tabs.filter { $0.personaID == id }.count,
-                                            downloadCount: session.downloads.count { $0.personaID == id && !$0.isFinished }, isSyncing: session.isSyncing)
+                                            downloadCount: session.downloads.count { $0.personaID == id && !$0.isFinished }, siteRuleCount: session.siteRules.rules.count { $0.personaID == id }, isSyncing: session.isSyncing)
         let alert = NSAlert()
         alert.messageText = texts.message
         alert.informativeText = texts.information
@@ -312,7 +313,7 @@ public enum BrowserWindowKind {
     }
 
     /// The Delete Persona sheet's question and explanation, for `persona` as `sheetName(ofPersona:space:among:)` names it and the counts of what goes. The explanation leaves out what the Persona has none of, and names one space, tab, or download without a number, as the Quit sheet names one download; every Persona has a space.
-    nonisolated static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int, isSyncing: Bool = false) -> (message: String, information: String) {
+    nonisolated static func deletePersonaTexts(persona: String, spaceCount: Int, favoriteCount: Int, tabCount: Int, downloadCount: Int, siteRuleCount: Int = 0, isSyncing: Bool = false) -> (message: String, information: String) {
         // Each sentence is whole in the string catalog, so that a translation can order its parts.
         let removed: String
         if tabCount == 0 {
@@ -337,6 +338,7 @@ public enum BrowserWindowKind {
         }
         let downloads = downloadCount == 0 ? "" : downloadCount == 1 ? " " + localized("Its download in progress stops.") : " " + localized("Its \(downloadCount) downloads in progress stop.")
         var information = removed + downloads + " " + localized("Arch removes its plugins, cookies, and website data from this Mac the next time it opens.")
+        if siteRuleCount > 0 { information += " " + localized("Its \(siteRuleCount) site rules are deleted too.") }
         if isSyncing { information += " " + localized("It is also deleted on your other Macs that sync with iCloud, which remove its cookies and website data too.") }
         return (localized("Delete \(persona)?"), information)
     }
@@ -745,7 +747,7 @@ public enum BrowserWindowKind {
     }
 
     /// Opens an internal page, navigates the selected tab, or opens a new tab for the submitted text.
-    public func submitCommandPalette(_ input: String) {
+    public func submitCommandPalette(_ input: String, bypassSiteRules: Bool = false) {
         defer {
             commandPaletteMode = nil
             focusPage()
@@ -753,6 +755,10 @@ public enum BrowserWindowKind {
         if let page = InternalPage(address: input) { return internalPage = page }
         guard let mode = commandPaletteMode, let url = BrowserSession.destination(forInput: input, siteSearch: session.siteSearch) else { return }
         internalPage = nil
+        if !bypassSiteRules, let destination = session.destination(forOpening: currentSpace, url: url) {
+            session.openRoutedTab(url: url, destination: destination, source: self, background: false)
+            return
+        }
         switch mode {
         case .editCurrent where selectedTab != nil: navigate(to: input)
         case .editCurrent, .newTab: openTab(url: url)

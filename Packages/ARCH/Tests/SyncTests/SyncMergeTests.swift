@@ -348,7 +348,8 @@ import Testing
         #expect(SyncRecordType.favorite.fields == [.persona, .url, .title, .order])
         #expect(SyncRecordType.tab.fields == [.persona, .space, .folder, .url, .title, .customTitle, .engine, .order])
         #expect(SyncRecordType.setting.fields == [.value])
-        #expect(SyncRecordType.allCases.map(\.rawValue) == ["Persona", "Space", "Folder", "Favorite", "Tab", "Setting"])
+        #expect(SyncRecordType.siteRule.fields == [.host, .pathPrefix, .persona, .space, .window])
+        #expect(SyncRecordType.allCases.map(\.rawValue) == ["Persona", "Space", "Folder", "Favorite", "Tab", "Setting", "SiteRule"])
     }
 
     @Test func eachTypeListsItsMergeUnits() {
@@ -359,6 +360,7 @@ import Testing
         #expect(SyncRecordType.favorite.fieldGroups == [[.url, .title]])
         #expect(SyncRecordType.tab.fieldGroups == [[.space, .folder, .order], [.url, .title]])
         #expect(SyncRecordType.setting.fieldGroups.isEmpty)
+        #expect(SyncRecordType.siteRule.fieldGroups == [[.host, .pathPrefix], [.persona, .space, .window]])
         for type in SyncRecordType.allCases {
             let groupedFields = type.fieldGroups.flatMap { $0 }
             #expect(Set(groupedFields).isSubset(of: type.fields), "\(type) groups only its own fields")

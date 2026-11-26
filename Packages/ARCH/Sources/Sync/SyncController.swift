@@ -365,7 +365,7 @@ import Foundation
         let base = bases
         // What this build cannot apply stays on the server as another build wrote it.
         let held = IncomingSidebarRecords.heldOut(server: base, local: records)
-        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) }
+        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) && (state.canSyncSiteRules || record.recordType != .siteRule) }
         let changes = SyncDiff.changes(local: records.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
         reconcile(changes, publish: publish ?? canSendRecords, includes: { $0.recordType != .setting })
     }
@@ -543,7 +543,14 @@ import Foundation
             // A defaults notification can still be waiting on the main queue.
             if !settings.changedKeys().isEmpty { compareSettings(publish: false) }
             let local = try SidebarRecords.records(from: sidebar.sidebarSyncState, foundAt: date)
-            let server = fetched.values.compactMap(SyncCloudKitRecords.syncRecord(from:))
+            // An earlier completed fetch may have delivered a rule before its destination.
+            // Retry it when later records arrive, without waiting for another launch.
+            for name in mirror.unapplied where fetched[name] == nil && !deletedNames.contains(name) {
+                guard let record = mirror.records[name], record.recordType == SyncRecordType.siteRule.rawValue else { continue }
+                fetched[name] = record
+                reapplying.insert(name)
+            }
+            let server = fetched.values.compactMap(SyncCloudKitRecords.syncRecord(from:)).filter { sidebar.sidebarSyncState.canSyncSiteRules || $0.recordType != .siteRule }
             if first {
                 let comparison = settings.comparison(mirror: base, pending: mirror.pendingSaves)
                 try applyFirst(local: local + comparison.records, server: server, date: date)
@@ -562,8 +569,12 @@ import Foundation
                 engine.remove([.saveRecord(key), .deleteRecord(key)])
             }
             for (key, row) in fetched { mirror.records[key] = row }
-            mirror.unapplied = IncomingSidebarRecords.heldOut(server: bases, local: [])
-                .union(mirror.records.compactMap { SyncCloudKitRecords.syncRecord(from: $0.value) == nil ? $0.key : nil })
+            mirror.unapplied = IncomingSidebarRecords.heldOut(server: bases, local: try SidebarRecords.records(from: sidebar.sidebarSyncState, foundAt: date))
+                .union(mirror.records.compactMap { entry in
+                    let unsupported = SyncCloudKitRecords.syncRecord(from: entry.value) == nil
+                    let unreadableRules = !sidebar.sidebarSyncState.canSyncSiteRules && entry.value.recordType == SyncRecordType.siteRule.rawValue
+                    return unsupported || unreadableRules ? entry.key : nil
+                })
             reapplying.removeAll()
             if mirror.records.isEmpty {
                 awaitingZoneSave = true
@@ -595,7 +606,7 @@ import Foundation
 
     /// Merges first-sync identities and applies the resulting sidebar and settings.
     private func applyFirst(local: [SyncRecord], server: [SyncRecord], date: Date) throws {
-        let held = IncomingSidebarRecords.heldOut(server: server, local: local)
+        let held = IncomingSidebarRecords.heldOut(server: server, local: local, deleted: deleted)
         let plan = try FirstSyncMerge.plan(local: local.filter { !held.contains($0.recordName) }, server: server.filter { !held.contains($0.recordName) },
                                            samePage: { $0.isSamePage(as: $1) })
         var replacements = SidebarSyncReplacements()
@@ -606,6 +617,7 @@ import Foundation
             case .folder: replacements.folders[old] = new
             case .tab: replacements.tabs[old] = new
             case .favorite: replacements.favorites[old] = new
+            case .siteRule: replacements.siteRules[old] = new
             case .persona, .setting: break
             }
         }
@@ -622,7 +634,8 @@ import Foundation
         // Only a changed local field takes an edit time from this Mac. Preserve the server's
         // times and order keys for unedited values before a three-way merge.
         let held = IncomingSidebarRecords.heldOut(server: base, local: local)
-        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) }
+        let canSyncSiteRules = sidebar.sidebarSyncState.canSyncSiteRules
+        let scope = { (record: SyncRecord) in record.recordType != .setting && !held.contains(record.recordName) && (canSyncSiteRules || record.recordType != .siteRule) }
         let differences = SyncDiff.changes(local: local.filter(scope), scope: scope, mirror: base, pending: mirror.pendingSaves, foundAt: date)
         // A name listed twice counts by its first copy, as in the comparison itself.
         let changed = Dictionary(differences.saves.map { ($0.recordName, $0) }, uniquingKeysWith: { first, _ in first })

@@ -68,6 +68,9 @@ import Foundation
     @Published public private(set) var hasCrashed = false
     /// How many times this tab's page process quit, kept for the tab close log.
     public private(set) var crashCount = 0
+    /// Rules decide explicit new-tab links before the source engine creates their pages.
+    var routeNewTabLink: ((EngineNavigationAction) -> EngineNavigationPolicy)?
+    var pendingSiteRuleOpenings: [(url: URL, disposition: EngineNavigationDisposition, destination: SiteRuleDestination, sourceWindowID: UUID?)] = []
     /// The session sets this callback so popups from this tab open as new tabs, with the address the page opened when the engine reports one.
     var openNewTab: ((any EngineWebContents, URL?, EngineNavigationDisposition) -> Void)?
     /// The session sets this callback to put in the tab's place a web contents that the engine made to load a page the tab's web contents cannot, as WebKit does for a web extension's pages.
@@ -392,6 +395,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     }
 
     public func webContents(_ webContents: any EngineWebContents, didCreateNewWebContents newWebContents: any EngineWebContents, targetURL: URL?, disposition: EngineNavigationDisposition) {
+        guard webContents === self.webContents else { return }
         openNewTab?(newWebContents, targetURL, disposition)
     }
     public func webContents(_ webContents: any EngineWebContents, didCreateReplacement replacement: any EngineWebContents) {
@@ -434,6 +438,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
 
     /// Swaps in another web contents: one from another engine, one that the engine made to load a page the old one cannot, or the page of a tab that had none. The old one stops reporting to the tab before the session closes it, and the tab keeps its title and icon until the new page reports its own, and its address unless the new web contents already has one, which it may have set before it reported to the tab.
     func replaceWebContents(with replacement: any EngineWebContents) {
+        pendingSiteRuleOpenings.removeAll()
         webContents.uiDelegate = nil
         webContents.navigationDelegate = nil
         webContents.pageScriptDelegate = nil
@@ -695,11 +700,12 @@ extension Tab: @preconcurrency EnginePageScriptDelegate {
 extension Tab: @preconcurrency EngineWebContentsNavigationDelegate {
     /// An agent's tab loads each address in its main frame, and each redirect hop, only once the agent monitor allows it (rules P13 and P16), whoever started the navigation; a link or window that opens elsewhere is asked about as a popup, not as a hop of the tab's navigation. A web or file link clicked with Command or the middle button goes back to the engine, which opens it in a new web contents with the page's referrer and reports it as the page's new tab (`openNewTab`), on both engines; an agent's tab opens none. A Shift-clicked web link opens a preview after the engine's policy callback returns.
     public func webContents(_ webContents: any EngineWebContents, decidePolicyFor action: EngineNavigationAction) -> EngineNavigationPolicy {
+        guard webContents === self.webContents else { return .cancel }
         let kind: AgentLoadKind = action.disposition != .currentTab ? .popup : action.isRedirect ? .redirect : .navigation
         if let owner = agentOwnerID, agentMonitor?.agentTab(self, owner: owner, mayLoad: action.url, kind: kind) == false { return .cancel }
         if action.opensLinkInNewTab, action.isUserInitiated, let scheme = action.url.scheme?.lowercased(),
            ["http", "https", "file"].contains(scheme), openNewTab != nil {
-            return agentOwnerID == nil ? .openLinkInNewTab : .cancel
+            return agentOwnerID == nil ? (routeNewTabLink?(action) ?? .openLinkInNewTab) : .cancel
         }
         guard action.disposition == .newWindow, action.isUserInitiated, let previewLink,
               let scheme = action.url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .allow }

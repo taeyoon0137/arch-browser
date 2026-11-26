@@ -46,6 +46,11 @@ public enum SidebarRecords {
             fields["customTitle"] = tab.customTitle.map(SyncValue.text)
             append(.tab, tab.id.uuidString, fields)
         }
+        for rule in state.siteRules where state.canSyncSiteRules {
+            append(.siteRule, rule.id.uuidString, ["host": .text(rule.host), "pathPrefix": .text(rule.pathPrefix),
+                "persona": .reference(personaName(rule.personaID)), "space": .reference(rule.spaceID.uuidString),
+                "window": .text(rule.window.rawValue)])
+        }
         return records
     }
 

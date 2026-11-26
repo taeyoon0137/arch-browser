@@ -9,6 +9,7 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
     case favorite = "Favorite"
     case tab = "Tab"
     case setting = "Setting"
+    case siteRule = "SiteRule"
 
     /// The fields this build reads and writes for the type. Any other field in a record came from a newer build, or from an older build, as a removed live folder's `live` does, and this build keeps it unchanged (`docs/sync.md`, Schema versions).
     public var fields: Set<SyncField> {
@@ -19,6 +20,7 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
         case .favorite: [.persona, .url, .title, .order]
         case .tab: [.persona, .space, .folder, .url, .title, .customTitle, .engine, .order]
         case .setting: [.value]
+        case .siteRule: [.host, .pathPrefix, .persona, .space, .window]
         }
     }
 
@@ -28,6 +30,7 @@ public enum SyncRecordType: String, CaseIterable, Hashable, Sendable {
         case .folder: [[.space, .parent, .order]]
         case .favorite: [[.url, .title]]
         case .tab: [[.space, .folder, .order], [.url, .title]]
+        case .siteRule: [[.host, .pathPrefix], [.persona, .space, .window]]
         case .persona, .space, .setting: []
         }
     }
@@ -49,6 +52,9 @@ public enum SyncField: String, CaseIterable, Hashable, Sendable {
     case engine
     case order
     case value
+    case host
+    case pathPrefix
+    case window
 }
 
 /// A field's value.

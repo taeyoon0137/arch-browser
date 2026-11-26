@@ -78,7 +78,7 @@ public enum FirstSyncMerge {
             }
             level = next
         }
-        for record in ordered where record.recordType == .favorite || record.recordType == .tab { match(record) }
+        for record in ordered where record.recordType == .favorite || record.recordType == .tab || record.recordType == .siteRule { match(record) }
 
         var apply = serverByName
         var upload: [SyncRecord] = []
@@ -111,6 +111,7 @@ public enum FirstSyncMerge {
         case folder(persona: String, space: String, parent: SyncValue?, name: String)
         case favorite(persona: String, address: String)
         case tab(persona: String, space: String, folder: SyncValue?)
+        case siteRule(persona: String, host: String, pathPrefix: String)
     }
 
     /// Builds a matching key for a space, folder, favorite, or tab with valid parent fields.
@@ -130,6 +131,9 @@ public enum FirstSyncMerge {
         case .tab:
             guard case .reference(let space) = record[.space], isOptionalReference(record[.folder]) else { return nil }
             return .tab(persona: persona, space: space, folder: record[.folder])
+        case .siteRule:
+            guard case .text(let host) = record[.host], case .text(let prefix) = record[.pathPrefix] else { return nil }
+            return .siteRule(persona: persona, host: host, pathPrefix: prefix)
         case .persona, .setting:
             return nil
         }

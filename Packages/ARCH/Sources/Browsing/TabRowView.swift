@@ -119,6 +119,7 @@ struct TabRowView: View {
             .disabled(!windowModel.canTogglePictureInPicture(tab))
         Divider()
         TabFolderItems(session: session, windowModel: windowModel, tab: tab)
+        SiteRuleMenu(session: session, tab: tab)
         Divider()
         // Closing a pinned tab unloads it; Delete Tab takes it out of the sidebar into the closed list (bookmark rule 4).
         Button(localized("Close Tab")) { session.requestCloseTab(tab) }

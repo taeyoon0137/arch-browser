@@ -231,7 +231,7 @@ import Terminal
         while !pendingURLs.isEmpty {
             let batch = pendingURLs
             pendingURLs.removeAll()
-            batch.forEach { session.openTab(url: $0) }
+            batch.forEach { session.openExternalTab(url: $0) }
         }
         acceptsRunningLinks = true
         NSApp.activate(ignoringOtherApps: true)
@@ -254,7 +254,7 @@ import Terminal
             return
         }
         frontSidebarTarget()
-        urls.forEach { session.openTab(url: $0) }
+        urls.forEach { session.openExternalTab(url: $0) }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -520,6 +520,8 @@ import Terminal
         spaceMoveMenu.delegate = self
         self.spaceMoveMenu = spaceMoveMenu
         tabMenu.addItem(submenu(spaceMoveMenu, title: localized("Move Tab to Space")))
+        let siteRulesMenu = SiteRulesMenu(session: session)
+        tabMenu.addItem(submenu(siteRulesMenu, title: siteRulesMenu.title))
         tabMenu.addItem(.separator())
         for number in 1...8 {
             tabMenu.addItem(withTitle: localized("Select Tab \(number)"), action: #selector(selectTab(_:)), keyEquivalent: String(number)).tag = number

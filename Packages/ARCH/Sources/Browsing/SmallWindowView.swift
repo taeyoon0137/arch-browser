@@ -38,6 +38,7 @@ struct SmallWindowView: View {
             }
             CommandPaletteLayer(session: session)
         }
+        .overlay(alignment: .bottom) { SiteRuleToastView(window: windowModel) }
         .coordinateSpace(name: BrowserWindowView.coordinateSpace)
         .environmentObject(windowModel)
         .background(SpaceBackgroundView())

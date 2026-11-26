@@ -50,20 +50,27 @@ public struct SidebarSyncState: Equatable {
     public let folders: [Folder]
     public let favorites: [Favorite]
     public let pinnedTabs: [PinnedTab]
+    public let siteRules: [SiteRule]
+    /// False while this build cannot read the local rules file or a capture lacks their new destination.
+    public let canSyncSiteRules: Bool
 
-    public init(personas: [Persona], spaces: [Space], folders: [Folder], favorites: [Favorite], pinnedTabs: [PinnedTab]) {
+    public init(personas: [Persona], spaces: [Space], folders: [Folder], favorites: [Favorite], pinnedTabs: [PinnedTab], siteRules: [SiteRule] = [], canSyncSiteRules: Bool = true) {
         self.personas = personas
         self.spaces = spaces
         self.folders = folders
         self.favorites = favorites
         self.pinnedTabs = pinnedTabs
+        self.siteRules = siteRules
+        self.canSyncSiteRules = canSyncSiteRules
     }
 
     /// Uses the captured session after migration or a successful save. A folder can only enter the
     /// result through its own space and a pinned ancestor at every level. A loaded session
     /// holds each ID once (`SessionSnapshot.normalized()`); an item that a snapshot lists twice still
     /// enters once, as its first copy (`docs/sync.md`, Mapping the session store to records).
-    init(snapshot: SessionSnapshot, defaultEngine: EngineKind) {
+    init(snapshot: SessionSnapshot, defaultEngine: EngineKind, siteRules: [SiteRule] = [], canSyncSiteRules: Bool = true) {
+        self.siteRules = Self.firstCopies(siteRules)
+        self.canSyncSiteRules = canSyncSiteRules
         personas = Self.firstCopies(snapshot.personas ?? [])
         spaces = Self.firstCopies(snapshot.spaces)
         favorites = Self.firstCopies(snapshot.favorites)
@@ -94,7 +101,7 @@ public struct SidebarSyncState: Equatable {
     /// The state with each ID once in each list, as the first copy has it. Applying it never meets an ID twice, which a dictionary keyed by ID would trap on.
     public var withFirstCopies: SidebarSyncState {
         SidebarSyncState(personas: Self.firstCopies(personas), spaces: Self.firstCopies(spaces), folders: Self.firstCopies(folders),
-                         favorites: Self.firstCopies(favorites), pinnedTabs: Self.firstCopies(pinnedTabs))
+                         favorites: Self.firstCopies(favorites), pinnedTabs: Self.firstCopies(pinnedTabs), siteRules: Self.firstCopies(siteRules), canSyncSiteRules: canSyncSiteRules)
     }
 
     /// `items` without each item whose ID an earlier item has.
@@ -111,6 +118,7 @@ public struct SidebarSyncDeletions {
     public var folders: Set<UUID> = []
     public var favorites: Set<UUID> = []
     public var tabs: Set<UUID> = []
+    public var siteRules: Set<UUID> = []
 
     public init() {}
 }
@@ -122,5 +130,6 @@ public struct SidebarSyncReplacements {
     public var folders: [UUID: UUID] = [:]
     public var favorites: [UUID: UUID] = [:]
     public var tabs: [UUID: UUID] = [:]
+    public var siteRules: [UUID: UUID] = [:]
     public init() {}
 }

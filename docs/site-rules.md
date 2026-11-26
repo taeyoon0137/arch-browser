@@ -1,6 +1,6 @@
 # Site rules design
 
-Status: design awaiting the user's approval (queue row IV.28 in `docs/plan.md`, feature row 74 in `docs/features.md`). Nothing here is built. After approval, implementation rows replace IV.28.
+Status: the user accepted all decisions below on November 24, including the routing toast and Undo. Phase 1 is implemented for feature row 74 in `docs/features.md`. Production sync schema deployment and checks in the running app are pending.
 
 A site rule opens a site's pages in a chosen "Persona / Space". A link to `mail.example.com` from another app then opens in "Work / Mail" with the Work Persona's cookies, regardless of where the user was when they clicked it. The rules in `docs/windows-personas.md` apply unless stated otherwise here: a tab's Persona is fixed when the tab is created (Persona rule 3), and the interface names a Persona as "Persona / Space" (Persona rule 7).
 
@@ -19,7 +19,7 @@ Terms: a "rule" is one row of the table; its "site" is a host with an optional p
 | Opening | Today | With a matching rule | Recommendation |
 |---|---|---|---|
 | A link from another app, an `open location` script, or a link that waited for launch (`AppDelegate.application(_:open:)`) | A small window in the last main window's space while Arch is in the background, otherwise a new tab in the sidebar target's current space | The tab is created in the destination: a small window whose tab belongs to the destination space, or a new tab there | Apply. This is the main case |
-| A link the user opens in a new tab from a page: Command-click, middle-click, Command-Shift-click, and Open Link in New Tab in the page's context menu (`Tab.webContents(_:decidePolicyFor:)` returning `.openLinkInNewTab`, then `openNewTab`) | A new tab in the page's space and Persona, with the page as opener and referrer | Same Persona, other space: the engine's new web contents joins the destination space, keeping opener and referrer. Other Persona: the policy returns `.cancel`, and the session opens the address in new web contents in the destination Persona, with no opener and no referrer | Apply |
+| A link the user opens in a new tab from a page: Command-click, middle-click, Command-Shift-click, and Open Link in New Tab in the page's context menu (`Tab.webContents(_:decidePolicyFor:)` returning `.openLinkInNewTab`, then `openNewTab`) | A new tab in the page's space and Persona, with the page as opener and referrer | Same Persona, other space: the engine's new web contents joins the destination space, keeping opener and referrer. The page context menu retains its existing fresh request without an engine referrer; its tab keeps the app-level opener. Other Persona: the policy returns `.cancel`, and the session opens the address in new web contents in the destination Persona, with no opener and no referrer | Apply |
 | An address typed in the palette for a new tab (⌘T) or with no tab selected | A new tab in the window's current space | A new tab in the destination | Apply |
 | An address typed over the current tab (⌘L, `CommandPaletteMode.editCurrent`) | The current tab navigates | The current tab stays unchanged, and a new tab opens in the destination. The palette's address row says "Opens in Work / Mail" in secondary text, and Option-Return opens it in the current tab instead | Apply, with the hint and the override |
 | A link clicked without a modifier that opens a new tab (`target="_blank"`), and `window.open` | The engine creates the new web contents in the page's Persona, with an opener, so sign-in popups can report back (row 48) | Unchanged in phase 1 | Do not apply in phase 1. User clicks on `target="_blank"` links can follow in phase 2, when the engines report whether the new page would get an opener; that needs a new member on `EngineNavigationAction`, added only then |
@@ -27,7 +27,7 @@ Terms: a "rule" is one row of the table; its "site" is a host with an optional p
 | Favorites, pinned tabs, the Bookmarks menu, source folder items, restored tabs, synced pins, imports, and links dropped on the sidebar | Their own place | Unchanged | Never apply: each belongs to a place the user already chose |
 | Previews (Shift-click), agent tabs, hook run tabs, plugins' and extensions' `tabs.create`, and `arch-cli` | Their own rules | Unchanged | Never apply. Agent tabs stay in their Persona and folder (`docs/agents.md`), and code never routes a tab across Personas |
 
-A rule changes nothing if the opening is already in the destination space.
+A rule changes nothing if the opening is already in the destination space. When it changes the user’s context, the source window shows "Opened in Persona / Space" with Undo. When no main window is open, a routed small window shows the toast itself. The toast fades after a few seconds. Undo moves the tab to the original space and selects it, recreating it in the original Persona’s profile when necessary, without applying the rule again. Background openings show the same toast without switching windows or spaces.
 
 ## Matching
 
@@ -79,10 +79,10 @@ A rule's site is a host and an optional path prefix.
 
 ## Sync
 
-- Recommendation: rules sync with the sidebar while sync is on, as a new record type, and stay local while it is off.
+- Accepted: rules sync with the sidebar while sync is on, as a new record type, and stay local while it is off.
   - `SiteRule`, named by the rule's UUID, with `host`, `pathPrefix`, and `window` in `encryptedValues`, so CloudKit encrypts them end to end as it does pinned tabs' addresses. `persona` and `space` are references, which CloudKit cannot encrypt and which contain no names.
   - Merge units: the site (`host` with `pathPrefix`) and the destination (`persona` with `space` and `window`), each by its edit time (sync decision 3). The first sync on a Mac joins rules with the same site within the same Persona (sync decision 4).
-  - A new record type is additive: `schemaVersion` 3, deployed to the Production schema before a build writes it (`docs/sync.md`, Schema versions).
+  - `SiteRule` is an additive record type in `schemaVersion` 3 (also used by folder tint). Deploy it to the Production schema before a build writes it (`docs/sync.md`, Schema versions).
 - Alternative: rules stay on each Mac, like remembered permissions. Rules resemble pinned tabs more than permissions: they name sites the user chose and spaces that already sync.
 
 ## Hooks or a built-in table
@@ -97,7 +97,7 @@ A rule's site is a host and an optional path prefix.
 | Sync | Can sync, end to end encrypted | Hooks never sync (hook decision 8) |
 | Flexibility | Host, subdomains, and one path prefix | Any logic, including an agent |
 
-Recommendation: the built-in table. Hooks cannot meet principle 1 because they see a tab only after it exists. A synchronous decision hook would put a script runtime and a timeout in front of every link.
+Accepted: the built-in table. Hooks cannot meet principle 1 because they see a tab only after it exists. A synchronous decision hook would put a script runtime and a timeout in front of every link.
 
 Hooks may still extend it:
 
@@ -122,30 +122,33 @@ Hooks may still extend it:
 
 - `BrowsingTests` (`SiteRuleSetTests`): host and subdomain matching, IP addresses and `localhost` matching only themselves, ports ignored, prefixes at segment boundaries (`/work` against `/work`, `/work/`, `/work/inbox`, and `/workshop`), case-sensitive paths, query and fragment ignored, non-web schemes refused, specificity by labels then prefix length, and duplicate sites refused.
 - `BrowsingTests` (`SiteRuleRoutingTests`, on fake web contents): a link from another app opening in the destination space as a tab and, in the background, as a small window of that space; a Command-click into the same Persona keeping opener and referrer; one into another Persona cancelling the engine's policy and opening new web contents in that Persona without an opener; a background opening leaving every window's space unchanged; In a New Window; typed addresses in both palette modes, with Option-Return navigating the current tab; `target="_blank"`, `window.open`, same-tab navigation, redirects, favorites, pinned tabs, previews, agent tabs, and plugins' tabs never routed; an opening already in the destination unchanged.
+- `BrowsingTests` (`SiteRuleRoutingTests`): routing toast only for a different context, background toast without switching, Undo returning and selecting the tab in its original space, cross-Persona Undo recreating its original profile, and expired or closed-tab Undo doing nothing.
 - `BrowsingTests` (`SiteRuleStoreTests`): reading and writing the file with mode 0600, preserving a later version without writing to it, a deleted space falling back to the Persona's preferred space and marked, a deleted Persona deleting its rules, a Persona without a profile getting the stand-in.
 - `PreferencesTests`: the table's rows named "Persona / Space", or by space alone with one Persona, the duplicate refusal offering to edit the first rule, and the popover's picker adding, changing, and removing the tab host's rule.
 - `SyncTests`: the `SiteRule` record with its encrypted fields and plain references, the two merge units, the first-sync join, and a rule held until its space arrives.
 - Bundle checks, added to the regression checklist in `docs/plan.md` as each step is built: a link from Terminal (`open https://…`) and from Mail with Arch in front and in the background on both engines; a Command-click into another Persona that loads signed out there while the source tab keeps its sign-in; Always Open This Site In ▸ and Move This Tab.
 
-## Build order after approval
+## Build order
 
 1. `SiteRule`, `SiteRuleSet`, and `SiteRuleStore`, with `SiteRuleSetTests` and `SiteRuleStoreTests`.
 2. Routing of links from other apps and typed addresses, with the palette's hint and Option-Return.
 3. Routing of links opened in new tabs from a page, across spaces and Personas.
 4. Settings ▸ Websites ▸ Where Sites Open, the popover group, and Always Open This Site In ▸ in the menus and the palette.
-5. Sync of `SiteRule` records, after the Production schema is deployed (a user step).
+5. Sync of `SiteRule` records is built. Deploy the Production schema before a build writes these records (a user step).
 6. Later, on request: `target="_blank"` clicks with the engine member, and the `siteRules` hook permission.
 
-## Open decisions
+## Accepted decisions
 
-1. Which openings rules apply to. Recommendation: links from other apps, links opened in new tabs from a page, and typed addresses, never same-tab navigation, favorites, pinned tabs, agents, or code.
-2. A typed address over the current tab. Recommendation: open it in a new tab in the destination, with the palette's hint and Option-Return to stay in the current tab.
-3. `target="_blank"` links and `window.open`. Recommendation: unchanged in phase 1; user clicks on `target="_blank"` links later, once the engines report the opener, and `window.open` never, since sign-in popups need their opener.
-4. Matching. Recommendation: host with its subdomains plus one optional path prefix; no wildcards or regular expressions.
-5. Precedence. Recommendation: most specific wins (host labels, then prefix length), with duplicate sites refused, so the table needs no order.
-6. Destination. Recommendation: one "Persona / Space", with In Its Space (default) or In a New Window; no "any space of a Persona" in phase 1.
-7. Background openings. Recommendation: a Command-click joins the destination space unselected and unread, and no window switches.
-8. A deleted destination space. Recommendation: keep the rule, open in its Persona's preferred space, and mark it in Settings; delete rules with their Persona.
-9. Where rules are edited. Recommendation: a Where Sites Open group in Settings ▸ Websites, Open This Site In in the site settings popover, and Always Open This Site In ▸ in the tab menus and the palette; choosing a rule never moves an open tab automatically.
-10. Sync. Recommendation: sync rules with the sidebar as end-to-end encrypted `SiteRule` records while sync is on; local otherwise.
-11. Hooks or a built-in table. Recommendation: the built-in table, since only it decides before the first request; hooks see routed tabs through `tabOpened` now and may propose rules through a `siteRules` permission later.
+1. Which openings rules apply to. Links from other apps, links opened in new tabs from a page, and typed addresses, never same-tab navigation, favorites, pinned tabs, agents, or code.
+2. A typed address over the current tab. Open it in a new tab in the destination, with the palette's hint and Option-Return to stay in the current tab.
+3. `target="_blank"` links and `window.open`. Unchanged in phase 1; user clicks on `target="_blank"` links later, once the engines report the opener, and `window.open` never, since sign-in popups need their opener.
+4. Matching. Host with its subdomains plus one optional path prefix; no wildcards or regular expressions.
+5. Precedence. Most specific wins (host labels, then prefix length), with duplicate sites refused, so the table needs no order.
+6. Destination. One "Persona / Space", with In Its Space (default) or In a New Window; no "any space of a Persona" in phase 1.
+7. Background openings. A Command-click joins the destination space unselected and unread, and no window switches.
+8. A deleted destination space. Keep the rule, open in its Persona's preferred space, and mark it in Settings; delete rules with their Persona.
+9. Where rules are edited. A Where Sites Open group in Settings ▸ Websites, Open This Site In in the site settings popover, and Always Open This Site In ▸ in the tab menus and the palette; choosing a rule never moves an open tab automatically.
+10. Sync. Sync rules with the sidebar as end-to-end encrypted `SiteRule` records while sync is on; local otherwise.
+11. Hooks or a built-in table. The built-in table, since only it decides before the first request; hooks see routed tabs through `tabOpened` now and may propose rules through a `siteRules` permission later.
+
+12. Routing feedback and Undo. When a rule opens a tab outside the user’s current space or Persona, show a toast in the source window, such as "Opened in Work / Mail", with Undo. A background Command-click shows the toast without switching windows or spaces. Openings that stay in the current space show no toast. When no main window is open, a routed small window shows the toast itself. The toast fades after a few seconds. Undo returns the tab to the space the user was browsing and selects it; across Personas it recreates the tab in the original Persona’s profile through the existing tab-move behavior. Undo does not run the rule again.

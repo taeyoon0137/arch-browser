@@ -33,6 +33,7 @@ struct CommandPaletteView: View {
     /// The row that Up and Down selected. Its identity selects a matching row on redraw. Nil, or a row that has left the list, selects the first row; typing selects it again.
     @State private var selectedRow: PaletteItem?
     @State private var argumentCommand: Attributed<PluginCommand>?
+    @State private var resultsHeight: CGFloat = 0
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
@@ -97,6 +98,11 @@ struct CommandPaletteView: View {
         return Array(session.spaceMoveCommands(matching: text, forTab: tab).prefix(5))
     }
 
+    private var siteRuleCommands: [SiteRuleCommand] {
+        guard argumentCommand == nil, !windowModel.isSelectedPageCovered, let tab = windowModel.selectedTab else { return [] }
+        return session.siteRuleCommands(matching: text, forTab: tab)
+    }
+
     /// The Web Store rows for the text and the selected tab's page, which no internal page or preview panel covers, while the app shell can start a store install.
     private var webStoreRows: PaletteWebStoreRows {
         guard session.installFromWebStore != nil else { return PaletteWebStoreRows() }
@@ -148,6 +154,7 @@ struct CommandPaletteView: View {
         items += pluginCommands.map(PaletteItem.command)
         if offersAskAboutPage { items.append(.askAboutPage) }
         items += spaceMoveCommands.map(PaletteItem.moveTab)
+        items += siteRuleCommands.map(PaletteItem.siteRule)
         if let id = storeRows.pageExtension { items.append(.pageStore(id)) }
         items += matchingTabs.map(PaletteItem.tab)
         items += historySuggestions.map(PaletteItem.history)
@@ -164,26 +171,26 @@ struct CommandPaletteView: View {
     }
 
     /// Return runs the selected row while the results show, and otherwise acts on the text as before.
-    private func submit(in items: [PaletteItem]) {
+    private func submit(in items: [PaletteItem], bypassSiteRules: Bool = false) {
         if let argumentCommand {
             windowModel.dismissCommandPalette()
             windowModel.runPluginCommand(argumentCommand.ref, source: .palette, argument: text)
             return
         }
-        guard showsResults else { return windowModel.submitCommandPalette(text) }
+        guard showsResults else { return windowModel.submitCommandPalette(text, bypassSiteRules: bypassSiteRules) }
         // Keep the reviewed document when Return runs a highlighted Ask Agent row after a redraw.
         if case .askAgent(let offer) = selectedRow, offer.task == text.trimmingCharacters(in: .whitespacesAndNewlines) {
             perform(.askAgent(offer))
             return
         }
-        perform(items[selectedIndex(in: items)])
+        perform(items[selectedIndex(in: items)], bypassSiteRules: bypassSiteRules)
     }
 
     /// Runs a row, on a click or on Return while it is selected.
-    private func perform(_ row: PaletteItem) {
+    private func perform(_ row: PaletteItem, bypassSiteRules: Bool = false) {
         switch row {
         case .primary:
-            windowModel.submitCommandPalette(text)
+            windowModel.submitCommandPalette(text, bypassSiteRules: bypassSiteRules)
         case .typedStore(let id):
             installFromWebStore(id, fromPage: false)
         case .askAgent(let offer):
@@ -208,20 +215,24 @@ struct CommandPaletteView: View {
             // The window shows the tab's new space with the tab selected, as the menus' moves do.
             windowModel.dismissCommandPalette()
             if let tab = windowModel.selectedTab { session.moveTab(tab.id, toSpace: command.space.id, windowsFollow: false, activating: windowModel) }
+        case .siteRule(let command):
+            let url = windowModel.selectedTab?.url
+            windowModel.dismissCommandPalette()
+            if let url { session.setSiteRuleFromMenu(for: url, destination: command.space) }
         case .pageStore(let id):
             installFromWebStore(id, fromPage: true)
         case .tab(let tab):
             windowModel.selectTab(tab.id)
             windowModel.dismissCommandPalette()
         case .history(let entry):
-            windowModel.submitCommandPalette(entry.url.absoluteString)
+            windowModel.submitCommandPalette(entry.url.absoluteString, bypassSiteRules: bypassSiteRules)
         }
     }
 
     @ViewBuilder private func rowView(for row: PaletteItem, isSelected: Bool) -> some View {
         switch row {
         case .primary:
-            PaletteRow(symbol: isSelected ? "arrow.turn.down.left" : actionSymbol, title: actionLabel, isPrimary: true, isSelected: isSelected)
+            PaletteRow(symbol: isSelected ? "arrow.turn.down.left" : actionSymbol, title: actionLabel, subtitle: windowModel.siteRuleHint(for: text), isPrimary: true, isSelected: isSelected)
         case .typedStore:
             PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.typedTitle, isSelected: isSelected)
         case .askAgent(let offer):
@@ -234,6 +245,9 @@ struct CommandPaletteView: View {
             PaletteRow(symbol: "sparkles", title: localized("Ask About This Page\u{2026}"), isSelected: isSelected)
         case .moveTab(let command):
             PaletteRow(symbol: command.space.symbol, title: command.title, isSelected: isSelected)
+        case .siteRule(let command):
+            PaletteRow(symbol: command.space.symbol, title: command.title,
+                       subtitle: windowModel.selectedTab?.url.flatMap { session.quickRuleNote(for: $0) }, isSelected: isSelected)
         case .pageStore:
             PaletteRow(symbol: "puzzlepiece.extension", title: PaletteWebStoreRows.pageTitle, isSelected: isSelected)
         case .tab(let tab):
@@ -245,53 +259,73 @@ struct CommandPaletteView: View {
         }
     }
 
-    var body: some View {
-        let items: [PaletteItem] = showsResults ? rows : [.primary]
-        VStack(spacing: Self.surfaceSpacing) {
-            // The symbol's column and the text start line up with the rows' below.
-            HStack(spacing: 14) {
-                Image(systemName: mode == .newTab ? "plus" : "magnifyingglass")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-                    .accessibilityHidden(true)
-                if let argumentCommand {
-                    Text(argumentCommand.item.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .padding(6)
-                        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-                }
-                TextField(argumentCommand == nil ? (mode == .newTab ? localized("Search or enter address for a new tab") : localized("Search or enter address")) : localized("Command argument"), text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 22))
-                    .focused($isFocused)
-                    .onSubmit { submit(in: items) }
-                    .onExitCommand { windowModel.dismissCommandPalette() }
-            }
-            .padding(.horizontal, 22)
-            .frame(height: Self.fieldHeight)
-            .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous)))
-            .background(PaletteArrowKeys(isActive: isFocused && showsResults && !isLeaving && !isWarmUp, move: { moveSelection(by: $0, in: items) }))
-            if showsResults {
-                let selected = selectedIndex(in: items)
+    private func results(_ items: [PaletteItem], availableHeight: CGFloat) -> some View {
+        let selected = selectedIndex(in: items)
+        let selectedID = items[selected].id
+        return ScrollViewReader { reader in
+            ScrollView {
                 VStack(spacing: 2) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, row in
                         rowView(for: row, isSelected: index == selected)
                             .paletteAction { perform(row) }
                             .accessibilityAddTraits(index == selected ? .isSelected : [])
+                            .id(row.id)
                     }
                 }
                 .padding(PaletteRowHighlight.panelInset)
-                .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)))
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: PaletteResultsHeightKey.self, value: geometry.size.height)
+                })
             }
+            .frame(height: min(max(80, min(420, availableHeight)), resultsHeight > 0 ? resultsHeight : CGFloat(items.count) * 40))
+            .onPreferenceChange(PaletteResultsHeightKey.self) { resultsHeight = $0 }
+            .onChange(of: selectedID) { _, id in reader.scrollTo(id) }
+            .onChange(of: resultsHeight) { reader.scrollTo(selectedID) }
+            .onChange(of: text) { reader.scrollTo(items[0].id, anchor: .top) }
+            .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: PaletteRowHighlight.panelRadius, style: .continuous)))
         }
-        // A window narrower than the palette, such as a small window, keeps the page margin on both sides of it.
-        .frame(maxWidth: 600)
-        .modifier(CommandPaletteAppearance(offset: arrivalOffset, isHidden: !hasArrived || isLeaving))
-        .allowsHitTesting(!isLeaving)
-        .padding(.top, Self.top)
-        .padding(.horizontal, BrowserWindowView.pageMargin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    var body: some View {
+        let items: [PaletteItem] = showsResults ? rows : [.primary]
+        GeometryReader { geometry in
+            VStack(spacing: Self.surfaceSpacing) {
+                // The symbol's column and the text start line up with the rows' below.
+                HStack(spacing: 14) {
+                    Image(systemName: mode == .newTab ? "plus" : "magnifyingglass")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                        .accessibilityHidden(true)
+                    if let argumentCommand {
+                        Text(argumentCommand.item.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .padding(6)
+                            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    TextField(argumentCommand == nil ? (mode == .newTab ? localized("Search or enter address for a new tab") : localized("Search or enter address")) : localized("Command argument"), text: $text)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 22))
+                        .focused($isFocused)
+                        .onSubmit { submit(in: items) }
+                        .onExitCommand { windowModel.dismissCommandPalette() }
+                }
+                .padding(.horizontal, 22)
+                .frame(height: Self.fieldHeight)
+                .modifier(PaletteSurface(shape: RoundedRectangle(cornerRadius: Self.fieldRadius, style: .continuous)))
+                .background(PaletteArrowKeys(isActive: isFocused && showsResults && !isLeaving && !isWarmUp, move: { moveSelection(by: $0, in: items) }, optionReturn: { submit(in: items, bypassSiteRules: true) }))
+                if showsResults {
+                    results(items, availableHeight: geometry.size.height - Self.top - Self.fieldHeight - Self.surfaceSpacing - 24)
+                }
+            }
+            // A window narrower than the palette, such as a small window, keeps the page margin on both sides of it.
+            .frame(maxWidth: 600)
+            .modifier(CommandPaletteAppearance(offset: arrivalOffset, isHidden: !hasArrived || isLeaving))
+            .allowsHitTesting(!isLeaving)
+            .padding(.top, Self.top)
+            .padding(.horizontal, BrowserWindowView.pageMargin)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
         .onAppear {
             guard !isWarmUp else { return }
             if mode == .editCurrent { text = windowModel.internalPage?.address ?? windowModel.selectedTab?.url?.absoluteString ?? "" }
@@ -310,6 +344,11 @@ struct CommandPaletteView: View {
     }
 }
 
+private struct PaletteResultsHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 /// One row of the palette's results panel.
 @MainActor private enum PaletteItem {
     /// Acts on the text as typed: an address, a site search, or a web search.
@@ -320,6 +359,7 @@ struct CommandPaletteView: View {
     case command(Attributed<PluginCommand>)
     case askAboutPage
     case moveTab(SpaceMoveCommand)
+    case siteRule(SiteRuleCommand)
     case pageStore(String)
     case tab(Tab)
     case history(HistoryEntry)
@@ -334,6 +374,7 @@ struct CommandPaletteView: View {
         case .command(let command): return command.ref
         case .askAboutPage: return "askAboutPage"
         case .moveTab(let command): return "moveTab-" + command.space.id.uuidString
+        case .siteRule(let command): return "siteRule-" + command.space.id.uuidString
         case .pageStore: return "pageStore"
         case .tab(let tab): return tab.id
         case .history(let entry): return entry.id
@@ -345,18 +386,21 @@ struct CommandPaletteView: View {
 private struct PaletteArrowKeys: NSViewRepresentable {
     let isActive: Bool
     let move: (Int) -> Void
+    let optionReturn: () -> Void
 
     func makeNSView(context: Context) -> MonitorView { MonitorView() }
 
     func updateNSView(_ view: MonitorView, context: Context) {
         view.isActive = isActive
         view.move = move
+        view.optionReturn = optionReturn
     }
 
     /// Lies behind the field and takes no clicks.
     final class MonitorView: NSView {
         var isActive = false
         var move: ((Int) -> Void)?
+        var optionReturn: (() -> Void)?
         private var monitor: Any?
 
         // A window that closes releases its views without moving them out of it first.
@@ -370,7 +414,15 @@ private struct PaletteArrowKeys: NSViewRepresentable {
             monitor = nil
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, let step = self.step(for: event) else { return event }
+                guard let self else { return event }
+                if self.isActive, event.window === self.window,
+                   event.modifierFlags.intersection([.command, .shift, .option, .control]) == [.option],
+                   [36, 76].contains(event.keyCode),
+                   (self.window?.firstResponder as? NSTextView)?.hasMarkedText() != true {
+                    self.optionReturn?()
+                    return nil
+                }
+                guard let step = self.step(for: event) else { return event }
                 self.move?(step)
                 return nil
             }

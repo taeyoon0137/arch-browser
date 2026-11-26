@@ -214,6 +214,7 @@ struct SiteSettingsView: View {
             if let tab, !windowModel.isSelectedPageCovered {
                 SiteSettingsHeader(tab: tab)
                 TabEngineSection(session: session, tab: tab)
+                SiteRulePopoverSection(session: session, tab: tab, close: close)
                 if let webExtensions = session.webExtensions(in: tab.personaID) {
                     WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)
                 }

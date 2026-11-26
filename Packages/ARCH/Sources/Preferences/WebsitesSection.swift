@@ -41,6 +41,7 @@ struct WebsitesSection: View {
         // macOS's permission is the app's, so any Persona's allowed site needs it.
         let hasAllowedSite = store.answers.values.contains { $0.decisions.values.contains { $0[.notifications] == .allow } }
         Form {
+            SiteRulesSection(session: session)
             if personas.count > 1 {
                 Section {
                     Picker(localized("Persona"), selection: $personaID) {
@@ -75,7 +76,7 @@ struct WebsitesSection: View {
         }
         .formStyle(.grouped)
         // A fixed height keeps the window still while answers come and go; the list scrolls instead.
-        .frame(width: sectionWidth, height: 360)
+        .frame(width: sectionWidth, height: 520)
         // The Agents Persona is named agent-only after it joins the Personas, so the list is read on the next turn.
         .onReceive(session.$personas) { _ in DispatchQueue.main.async { personas = session.personasWithRememberedAnswers } }
         // Each time the section shows, it starts at the active window's Persona.

@@ -44,6 +44,7 @@ final class EngineRuntime {
     public let sitePermissions: SitePermissionStore
     /// The keyword shortcuts that the palette searches and Settings ▸ Site Search and imports change.
     public let siteSearch: SiteSearchStore
+    public let siteRules: SiteRuleStore
     /// Whether macOS lets Arch show notifications, which the download notifier, the permission card, and Settings ▸ Websites share.
     public let notificationAuthorization = NotificationAuthorization()
     /// Each running engine's application, started once.
@@ -101,6 +102,7 @@ final class EngineRuntime {
     /// The page a tab opens without an address: the home page of the search engine chosen in Settings.
     public nonisolated static var newTabURL: URL { SearchEngine.current.homeURL }
 
+    private var siteRuleSyncError: Error?
     private let store: SessionStore
     private var cancellables: Set<AnyCancellable> = []
     private var tabObservers: [UUID: AnyCancellable] = [:]
@@ -161,6 +163,7 @@ final class EngineRuntime {
         self.history = history
         sitePermissions = SitePermissionStore(directory: userDataDirectory)
         siteSearch = SiteSearchStore(directory: userDataDirectory)
+        siteRules = SiteRuleStore(directory: userDataDirectory)
         permissionAnswers = SitePermissionAnswers(store: sitePermissions, notifications: notificationAuthorization, agentOnlyPersonaID: Self.agentOnly(agentOnlyPersonaID))
         downloadNotifier = DownloadNotifier(authorization: notificationAuthorization)
         // Without a saved session, or with a file that did not load, the session starts from an empty snapshot. Normalizing gives every Persona a space, so there is always a current space.
@@ -214,6 +217,10 @@ final class EngineRuntime {
         restoreTabs(snapshot)
         restoreFavoriteTabs(snapshot)
         observeChanges()
+        siteRules.didChange.sink { [weak self] in
+            self?.objectWillChange.send()
+            self?.scheduleSave()
+        }.store(in: &cancellables)
         personaDataRemoval.didRemove = { [weak self] in self?.scheduleSave() }
         archiveTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -440,8 +447,14 @@ final class EngineRuntime {
     public func openSmallWindow(url: URL) -> BrowserWindowModel {
         let lastSpaceID = lastMainWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
         let spaceID = spaces.contains { $0.id == lastSpaceID } ? lastSpaceID : spaces[0].id
-        let personaID = personaID(ofSpace: spaceID)
-        return openSmallWindow(url: url, engine: defaultEngine, spaceID: spaceID, personaID: personaID)
+        let origin = spaces.first { $0.id == spaceID } ?? spaces[0]
+        let source = lastMainWindow
+        guard let destination = destination(forOpening: origin, url: url) else {
+            return openSmallWindow(url: url, engine: defaultEngine, spaceID: spaceID, personaID: origin.resolvedPersonaID)
+        }
+        let opened = openSmallWindow(url: url, engine: defaultEngine, spaceID: destination.space.id, personaID: destination.space.resolvedPersonaID)
+        if let tab = opened.selectedTab { showSiteRuleToast(for: tab, destination: destination, source: source, target: opened) }
+        return opened
     }
 
     /// An address Arch opens keeps its requested engine if this Persona temporarily needs a fallback.
@@ -791,6 +804,7 @@ final class EngineRuntime {
         favorites.removeAll { $0.resolvedPersonaID == id }
         spaces.removeAll { $0.resolvedPersonaID == id }
         personas.removeAll { $0.id == id }
+        siteRules.rules.filter { $0.personaID == id }.forEach { siteRules.remove(id: $0.id) }
         // Its browsers close, and its plugins stop. Download items refer to their lists and profiles unowned, so its runtimes stay until quit.
         if let engines = personaEngines.removeValue(forKey: id) {
             closePlugins(of: engines)
@@ -1048,8 +1062,30 @@ final class EngineRuntime {
     func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
         // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space. A page of a tab that a script plugin opened, before the user acted in it, opens its tab held as theirs (`PageDownloadGate.holdUntilUserActs()`), so that their own pages cannot download through the tabs they open.
+        tab.routeNewTabLink = { [weak self, weak tab] action in
+            guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return .cancel }
+            let source = self.window(showing: tab)
+            let origin = source?.currentSpace ?? self.spaces.first { $0.id == tab.spaceID } ?? self.preferredSpace(in: tab.personaID)
+            guard let destination = self.destination(forOpening: origin, url: action.url) else { return .openLinkInNewTab }
+            if destination.space.resolvedPersonaID == tab.personaID {
+                tab.pendingSiteRuleOpenings.append((action.url, action.disposition, destination, source?.id))
+                return .openLinkInNewTab
+            }
+            // Cancel before the source engine creates or loads a page with its profile and referrer.
+            DispatchQueue.main.async { [weak self, weak tab, weak source] in
+                guard let self, let tab, self.allTabs.contains(where: { $0 === tab }),
+                      let space = self.siteRuleDestination(destination.rule), space.resolvedPersonaID == destination.rule.personaID else { return }
+                let resolved = SiteRuleDestination(rule: destination.rule, space: space, originSpaceID: destination.originSpaceID,
+                                                   originPersonaID: destination.originPersonaID)
+                let source = source.flatMap { window in self.windows.contains { $0 === window } ? window : nil }
+                let opened = self.openRoutedTab(url: action.url, destination: resolved, source: source,
+                                                background: action.disposition == .newBackgroundTab || source == nil)
+                if tab.pageDownloads.isHeldUntilUserActs { opened.pageDownloads.holdUntilUserActs() }
+            }
+            return .cancel
+        }
         tab.openNewTab = { [weak self, weak tab] popup, targetURL, disposition in
-            guard let self, let tab else { return }
+            guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
             // A Persona without a profile, such as one a synced deletion removed, cannot own the popup, which no tab then takes.
             guard let runtime = self.runtime(for: popup.engineKind, in: personaID) else { return }
             runtime.browser.takeOwnership(of: popup)
@@ -1057,6 +1093,29 @@ final class EngineRuntime {
             defer { if isHeld { self.tabs.first { $0.webContents === popup }?.pageDownloads.holdUntilUserActs() } }
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
             let window = self.window(showing: tab)
+            if let index = tab.pendingSiteRuleOpenings.firstIndex(where: { $0.url == targetURL && $0.disposition == disposition }) {
+                let pending = tab.pendingSiteRuleOpenings.remove(at: index)
+                let source = self.windows.first { $0.id == pending.sourceWindowID }
+                // The space may have been deleted while the engine created the page. The page's profile is already fixed.
+                if let space = self.siteRuleDestination(pending.destination.rule), space.resolvedPersonaID == personaID {
+                    let opened = self.adopt(popup, spaceID: space.id, personaID: personaID, pinned: false, select: false,
+                                            opener: tab.webContents, preferredEngine: tab.preferredEngine)
+                    let background = disposition == .newBackgroundTab || source == nil
+                    if space.id != pending.destination.originSpaceID {
+                        let destination = SiteRuleDestination(rule: pending.destination.rule, space: space,
+                                                              originSpaceID: pending.destination.originSpaceID,
+                                                              originPersonaID: pending.destination.originPersonaID)
+                        self.finishSiteRuleOpening(opened, destination: destination, source: source, background: background)
+                    } else if background {
+                        opened.isUnread = true
+                    } else {
+                        source?.selectTab(opened.id)
+                        source?.nsWindow?.makeKeyAndOrderFront(nil)
+                        source?.focusPage()
+                    }
+                    return
+                }
+            }
             if disposition != .newBackgroundTab, let window { return window.showOpenedPage(popup, personaID: personaID, opener: tab.webContents, preferredEngine: tab.preferredEngine) }
             let opened = self.adopt(popup, spaceID: tab.spaceID ?? window?.currentSpaceID ?? self.preferredSpace(in: personaID).id, personaID: personaID, pinned: false, select: false, opener: tab.webContents, preferredEngine: tab.preferredEngine)
             opened.isUnread = true
@@ -1148,8 +1207,15 @@ final class EngineRuntime {
         // A context-menu link opens behind, marked unread, in the source Persona and engine. A link clicked with Command or the middle button opens through `openNewTab`.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
-            let spaceID = tab.spaceID ?? self.window(showing: tab)?.currentSpaceID ?? self.preferredSpace(in: tab.personaID).id
-            self.openTab(url: url, in: spaceID, select: false, engine: tab.preferredEngine).isUnread = true
+            let source = self.window(showing: tab)
+            let origin = source?.currentSpace ?? self.spaces.first { $0.id == tab.spaceID } ?? self.preferredSpace(in: tab.personaID)
+            if tab.agentOwnerID == nil, let destination = self.destination(forOpening: origin, url: url) {
+                let opened = self.openRoutedTab(url: url, destination: destination, source: source, background: true,
+                                               engine: destination.space.resolvedPersonaID == tab.personaID ? tab.preferredEngine : self.defaultEngine)
+                if opened.personaID == tab.personaID { opened.opener = tab.webContents }
+            } else {
+                self.openTab(url: url, in: origin.id, select: false, engine: tab.preferredEngine).isUnread = true
+            }
         }
         // Search with in a page's context menu shows the results for the page's selection as a page the tab opens: in a new tab that the window showing the page selects, in the page's engine and Persona, or behind, marked unread, when no window shows the page.
         tab.searchInNewTab = { [weak self, weak tab] text in
@@ -2320,7 +2386,7 @@ final class EngineRuntime {
     }
 
     /// The syncable sidebar of this session, for the first sync or when enabling sync.
-    public var sidebarSyncState: SidebarSyncState { SidebarSyncState(snapshot: snapshot(), defaultEngine: defaultEngine) }
+    public var sidebarSyncState: SidebarSyncState { SidebarSyncState(snapshot: snapshot(), defaultEngine: defaultEngine, siteRules: siteRules.rules, canSyncSiteRules: !siteRules.isReadOnly) }
 
     /// Observes successful saves on the main queue in file order. With no observer, saving does
     /// not construct the projection. Replacing the observer drops its outstanding callbacks.
@@ -2329,7 +2395,13 @@ final class EngineRuntime {
             guard let observer = onSidebarSyncSave else { store.didWrite = nil; return }
             store.didWrite = { [weak self] snapshot in
                 guard let self else { return }
-                observer(SidebarSyncState(snapshot: snapshot, defaultEngine: self.defaultEngine))
+                // Rules save separately and may be newer than this captured session.
+                // Wait for the next save when their new destination is not in this capture.
+                let ready = !self.siteRules.isReadOnly && self.siteRules.rules.allSatisfy { rule in
+                    (snapshot.personas ?? []).contains { $0.id == rule.personaID }
+                        && (!self.spaces.contains { $0.id == rule.spaceID } || snapshot.spaces.contains { $0.id == rule.spaceID })
+                }
+                observer(SidebarSyncState(snapshot: snapshot, defaultEngine: self.defaultEngine, siteRules: self.siteRules.rules, canSyncSiteRules: ready))
             }
         }
     }
@@ -2337,7 +2409,8 @@ final class EngineRuntime {
     /// Writes the current browser snapshot immediately and returns the save result.
     @discardableResult
     public func saveNow() -> Result<Void, Error> {
-        store.saveNow(snapshot())
+        if let siteRuleSyncError { return .failure(siteRuleSyncError) }
+        return store.saveNow(snapshot())
     }
 
     /// Clear the recovery marker only after the full fetch and its mirror checkpoint have been
@@ -2390,6 +2463,7 @@ extension BrowserSession {
         let before = sidebarSyncState
         let selections = windows.compactMap { window in window.selectedTabID.flatMap { replacements.tabs[$0] }.map { (window, $0) } }
         applySidebarSync(state, deletions: SidebarSyncDeletions())
+        guard siteRuleSyncError == nil else { return }
         let oldSpaceOwners = Dictionary(before.spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })
         let newSpaceOwners = Dictionary(state.spaces.map { ($0.id, $0.resolvedPersonaID) }, uniquingKeysWith: { first, _ in first })
         var changedSpaces: [UUID: UUID] = [:]
@@ -2450,6 +2524,23 @@ extension BrowserSession {
         for (window, target) in selections where window.selectedTabID.flatMap({ replacedTabs[$0] }) == target { window.selectTab(target) }
         for tab in tabs where replacedTabs[tab.id] != nil { _ = removeTab(tab, closedRecord: nil, reason: .sync) }
         spaces.removeAll { changedSpaces[$0.id] != nil }
+        let joinedRules = siteRules.rules.filter { replacements.siteRules[$0.id] == nil }.map { rule in
+            var rule = rule
+            if let space = changedSpaces[rule.spaceID] { rule.spaceID = space }
+            return rule
+        }
+        saveSyncedSiteRules(joinedRules)
+    }
+
+    private func saveSyncedSiteRules(_ rules: [SiteRule]) {
+        guard !siteRules.isReadOnly else { return }
+        do {
+            try siteRules.replaceFromSync(rules)
+            siteRuleSyncError = nil
+        } catch {
+            // A failed rule write must not advance the sync mirror's checkpoint.
+            siteRuleSyncError = error
+        }
     }
 
     /// Applies a complete, repaired sidebar and its explicit tombstones. Items kept on this Mac
@@ -2459,11 +2550,12 @@ extension BrowserSession {
         let state = state.withFirstCopies
         let current = sidebarSyncState
         yieldIDs(to: state, current: current)
-        guard state != current || !deletions.personas.isDisjoint(with: personas.map(\.id))
+        guard state != current || siteRuleSyncError != nil || !deletions.personas.isDisjoint(with: personas.map(\.id))
                 || !deletions.spaces.isDisjoint(with: current.spaces.map(\.id))
                 || !deletions.folders.isDisjoint(with: current.folders.map(\.id))
                 || !deletions.favorites.isDisjoint(with: current.favorites.map(\.id))
-                || !deletions.tabs.isDisjoint(with: current.pinnedTabs.map(\.id)) else { return }
+                || !deletions.tabs.isDisjoint(with: current.pinnedTabs.map(\.id))
+                || !deletions.siteRules.isDisjoint(with: current.siteRules.map(\.id)) else { return }
         let eligibleFolders = Set(current.folders.map(\.id))
         let eligibleTabs = Set(current.pinnedTabs.map(\.id))
         for persona in state.personas {
@@ -2564,6 +2656,12 @@ extension BrowserSession {
         if let reordered = Self.orderedSynced(folders, by: state.folders.map(\.id).filter(appliedFolders.contains)) { folders = reordered }
         if let reordered = Self.orderedSynced(favorites, by: state.favorites.map(\.id).filter(appliedFavorites.contains)) { favorites = reordered }
         if let reordered = Self.orderedSynced(tabs, by: state.pinnedTabs.map(\.id).filter(appliedTabs.contains)) { tabs = reordered }
+        var rules = siteRules.rules.filter { !deletions.siteRules.contains($0.id) && !deletions.personas.contains($0.personaID) }
+        for incoming in state.siteRules where !deletions.siteRules.contains(incoming.id) && !deletions.personas.contains(incoming.personaID) {
+            if let index = rules.firstIndex(where: { $0.id == incoming.id }) { rules[index] = incoming }
+            else { rules.append(incoming) }
+        }
+        saveSyncedSiteRules(rules)
         applyPendingSyncEngines()
     }
 

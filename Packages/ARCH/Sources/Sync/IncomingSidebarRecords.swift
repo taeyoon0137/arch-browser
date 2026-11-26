@@ -32,7 +32,7 @@ public enum IncomingSidebarRecords {
         var combined = byName(local)
         let bases = byName(mirror)
         let fetchedByName = byName(fetched)
-        let held = heldRecords(server: Array(bases.merging(fetchedByName) { _, fetched in fetched }.values), local: local)
+        let held = heldRecords(server: Array(bases.merging(fetchedByName) { _, fetched in fetched }.values), local: local, deleted: deleted)
         var sends: [String: SyncRecord] = [:]
         for (name, server) in fetchedByName where held[name] == nil {
             if let localRecord = combined[name] {
@@ -54,20 +54,20 @@ public enum IncomingSidebarRecords {
     /// explicit deletion always wins. Settings use SyncedSettings independently of this graph.
     /// A tab without an engine takes `defaultEngine`. A record name listed twice counts once, as its first copy.
     public static func plan(records: [SyncRecord], deleted: [String: SyncRecordType], foundAt: Date, defaultEngine: EngineKind) throws -> Plan {
-        try plan(records: records, deleted: deleted, foundAt: foundAt, defaultEngine: defaultEngine, held: heldRecords(server: records, local: []))
+        try plan(records: records, deleted: deleted, foundAt: foundAt, defaultEngine: defaultEngine, held: heldRecords(server: records, local: [], deleted: deleted))
     }
 
     /// The sidebar records that this build leaves alone, by name: a server record whose name or a field it needs this build cannot read, such as a tint or engine of a newer build, or a space's home address that is not http or https; a server record that would move `local`'s row of the same name to another Persona or type; a server Persona whose Personal space name (`personalSpaceID(for:)`) another record holds that is not one of its spaces; and every record under one of them, since the repairs would otherwise move it. The plans skip them, and the comparisons neither save nor delete them, so sync goes on without them and keeps what another build wrote.
-    public static func heldOut(server: [SyncRecord], local: [SyncRecord]) -> Set<String> {
-        Set(heldRecords(server: server, local: local).keys)
+    public static func heldOut(server: [SyncRecord], local: [SyncRecord], deleted: [String: SyncRecordType] = [:]) -> Set<String> {
+        Set(heldRecords(server: server, local: local, deleted: deleted).keys)
     }
 
     /// Holds out unsupported or moved records and their descendants from the repair plan.
-    private static func heldRecords(server: [SyncRecord], local: [SyncRecord]) -> [String: SyncRecord] {
+    private static func heldRecords(server: [SyncRecord], local: [SyncRecord], deleted: [String: SyncRecordType] = [:]) -> [String: SyncRecord] {
         let localByName = Dictionary(local.map { ($0.recordName, $0) }) { first, _ in first }
         var held: [String: SyncRecord] = [:]
         for item in server where item.recordType != .setting {
-            let moved = localByName[item.recordName].map { $0.recordType != item.recordType || $0[.persona] != item[.persona] } ?? false
+            let moved = localByName[item.recordName].map { $0.recordType != item.recordType || (item.recordType != .siteRule && $0[.persona] != item[.persona]) } ?? false
             if moved || !canApply(item) { held[item.recordName] = item }
         }
         // A Persona left without spaces gets a Personal space of a fixed name (`personalSpaceID(for:)`). Another record of that name, which no build writes, would fail every fetch's plan, so the Persona waits instead.
@@ -75,6 +75,22 @@ public enum IncomingSidebarRecords {
         for item in server where item.recordType == .persona && held[item.recordName] == nil {
             guard let name = try? personalSpaceID(for: item).uuidString, let other = byName[name] else { continue }
             if other.recordType != .space || other[.persona] != .reference(item.recordName) { held[item.recordName] = item }
+        }
+        // A new rule waits for its destination records. A known local destination or an
+        // explicit deletion distinguishes a deleted space, whose rule retains its reference.
+        for item in server where item.recordType == .siteRule && held[item.recordName] == nil {
+            guard case .reference(let persona) = item[.persona], case .reference(let space) = item[.space] else { continue }
+            let known = localByName[item.recordName]
+            let sameDestination = known?[.persona] == item[.persona] && known?[.space] == item[.space]
+            if deleted[persona] == .persona { continue }
+            let hasPersona = byName[persona]?.recordType == .persona
+            let destination = byName[space]
+            let hasSpace = destination?.recordType == .space && destination?[.persona] == item[.persona]
+            if !hasPersona || (!hasSpace && !sameDestination && deleted[space] != .space) {
+                held[item.recordName] = item
+            } else if destination != nil && !hasSpace {
+                held[item.recordName] = item
+            }
         }
         var grew = !held.isEmpty
         while grew {
@@ -120,6 +136,12 @@ public enum IncomingSidebarRecords {
             guard item[.engine] == nil || text(.engine).flatMap(EngineKind.init(rawValue:)) != nil else { return false }
             guard item[.url] == nil || (address(.url) != nil && text(.title) != nil) else { return false }
             return item[.customTitle] == nil || text(.customTitle) != nil
+        case .siteRule:
+            guard let host = text(.host), let prefix = text(.pathPrefix),
+                  let site = try? SiteRuleSite(host: host, pathPrefix: prefix), site.host == host, site.pathPrefix == prefix,
+                  text(.window).flatMap(SiteRule.Window.init(rawValue:)) != nil,
+                  case .reference(let space) = item[.space], (try? identifier(space, type: .space)) != nil else { return false }
+            return true
         case .setting:
             return true
         }
@@ -255,6 +277,7 @@ public enum IncomingSidebarRecords {
             case .folder: tombstones.folders.insert(id)
             case .favorite: tombstones.favorites.insert(id)
             case .tab: tombstones.tabs.insert(id)
+            case .siteRule: tombstones.siteRules.insert(id)
             case .setting: break
             }
         }
@@ -338,6 +361,11 @@ public enum IncomingSidebarRecords {
                 spaceID: identifier(reference(item, .space), type: .space), folderID: optionalParent(item, .folder),
                 savedPage: saved, customTitle: custom, engine: engine)
         }
-        return SidebarSyncState(personas: people, spaces: spaceRows, folders: folderRows, favorites: favorites, pinnedTabs: tabs)
+        let siteRules = try all.values.filter { $0.recordType == .siteRule }.sorted { $0.recordName < $1.recordName }.map { item in
+            guard let window = try SiteRule.Window(rawValue: text(item, .window)) else { throw InvalidGraph.malformedRecord(item.recordName) }
+            return try SiteRule(id: identifier(item.recordName, type: .siteRule), host: text(item, .host), pathPrefix: text(item, .pathPrefix),
+                spaceID: identifier(reference(item, .space), type: .space), personaID: owner(item), window: window, modifiedAt: item.modifiedAt)
+        }
+        return SidebarSyncState(personas: people, spaces: spaceRows, folders: folderRows, favorites: favorites, pinnedTabs: tabs, siteRules: siteRules)
     }
 }

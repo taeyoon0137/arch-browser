@@ -14,6 +14,7 @@ import Testing
         var onSidebarSyncSave: ((SidebarSyncState) -> Void)?
         var firstReplacements: [SidebarSyncReplacements] = []
         var failSave = false
+        var rulesAreReadOnly = false
         var beforeSave: (() throws -> Void)?
         var saved: SidebarSyncState?
 
@@ -22,10 +23,14 @@ import Testing
                                                 spaces: [Space(name: "Personal")], folders: [], favorites: [], pinnedTabs: [])
         }
 
-        func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) { sidebarSyncState = state }
+        private func projected(_ state: SidebarSyncState) -> SidebarSyncState {
+            SidebarSyncState(personas: state.personas, spaces: state.spaces, folders: state.folders, favorites: state.favorites,
+                pinnedTabs: state.pinnedTabs, siteRules: rulesAreReadOnly ? [] : state.siteRules, canSyncSiteRules: !rulesAreReadOnly)
+        }
+        func applySidebarSync(_ state: SidebarSyncState, deletions: SidebarSyncDeletions) { sidebarSyncState = projected(state) }
         func applyFirstSidebarSync(_ state: SidebarSyncState, replacements: SidebarSyncReplacements) {
             firstReplacements.append(replacements)
-            sidebarSyncState = state
+            sidebarSyncState = projected(state)
         }
         @discardableResult func saveNow() -> Result<Void, Error> {
             Result {
@@ -672,4 +677,42 @@ import Testing
         while !f.controller.canSendRecords && ContinuousClock.now < restarted { await Task.yield() }
         #expect(f.engines.count == 1 && f.controller.canSendRecords)
     }
+
+    @Test func aSiteRuleHeldInAnEarlierFetchAppliesWhenItsSpaceArrives() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        let engine = try await f.startAndSend()
+        let space = Space(name: "Mail")
+        let rule = SiteRule(host: "mail.example.test", spaceID: space.id, personaID: Persona.defaultID)
+        let state = SidebarSyncState(personas: [], spaces: [space], folders: [], favorites: [], pinnedTabs: [], siteRules: [rule])
+        let records = try SidebarRecords.records(from: state, foundAt: f.clock)
+        let ruleRecord = try #require(records.first { $0.recordType == .siteRule })
+        engine.deliver([.fetchStarted, .fetchedChanges(SyncFetchedChanges(records: [SyncCloudKitRecords.ckRecord(from: ruleRecord)])), .fetchEnded(failure: nil)])
+        #expect(f.sidebar.sidebarSyncState.siteRules.isEmpty && f.copy.unapplied.contains(rule.id.uuidString))
+        #expect(!engine.pendingChanges.contains(.deleteRecord(rule.id.uuidString)))
+        let spaceRecord = try #require(records.first { $0.recordType == .space })
+        engine.deliver([.fetchStarted, .fetchedChanges(SyncFetchedChanges(records: [SyncCloudKitRecords.ckRecord(from: spaceRecord)])), .fetchEnded(failure: nil)])
+        #expect(f.sidebar.sidebarSyncState.siteRules.map(\.id) == [rule.id])
+        #expect(!f.copy.unapplied.contains(rule.id.uuidString) && f.controller.lastError == nil)
+    }
+
+
+    @Test func anUnreadableLocalRuleFileNeverDeletesOrOverwritesCloudRules() async throws {
+        let f = Fixture()
+        defer { f.clean() }
+        f.sidebar.rulesAreReadOnly = true
+        let initial = f.sidebar.sidebarSyncState
+        f.sidebar.applySidebarSync(initial, deletions: SidebarSyncDeletions())
+        let rule = SiteRule(host: "mail.example.test", spaceID: f.space.id, personaID: Persona.defaultID)
+        let state = SidebarSyncState(personas: initial.personas, spaces: initial.spaces, folders: [], favorites: [], pinnedTabs: [], siteRules: [rule])
+        let rows = try SidebarRecords.records(from: state, foundAt: f.clock).map { SyncCloudKitRecords.ckRecord(from: $0) }
+        f.onCreate = { $0.fetchScript = [.fetchedChanges(.init(records: rows))] }
+        let engine = try await f.startAndSend()
+        #expect(f.sidebar.sidebarSyncState.siteRules.isEmpty)
+        #expect(f.copy.unapplied.contains(rule.id.uuidString) && f.copy.records[rule.id.uuidString] != nil)
+        #expect(!engine.pendingChanges.contains(.deleteRecord(rule.id.uuidString)))
+        #expect(engine.batches.allSatisfy { !$0.deletedRecordNames.contains(rule.id.uuidString) && !$0.records.contains { $0.recordID.recordName == rule.id.uuidString } })
+        #expect(f.controller.lastError == nil)
+    }
+
 }
