@@ -12,6 +12,7 @@ struct TabRowView: View {
     @ObservedObject var tab: Tab
     @ObservedObject private var commandKey = CommandKeyState.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.spaceTheme) private var theme
     @Environment(\.isDraggingTab) private var isDraggingTab
     @State private var isHovering = false
 
@@ -24,10 +25,10 @@ struct TabRowView: View {
     private var showsHover: Bool { isHovering && !isDraggingTab }
 
     private var fill: Color {
-        if isSelected { return SidebarFill.selected.color(in: colorScheme) }
+        if isSelected { return SidebarFill.selected.color(in: colorScheme, isPrivate: theme.isPrivate) }
         // The other panes of the split view on screen show a lighter selection. The dark selection is faint, so half of it would read as hover; there it sits halfway between hover and selected.
-        if windowModel.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme).opacity(colorScheme == .dark ? 0.7 : 0.5) }
-        return showsHover ? SidebarFill.hover.color(in: colorScheme) : .clear
+        if windowModel.isInSplitViewOnScreen(tab) { return SidebarFill.selected.color(in: colorScheme, isPrivate: theme.isPrivate).opacity(colorScheme == .dark ? 0.7 : 0.5) }
+        return showsHover ? SidebarFill.hover.color(in: colorScheme, isPrivate: theme.isPrivate) : .clear
     }
 
     var body: some View {
@@ -100,9 +101,11 @@ struct TabRowView: View {
             windowModel.selectTab(tab.id)
             windowModel.renamingTabID = tab.id
         }
-        Button(tab.isPinned ? localized("Unpin Tab") : localized("Pin Tab")) { session.togglePinned(tab) }
-        Button(localized("Add to Favorites")) { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
-        Button(localized("Open in Split View")) { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
+        if !tab.isPrivate {
+            Button(tab.isPinned ? localized("Unpin Tab") : localized("Pin Tab")) { session.togglePinned(tab) }
+            Button(localized("Add to Favorites")) { session.addFavorite(tab) }.disabled(!session.canAddFavorite(tab))
+            Button(localized("Open in Split View")) { windowModel.openInSplitView(tab) }.disabled(!windowModel.canOpenInSplitView(tab))
+        }
         Divider()
         // A pinned tab's saved page (bookmark rules 2 and 3). Go Back shows only while the tab is off it.
         if tab.isPinned {
@@ -112,21 +115,25 @@ struct TabRowView: View {
             Button(localized("Use Current Page as Saved Page")) { session.useCurrentPageAsSavedPage(tab) }.disabled(!session.canUseCurrentPageAsSavedPage(tab))
             Button(localized("Edit Saved Address\u{2026}")) { windowModel.promptToEditSavedAddress(of: tab) }
         }
-        SidebarAgentMenuItem(windowModel: windowModel, tab: tab)
+        if !tab.isPrivate { SidebarAgentMenuItem(windowModel: windowModel, tab: tab) }
         Button(localized("Copy Address")) { tab.url.map(Tab.copyToPasteboard) }.disabled(tab.url == nil)
         Button(localized("Duplicate")) { withAnimation(.easeInOut(duration: 0.15)) { windowModel.duplicate(tab) } }
         Button(localized("Picture in Picture")) { windowModel.togglePictureInPicture(tab) }
             .disabled(!windowModel.canTogglePictureInPicture(tab))
         Divider()
-        TabFolderItems(session: session, windowModel: windowModel, tab: tab)
-        SiteRuleMenu(session: session, tab: tab)
-        Divider()
+        if !tab.isPrivate {
+            TabFolderItems(session: session, windowModel: windowModel, tab: tab)
+            SiteRuleMenu(session: session, tab: tab)
+            Divider()
+        }
         // Closing a pinned tab unloads it; Delete Tab takes it out of the sidebar into the closed list (bookmark rule 4).
         Button(localized("Close Tab")) { session.requestCloseTab(tab) }
         if tab.isPinned {
             Button(localized("Delete Tab")) { session.requestDeleteTab(tab) }
         }
-        PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
+        if !tab.isPrivate {
+            PluginMenuSections(plugins: session.plugins(in: tab.personaID), location: .tabContextMenu) { windowModel.runPluginCommand($0, onTab: tab) }
+        }
     }
 }
 
@@ -350,6 +357,7 @@ struct TabRowButton: View {
     let help: String
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.spaceTheme) private var theme
     @State private var isHovering = false
 
     var body: some View {
@@ -357,7 +365,7 @@ struct TabRowButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 10, weight: .bold))
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
+                .background(Circle().fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme, isPrivate: theme.isPrivate) : .clear))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -398,6 +406,7 @@ struct TabIconView: View {
 struct NewTabButton: View {
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.spaceTheme) private var theme
     @State private var isHovering = false
 
     var body: some View {
@@ -413,7 +422,7 @@ struct NewTabButton: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 36)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme) : .clear))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(isHovering ? SidebarFill.hover.color(in: colorScheme, isPrivate: theme.isPrivate) : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

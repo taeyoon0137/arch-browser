@@ -8,6 +8,15 @@
 - The default Persona keeps today's storage, so the upgrade moves no site data and signs nobody out.
 - Nothing here uses a private API or needs a flag on `flags://`.
 
+## Private windows
+
+- File ▸ New Private Window (⇧⌘N) and the Dock menu open a private window with the default engine settings. It belongs to no Persona and no space. Its sidebar shows the private eye-slash indicator and only its own open tabs, with no Persona or space switcher, favorites, pinned tabs, folders, or plugins. The window always uses dark appearance and a palette defined in `SpaceTheme.swift`, independent of app and system appearance: an opaque charcoal-to-muted navy-purple gradient behind the docked or floating sidebar and window frame, lighter cards and selected rows, and contrasting text, secondary text, and separators.
+- Each private window session owns fresh in-memory engine contexts: `WKWebsiteDataStore.nonPersistent()` and a CEF request context with an empty cache path. A popup stays in its opener's private session. Private tabs cannot move into a Persona or become bookmarks. Closing the session's last private window closes its pages and downloads and releases its contexts; downloaded files already saved remain where the user saved them.
+- Private cookies, caches, site storage, permissions, and download entries are never written to a Persona's stores. Private visits, titles, and icons do not enter history, suggestions, recently closed tabs, the close log, `session.json`, sync, remote tabs, or the Persona favicon cache. Private windows are never restored. Permission answers remain within the private session.
+- No plugins, web extensions, user scripts, or hooks run in private windows, and no private browser events are emitted. Page reader, page questions, AppleScript tab access, and agent attachment exclude user-opened private tabs. MCP, `arch-cli`, in-app agents, and full-control plugins cannot list or read them.
+- An agent's `open_tab` tool accepts `private: true` (`arch-cli open --private`). Such a tab belongs to no Persona or space and is visible only to the client or session that opened it. The private flag does not grant access to a user's private tabs or another agent's private tabs. A user opening a tab from an agent-owned private window gets a separate private window and context, so the agent cannot reach the user's cookies through shared storage. Ordinary agent site and tool restrictions still apply. Durable agent activity omits private sites; bounded runs and hooks exclude these tabs.
+- Unit and source checks cover context selection, persistence exclusion, owner access, and shortcut wiring without launching Arch. Visual appearance, live CEF storage, popup behavior, and teardown with active downloads still need verification in the running app.
+
 ## Facts this design relies on
 
 Verified by reading the code at commit 985b464, the CEF 156 headers in `Packages/ARCHKit/Sources/CEFBridge/cefroot/include`, and the macOS 27 SDK headers.

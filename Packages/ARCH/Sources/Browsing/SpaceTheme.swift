@@ -76,6 +76,21 @@ public enum TintStrength: String, CaseIterable {
 
 /// The current space's tint resolved in the window's appearance. The window passes it to its views in the environment.
 struct SpaceTheme: Equatable {
+    /// Fixed private-window colors, independent of the space tint, desktop, and system appearance.
+    enum PrivatePalette {
+        static let backgroundStart = SRGBColor(red: 0.18, green: 0.19, blue: 0.22)
+        static let backgroundEnd = SRGBColor(red: 0.21, green: 0.19, blue: 0.29)
+        static let field = SRGBColor(red: 0.25, green: 0.26, blue: 0.32)
+        static let hover = SRGBColor(red: 0.28, green: 0.28, blue: 0.36)
+        static let selected = SRGBColor(red: 0.34, green: 0.33, blue: 0.44)
+        static let primary = SRGBColor(red: 0.96, green: 0.95, blue: 0.99)
+        static let secondary = SRGBColor(red: 0.83, green: 0.83, blue: 0.90)
+        static let tertiary = SRGBColor(red: 0.74, green: 0.75, blue: 0.83)
+        static let separator = SRGBColor(red: 0.50, green: 0.50, blue: 0.61)
+        static let buttonHover = primary.color.opacity(0.08)
+        static let buttonOn = primary.color.opacity(0.1)
+    }
+
     /// The sidebar keeps the window's appearance while its text reaches WCAG's 4.5:1 contrast for body text on the wash.
     static let minimumTextContrast = 4.5
     /// Below this contrast against the wash, a space's symbol draws in the sidebar's text color instead of its tint. Several tints miss WCAG's 3:1 for graphics even on the bare light material, so the bar is lower, and only a wash close to the symbol's own color reaches it.
@@ -83,6 +98,7 @@ struct SpaceTheme: Equatable {
 
     /// The current space's tint, resolved so that a change of the system accent color draws the wash anew.
     let tint: Color
+    let isPrivate: Bool
     let strength: TintStrength
     /// The appearance the sidebar draws its text and icons in.
     let sidebarColorScheme: ColorScheme
@@ -91,7 +107,16 @@ struct SpaceTheme: Equatable {
     /// The wash as the sidebar shows it, at the gradient's average opacity.
     private let wash: SRGBColor
 
-    init(tint: SpaceTint, strength: TintStrength, colorScheme: ColorScheme) {
+    init(tint: SpaceTint, strength: TintStrength, colorScheme: ColorScheme, isPrivate: Bool = false) {
+        self.isPrivate = isPrivate
+        if isPrivate {
+            self.tint = PrivatePalette.backgroundStart.color
+            self.strength = .strong
+            self.colorScheme = .dark
+            self.wash = PrivatePalette.backgroundStart.over(PrivatePalette.backgroundEnd, opacity: 0.5)
+            sidebarColorScheme = .dark
+            return
+        }
         let tintColor = SRGBColor(tint.nsColor, in: colorScheme)
         // The window background stands in for the sidebar material, whose color depends on what lies behind the window.
         let material = SRGBColor(.windowBackgroundColor, in: colorScheme)
@@ -104,6 +129,13 @@ struct SpaceTheme: Equatable {
         self.colorScheme = colorScheme
         self.wash = wash
         sidebarColorScheme = usesOther ? (colorScheme == .dark ? .light : .dark) : colorScheme
+    }
+
+    /// Private windows use an opaque gradient; ordinary windows wash the material with their tint.
+    var backgroundColors: [Color] {
+        isPrivate
+            ? [PrivatePalette.backgroundStart.color, PrivatePalette.backgroundEnd.color]
+            : [tint.opacity(strength.opacities.start), tint.opacity(strength.opacities.end)]
     }
 
     /// A space's symbol color: its tint, or the sidebar's text color where the wash comes too close to that tint.
@@ -157,6 +189,7 @@ extension SRGBColor {
 /// Resolves the theme of the space with `tint` in the window's appearance and passes it to the views inside, again whenever the system colors change: the views hold resolved colors, which do not follow a new accent color by themselves.
 struct SpaceThemeModifier: ViewModifier {
     let tint: SpaceTint
+    var isPrivate = false
     @AppStorage(TintStrength.defaultsKey) private var strength = TintStrength.subtle
     @Environment(\.colorScheme) private var colorScheme
     @State private var systemColorChanges = 0
@@ -165,7 +198,7 @@ struct SpaceThemeModifier: ViewModifier {
         // Reading the count makes each change run `body` again, which resolves the accent color anew.
         _ = systemColorChanges
         return content
-            .environment(\.spaceTheme, SpaceTheme(tint: tint, strength: strength, colorScheme: colorScheme))
+            .environment(\.spaceTheme, SpaceTheme(tint: tint, strength: strength, colorScheme: colorScheme, isPrivate: isPrivate))
             .onReceive(NotificationCenter.default.publisher(for: NSColor.systemColorsDidChangeNotification)) { _ in systemColorChanges += 1 }
     }
 }
@@ -175,7 +208,13 @@ struct SidebarAppearance: ViewModifier {
     @Environment(\.spaceTheme) private var theme
 
     func body(content: Content) -> some View {
-        content.environment(\.colorScheme, theme.sidebarColorScheme)
+        if theme.isPrivate {
+            content
+                .foregroundStyle(SpaceTheme.PrivatePalette.primary.color, SpaceTheme.PrivatePalette.secondary.color, SpaceTheme.PrivatePalette.tertiary.color)
+                .environment(\.colorScheme, theme.sidebarColorScheme)
+        } else {
+            content.environment(\.colorScheme, theme.sidebarColorScheme)
+        }
     }
 }
 

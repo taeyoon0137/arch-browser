@@ -31,17 +31,21 @@ final class PluginsMenu: NSObject, NSMenuItemValidation {
         let session = session
         // The values arrive before the session and the windows change, so each step reads the value it receives.
         subscription = session.$windows
-            .map { windows -> AnyPublisher<Persona.ID, Never> in
-                guard let window = windows.first else { return Just(Persona.defaultID).eraseToAnyPublisher() }
+            .map { windows -> AnyPublisher<Persona.ID?, Never> in
+                guard let window = windows.first else { return Just(Optional(Persona.defaultID)).eraseToAnyPublisher() }
+                guard !window.isPrivate else { return Just(nil).eraseToAnyPublisher() }
                 return window.$currentSpaceID
-                    .map { id in session.spaces.first { $0.id == id }?.resolvedPersonaID ?? Persona.defaultID }
+                    .map { id -> Persona.ID? in session.spaces.first { $0.id == id }?.resolvedPersonaID ?? Persona.defaultID }
                     .eraseToAnyPublisher()
             }
             .switchToLatest()
             .removeDuplicates()
-            .map { id in MainActor.assumeIsolated { session.plugins(in: id) }.$contributions }
+            .map { id -> AnyPublisher<[PluginMenuSection], Never> in
+                guard let id else { return Just([]).eraseToAnyPublisher() }
+                return MainActor.assumeIsolated { session.plugins(in: id) }.$contributions
+                    .map { $0.menuSections(at: .pluginsMenu) }.eraseToAnyPublisher()
+            }
             .switchToLatest()
-            .map { $0.menuSections(at: .pluginsMenu) }
             .removeDuplicates()
             .sink { [weak self] sections in MainActor.assumeIsolated { self?.show(sections) } }
     }
@@ -81,6 +85,6 @@ final class PluginsMenu: NSObject, NSMenuItemValidation {
 
     /// Plugin commands need a browser window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        session.activeWindow != nil
+        session.activeWindow.map { !$0.isPrivate } == true
     }
 }

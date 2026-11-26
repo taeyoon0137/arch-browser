@@ -266,6 +266,8 @@ class StorageClearingClient : public CefClient, public CefLifeSpanHandler, publi
 @interface ARCHCEFRequestContext ()
 /// Creates the object before CEF has a context for it.
 - (instancetype)initWithoutContext;
+/// Creates independent storage at the validated profile path, or in memory for an empty path.
+- (nullable instancetype)initWithProfilePath:(NSString *)profile;
 /// Runs the calls that waited for Chromium to initialize the context, in order. Later calls run at once.
 - (void)runWaitingCalls;
 /// Asks the delegate for the tab that a service worker of the context asks for, and answers `callback` with it. Returns NO without a delegate, so that Chromium handles the request.
@@ -362,12 +364,23 @@ class ContextReadiness : public TabRequestHandler, public CefCompletionCallback 
     } else if (errno != ENOENT) {
         return nil;
     }
+    return [self initWithProfilePath:profile];
+}
+
++ (instancetype)createEphemeralContext {
+    if (!gInitialized) {
+        return nil;
+    }
+    return [[self alloc] initWithProfilePath:@""];
+}
+
+- (instancetype)initWithProfilePath:(NSString *)profile {
     self = [self initWithoutContext];
     if (!self) {
         return nil;
     }
     _waitingCalls = [NSMutableArray array];
-    // The other settings stay empty, as the runtime leaves its own.
+    // An empty cache path creates an independent in-memory profile. Never use the global context for private storage.
     CefRequestContextSettings settings;
     CefString(&settings.cache_path) = profile.UTF8String;
     CefRefPtr<ContextReadiness> readiness = new ContextReadiness(self);

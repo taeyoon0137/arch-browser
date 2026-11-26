@@ -42,8 +42,10 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
     public var engine: EngineKind
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for a tab of the user's.
     public var agentOwnerID: UUID?
+    /// Private tabs can be read only by the agent that opened them, never through sharing.
+    public var isPrivate: Bool
 
-    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, canGoBack: Bool = false, canGoForward: Bool = false, engine: EngineKind, agentOwnerID: UUID? = nil, documentID: UUID = UUID(), isLoaded: Bool = true) {
+    public init(id: UUID, spaceID: UUID?, title: String, url: URL?, isLoading: Bool, canGoBack: Bool = false, canGoForward: Bool = false, engine: EngineKind, agentOwnerID: UUID? = nil, documentID: UUID = UUID(), isLoaded: Bool = true, isPrivate: Bool = false) {
         self.id = id
         self.documentID = documentID
         self.spaceID = spaceID
@@ -55,11 +57,12 @@ public struct AgentTabInfo: Identifiable, Equatable, Sendable {
         self.canGoForward = canGoForward
         self.engine = engine
         self.agentOwnerID = agentOwnerID
+        self.isPrivate = isPrivate
     }
 
     /// Allows sharing only a loaded user tab whose site policy permits its title.
     func canShareWithAgent(allowsAI: (URL) -> Bool) -> Bool {
-        isLoaded && agentOwnerID == nil && AgentPolicy.showsTitle(of: url, allowsAI: allowsAI)
+        !isPrivate && isLoaded && agentOwnerID == nil && AgentPolicy.showsTitle(of: url, allowsAI: allowsAI)
     }
 
     /// Checks the tab ID, document ID, and URL before reusing reviewed content.
@@ -74,11 +77,14 @@ public struct AgentTabOwner: Equatable, Sendable {
     public var id: UUID
     public var spaceID: UUID
     public var folderName: String
+    /// Opens independent, in-memory storage without a Persona, space, or agent folder.
+    public var isPrivate: Bool
 
-    public init(id: UUID, spaceID: UUID, folderName: String) {
+    public init(id: UUID, spaceID: UUID, folderName: String, isPrivate: Bool = false) {
         self.id = id
         self.spaceID = spaceID
         self.folderName = folderName
+        self.isPrivate = isPrivate
     }
 }
 

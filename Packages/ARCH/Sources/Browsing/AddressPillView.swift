@@ -31,7 +31,7 @@ struct AddressPillView: View {
 
     /// The name of the web extension in the tab's Persona whose page is at `url` (`BrowserSession.extensionName(ofPageAt:in:)`), which the address pill, the small window, and the tab switcher show in place of the identifier that the page's address has as its host; nil for another page. The pill and the small window put the extension symbol before it in place of the globe (`symbol(for:internalPage:isExtensionPage:)`), and VoiceOver reads it as an extension's page (`accessibilityLabel(ofExtensionPage:)`), so that an extension cannot pass its page off as a website by the name it gives itself. The pill's help and the palette keep the whole address.
     static func extensionName(ofPageAt url: URL, in tab: Tab, session: BrowserSession) -> String? {
-        session.extensionName(ofPageAt: url, in: tab.personaID)
+        tab.isPrivate ? nil : session.extensionName(ofPageAt: url, in: tab.personaID)
     }
 
     /// What VoiceOver reads for the site of an extension's page.
@@ -99,7 +99,7 @@ struct AddressPillView: View {
                     .environment(\.colorScheme, theme.colorScheme))
         }
         .font(.system(size: 14))
-        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme)))
+        .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(SidebarFill.field.color(in: colorScheme, isPrivate: theme.isPrivate)))
         .offset(pull)
         .opacity(pull == .zero ? 1 : 0)
         // Outside the motion, so the frame stays where the pill rests.
@@ -214,8 +214,10 @@ struct SiteSettingsView: View {
             if let tab, !windowModel.isSelectedPageCovered {
                 SiteSettingsHeader(tab: tab)
                 TabEngineSection(session: session, tab: tab)
-                SiteRulePopoverSection(session: session, tab: tab, close: close)
-                if let webExtensions = session.webExtensions(in: tab.personaID) {
+                if !tab.isPrivate {
+                    SiteRulePopoverSection(session: session, tab: tab, close: close)
+                }
+                if !tab.isPrivate, let webExtensions = session.webExtensions(in: tab.personaID) {
                     WebExtensionActionsSection(session: session, webExtensions: webExtensions, tab: tab, close: close)
                 }
                 // The card that the row opens says what goes, so this sentence is only the row's help.
@@ -269,7 +271,7 @@ struct TabEngineSection: View {
                     session.switchEngine(of: tab, to: tab.engineKind)
                 })
             }
-            PageAISiteRow(tab: tab)
+            if !tab.isPrivate { PageAISiteRow(tab: tab) }
         }
     }
 }

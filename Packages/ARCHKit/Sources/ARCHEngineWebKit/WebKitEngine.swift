@@ -69,9 +69,12 @@ public final class WebKitApplication: EngineApplication {
         let dataStore = storageIdentifier.map { WKWebsiteDataStore(forIdentifier: $0) } ?? .default()
         completion(.success(makeBrowserContext(storageIdentifier: storageIdentifier, dataStore: dataStore)))
     }
-    /// A profile over `dataStore`. Besides `createBrowserContext`, the adapter's tests use it for a profile whose store, `.nonPersistent()`, keeps nothing on disk; the app's profiles all keep their data.
-    func makeBrowserContext(storageIdentifier: UUID?, dataStore: WKWebsiteDataStore) -> WebKitBrowserContext {
-        let context = WebKitBrowserContext(storageIdentifier: storageIdentifier, dataStore: dataStore)
+    public func createEphemeralBrowserContext(completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
+        completion(.success(makeBrowserContext(storageIdentifier: nil, dataStore: .nonPersistent(), allowsExtensions: false)))
+    }
+    /// A profile over the selected persistent or in-memory website data store.
+    func makeBrowserContext(storageIdentifier: UUID?, dataStore: WKWebsiteDataStore, allowsExtensions: Bool = true) -> WebKitBrowserContext {
+        let context = WebKitBrowserContext(storageIdentifier: storageIdentifier, dataStore: dataStore, allowsExtensions: allowsExtensions)
         context.application = self
         return context
     }
@@ -88,17 +91,19 @@ public final class WebKitApplication: EngineApplication {
     }
 }
 
-/// One profile, whose `WKWebsiteDataStore` keeps its cookies, site storage, and caches for the app's lifetime: the default store or, with a storage identifier, the store of that identifier.
+/// One profile, with the default, an identified persistent, or a fresh non-persistent website data store.
 public final class WebKitBrowserContext: EngineBrowserContext {
     /// The identifier of the profile's store, or nil for the default store or one that keeps nothing on disk.
     let storageIdentifier: UUID?
+    private let allowsExtensions: Bool
     public var preferences = EnginePreferences()
     public let dataStore: WKWebsiteDataStore
     weak var application: WebKitApplication?
     lazy var webKitDownloads = WebKitDownloads(context: self)
 
-    init(storageIdentifier: UUID?, dataStore: WKWebsiteDataStore) {
+    init(storageIdentifier: UUID?, dataStore: WKWebsiteDataStore, allowsExtensions: Bool = true) {
         self.storageIdentifier = storageIdentifier
+        self.allowsExtensions = allowsExtensions
         self.dataStore = dataStore
     }
 
@@ -112,7 +117,7 @@ public final class WebKitBrowserContext: EngineBrowserContext {
     var webExtensions: WebKitExtensions? { webExtensionsObject as? WebKitExtensions }
     /// The profile's `WebKitExtensions` on macOS 15.4 and later, made at first use. It is stored untyped, as a stored property cannot have a type of a newer system.
     private lazy var webExtensionsObject: AnyObject? = {
-        guard #available(macOS 15.4, *) else { return nil }
+        guard allowsExtensions, #available(macOS 15.4, *) else { return nil }
         return WebKitExtensions(context: self)
     }()
 }

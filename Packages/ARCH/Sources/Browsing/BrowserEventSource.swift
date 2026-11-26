@@ -9,9 +9,12 @@ import UniformTypeIdentifiers
 /// What the source follows of a browser window.
 @MainActor protocol BrowserEventWindow: AnyObject {
     var id: UUID { get }
+    var isPrivate: Bool { get }
     var selectedTabIDs: AnyPublisher<UUID?, Never> { get }
     var currentSpaceIDs: AnyPublisher<UUID, Never> { get }
 }
+
+extension BrowserEventWindow { var isPrivate: Bool { false } }
 
 extension BrowserWindowModel: BrowserEventWindow {
     var selectedTabIDs: AnyPublisher<UUID?, Never> { $selectedTabID.eraseToAnyPublisher() }
@@ -110,6 +113,7 @@ final class BrowserEventSource {
 
     /// Follows each tab's loads, address, and shown name, and posts `tabOpened` for a tab that joins, other than one restored from the saved session or a pinned tab that browser import or sidebar sync adds. A tab opened inside `withCause` keeps the cause for its first load. A tab that leaves is no longer followed.
     func follow(tabs current: [Tab], postingNewTabs: Bool) {
+        let current = current.filter { !$0.isPrivate }
         let ids = Set(current.map(\.id))
         for id in tabs.keys where !ids.contains(id) {
             tabs[id] = nil
@@ -127,6 +131,7 @@ final class BrowserEventSource {
 
     /// Posts `tabClosed` while the session still lists the tab, so the event's consumers can read its last name and address.
     func tabWillClose(_ tab: Tab, reason: BrowserTabCloseReason) {
+        guard !tab.isPrivate else { return }
         bus.post(.tabClosed(tab: ref(tab), reason: reason))
     }
 
@@ -247,6 +252,7 @@ final class BrowserEventSource {
 
     /// Follows each window's selected tab and current space. A window's space when the source first sees it is no switch.
     func follow(windows current: [any BrowserEventWindow]) {
+        let current = current.filter { !$0.isPrivate }
         let ids = Set(current.map(\.id))
         for id in windows.keys where !ids.contains(id) {
             windows[id] = nil

@@ -61,6 +61,9 @@ final class EngineRuntime {
     private var enginesThatDidNotStart: Set<EngineKind> = []
     /// Each Persona's runtimes, from the Persona's first tab until quit, and its plugins.
     private var personaEngines: [Persona.ID: PersonaEngines] = [:]
+    /// Private runtime keys are never Persona IDs in `personas`, and never acquire a profile folder.
+    private var privateRuntimes: [UUID: [EngineKind: EngineRuntime]] = [:]
+    private var privateDownloads: [DownloadEntry] = []
     /// The runtimes of Personas deleted since launch, kept without tabs until quit, because the download items in their rows refer to their download lists and profiles unowned.
     private var retiredPersonaEngines: [PersonaEngines] = []
     /// The deleted Personas whose stored data is still on disk.
@@ -267,6 +270,93 @@ final class EngineRuntime {
         case noEngineStarted
     }
 
+    // MARK: Private windows
+
+    /// Opens independent in-memory storage, with no Persona, space, plugins, or saved window record.
+    @discardableResult
+    public func openPrivateWindow(ownerID: UUID? = nil) -> BrowserWindowModel {
+        let window = makePrivateWindow(ownerID: ownerID, createsNativeWindow: true)
+        window.nsWindow?.makeKeyAndOrderFront(nil)
+        window.showCommandPalette(.newTab)
+        return window
+    }
+
+    /// The headless form lets session tests verify isolation without opening an AppKit window.
+    func makePrivateWindow(ownerID: UUID? = nil, createsNativeWindow: Bool = false) -> BrowserWindowModel {
+        let id = UUID()
+        privateRuntimes[id] = [:]
+        let record = SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: id, selectedTabID: nil, isSidebarVisible: true)
+        let window = BrowserWindowModel(session: self, record: record, kind: .main, privateSessionID: id, privateOwnerID: ownerID)
+        windows.insert(window, at: 0)
+        if createsNativeWindow { windowControllers.append(BrowserWindowController(model: window, cascadingFrom: nil)) }
+        updateFocusedTab()
+        return window
+    }
+
+    /// Adds a tab to exactly this private window. A failed ephemeral context leaves a blank stand-in and never opens a persistent profile.
+    @discardableResult
+    func openPrivateTab(url: URL?, in window: BrowserWindowModel, ownerID: UUID? = nil, engine: EngineKind? = nil, select: Bool = true) -> Tab? {
+        guard let id = window.privateSessionID, privateRuntimes[id] != nil else { return nil }
+        if ownerID != window.privateOwnerID {
+            let isolated = makePrivateWindow(ownerID: ownerID, createsNativeWindow: window.nsWindow != nil)
+            isolated.nsWindow?.makeKeyAndOrderFront(nil)
+            return openPrivateTab(url: url, in: isolated, ownerID: ownerID, engine: engine, select: select)
+        }
+        let preferred = engine ?? defaultEngine
+        let page = makeWebContents(url: url, engine: preferred, state: nil, in: id, agentTab: ownerID != nil)
+        let tab = adoptPrivate(page, sessionID: id, ownerID: ownerID)
+        tab.preferredEngine = preferred
+        if select { window.selectTab(tab.id) }
+        return tab
+    }
+
+    func openPrivateAgentTab(url: URL, engine: EngineKind?, owner: AgentTabOwner) -> Tab? {
+        let window = openPrivateWindow(ownerID: owner.id)
+        return openPrivateTab(url: url, in: window, ownerID: owner.id, engine: engine)
+    }
+
+    @discardableResult
+    func adoptPrivate(_ page: any EngineWebContents, sessionID: UUID, ownerID: UUID?, opener: (any EngineWebContents)? = nil) -> Tab {
+        let tab = makeTab(page, id: UUID(), spaceID: nil, personaID: sessionID, pinned: false)
+        tab.privateAgentOwnerID = ownerID
+        tab.opener = opener
+        tabs.append(tab)
+        return tab
+    }
+
+    private func privateRuntime(for kind: EngineKind, sessionID: UUID) -> EngineRuntime? {
+        if let existing = privateRuntimes[sessionID]?[kind] { return existing }
+        for candidate in [kind] + registry.registeredKinds.filter({ $0 != kind }) {
+            if let existing = privateRuntimes[sessionID]?[candidate] { return existing }
+            guard let application = application(for: candidate) else { continue }
+            var created: Result<any EngineBrowserContext, Error>?
+            application.createEphemeralBrowserContext { created = $0 }
+            guard let context = try? created?.get() else { continue }
+            let runtime = EngineRuntime(kind: candidate, personaID: sessionID, context: context, browser: application.createBrowser(context: context))
+            privateRuntimes[sessionID]?[candidate] = runtime
+            context.downloads.delegate = self
+            context.delegate = self
+            // One copy of global download preferences, without a subscription retaining this private context after close.
+            context.preferences.downloadFilePath = Self.savedDownloadsFolder
+            context.preferences.promptForDownloadPath = UserDefaults.standard.bool(forKey: Self.asksWhereToSaveDownloadsKey)
+            return runtime
+        }
+        return nil
+    }
+
+    private func closePrivateSession(_ id: UUID) {
+        for tab in tabs where tab.privateSessionID == id { removeTab(tab, closedRecord: nil, reason: .user) }
+        privateDownloads.filter { $0.personaID == id && $0.canCancel }.forEach { $0.item.cancel() }
+        privateDownloads.removeAll { $0.personaID == id }
+        for page in downloadPages where page.runtime.personaID == id { page.runtime.browser.closeWebContents(page.webContents) }
+        downloadPages.removeAll { $0.runtime.personaID == id }
+        privateRuntimes.removeValue(forKey: id)?.values.forEach {
+            $0.context.downloads.delegate = nil
+            $0.context.delegate = nil
+            $0.browser.closeAllWebContents()
+        }
+    }
+
     // MARK: Windows
 
     /// The open browser windows, the most recently main first.
@@ -280,7 +370,7 @@ final class EngineRuntime {
     public var activeWindow: BrowserWindowModel? { windows.first }
 
     /// The main window that last became main, or nil while none is open. Menu validation and other checks read it, because they must not create a window.
-    public var lastMainWindow: BrowserWindowModel? { windows.first { $0.kind == .main } }
+    public var lastMainWindow: BrowserWindowModel? { windows.first { $0.kind == .main && !$0.isPrivate } }
 
     /// The window that sidebar commands act on: the last main window, or, while none is open, the front one of the main windows that reopen from `windowsToReopen` (window rule 7).
     public func sidebarTarget() -> BrowserWindowModel { lastMainWindow ?? reopenWindows(windowsToReopen)[0] }
@@ -291,9 +381,9 @@ final class EngineRuntime {
         let session = agents.session(withID: ownerID)
         let panel: AgentPanelContent = session != nil ? .session(ownerID) : .client(ownerID)
         let personaID = session?.personaID ?? agents.grants.first { $0.id == ownerID }?.personaID
-        let ownMain = windows.filter { $0.kind == .main && $0.personaID == personaID }
-        let window = windows.first { $0.agentPanel == panel } ?? ownMain.first { $0.agentPanel == nil } ?? ownMain.first
-            ?? windows.first { $0.agentPanel == nil } ?? activeWindow ?? sidebarTarget()
+        let ownMain = windows.filter { $0.kind == .main && !$0.isPrivate && $0.personaID == personaID }
+        let window = windows.first { !$0.isPrivate && $0.agentPanel == panel } ?? ownMain.first { $0.agentPanel == nil } ?? ownMain.first
+            ?? windows.first { !$0.isPrivate && $0.agentPanel == nil } ?? windows.first { !$0.isPrivate } ?? sidebarTarget()
         let isSession = session != nil
         if isSession { window.showAgentSession(ownerID) } else { window.showClientPanel(ownerID) }
         window.nsWindow?.makeKeyAndOrderFront(nil)
@@ -313,7 +403,7 @@ final class EngineRuntime {
     /// New Window: opens a main window on the active window's current space, or on the last main window's while none is open, with no tab selected (open decision 8).
     @discardableResult
     public func openWindow() -> BrowserWindowModel {
-        let spaceID = activeWindow?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
+        let spaceID = windows.first { !$0.isPrivate }?.currentSpaceID ?? windowsToReopen[0].currentSpaceID
         let window = makeWindow(from: SessionSnapshot.WindowRecord(id: UUID(), frame: nil, currentSpaceID: spaceID, selectedTabID: nil, isSidebarVisible: true), kind: .main)
         window.nsWindow?.makeKeyAndOrderFront(nil)
         return window
@@ -369,8 +459,11 @@ final class EngineRuntime {
         // The tabs the window showed were in view until now, as the archive timer and the saved session count the tabs of open windows, also when closing the last main window quits.
         window.paneTabs.forEach { $0.lastActivatedAt = Date() }
         window.prepareToClose()
-        if window.kind == .main { windowsToReopen = [window.record] }
+        if window.kind == .main, !window.isPrivate { windowsToReopen = [window.record] }
         windows.removeAll { $0 === window }
+        if let id = window.privateSessionID, !windows.contains(where: { $0.privateSessionID == id }) {
+            closePrivateSession(id)
+        }
         applyPendingSyncEngines()
         windows.forEach { $0.updateShownTabs() }
         updateFocusedTab()
@@ -492,6 +585,10 @@ final class EngineRuntime {
     /// Opens a small window, made key and ordered front, on a new tab for `webContents`, which a runtime of the Persona created. The tab moves to the space `spaceID`, or to the Persona's preferred space when that space belongs to another Persona. It stays in `tabs`, so that sheets, permissions, downloads, Now Playing, and `session.json` handle it as any other, while its space's list leaves it out.
     @discardableResult
     func openSmallWindow(_ webContents: any EngineWebContents, spaceID: UUID, personaID: Persona.ID, opener: (any EngineWebContents)? = nil, preferredEngine: EngineKind? = nil) -> BrowserWindowModel {
+        if let window = windows.first(where: { $0.privateSessionID == personaID }) {
+            window.showOpenedPage(webContents, personaID: personaID, opener: opener, preferredEngine: preferredEngine)
+            return window
+        }
         let spaceID = self.spaceID(spaceID, orPreferredIn: personaID)
         let tab = makeTab(webContents, id: UUID(), spaceID: spaceID, personaID: personaID, pinned: false)
         if let preferredEngine { tab.preferredEngine = preferredEngine }
@@ -507,7 +604,8 @@ final class EngineRuntime {
 
     /// Move to Main Window: the small window's tab joins the end of its space's open tabs, and the sidebar target selects it, which takes it from the small window (window rule 2) and so closes that window, then comes forward with the page focused. The page moves without loading again. The tab's space is still there, because deleting a space moves its tabs, a small window's among them.
     public func moveToMainWindow(_ smallWindow: BrowserWindowModel) {
-        guard smallWindow.kind == .small, let tab = smallWindow.selectedTab, let index = tabs.firstIndex(where: { $0 === tab }) else { return }
+        guard smallWindow.kind == .small, !smallWindow.isPrivate, let tab = smallWindow.selectedTab, !tab.isPrivate,
+              let index = tabs.firstIndex(where: { $0 === tab }) else { return }
         tab.isInSmallWindow = false
         var reordered = tabs
         reordered.append(reordered.remove(at: index))
@@ -607,6 +705,7 @@ final class EngineRuntime {
 
     /// Uses the requested engine when its profile opens, otherwise another registered engine in the same Persona. Nil when no engine opens a profile for the Persona, as when its profile folder cannot open or a synced deletion has removed the Persona while one of its pages still asks; each caller then leaves the page unopened instead of stopping the app.
     func runtime(for kind: EngineKind, in personaID: Persona.ID) -> EngineRuntime? {
+        if privateRuntimes[personaID] != nil { return privateRuntime(for: kind, sessionID: personaID) }
         let engines = engines(of: personaID)
         if let runtime = engines.runtimes[kind] ?? startRuntime(kind, in: engines) { return runtime }
         for fallback in registry.registeredKinds where fallback != kind {
@@ -641,13 +740,13 @@ final class EngineRuntime {
     }
 
     /// The runtime that created the tab's web contents.
-    private func runtime(of tab: Tab) -> EngineRuntime? {
-        personaEngines[tab.personaID]?.runtimes[tab.engineKind]
+    func runtime(of tab: Tab) -> EngineRuntime? {
+        privateRuntimes[tab.personaID]?[tab.engineKind] ?? personaEngines[tab.personaID]?.runtimes[tab.engineKind]
     }
 
     /// The runtime whose profile keeps the download list.
     private func runtime(owning downloads: any EngineDownloads) -> EngineRuntime? {
-        personaEngines.values.flatMap(\.runtimes.values).first { ($0.context.downloads as AnyObject) === (downloads as AnyObject) }
+        (personaEngines.values.flatMap(\.runtimes.values) + privateRuntimes.values.flatMap { Array($0.values) }).first { ($0.context.downloads as AnyObject) === (downloads as AnyObject) }
     }
 
     // MARK: Spaces
@@ -878,6 +977,7 @@ final class EngineRuntime {
 
     /// Whether the tab's page, a pinned tab's saved page, is not yet a favorite of the tab's Persona, which the menu bar and the tab's context menu check.
     public func canAddFavorite(_ tab: Tab) -> Bool {
+        guard !tab.isPrivate else { return false }
         guard let url = favoriteAddress(of: tab) else { return false }
         return !favorites.contains { $0.url == url && $0.resolvedPersonaID == tab.personaID }
     }
@@ -1098,7 +1198,8 @@ final class EngineRuntime {
 
     /// A web contents of the Persona in `engine`, or in the default engine, that opens `url` or the new tab page and restores `state` when given. Its first document runs the app's page scripts, with the agents' target check for an agent tab, and those of the Persona's enabled plugins (`TabUnloading.pageScripts(withPluginScripts:inAgentTab:)`), which Chromium receives only with the browser it creates.
     func makeWebContents(url: URL?, engine: EngineKind?, state: Data?, in personaID: Persona.ID, agentTab: Bool = false) -> any EngineWebContents {
-        let pageScripts = TabUnloading.pageScripts(withPluginScripts: plugins(in: personaID).contributions.pageScripts, inAgentTab: agentTab)
+        let pluginScripts = privateRuntimes[personaID] == nil ? plugins(in: personaID).contributions.pageScripts : []
+        let pageScripts = TabUnloading.pageScripts(withPluginScripts: pluginScripts, inAgentTab: agentTab)
         let requested = engine ?? defaultEngine
         // Without a profile the tab keeps its address in a stand-in, which opens the page once a profile can.
         guard let runtime = runtime(for: requested, in: personaID) else { return UnloadedWebContents(url: url, title: "", engine: requested, state: state) }
@@ -1131,9 +1232,11 @@ final class EngineRuntime {
     /// Wraps `webContents` in a tab whose popups, dialogs, permission requests, and closing go through the session. The caller adds it to a space's list or gives it to a favorite.
     func makeTab(_ webContents: any EngineWebContents, id: UUID, spaceID: UUID?, personaID: UUID, pinned: Bool) -> Tab {
         let tab = Tab(id: id, webContents: webContents, spaceID: spaceID, isPinned: pinned, personaID: personaID)
+        if privateRuntimes[personaID] != nil { tab.privateSessionID = personaID }
         // A tab a page opens comes from the page's runtime, so it belongs to the page's Persona, and it keeps the page as its opener. The window that shows the page shows the new tab, in the page's space, which is that window's current space, or in another small window beside a small window. A page that no window shows opens it behind, marked unread, in the page's space or, for a favorite's page, its Persona's preferred space. A page of a tab that a script plugin opened, before the user acted in it, opens its tab held as theirs (`PageDownloadGate.holdUntilUserActs()`), so that their own pages cannot download through the tabs they open.
         tab.routeNewTabLink = { [weak self, weak tab] action in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return .cancel }
+            guard !tab.isPrivate else { return .openLinkInNewTab }
             let source = self.window(showing: tab)
             let origin = source?.currentSpace ?? self.spaces.first { $0.id == tab.spaceID } ?? self.preferredSpace(in: tab.personaID)
             guard let destination = self.destination(forOpening: origin, url: action.url) else { return .openLinkInNewTab }
@@ -1161,6 +1264,21 @@ final class EngineRuntime {
             runtime.browser.takeOwnership(of: popup)
             let isHeld = tab.pageDownloads.isHeldUntilUserActs
             defer { if isHeld { self.tabs.first { $0.webContents === popup }?.pageDownloads.holdUntilUserActs() } }
+            if let id = tab.privateSessionID {
+                let opened = self.adoptPrivate(popup, sessionID: id, ownerID: tab.agentOwnerID, opener: tab.webContents)
+                if let owner = tab.agentOwnerID {
+                    if let url = popup.url ?? targetURL, self.agentMonitor?.agentTab(tab, owner: owner, mayLoad: url, kind: .popup) == false {
+                        DispatchQueue.main.async { [weak self, weak opened] in
+                            if let self, let opened { self.closeAgentTab(opened, reason: .page) }
+                        }
+                        return
+                    }
+                    self.agentMonitor?.agentTab(tab, owner: owner, didReport: .opened(tab: opened.id))
+                    return
+                }
+                if disposition != .newBackgroundTab { self.windows.first { $0.privateSessionID == id }?.selectTab(opened.id) }
+                return
+            }
             if let owner = tab.agentOwnerID { return self.adoptAgentPopup(popup, targetURL: targetURL, opener: tab, owner: owner) }
             let window = self.window(showing: tab)
             if let index = tab.pendingSiteRuleOpenings.firstIndex(where: { $0.url == targetURL && $0.disposition == disposition }) {
@@ -1238,6 +1356,7 @@ final class EngineRuntime {
         // The page takes its host's remembered zoom.
         tab.didFinishLoad = { [weak self, weak tab] in
             guard let self, let tab else { return }
+            guard !tab.isPrivate else { return }
             self.personaEngines[tab.personaID]?.cookieSync.scheduleCopy(from: tab.engineKind)
             self.scheduleSave()
             self.applyZoom(to: tab)
@@ -1255,16 +1374,24 @@ final class EngineRuntime {
         }
         tab.requestPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
+            if tab.isPrivate {
+                let content = SitePermissionAnswers.content(for: request, remembersAnswer: false, identity: PromptSiteIdentity.make(for: request.origin, in: tab))
+                return self.enqueuePrompt(content, for: tab) { completion($0.buttonID == "allow") }
+            }
             self.permissionAnswers.answer(request, forTab: tab.id, personaID: tab.personaID, in: self.runtime(of: tab)?.context, identity: PromptSiteIdentity.make(for: request.origin, in: tab), persona: self.permissionCardPersonaName(for: tab), ask: { makeContent, response in
                 self.enqueuePrompt(making: makeContent, for: tab, completion: response)
             }, completion: completion)
         }
         tab.denyPermission = { [weak self, weak tab] request, completion in
             guard let self, let tab else { return completion(false) }
+            if tab.isPrivate { return completion(false) }
             self.permissionAnswers.denyWithoutAsking(request, personaID: tab.personaID, in: self.runtime(of: tab)?.context, completion: completion)
         }
         // A tab keeps its Persona for its whole life, so its visits go to that Persona's history.
-        tab.recordVisit = { [weak self, personaID = tab.personaID] url, title in self?.history.record(url, title: title, persona: personaID) }
+        tab.recordVisit = { [weak self, weak tab] url, title in
+            guard let tab, !tab.isPrivate else { return }
+            self?.history.record(url, title: title, persona: tab.personaID)
+        }
         // The page fills the window that shows it. A page that no window shows leaves fullscreen; the engine is still in its callback, so that happens on the next turn of the run loop.
         tab.didChangeFullscreen = { [weak self, weak tab] isFullscreen in
             guard let self, let tab else { return }
@@ -1277,6 +1404,12 @@ final class EngineRuntime {
         // A context-menu link opens behind, marked unread, in the source Persona and engine. A link clicked with Command or the middle button opens through `openNewTab`.
         tab.openURLInNewTab = { [weak self, weak tab] url in
             guard let self, let tab, self.allTabs.contains(where: { $0 === tab }) else { return }
+            if tab.isPrivate {
+                if let window = self.windows.first(where: { $0.privateSessionID == tab.privateSessionID }) {
+                    _ = self.openPrivateTab(url: url, in: window, engine: tab.preferredEngine, select: false)
+                }
+                return
+            }
             let source = self.window(showing: tab)
             let origin = source?.currentSpace ?? self.spaces.first { $0.id == tab.spaceID } ?? self.preferredSpace(in: tab.personaID)
             if tab.agentOwnerID == nil, let destination = self.destination(forOpening: origin, url: url) {
@@ -1291,6 +1424,12 @@ final class EngineRuntime {
         tab.searchInNewTab = { [weak self, weak tab] text in
             guard let self, let tab else { return }
             let url = Self.searchResultsURL(for: text)
+            if tab.isPrivate {
+                if let window = self.windows.first(where: { $0.privateSessionID == tab.privateSessionID }) {
+                    _ = self.openPrivateTab(url: url, in: window, engine: tab.preferredEngine)
+                }
+                return
+            }
             if let window = self.window(showing: tab) {
                 let page = self.makeWebContents(url: url, engine: tab.preferredEngine, state: nil, in: tab.personaID)
                 return window.showOpenedPage(page, personaID: tab.personaID, preferredEngine: tab.preferredEngine)
@@ -1320,7 +1459,7 @@ final class EngineRuntime {
         tab.agentOwnerOfFolder = { [weak self] id in self?.folders.first { $0.id == id }?.agentSessionID }
         tab.agentMonitor = agentMonitor
         // Every change to what `session.json` keeps of a tab, such as a new address or name, is saved.
-        tabObservers[tab.id] = tab.persistedChanges.sink { [weak self] in self?.scheduleSave() }
+        if !tab.isPrivate { tabObservers[tab.id] = tab.persistedChanges.sink { [weak self] in self?.scheduleSave() } }
         return tab
     }
 
@@ -1331,8 +1470,12 @@ final class EngineRuntime {
 
     /// Selects a tab that no window shows. A space's tab goes to the front main window on its space, or else to the front main window of its Persona, which then shows the tab's space, so that a window of another Persona keeps its Persona / Space while one of the tab's Persona is open; only without either does it go to the sidebar target. A favorite's tab belongs to no space and leaves a window on its current space, so it goes to the front main window of its Persona, or else to the sidebar target moved to the Persona's preferred space, so that the window offers the tab's favorites and plugins.
     func selectUnshownTab(_ tab: Tab) {
-        let window = windows.first { $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
-            ?? windows.first { $0.kind == .main && $0.personaID == tab.personaID } ?? sidebarTarget()
+        if let id = tab.privateSessionID {
+            windows.first { $0.privateSessionID == id }?.selectTab(tab.id)
+            return
+        }
+        let window = windows.first { $0.kind == .main && !$0.isPrivate && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
+            ?? windows.first { $0.kind == .main && !$0.isPrivate && $0.personaID == tab.personaID } ?? sidebarTarget()
         window.selectTab(tab.id)
     }
 
@@ -1352,6 +1495,14 @@ final class EngineRuntime {
 
     /// Copies cookies, then replaces a still-open tab's page with one from the requested engine.
     private func switchLoadedEngine(of tab: Tab, to kind: EngineKind, source: EngineRuntime, permits: @escaping () -> Bool) {
+        if tab.isPrivate {
+            guard permits(), let target = runtime(for: kind, in: tab.personaID), target.kind == kind else { return }
+            let page = makeWebContents(url: tab.url, engine: kind, state: nil, in: tab.personaID, agentTab: tab.agentOwnerID != nil)
+            replaceWebContents(of: tab, with: page)
+            tab.preferredEngine = kind
+            tab.requestedEngineSwitch = nil
+            return
+        }
         guard let target = runtime(for: kind, in: tab.personaID), target.kind == kind else { return }
         // The page loads in the other engine once it has this engine's cookies, so the site stays signed in.
         engines(of: tab.personaID).cookieSync.copy(from: source, to: target) { [weak self, weak tab] in
@@ -1386,7 +1537,7 @@ final class EngineRuntime {
             let action = TabCloseAction.of(tab, reason: .user)
             guard self.perform(action, on: tab, reason: .user) else { return }
             // ⌘Z reopens only a tab that joined the closed list, so after an unload or a favorite's end it reopens none of the tabs closed before either, rather than an older tab in its place.
-            if action == .close(remember: true) { self.undoableCloseCount += 1 } else { self.forgetUndoableCloses() }
+            if !tab.isPrivate, action == .close(remember: true) { self.undoableCloseCount += 1 } else { self.forgetUndoableCloses() }
         }
     }
 
@@ -1423,6 +1574,7 @@ final class EngineRuntime {
     /// Does what `action` does to the tab and returns whether the tab was still open for it, as a page that agrees to close late can find its tab closed meanwhile.
     @discardableResult
     func perform(_ action: TabCloseAction, on tab: Tab, reason: TabCloseReason) -> Bool {
+        if tab.isPrivate { return removeTab(tab, closedRecord: nil, reason: reason) }
         switch action {
         case .unload: return unloadToSavedPage(tab, reason: reason)
         case .end, .close, .forget: return removeTab(tab, closedRecord: action.closedRecord(of: tab), reason: reason)
@@ -1448,11 +1600,11 @@ final class EngineRuntime {
         guard index != nil || favoriteID != nil else { return false }
         eventSource.tabWillClose(tab, reason: eventReason ?? BrowserTabCloseReason(reason))
         let owner = tab.agentOwnerID
-        let logs = owner == nil
+        let logs = owner == nil && !tab.isPrivate
         recordClose(of: tab, reason: reason, logs: logs)
         if let index { tabs.remove(at: index) }
         if let favoriteID { favoriteTabs[favoriteID] = nil }
-        if owner == nil { agentMonitor?.userDocumentDidEnd(in: tab.id, document: tab.documentID) }
+        if owner == nil, !tab.isPrivate { agentMonitor?.userDocumentDidEnd(in: tab.id, document: tab.documentID) }
         tabObservers[tab.id] = nil
         downloadOnlyTabIDs.remove(tab.id)
         retire(tab.webContents, of: tab.personaID)
@@ -1486,6 +1638,10 @@ final class EngineRuntime {
         let splitNeighbor = leaveSplitView(tab).flatMap { id in tabs.first { $0.id == id } }
         let opener = reason == .page || reason == .download ? allTabs.first { $0.webContents === tab.opener && $0.isListedInSidebar } : nil
         for window in windows where window.selectedTabID == tab.id {
+            if window.isPrivate {
+                window.selectTab(window.privateTabs.first { $0.id != tab.id }?.id)
+                continue
+            }
             guard window.kind == .main else {
                 window.close()
                 continue
@@ -1511,7 +1667,7 @@ final class EngineRuntime {
     /// Closes a page of the Persona that no tab shows any more, through the runtime that created it. A page whose downloads would stop with it stays open on a blank page until they finish. A tab without its page has none to close.
     func retire(_ webContents: any EngineWebContents, of personaID: Persona.ID) {
         defer { automaticPictureInPicture.contentsDidRetire(webContents) }
-        guard !(webContents is UnloadedWebContents), let runtime = personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
+        guard !(webContents is UnloadedWebContents), let runtime = privateRuntimes[personaID]?[webContents.engineKind] ?? personaEngines[personaID]?.runtimes[webContents.engineKind] else { return }
         if webContents.closingStopsDownloads {
             // Without a delegate the page's own questions, such as its leave-page check on the way to the blank page, get their default answers. Its developer tools close with its tab.
             webContents.uiDelegate = nil
@@ -1645,6 +1801,7 @@ final class EngineRuntime {
 
     /// The tab stores the pinned flag; the session republishes changes for views that group tabs by it. A tab in a folder leaves it, because the folder stays in the other list.
     public func togglePinned(_ tab: Tab) {
+        guard !tab.isPrivate else { return }
         objectWillChange.send()
         movingTabs {
             tab.folderID = nil
@@ -1757,6 +1914,7 @@ final class EngineRuntime {
 
     /// The runtime of the Persona's web extensions, for their actions in the site settings popover.
     public func webExtensions(in personaID: Persona.ID) -> WebExtensionRuntime? {
+        guard privateRuntimes[personaID] == nil else { return nil }
         _ = plugins(in: personaID)
         return engines(of: personaID).webExtensions
     }
@@ -1859,6 +2017,7 @@ final class EngineRuntime {
 
     /// Sets a tab's zoom and remembers it for the page's host, so that the host's other open tabs follow. A page without a host keeps the factor until its next load.
     func setZoom(_ factor: Double, of tab: Tab) {
+        if tab.isPrivate { tab.webContents.zoomFactor = factor; return }
         guard let host = tab.webContents.url?.host else {
             tab.webContents.zoomFactor = factor
             return
@@ -1872,6 +2031,7 @@ final class EngineRuntime {
 
     /// Gives a tab its host's remembered zoom factor, or 1 for a host without one.
     private func applyZoom(to tab: Tab) {
+        guard !tab.isPrivate else { return }
         let factors = UserDefaults.standard.dictionary(forKey: Self.zoomFactorsKey) as? [String: Double]
         let factor = tab.webContents.url?.host.flatMap { factors?[$0] } ?? 1
         if abs(tab.webContents.zoomFactor - factor) > 0.001 { tab.webContents.zoomFactor = factor }
@@ -2523,11 +2683,11 @@ final class EngineRuntime {
 
     /// The session as `session.json` keeps it, without agent folders and their tabs, which are gone after quit unless the user kept them. The windows are the open main windows, front to back, or the last main window while none is open, so that the next launch opens them. The front one's space and selection also go where older builds read them. Small windows are not kept: their tabs are saved as open tabs of their spaces (open decision 4). The tabs windows show are recorded as active now, as the archive timer counts them, so that the next launch does not archive a tab that was in view until the app quit.
     private func snapshot() -> SessionSnapshot {
-        let mainWindows = windows.filter { $0.kind == .main }
+        let mainWindows = windows.filter { $0.kind == .main && !$0.isPrivate }
         let windowRecords = mainWindows.isEmpty ? windowsToReopen : mainWindows.map(\.record)
         let now = Date()
         let shownIDs = Set(windows.flatMap(\.paneTabs).map(\.id))
-        let kept = SessionSnapshot.keptSidebar(tabs: tabs, folders: folders)
+        let kept = SessionSnapshot.keptSidebar(tabs: tabs.filter { !$0.isPrivate }, folders: folders)
         let front = windowRecords[0]
         return SessionSnapshot(version: SessionSnapshot.currentVersion, needsFullSidebarSync: needsFullSidebarSync ? true : nil, personas: personas, removedPersonaIDs: personaDataRemoval.pendingIDs, spaces: spaces, currentSpaceID: front.currentSpaceID, favorites: favorites,
                                tabs: kept.tabs.map { SessionSnapshot.TabRecord($0, spaceID: $0.spaceID ?? front.currentSpaceID, lastActivatedAt: shownIDs.contains($0.id) || $0.hasActivityToPreserve ? now : $0.lastActivatedAt) },
@@ -2770,7 +2930,7 @@ extension BrowserSession {
     /// An open tab or open folder of this Mac whose ID an incoming pinned tab or pinned folder carries, as when this Mac's data came from the Mac that pinned it, is another item, which never syncs: it takes a new ID and keeps its page, place, contents, and selection, so the pin joins beside it and no comparison takes the pin for one deleted here (`docs/sync.md`, Mapping the session store to records ▸ IDs listed twice). Agent tabs and folders, which `session.json` never keeps, are left alone.
     private func yieldIDs(to state: SidebarSyncState, current: SidebarSyncState) {
         let pinIDs = Set(state.pinnedTabs.map(\.id)).subtracting(current.pinnedTabs.map(\.id))
-        for old in allTabs where pinIDs.contains(old.id) && !old.isPinned && old.agentOwnerID == nil {
+        for old in allTabs where pinIDs.contains(old.id) && !old.isPrivate && !old.isPinned && old.agentOwnerID == nil {
             let page = old.webContents
             old.replaceWebContents(with: UnloadedWebContents(url: old.url, title: old.title, engine: old.engineKind, state: nil))
             let copy = makeTab(page, id: UUID(), spaceID: old.spaceID, personaID: old.personaID, pinned: false)
@@ -3024,6 +3184,13 @@ extension BrowserSession: @preconcurrency EngineApplicationDelegate {
 extension BrowserSession: @preconcurrency EngineBrowserContextDelegate {
     /// A service worker of a Persona's profile opens a page, as `clients.openWindow()` does after a click on its notification: in a new tab of that Persona in the profile's engine, in the current space of the Persona's front main window, or without one in the Persona's preferred space, selected, with its window and the app in front, as the page's own `focus()` brings its tab. A window of another Persona keeps its Persona / Space while one of the Persona is open. A quit opens none.
     public func browserContext(_ context: any EngineBrowserContext, openTabWith url: URL, completion: @escaping ((any EngineWebContents)?) -> Void) {
+        guard !isQuitting else { return completion(nil) }
+        if let runtime = privateRuntimes.values.flatMap({ Array($0.values) }).first(where: { ($0.context as AnyObject) === (context as AnyObject) }) {
+            guard let window = windows.first(where: { $0.privateSessionID == runtime.personaID }), window.privateOwnerID == nil,
+                  let tab = openPrivateTab(url: url, in: window, engine: runtime.kind) else { return completion(nil) }
+            completion(tab.webContents)
+            return
+        }
         guard !isQuitting,
               let runtime = personaEngines.values.lazy.flatMap(\.runtimes.values).first(where: { ($0.context as AnyObject) === (context as AnyObject) }) else {
             return completion(nil)
@@ -3101,13 +3268,14 @@ extension BrowserSession {
 extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
     /// The download's entry. Engines number downloads per profile, so the item, not its ID, names one download among every Persona's.
     private func entry(for item: any EngineDownloadItem) -> DownloadEntry? {
-        downloads.first { $0.item === item }
+        (downloads + privateDownloads).first { $0.item === item }
     }
 
     /// The library button shows a new download's progress, so the library itself stays as it is. The tab that only pointed at the file closes; another such tab waits for its own download, which closing it first would cancel.
     public func downloads(_ downloads: any EngineDownloads, didCreate item: any EngineDownloadItem) {
         guard let personaID = runtime(owning: downloads)?.personaID else { return }
-        self.downloads.append(DownloadEntry(item: item, personaID: personaID, session: self))
+        let entry = DownloadEntry(item: item, personaID: personaID, session: self)
+        if privateRuntimes[personaID] != nil { privateDownloads.append(entry) } else { self.downloads.append(entry) }
         guard let tab = allTabs.first(where: { downloadOnlyTabIDs.contains($0.id) && $0.webContents === item.webContents }) else { return }
         downloadOnlyTabIDs.remove(tab.id)
         // The engine is still choosing the file's destination, so the tab closes once that callback returns.
@@ -3122,14 +3290,15 @@ extension BrowserSession: @preconcurrency EngineDownloadsDelegate {
         let wasFinished = entry.isFinished
         entry.refresh()
         downloadSummary.refresh(from: self.downloads)
-        if !wasFinished, entry.state == .completed, !windows.contains(where: { $0.isLibraryVisible && $0.libraryTab == .downloads }) { unseenDownloadIDs.insert(entry.id) }
-        if !wasFinished, entry.state == .completed { downloadNotifier.downloadDidFinish(entry) }
+        if !wasFinished, entry.state == .completed, privateRuntimes[entry.personaID] == nil, !windows.contains(where: { $0.isLibraryVisible && $0.libraryTab == .downloads }) { unseenDownloadIDs.insert(entry.id) }
+        if !wasFinished, entry.state == .completed, privateRuntimes[entry.personaID] == nil { downloadNotifier.downloadDidFinish(entry) }
         closeDownloadPagesIfIdle()
     }
 
     public func downloads(_ downloads: any EngineDownloads, didRemove item: any EngineDownloadItem) {
         if let entry = entry(for: item) { unseenDownloadIDs.remove(entry.id) }
         self.downloads.removeAll { $0.item === item }
+        privateDownloads.removeAll { $0.item === item }
         closeDownloadPagesIfIdle()
     }
 

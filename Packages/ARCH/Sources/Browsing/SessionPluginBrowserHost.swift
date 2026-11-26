@@ -23,7 +23,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
     /// Lists one Persona's sidebar tabs for plugins, excluding agent tabs.
     public func tabs(in persona: PersonaID) -> [PluginTab] {
         guard let session else { return [] }
-        return session.tabsInSidebarOrder.filter { $0.personaID == persona && BrowserEventSource.kind(of: $0) != .agent }.map(session.pluginTab)
+        return session.tabsInSidebarOrder.filter { $0.personaID == persona && !$0.isPrivate && BrowserEventSource.kind(of: $0) != .agent }.map(session.pluginTab)
     }
 
     /// Lists one Persona's downloads with the metadata available to plugins.
@@ -55,7 +55,7 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
 
     /// Only a space's tab takes a suggested name; a favorite's tab goes by its favorite's name. The rename's title change posts inside `withCause`, so it names its cause.
     public func renameTab(_ id: UUID, to name: String?, showing document: URL?, cause: BrowserEventCause, applying: Bool) -> Bool {
-        guard let session, let tab = session.tabs.first(where: { $0.id == id }), BrowserEventSource.kind(of: tab) != .agent,
+        guard let session, let tab = session.tabs.first(where: { $0.id == id }), !tab.isPrivate, BrowserEventSource.kind(of: tab) != .agent,
               let document = document ?? tab.committedURL else { return false }
         return session.events.withCause(cause) { BrowserHooks.suggest(name, for: document, to: tab, applying: applying) }
     }
@@ -67,7 +67,8 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
 
     /// The tab that a command from the window that last became main gets (`BrowserWindowModel.selectedPluginTab(of:)`).
     public func selectedTab(in persona: PersonaID) -> UUID? {
-        session?.activeWindow?.selectedPluginTab(of: persona)?.id
+        guard let window = session?.activeWindow, !window.isPrivate else { return nil }
+        return window.selectedPluginTab(of: persona)?.id
     }
 
     /// The tab goes where a new tab that the user opens in the space goes, and its `tabOpened`, `tabSelected`, the `spaceSwitched` that the selection brings, and its first `addressChanged` and `pageLoaded` carry the cause, which the tab keeps for its first load. Its downloads ask until the user acts in its page or loads an address in it, and an address of a file downloads nothing (`PageDownloadGate.holdUntilUserActs()`).
@@ -137,16 +138,16 @@ public final class SessionPluginBrowserHost: PluginBrowserHost {
 
     /// Selects the tab in a window of its Persona only, so that a window of another Persona keeps its Persona / Space, which selecting a favorite's tab of another Persona would change: the window of the Persona that shows it, else the front main window on its space, else the front main window of its Persona, which then shows the tab's space, or for a favorite's tab stays on its own. None selects it without such a window. A window that has the tab selected already stays as it is, so that the internal page, palette, or find bar that the user has open there stays.
     private func select(_ tab: Tab, in session: BrowserSession) {
-        let window = session.windows.first { $0.personaID == tab.personaID && $0.shows(tab) }
-            ?? session.windows.first { $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
-            ?? session.windows.first { $0.kind == .main && $0.personaID == tab.personaID }
+        let window = session.windows.first { !$0.isPrivate && $0.personaID == tab.personaID && $0.shows(tab) }
+            ?? session.windows.first { !$0.isPrivate && $0.kind == .main && tab.spaceID != nil && $0.currentSpaceID == tab.spaceID }
+            ?? session.windows.first { !$0.isPrivate && $0.kind == .main && $0.personaID == tab.personaID }
         guard let window, window.selectedTabID != tab.id else { return }
         window.selectTab(tab.id)
     }
 
     /// An open tab other than an agent tab, a favorite's among them.
     private func pluginTab(_ id: UUID) -> Tab? {
-        guard let tab = session?.allTabs.first(where: { $0.id == id }), BrowserEventSource.kind(of: tab) != .agent else { return nil }
+        guard let tab = session?.allTabs.first(where: { $0.id == id }), !tab.isPrivate, BrowserEventSource.kind(of: tab) != .agent else { return nil }
         return tab
     }
 }

@@ -45,7 +45,7 @@ final class PluginPages {
     /// Gives the Persona's tabs that `needs` picks their page scripts (`pageScripts(of:among:shared:plugins:)`), with `shared` as the Persona's plugins' scripts.
     private func setPageScripts(ofTabsIn personaID: Persona.ID, where needs: (Tab) -> Bool, shared: [EnginePageScript], plugins: PluginManager) {
         let tabs = session?.allTabs ?? []
-        for tab in tabs where tab.personaID == personaID && needs(tab) {
+        for tab in tabs where !tab.isPrivate && tab.personaID == personaID && needs(tab) {
             tab.webContents.setPageScripts(pageScripts(of: tab, among: tabs, shared: shared, plugins: plugins))
         }
     }
@@ -65,6 +65,7 @@ final class PluginPages {
     /// Sets the callbacks of each tab that joins and gives it its Persona's page scripts: a page that another page opens starts with that page's scripts, and the preview panel's pages run none. A tab that joins or leaves can start or end another's sharing of a script list, as a page that a WebKit tab opens does, so the tabs with access then take their scripts again (`pageScripts(of:among:shared:plugins:)`). `tabs` holds the tabs that join, which the session does not list yet.
     private func follow(_ tabs: [Tab]) {
         guard let session else { return }
+        let tabs = tabs.filter { !$0.isPrivate }
         let ids = Set(tabs.map(\.id))
         let tabsLeft = !followedTabIDs.isSubset(of: ids)
         followedTabIDs.formIntersection(ids)
@@ -95,7 +96,7 @@ final class PluginPages {
 
     /// Adds the items for the contexts of the click, one section per plugin under the plugin's name. Each runs its command on the tab with what the user clicked on.
     private func addMenuItems(for element: EngineContextMenuElement, in tab: Tab, to menu: NSMenu) {
-        guard let session else { return }
+        guard let session, !tab.isPrivate else { return }
         let plugins = session.plugins(in: tab.personaID)
         let invocation = PluginInvocation(tab: session.pluginTab(tab), linkURL: element.linkURL, imageURL: element.imageURL, selection: element.selectedText, source: .contextMenu)
         for section in plugins.contributions.menuSections(at: .pageContextMenu(Set(element))) {

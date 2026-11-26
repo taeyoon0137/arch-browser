@@ -32,6 +32,7 @@ final class LowPowerMode: ObservableObject {
 struct LowPowerModeIndicator: View {
     @ObservedObject private var mode = LowPowerMode.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.spaceTheme) private var theme
     @State private var isHovering = false
 
     var body: some View {
@@ -41,9 +42,9 @@ struct LowPowerModeIndicator: View {
                 Image(systemName: "battery.50percent")
                     .font(.system(size: 15, weight: .medium))
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(Color.secondary, Color.yellow)
+                    .foregroundStyle(theme.isPrivate ? SpaceTheme.PrivatePalette.secondary.color : Color.secondary, Color.yellow)
                     .frame(width: 30, height: 28)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering ? SidebarFill.buttonHover.color(in: colorScheme, isPrivate: theme.isPrivate) : .clear))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

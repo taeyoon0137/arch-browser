@@ -211,7 +211,7 @@ public final class AgentRunner: ObservableObject {
         guard case .outsideClient(let grant, _) = request.origin else {
             return host.userTabs(in: personaID).first { $0.id == id && $0.agentOwnerID == nil }
         }
-        return host.tabs(withIDs: [id]).first { request.sharedTabs.contains(id) ? $0.agentOwnerID == nil : $0.agentOwnerID == grant }
+        return host.tabs(withIDs: [id]).first { !$0.isPrivate && (request.sharedTabs.contains(id) ? $0.agentOwnerID == nil : $0.agentOwnerID == grant) }
     }
 
     /// Compares two page addresses while ignoring their fragments.

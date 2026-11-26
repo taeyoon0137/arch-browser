@@ -65,6 +65,7 @@ extension BrowserSession {
     }
 
     func finishSiteRuleOpening(_ tab: Tab, destination: SiteRuleDestination, source: BrowserWindowModel?, background: Bool) {
+        guard !tab.isPrivate, source?.isPrivate != true else { return }
         var target: BrowserWindowModel?
         if background {
             tab.isUnread = true
@@ -73,8 +74,8 @@ extension BrowserSession {
                 target = makeWindow(from: .init(id: UUID(), frame: nil, currentSpaceID: destination.space.id,
                                                selectedTabID: nil, isSidebarVisible: true), kind: .main)
             } else {
-                target = windows.first { $0.kind == .main && $0.currentSpaceID == destination.space.id }
-                    ?? (source?.kind == .main ? source : nil) ?? sidebarTarget()
+                target = windows.first { $0.kind == .main && !$0.isPrivate && $0.currentSpaceID == destination.space.id }
+                    ?? (source?.kind == .main && source?.isPrivate == false ? source : nil) ?? sidebarTarget()
             }
             target?.selectTab(tab.id)
             target?.nsWindow?.makeKeyAndOrderFront(nil)
@@ -84,7 +85,7 @@ extension BrowserSession {
     }
 
     func showSiteRuleToast(for tab: Tab, destination: SiteRuleDestination, source: BrowserWindowModel?, target: BrowserWindowModel? = nil) {
-        guard let source = source ?? target else { return }
+        guard !tab.isPrivate, let source = source ?? target, !source.isPrivate, target?.isPrivate != true else { return }
         let place = displayedPlace(ofPersona: destination.space.resolvedPersonaID, space: destination.space) ?? destination.space.name
         let toast = SiteRuleToast(tabID: tab.id, originWindowID: source.id, originSpaceID: destination.originSpaceID,
                                   originPersonaID: destination.originPersonaID, message: localized("Opened in \(place)"),
@@ -94,11 +95,12 @@ extension BrowserSession {
     }
 
     func undoSiteRuleOpening(_ toast: SiteRuleToast, from window: BrowserWindowModel, now: Date = Date()) {
+        guard !window.isPrivate else { return }
         for other in windows where other.siteRuleToast?.id == toast.id { other.siteRuleToast = nil }
         guard now < toast.expiresAt,
               let origin = spaces.first(where: { $0.id == toast.originSpaceID && $0.resolvedPersonaID == toast.originPersonaID }),
-              let tab = tabs.first(where: { $0.id == toast.tabID }), tab.agentOwnerID == nil else { return }
-        let source = windows.first { $0.id == toast.originWindowID && $0.kind == .main }
+              let tab = tabs.first(where: { $0.id == toast.tabID }), !tab.isPrivate, tab.agentOwnerID == nil else { return }
+        let source = windows.first { $0.id == toast.originWindowID && $0.kind == .main && !$0.isPrivate }
             ?? (window.kind == .main ? window : nil) ?? sidebarTarget()
         // Small-window tabs must join the sidebar before the existing move can carry them.
         tab.isInSmallWindow = false
@@ -114,6 +116,7 @@ extension BrowserSession {
 
 extension BrowserWindowModel {
     func showSiteRuleToast(_ toast: SiteRuleToast) {
+        guard !isPrivate else { return }
         withAnimation(.easeInOut(duration: 0.2)) { siteRuleToast = toast }
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, toast.expiresAt.timeIntervalSinceNow)) { [weak self] in
             guard let self, siteRuleToast?.id == toast.id else { return }
@@ -122,6 +125,7 @@ extension BrowserWindowModel {
     }
 
     func siteRuleHint(for input: String) -> String? {
+        guard !isPrivate else { return nil }
         guard let url = BrowserSession.destination(forInput: input, siteSearch: session.siteSearch),
               let destination = session.destination(forOpening: currentSpace, url: url) else { return nil }
         let place = session.displayedPlace(ofPersona: destination.space.resolvedPersonaID, space: destination.space) ?? destination.space.name

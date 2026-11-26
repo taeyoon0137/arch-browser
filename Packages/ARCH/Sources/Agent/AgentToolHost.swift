@@ -131,7 +131,13 @@ import Foundation
     /// Runs a call now and adds the events since the client's previous call.
     private func runNow(_ call: AgentToolCall, for client: AgentToolClient, state: AgentGrantState, box: AgentCallBox) async -> Outcome {
         let start = state.lastSequence
+        // Resolve before running: closing the tab removes its privacy marker from the browser host.
+        let privateTab = call.arguments["tab"]?.stringValue.flatMap(state.handles.tabs.id(for:))
+            .flatMap { host.tabs(withIDs: [$0]).first }?.isPrivate == true
+        let privateOpen = call.name == "open_tab" && call.arguments["private"] == .bool(true)
         var outcome = await outcome(of: call, for: client, state: state, box: box)
+        // The owner still receives the result in memory; durable activity keeps only the tool and decision.
+        if privateTab || privateOpen { outcome.site = nil }
         // A result that would still pass its limit, as a page's very long address can make one, says so in its place, so that no result takes a client's connection past the frame limit.
         if outcome.result.text.utf8.count > AgentLimits.resultTextBytes { outcome.result = Self.tooLong(outcome.result, tool: call.name) }
         attachEvents(to: &outcome, since: start, state: state)
@@ -375,7 +381,7 @@ import Foundation
             return full
         }
         let engine = arguments["engine"]?.stringValue.map { $0 == "webkit" ? EngineKind.webKit : EngineKind.chromium }
-        let owner = AgentTabOwner(id: client.id, spaceID: space.id, folderName: client.folderName)
+        let owner = AgentTabOwner(id: client.id, spaceID: space.id, folderName: client.folderName, isPrivate: arguments["private"] == .bool(true))
         guard let tab = host.openAgentTab(at: url, engine: engine, for: owner) else { return Self.error("noSpace", "Arch could not open an agent tab in this client's space.") }
         let handle = state.handles.tabs.handle(for: tab.id)
         let load = isWritten && client.kind == .inApp ? state.beginWrittenLoad(url, in: tab.id) : nil
@@ -854,7 +860,7 @@ import Foundation
             state.handles.renamingSharedTabIDs.remove(tab.id)
         }
         if tab.agentOwnerID == client.id { return .agentTab }
-        guard isShared, tab.agentOwnerID == nil else { return .notTheClients }
+        guard !tab.isPrivate, isShared, tab.agentOwnerID == nil else { return .notTheClients }
         return .shared(acting: state.handles.actingSharedTabIDs.contains(tab.id))
     }
 

@@ -331,8 +331,16 @@ import Terminal
     }
 
     /// A Dock click opens a main window where the last one was while Settings, History, or another of the app's windows keeps the app running without one. Otherwise AppKit brings the windows forward as usual.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let regular = menu.addItem(withTitle: localized("New Window"), action: #selector(newWindow), keyEquivalent: "")
+        regular.target = self
+        menu.addItem(PrivateWindowCommand.menuItem(target: self, action: #selector(newPrivateWindow), withShortcut: false))
+        return menu
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        guard let session, session.lastMainWindow == nil else { return true }
+        guard let session, !session.windows.contains(where: { $0.kind == .main }) else { return true }
         // With no main window open, the sidebar target is a new one.
         _ = session.sidebarTarget()
         return false
@@ -404,6 +412,7 @@ import Terminal
         let fileMenu = NSMenu(title: localized("File"))
         fileMenu.addItem(withTitle: localized("New Tab"), action: #selector(newTab), keyEquivalent: "t")
         fileMenu.addItem(withTitle: localized("New Window"), action: #selector(newWindow), keyEquivalent: "n")
+        fileMenu.addItem(PrivateWindowCommand.menuItem(target: self, action: #selector(newPrivateWindow)))
         fileMenu.addItem(withTitle: localized("Open Location\u{2026}"), action: #selector(openLocation), keyEquivalent: "l")
         fileMenu.addItem(.separator())
         let closeTabItem = fileMenu.addItem(withTitle: localized("Close Tab"), action: #selector(closeTab), keyEquivalent: "w")
@@ -587,9 +596,10 @@ import Terminal
         return item
     }
 
-    /// The window that sidebar commands act on (`BrowserSession.sidebarTarget()`). It comes forward while a small window is the active window, so that the command shows where it acts.
+    /// Sidebar commands stay in the current private window; otherwise they use the session's regular sidebar target, bringing it forward from behind a small window.
     @discardableResult
     private func frontSidebarTarget() -> BrowserWindowModel {
+        if let active = session.activeWindow, active.isPrivate { return active }
         let target = session.sidebarTarget()
         if session.activeWindow?.kind == .small { target.nsWindow?.makeKeyAndOrderFront(nil) }
         return target
@@ -599,6 +609,7 @@ import Terminal
     @objc private func newTab() { frontSidebarTarget().showCommandPalette(.newTab) }
     /// A new window shows no tab, so it opens with the new tab palette (open decision 8).
     @objc private func newWindow() { session.openWindow().showCommandPalette(.newTab) }
+    @objc private func newPrivateWindow() { session.openPrivateWindow().showCommandPalette(.newTab) }
     /// ⌘W closes the window in front when it is another of the app's windows, such as History, Settings, or the developer tools, not a tab behind it. While such a window shows a sheet, the item is disabled (`showsSheetOfOtherWindow`). A browser window's sheets and popovers leave ⌘W to its tab.
     @objc private func closeTab() {
         if let key = NSApp.keyWindow, session.window(for: key) == nil, key.sheetParent == nil, key.styleMask.contains(.closable) { return key.performClose(nil) }
@@ -615,6 +626,7 @@ import Terminal
     @objc private func closeOtherTabs() { session.activeWindow?.closeOtherTabs() }
     /// The tab reopens in the sidebar target, which comes forward from behind a small window.
     @objc private func reopenClosedTab() {
+        guard session.activeWindow?.isPrivate != true else { return }
         frontSidebarTarget()
         session.reopenLastClosedTab()
     }
@@ -648,11 +660,13 @@ import Terminal
     @objc private func togglePageReader() { session.activeWindow?.togglePageReader() }
     /// The agent panel shows in the active window, a small window included, whose session goes to the space Move to Main Window would use.
     @objc private func newAgentTask() {
+        guard session.activeWindow?.isPrivate != true else { return }
         guard agents?.agentModels().isEmpty == false else { return showAgentModelSetup() }
         (session.activeWindow ?? frontSidebarTarget()).showAgentComposer()
     }
     /// An open panel hides, and a draft shows, also once no model is connected.
     @objc private func toggleAgentPanel() {
+        guard session.activeWindow?.isPrivate != true else { return }
         let window = session.activeWindow ?? frontSidebarTarget()
         guard window.canToggleAgentPanel else { return showAgentModelSetup() }
         window.toggleAgentPanel()
@@ -704,7 +718,7 @@ import Terminal
     @objc private func showHistory() { historyWindow.show(persona: historyPersona) }
 
     /// The Persona whose history the History menu shows: the active window's, or the default one while no browser window is open, as for the Plugins menu.
-    private var historyPersona: UUID { session.activeWindow?.personaID ?? Persona.defaultID }
+    private var historyPersona: UUID { session.activeWindow.flatMap { $0.isPrivate ? nil : $0.personaID } ?? Persona.defaultID }
 
     /// The History window, made on first use. Its pages open as new tabs of the shown Persona, in the space where a new tab of the Persona goes, selected in the sidebar target, which comes to the front.
     private lazy var historyWindow: HistoryWindowController = {
@@ -721,7 +735,7 @@ import Terminal
 
     /// Fills the Bookmarks menu for the sidebar target, and lists the active window's selected tab's previous ten pages, most recent first, between Forward and Show All History. Both are made when their menu opens rather than in `menuNeedsUpdate(_:)`, which AppKit also calls to search the menu for each key equivalent the user presses; their items have no key equivalents.
     func menuWillOpen(_ menu: NSMenu) {
-        if menu === bookmarksMenu, let session { return fillBookmarks(menu, with: session.bookmarkMenuEntries) }
+        if menu === bookmarksMenu, let session { return fillBookmarks(menu, with: session.activeWindow?.isPrivate == true ? [.noBookmarks] : session.bookmarkMenuEntries) }
         if menu === spaceMoveMenu { return fillSpaceMoves(menu) }
         guard menu === historyMenu else { return }
         for item in menu.items where item.tag == Self.recentPageTag { menu.removeItem(item) }
@@ -752,7 +766,7 @@ import Terminal
     /// While ⌘Z reopens closed tabs (`installUndoCloseShortcut()`), Edit ▸ Undo is Undo Close Tab, so that choosing it does what pressing its shortcut does; otherwise it undoes in the first responder. AppKit calls this before the Edit menu shows and before it searches the menu for a key equivalent. The key monitor compares only the item's shortcut, which this leaves alone.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === editMenu, let undoItem else { return }
-        if (session?.undoableCloseCount ?? 0) > 0 {
+        if session?.activeWindow?.isPrivate != true, (session?.undoableCloseCount ?? 0) > 0 {
             undoItem.title = localized("Undo Close Tab")
             undoItem.target = self
             undoItem.action = #selector(reopenClosedTab)
@@ -778,7 +792,7 @@ import Terminal
     /// Lists Move to Space for the sidebar target's selected tab, as its row's context menu does (`MoveToSpaceMenu`): each Persona's spaces under the Persona's name while there are several, the tab's own space checked and disabled, New Space at the end of each Persona's part, and the spaces of a Persona that refuses the tab disabled with the reason as their tooltip. Without a tab that a menu moves, such as a favorite's, it holds one disabled item.
     private func fillSpaceMoves(_ menu: NSMenu) {
         menu.removeAllItems()
-        let tab = session?.lastMainWindow?.selectedTab
+        let tab = session?.activeWindow?.isPrivate == true ? nil : session?.lastMainWindow?.selectedTab
         guard let session, let tab, let currentSpaceID = tab.spaceID, case let sections = session.spaceMoveSections(forTab: tab), !sections.isEmpty else {
             menu.addItem(withTitle: localized("No Tab to Move"), action: nil, keyEquivalent: "").isEnabled = false
             return
@@ -918,6 +932,18 @@ import Terminal
     /// Toggles name their next action. Page commands use the active window; sidebar commands use the last main window.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         let activeWindow = session?.activeWindow
+        if activeWindow?.isPrivate == true {
+            let unavailable: [Selector] = [#selector(newSpace), #selector(nextSpace), #selector(previousSpace),
+                #selector(newPersona), #selector(renamePersona), #selector(deletePersona), #selector(mergePersona),
+                #selector(togglePinned), #selector(addFavorite), #selector(openInSplitView), #selector(moveTabUp), #selector(moveTabDown),
+                #selector(goBackToSavedPage), #selector(useCurrentPageAsSavedPage), #selector(editSavedAddress),
+                #selector(toggleDownloads), #selector(reopenClosedTab), #selector(toggleAgentPanel), #selector(newAgentTask),
+                #selector(togglePageReader), #selector(goHome), #selector(importBookmarksAndHistory), #selector(importFromBrowser)]
+            if let action = item.action, unavailable.contains(action) { return false }
+            if item.action == #selector(nextTab) || item.action == #selector(previousTab) || item.action == #selector(closeOtherTabs) {
+                return activeWindow?.selectedTab != nil
+            }
+        }
         if item.action == #selector(zoomIn) || item.action == #selector(zoomOut) || item.action == #selector(resetZoom) {
             return activeWindow?.canZoom == true
         }
@@ -967,7 +993,8 @@ import Terminal
         }
         // The sidebar and library toggles name what they will do, for the sidebar target, which they act on. With the sidebar hidden, the library always opens.
         if item.action == #selector(toggleSidebar) {
-            item.title = session?.lastMainWindow?.isSidebarVisible == false ? localized("Show Sidebar") : localized("Hide Sidebar")
+            let window = activeWindow?.isPrivate == true ? activeWindow : session?.lastMainWindow
+            item.title = window?.isSidebarVisible == false ? localized("Show Sidebar") : localized("Hide Sidebar")
         }
         if item.action == #selector(toggleDownloads) {
             let window = session?.lastMainWindow
@@ -1073,7 +1100,7 @@ import Terminal
     /// Edit ▸ Undo's shortcut, ⌘Z unless Settings ▸ Shortcuts changed it, reopens the tabs the user just closed, newest first, until the user presses a different key or clicks in the page. It runs before the focused page can handle the shortcut as its own undo. The monitor reads each item's shortcut when a key is pressed, so it follows changes in Settings ▸ Shortcuts.
     private func installUndoCloseShortcut() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, let session = self.session, session.undoableCloseCount > 0 else { return event }
+            guard let self, let session = self.session, session.activeWindow?.isPrivate != true, session.undoableCloseCount > 0 else { return event }
             let pressed = KeyShortcut(event: event)
             if pressed != nil, pressed == self.undoItem.flatMap(KeyShortcut.init(menuItem:)) {
                 self.reopenClosedTab()
@@ -1114,6 +1141,7 @@ import Terminal
             }
             guard !event.isARepeat else { return event }
             let window = session.activeWindow
+            guard window?.isPrivate != true else { findPresses.reset(); return event }
             switch findPresses.press(at: event.timestamp) {
             case .seenAgain:
                 return event
@@ -1187,7 +1215,7 @@ import Terminal
     private func openNewTabFromAnyApp() {
         guard let session else { return }
         NSApp.activate(ignoringOtherApps: true)
-        let target = session.sidebarTarget()
+        let target = frontSidebarTarget()
         if let window = target.nsWindow {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
@@ -1206,11 +1234,13 @@ import Terminal
     private lazy var importController = ImportController(session: session)
 
     @objc private func importBookmarksAndHistory() {
+        guard session.activeWindow?.isPrivate != true else { return }
         guard let window = frontSidebarTarget().nsWindow else { return }
         importController.chooseFiles(in: window)
     }
 
     @objc private func importFromBrowser() {
+        guard session.activeWindow?.isPrivate != true else { return }
         guard let window = frontSidebarTarget().nsWindow else { return }
         importController.importFromBrowser(in: window)
     }

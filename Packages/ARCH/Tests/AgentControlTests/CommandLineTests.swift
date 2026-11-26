@@ -79,6 +79,15 @@ import Testing
         #expect(try AgentCommandLine.parse(["--json", "open", "https://example.org/"]).json)
     }
 
+    @Test func privateOpenMapsToTheSharedToolFlag() throws {
+        let call = AgentToolCall(name: "open_tab", arguments: ["url": "https://example.org/", "private": true])
+        #expect(try AgentCommandLine.parse(["open", "https://example.org/", "--private"]).command == .tool(call))
+        #expect(try AgentCommandLine.parse(["--private", "open", "https://example.org/"]).command == .tool(call))
+        #expect(throws: AgentUsageError.self) { try AgentCommandLine.parse(["tabs", "--private"]) }
+        let parameter = try #require(AgentToolCatalog.tool(named: "open_tab")?.parameters.first { $0.name == "private" })
+        #expect(parameter.kind == .boolean && !parameter.isRequired)
+    }
+
     /// The snapshot and ref commands for reading and acting each run one tool.
     /// `type --text -` leaves the text for standard input.
     /// `screenshot` names its file.

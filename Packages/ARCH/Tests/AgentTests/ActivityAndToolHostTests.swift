@@ -28,6 +28,35 @@ import Testing
         #expect(service.activity.entries.filter { $0.event == .toolCall }.map(\.toolClass) == ["R", "R"])
     }
 
+    @Test func privateToolCallsPersistNoBrowsingSitesEvenAfterClosing() async throws {
+        let harness = try Harness()
+        defer { harness.cleanUp() }
+        let service = try await harness.makeOpenService()
+        harness.prompt.answers = [AgentGrantChoice()]
+        let first = URL(string: "https://private.example/first")!
+        let next = URL(string: "https://private.example/next")!
+        harness.host.pages[first] = ("Private page", "Private text")
+        harness.host.pages[next] = ("Private next page", "Private next text")
+        let client = try TestClient(harness.location)
+        _ = try await client.hello()
+        let opened = try await client.callTool("open_tab", ["url": .string(first.absoluteString), "private": true])
+        #expect(opened.status == .ok)
+        let handle = try #require(opened.structured?["tab"]?.stringValue)
+        #expect(try await client.callTool("read_text", ["tab": .string(handle)]).status == .ok)
+        #expect(try await client.callTool("navigate", ["tab": .string(handle), "url": .string(next.absoluteString)]).status == .ok)
+        #expect(try await client.callTool("close_tab", ["tab": .string(handle)]).status == .ok)
+        let privateCalls = service.activity.entries.filter { $0.event == .toolCall }
+        #expect(privateCalls.map(\.tool) == ["open_tab", "read_text", "navigate", "close_tab"])
+        #expect(privateCalls.allSatisfy { $0.site == nil })
+        service.activity.saveNow()
+        let file = try String(contentsOf: harness.folder.appendingPathComponent("agent-activity.json"), encoding: .utf8)
+        #expect(!file.contains("private.example") && !file.contains("Private page") && !file.contains("Private text"))
+
+        // Ordinary activity still records its site.
+        #expect(try await client.callTool("open_tab", ["url": "https://ordinary.example/"]).status == .ok)
+        #expect(service.activity.entries.last?.site == "ordinary.example")
+    }
+
     @Test func theLogKeepsNinetyDaysAndItsCapAndSetsAsideAFileThatDoesNotRead() throws {
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("agl-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

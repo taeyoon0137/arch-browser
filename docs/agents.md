@@ -436,7 +436,7 @@ One catalog in `AgentControl` serves `tools/list`, the MCP server, the CLI's com
 | `list_spaces` | — | Spaces of the session's Persona: handle, name, agent tab count | R |
 | `list_tabs` | `scope` (`agent` default, `shared`) | Agent tabs (handle, title, address, loading, engine) and tabs the user shared (handle, title, host) | R |
 | `request_tab` | `reason`, `access` (`read` or `act`) | The tab the user picks in Arch, or `denied`. An app-started task can request only `read`. | R, asks |
-| `open_tab` | `url` or `ref` (a link in a snapshot), `tab?` (the ref's tab), `engine?` | The new agent tab, opened in the background | N |
+| `open_tab` | `url` or `ref` (a link in a snapshot), `tab?` (the ref's tab), `engine?`, `private?` | The new agent tab, opened in the background | N |
 | `navigate` | `tab`, and `url`, `ref` (follow that link), or `action` (`back`, `forward`, `reload`) | Address and title once the document loads, or after 30 seconds | N |
 | `close_tab` | `tab` | — (agent tabs of this session or client only) | N |
 | `snapshot` | `tab`, `mode` (`interactive` default, `full`), `ref?` (a subtree), `max_chars?`, `diff?` | The page as an outline with refs (Page snapshots) | R |
@@ -806,7 +806,8 @@ No tool, command, control method, or MCP call exists for: Settings and `ai.json`
 - In the user's own Personas, `BrowserSession` copies each Persona's remembered answers from `permissions.json` into that Persona's profiles (Persona rule 6). On Chromium, `CEFBridgeRequestContext` sets them as content settings, so Chromium answers a remembered request without asking the delegate. A site the user allowed the camera, microphone, or location keeps that access in Chromium agent tabs of that Persona. P8 applies on WebKit, which asks the delegate each time, and to every request that is not remembered. The composer says so when the session's Persona has such answers.
 - Agent tabs record no history visits, so pages an agent visits enter no Persona's suggestions or history. `search_history` reads the history of the client's Persona only (Persona rule 6), so a client in the Agents Persona finds only the pages the user visited there. It is off unless the user turns it on for in-app sessions or grants it to an outside client with Touch ID. Its results omit excluded sites, queries, and fragments.
 - Downloads: an agent sees only those its own tabs started, by name and state.
-- Arch has no private window. If one is added, agents never see its tabs, cannot open one, and a request to read one is refused.
+- User-opened private windows and tabs are invisible to agents, including in-app sessions, outside MCP and `arch-cli` clients, and plugins with full control. Their page text, tab metadata, history, and browser events never reach an agent. Private windows run no plugins, web extensions, user scripts, or hooks.
+- `open_tab` accepts the optional Boolean `private` (default false); `arch-cli open --private` sends it. An agent-created private tab is visible and accessible only to the client or session that opened it. It belongs to no Persona or space, uses fresh ephemeral engine contexts, and keeps the existing site, input, and approval restrictions. It cannot be shared, kept as a normal tab, or claimed by another agent. Durable tool activity omits its site; page results stay available to its opener in memory. Bounded runs and hooks exclude private tabs. Closing its private session removes it without a history, restore, sync, or closed-tab record.
 
 ## Usage and cost
 

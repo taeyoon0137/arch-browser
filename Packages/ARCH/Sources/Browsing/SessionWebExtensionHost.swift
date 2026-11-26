@@ -75,18 +75,18 @@ final class SessionWebExtensionHost: WebExtensionHost {
     private func extensionWindows(of personaID: Persona.ID, in session: BrowserSession) -> [ExtensionWindow] {
         let spaces = session.spaces.filter { $0.resolvedPersonaID == personaID }
         // A favorite's tab belongs to no space: it is in the Persona's space where a window shows it, or else in the Persona's first space.
-        let favoriteTabs = Dictionary(grouping: session.openFavoriteTabs.filter { $0.personaID == personaID }) { tab in
-            let shownIn = session.windows.first { $0.selectedTabID == tab.id }?.currentSpaceID
+        let favoriteTabs = Dictionary(grouping: session.openFavoriteTabs.filter { !$0.isPrivate && $0.personaID == personaID }) { tab in
+            let shownIn = session.windows.first { !$0.isPrivate && $0.selectedTabID == tab.id }?.currentSpaceID
             return spaces.contains { $0.id == shownIn } ? shownIn : spaces.first?.id
         }
         let spaceWindows = spaces.map { space -> ExtensionWindow in
-            let showing = session.windows.filter { $0.kind == .main && $0.currentSpaceID == space.id }
-            let tabs = ((favoriteTabs[space.id] ?? []) + session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)).filter(\.isLoaded)
+            let showing = session.windows.filter { !$0.isPrivate && $0.kind == .main && $0.currentSpaceID == space.id }
+            let tabs = ((favoriteTabs[space.id] ?? []) + session.tabs(in: space.id, pinned: true) + session.tabs(in: space.id, pinned: false)).filter { !$0.isPrivate && $0.isLoaded }
             let active = showing.lazy.compactMap(\.selectedTab).first { tab in tabs.contains { $0 === tab } } ?? tabs.max { $0.lastActivatedAt < $1.lastActivatedAt }
             return (space.id, space, tabs, active, showing.first)
         }
         let smallWindows = session.windows.compactMap { window -> ExtensionWindow? in
-            guard window.kind == .small, window.personaID == personaID, let tab = window.selectedTab else { return nil }
+            guard !window.isPrivate, window.kind == .small, window.personaID == personaID, let tab = window.selectedTab, !tab.isPrivate else { return nil }
             return (window.id, window.currentSpace, [tab], tab, window)
         }
         return spaceWindows + smallWindows
@@ -94,12 +94,13 @@ final class SessionWebExtensionHost: WebExtensionHost {
 
     /// The space of the window that last became main, when it is the Persona's.
     private func focusedSpace(of personaID: Persona.ID, in session: BrowserSession) -> Space? {
-        session.windows.first.map(\.currentSpace).flatMap { $0.resolvedPersonaID == personaID ? $0 : nil }
+        guard let window = session.windows.first, !window.isPrivate else { return nil }
+        return window.currentSpace.resolvedPersonaID == personaID ? window.currentSpace : nil
     }
 
     /// The window that last became main as the Persona's extensions see it, when it is the Persona's: a small window itself, or else the space of a main window.
     private func focusedWindowID(of personaID: Persona.ID, in session: BrowserSession) -> UUID? {
-        guard let window = session.windows.first, window.personaID == personaID else { return nil }
+        guard let window = session.windows.first, !window.isPrivate, window.personaID == personaID else { return nil }
         return window.kind == .small ? window.id : window.currentSpaceID
     }
 
@@ -114,13 +115,13 @@ final class SessionWebExtensionHost: WebExtensionHost {
     }
 
     func webContents(ofTab id: UUID) -> (any EngineWebContents)? {
-        session?.allTabs.first { $0.id == id }?.webContents
+        session?.allTabs.first { $0.id == id && !$0.isPrivate }?.webContents
     }
 
     /// The window that shows the tab selects it again, or else the front main window that shows the tab's space, which the extensions see as the tab's window, so that another window keeps its space; otherwise a window selects it as for a tab no window shows, which takes a favorite's tab to a window of its Persona.
     func activate(_ tab: any EngineWebContents) {
         guard let session, let tab = self.tab(tab) else { return }
-        if let window = session.window(showing: tab) ?? session.windows.first(where: { $0.kind == .main && $0.currentSpaceID == tab.spaceID }) {
+        if let window = session.window(showing: tab) ?? session.windows.first(where: { !$0.isPrivate && $0.kind == .main && $0.currentSpaceID == tab.spaceID }) {
             window.selectTab(tab.id)
         } else {
             session.selectUnshownTab(tab)
@@ -137,7 +138,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
     func present(_ popup: EngineExtensionPopup, for tab: (any EngineWebContents)?) -> Bool {
         guard let session else { return false }
         let window = if let tab { self.tab(tab).flatMap(session.window(showing:)) } else { session.windows.first }
-        guard let window, let anchor = window.siteControlAnchor(window.siteSettingsButtonView) else { return false }
+        guard let window, !window.isPrivate, let anchor = window.siteControlAnchor(window.siteSettingsButtonView) else { return false }
         ExtensionPopupPresenter.present(popup, relativeTo: anchor.rect, of: anchor.view, preferredEdge: anchor.edge)
         return true
     }
@@ -176,7 +177,7 @@ final class SessionWebExtensionHost: WebExtensionHost {
 
     /// Shows the question as a card over the tab, or without a tab over the tab of the window that last became main. A question for a tab that has closed, or without any tab, gets the safe answer. The card shows the extension's action icon for the tab as the site settings popover does, or the extension symbol without one.
     func ask(_ question: WebExtensionQuestion, for tab: (any EngineWebContents)?, completion: @escaping (Bool) -> Void) {
-        guard let session, let tab = if let tab { self.tab(tab) } else { session.focusedTab } else { return completion(false) }
+        guard let session, let tab = if let tab { self.tab(tab) } else { session.focusedTab }, !tab.isPrivate else { return completion(false) }
         let icon = question.pluginID.flatMap { id in session.webExtensions(in: tab.personaID)?.actions(for: tab.webContents).first { $0.id == id }?.action?.icon }
         let content = TabPromptContent.extensionQuestion(question, icon: icon, identity: PromptSiteIdentity.make(for: tab.url, in: tab))
         session.enqueuePrompt(content, for: tab) { completion(TabPromptContent.extensionAnswer($0)) }
@@ -193,6 +194,6 @@ final class SessionWebExtensionHost: WebExtensionHost {
 
     /// The open tab whose web contents `webContents` is.
     private func tab(_ webContents: any EngineWebContents) -> Tab? {
-        session?.allTabs.first { $0.webContents === webContents }
+        session?.allTabs.first { $0.webContents === webContents && !$0.isPrivate }
     }
 }

@@ -78,6 +78,8 @@ typedef NS_ENUM(NSInteger, ARCHCEFCookieSameSite) {
 @property (class, nonatomic, readonly) ARCHCEFRequestContext *globalContext;
 /// A context whose profile lives at `cachePath`, which must name a direct child of the root cache directory, with no traversal or symlink at the child itself. Nil for any other path or before the runtime initializes. Browsers can use it at once; cookie, storage, and permission calls wait, in order, until Chromium reports the context and its cookie store initialized.
 - (nullable instancetype)initWithCachePath:(NSString *)cachePath;
+/// A fresh independent request context with an empty cache path. All profile data stays in memory until its last browser and context are released. Nil before the runtime initializes.
++ (nullable instancetype)createEphemeralContext NS_SWIFT_NAME(makeEphemeral());
 - (instancetype)init NS_UNAVAILABLE;
 /// Calls `completion` once on the main thread with every stored cookie, or with none when the store cannot be read.
 - (void)visitAllCookies:(void (^)(NSArray<ARCHCEFCookie *> *cookies))completion;

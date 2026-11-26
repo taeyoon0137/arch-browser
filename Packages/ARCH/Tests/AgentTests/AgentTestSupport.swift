@@ -83,7 +83,7 @@ import Testing
     func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo? {
         guard spacesByPersona.values.contains(where: { $0.contains { $0.id == owner.spaceID } }) else { return nil }
         openedOwners.append(owner)
-        let tab = AgentTabInfo(id: UUID(), spaceID: owner.spaceID, title: "", url: nil, isLoading: true, engine: engine ?? .webKit, agentOwnerID: owner.id)
+        let tab = AgentTabInfo(id: UUID(), spaceID: owner.isPrivate ? nil : owner.spaceID, title: "", url: nil, isLoading: true, engine: engine ?? .webKit, agentOwnerID: owner.id, isPrivate: owner.isPrivate)
         tabs.append(tab)
         load(url, in: tab.id)
         return tab

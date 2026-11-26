@@ -82,7 +82,7 @@ public final class PageAssistant: ObservableObject {
 
     /// Summarizes the tab's page as a window's reader opens beside it, unless its conversation has begun or AI is off for its site.
     func readerDidShow(_ tab: Tab) {
-        guard let url = tab.url, AIService.shared.settings.allowsAI(on: url), readerConversation(for: tab).exchanges.isEmpty else { return }
+        guard !tab.isPrivate, let url = tab.url, AIService.shared.settings.allowsAI(on: url), readerConversation(for: tab).exchanges.isEmpty else { return }
         summarize(tab)
     }
 
@@ -106,11 +106,13 @@ public final class PageAssistant: ObservableObject {
 
     /// Requests a summary in the tab's reader conversation.
     func summarize(_ tab: Tab) {
+        guard !tab.isPrivate else { return }
         readerConversation(for: tab).ask(Self.summaryPrompt, title: localized("Summary"))
     }
 
     /// A follow-up question carries the text selected in the page when it goes out.
     func askInReader(_ question: String, about tab: Tab) {
+        guard !tab.isPrivate else { return }
         readerConversation(for: tab).ask(question, about: .current)
     }
 
@@ -125,7 +127,7 @@ public final class PageAssistant: ObservableObject {
 
     /// Opens a web link from a reply about `tab`'s page as a page that the tab's page opened: in a new tab of the tab's Persona, in the default engine, selected in the window that shows the tab, or in a small window of its own beside a small window (`BrowserWindowModel.openReplyLink`), or in the Persona's preferred space while no window shows the tab. Other links open nothing, so a reply cannot hand an address to another app.
     func openLink(_ url: URL, from tab: Tab) -> OpenURLAction.Result {
-        guard let session, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .discarded }
+        guard !tab.isPrivate, let session, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return .discarded }
         if let window = session.window(showing: tab) {
             window.openReplyLink(url, in: tab.personaID)
         } else {
@@ -138,6 +140,7 @@ public final class PageAssistant: ObservableObject {
 
     /// Observes open tabs, discarding closed conversations and checking page changes.
     private func follow(_ tabs: [Tab]) {
+        let tabs = tabs.filter { !$0.isPrivate }
         let ids = Set(tabs.map(\.id))
         for id in tabObservers.keys where !ids.contains(id) {
             tabObservers[id] = nil
@@ -241,7 +244,7 @@ final class TabPageSource: AIPageSource {
 
     /// Cancellation ends the read at once, since a page that does not answer, such as one whose script never yields, would keep it waiting after its request or hook has stopped. The engine's late answer is dropped.
     private func readableContent(ofTab id: UUID, limit: Int) async throws -> EngineReadableContent {
-        guard let webContents = session?.allTabs.first(where: { $0.id == id })?.webContents else { throw EngineReadableContentError.unreadable }
+        guard let webContents = session?.allTabs.first(where: { $0.id == id && !$0.isPrivate })?.webContents else { throw EngineReadableContentError.unreadable }
         let read = PageRead()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in

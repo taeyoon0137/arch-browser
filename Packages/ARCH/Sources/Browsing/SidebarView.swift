@@ -3,11 +3,20 @@
 import AppKit
 import SwiftUI
 
-/// Translucent fills for sidebar controls. They lighten the window material in both appearances instead of covering it with an opaque color. A row under the pointer takes `hover`; a small borderless button under the pointer takes `buttonHover`, which stays visible on a hovered or selected row, and one that is on, as the Library button while the library is open, `buttonOn`.
+/// Sidebar controls use translucent fills over the window material, or the fixed private palette. A row under the pointer takes `hover`; a small borderless button under the pointer takes `buttonHover`, which stays visible on a hovered or selected row, and one that is on, as the Library button while the library is open, `buttonOn`.
 enum SidebarFill {
     case field, hover, selected, buttonHover, buttonOn
 
-    func color(in scheme: ColorScheme) -> Color {
+    func color(in scheme: ColorScheme, isPrivate: Bool = false) -> Color {
+        if isPrivate {
+            switch self {
+            case .field: return SpaceTheme.PrivatePalette.field.color
+            case .hover: return SpaceTheme.PrivatePalette.hover.color
+            case .selected: return SpaceTheme.PrivatePalette.selected.color
+            case .buttonHover: return SpaceTheme.PrivatePalette.buttonHover
+            case .buttonOn: return SpaceTheme.PrivatePalette.buttonOn
+            }
+        }
         switch (self, scheme) {
         case (.buttonHover, _): return .primary.opacity(0.08)
         case (.buttonOn, _): return .primary.opacity(0.1)
@@ -123,23 +132,57 @@ struct SidebarView: View {
                     SidebarTopRow(windowButtons: windowButtons)
                     AddressPillView(session: session, tab: nil)
                 }
-                // Persona groups and their space pages reach the sidebar's edges. Clip before the negative margin, which would move the clip inward and cut off a lifted tab's shadow.
-                SidebarSpaceContent(session: session, translation: swipeTranslation)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .padding(.top, 6)
-                .clipped()
-                .padding(.horizontal, -Self.inset)
-                .modifier(SidebarDropTarget())
+                if windowModel.isPrivate {
+                    privateTabs
+                } else {
+                    // Persona groups and their space pages reach the sidebar's edges.
+                    SidebarSpaceContent(session: session, translation: swipeTranslation)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 6)
+                        .clipped()
+                        .padding(.horizontal, -Self.inset)
+                        .modifier(SidebarDropTarget())
+                }
             }
             // The swipe area reaches the sidebar's edges and the gap above the bar. Disable it when the library pushes the sidebar aside, as it then extends over the page.
-            .background(SpaceSwipeView(isEnabled: !windowModel.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -Self.rowSpacing))
-            SidebarBottomBar(session: session)
+            .background(SpaceSwipeView(isEnabled: !windowModel.isPrivate && !windowModel.isLibraryVisible, onChange: swipeChanged, onEnd: swipeEnded).padding(.horizontal, -Self.inset).padding(.bottom, -Self.rowSpacing))
+            if !windowModel.isPrivate { SidebarBottomBar(session: session) }
         }
         .padding(.horizontal, Self.inset)
         .padding(.bottom, Self.bottomMargin)
-        .contextMenu { RemoteTabsToggle(session: session) }
+        .contextMenu {
+            if !windowModel.isPrivate { RemoteTabsToggle(session: session) }
+        }
         // Opening or closing the library by menu or shortcut releases it from any current swipe.
         .onChange(of: windowModel.isLibraryVisible) { isSwipingLibrary = false }
+    }
+
+    /// Private windows have one flat list of their own tabs, without Persona content or drop targets.
+    private var privateTabs: some View {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            Label(localized("Private Browsing"), systemImage: "eye.slash")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(SpaceTheme.PrivatePalette.separator.color)
+                        .frame(height: 1)
+                        .padding(.horizontal, 10)
+                        .accessibilityHidden(true)
+                }
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(windowModel.privateTabs) { tab in
+                        TabRowView(session: session, tab: tab)
+                    }
+                    NewTabButton(action: { windowModel.showCommandPalette(.newTab, from: .sidebar) })
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.top, 6)
     }
 }
 
@@ -258,6 +301,24 @@ struct SidebarColumn: View {
     private var widening: CGFloat { isFloating ? 0 : Self.libraryWidening }
 
     var body: some View {
+        if windowModel.isPrivate {
+            SidebarView(session: session, windowButtons: windowButtons)
+                .frame(width: width)
+                .environment(\.sidebarWidth, width)
+                .modifier(SidebarAppearance())
+                .overlay(alignment: .trailing) {
+                    if !isFloating {
+                        SidebarResizeHandle(width: width, onResize: onResize)
+                            .frame(width: BrowserWindowView.sidebarGap)
+                            .offset(x: BrowserWindowView.sidebarGap - SidebarView.inset)
+                    }
+                }
+        } else {
+            regularColumn
+        }
+    }
+
+    private var regularColumn: some View {
         HStack(spacing: 0) {
             LibraryPanel(session: session, windowButtons: windowButtons)
                 .frame(width: libraryWidth)
@@ -394,6 +455,7 @@ struct SidebarIconButton: View {
     let action: () -> Void
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.spaceTheme) private var theme
     @State private var isHovering = false
 
     var body: some View {
@@ -401,7 +463,7 @@ struct SidebarIconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
                 .frame(width: 30, height: 28)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering && isEnabled ? SidebarFill.buttonHover.color(in: colorScheme) : .clear))
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(isHovering && isEnabled ? SidebarFill.buttonHover.color(in: colorScheme, isPrivate: theme.isPrivate) : .clear))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

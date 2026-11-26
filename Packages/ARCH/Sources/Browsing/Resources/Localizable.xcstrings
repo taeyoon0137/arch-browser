@@ -2851,6 +2851,16 @@
         }
       }
     },
+    "New Private Window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 개인정보 보호 창"
+          }
+        }
+      }
+    },
     "New Space" : {
       "localizations" : {
         "ko" : {
@@ -3457,6 +3467,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "이전 일치 항목"
+          }
+        }
+      }
+    },
+    "Private Browsing" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인정보 보호 브라우징"
           }
         }
       }

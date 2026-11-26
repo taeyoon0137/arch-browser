@@ -2218,8 +2218,8 @@ extension AgentService {
         func refused(_ code: String, _ message: String) -> AgentRunResult { AgentRunResult(status: .refused, code: code, message: message) }
         var fields = given
         let state = state(for: grant)
-        let own = host.agentTabs(of: grant.id)
-        let shared = host.tabs(withIDs: Set(state.handles.sharedTabIDs)).filter { $0.agentOwnerID == nil }
+        let own = host.agentTabs(of: grant.id).filter { !$0.isPrivate }
+        let shared = host.tabs(withIDs: Set(state.handles.sharedTabIDs)).filter { !$0.isPrivate && $0.agentOwnerID == nil }
         let reachable = own + shared
         var ids = reachable.map(\.id)
         if let value = fields.removeValue(forKey: "tabs") {

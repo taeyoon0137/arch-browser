@@ -21,6 +21,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: model.kind.defaultContentSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
+        if model.isPrivate {
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.backgroundColor = NSColor(SpaceTheme.PrivatePalette.backgroundStart.color)
+        }
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         // An empty unified toolbar gives the title bar the standard height of the system's own apps and centers the traffic light buttons in it, on the line of the sidebar's top row. A small window's toolbar is compact, as in the system's small windows, so its title bar and row stay thin.
@@ -103,6 +107,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
     /// The title bar hides the title. The Window menu and Mission Control show it, with the window's Persona and current space as `title(tabTitle:spaceName:place:)` builds it, and the selected tab's title as its row shows it (`Tab.shownTitle`). While an internal page covers the page area, the title names that page, as the page area and the address pill do, not the tab under it.
     private func updateTitle() {
         guard let window else { return }
+        if model.isPrivate {
+            window.title = Self.title(tabTitle: model.selectedTab?.shownTitle, spaceName: localized("Private Browsing"), place: localized("Private Browsing"))
+            return
+        }
         let space = model.currentSpace
         let title = Self.title(tabTitle: model.internalPage?.title ?? model.selectedTab?.shownTitle, spaceName: space.name, place: model.session.displayedPlace(ofPersona: space.resolvedPersonaID, space: space))
         if window.title != title { window.title = title }
@@ -139,7 +147,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate {
 
     /// Keeps the window's frame for the saved session, which then saves, except in full screen, where the frame from before stays. Full screen is not restored, so the window opens at that frame next time.
     private func recordFrame() {
-        guard let window, !isInFullScreen, window.frame != model.restorableFrame else { return }
+        guard !model.isPrivate, let window, !isInFullScreen, window.frame != model.restorableFrame else { return }
         model.restorableFrame = window.frame
         model.session.scheduleSave()
     }

@@ -52,17 +52,22 @@ import Foundation
 
     public func tabs(withIDs ids: Set<UUID>) -> [AgentTabInfo] {
         guard !ids.isEmpty else { return [] }
-        return session.tabsInSidebarOrder.filter { ids.contains($0.id) }.map(Self.info(of:))
+        return agentVisibleTabs.filter { ids.contains($0.id) }.map(Self.info(of:))
     }
 
     public func agentTabs(of ownerID: UUID) -> [AgentTabInfo] {
-        session.tabsInSidebarOrder.filter { $0.agentOwnerID == ownerID }.map(Self.info(of:))
+        agentVisibleTabs.filter { $0.agentOwnerID == ownerID }.map(Self.info(of:))
+    }
+
+    /// User-created private tabs never enter the agent host. The tool service checks the opener of every private agent tab before each access.
+    private var agentVisibleTabs: [Tab] {
+        session.tabsInSidebarOrder.filter { !$0.isPrivate } + session.allTabs.filter { $0.isPrivate && $0.agentOwnerID != nil }
     }
 
     /// A tab as the agents' service sees it.
     static func info(of tab: Tab) -> AgentTabInfo {
         AgentTabInfo(id: tab.id, spaceID: tab.spaceID, title: tab.displayTitle, url: tab.url, isLoading: tab.isLoading, canGoBack: tab.canGoBack, canGoForward: tab.canGoForward,
-                     engine: tab.engineKind, agentOwnerID: tab.agentOwnerID, documentID: tab.documentID, isLoaded: tab.isLoaded)
+                     engine: tab.engineKind, agentOwnerID: tab.agentOwnerID, documentID: tab.documentID, isLoaded: tab.isLoaded, isPrivate: tab.isPrivate)
     }
 
     /// The results page of the search engine chosen in Settings ▸ General, which takes the terms in `q`.
@@ -87,7 +92,10 @@ import Foundation
 
     /// Opens and follows an agent-owned tab, returning its current browser facts.
     public func openAgentTab(at url: URL, engine: EngineKind?, for owner: AgentTabOwner) -> AgentTabInfo? {
-        guard let tab = session.openAgentTab(url: url, engine: engine, owner: owner.id, folderName: owner.folderName, in: owner.spaceID) else { return nil }
+        let opened = owner.isPrivate
+            ? session.openPrivateAgentTab(url: url, engine: engine, owner: owner)
+            : session.openAgentTab(url: url, engine: engine, owner: owner.id, folderName: owner.folderName, in: owner.spaceID)
+        guard let tab = opened else { return nil }
         follow(tab, owner: owner.id)
         return Self.info(of: tab)
     }
@@ -111,20 +119,20 @@ import Foundation
     }
 
     public func readableContent(of tabID: UUID, limit: Int, completion: @escaping (Result<EngineReadableContent, any Error>) -> Void) {
-        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(.failure(EngineReadableContentError.unreadable)) }
+        guard let tab = agentVisibleTabs.first(where: { $0.id == tabID }) else { return completion(.failure(EngineReadableContentError.unreadable)) }
         tab.webContents.readableContent(limit: limit, completion: completion)
     }
 
     /// Gives a hidden tab a viewport before running an agent page script.
     public func runPageScript(_ source: String, world: String, in tabID: UUID, completion: @escaping (Result<String?, any Error>) -> Void) {
-        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(.failure(EngineReadableContentError.unreadable)) }
+        guard let tab = agentVisibleTabs.first(where: { $0.id == tabID }) else { return completion(.failure(EngineReadableContentError.unreadable)) }
         giveViewport(to: tab)
         tab.webContents.executeJavaScript(source, inWorld: world, completion: completion)
     }
 
     /// Gives a hidden tab a viewport and captures its page or viewport.
     public func capture(_ tabID: UUID, fullPage: Bool, completion: @escaping (NSImage?) -> Void) {
-        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return completion(nil) }
+        guard let tab = agentVisibleTabs.first(where: { $0.id == tabID }) else { return completion(nil) }
         giveViewport(to: tab)
         if fullPage { tab.webContents.captureFullPage(completion: completion) } else { tab.webContents.captureViewport(completion: completion) }
     }
@@ -144,12 +152,18 @@ import Foundation
     }
 
     public func userTabs(in personaID: UUID) -> [AgentTabInfo] {
-        session.tabsInSidebarOrder.filter { $0.agentOwnerID == nil && $0.personaID == personaID }.map(Self.info(of:))
+        session.tabsInSidebarOrder.filter { !$0.isPrivate && $0.agentOwnerID == nil && $0.personaID == personaID }.map(Self.info(of:))
     }
 
     /// Shows a tab by the rule a step's tab button follows (`BrowserWindowModel.showAgentTab(_:)`): a small window's tab brings its small window forward, since the main window selecting it would close that window and leave the tab out of every list; any other tab is selected in the front main window, which comes forward. A tab that has closed shows nothing.
     public func showTab(_ tabID: UUID) {
-        guard let tab = session.allTabs.first(where: { $0.id == tabID }) else { return }
+        guard let tab = agentVisibleTabs.first(where: { $0.id == tabID }) else { return }
+        if tab.isPrivate {
+            let window = session.windows.first { $0.privateSessionID == tab.privateSessionID }
+            window?.selectTab(tabID)
+            window?.nsWindow?.makeKeyAndOrderFront(nil)
+            return
+        }
         let window = session.sidebarTarget()
         window.showAgentTab(tabID)
         if !tab.isInSmallWindow { window.nsWindow?.makeKeyAndOrderFront(nil) }
@@ -180,11 +194,15 @@ import Foundation
 
     /// An open tab that an agent folder holds.
     private func agentTab(_ id: UUID) -> Tab? {
-        session.tabs.first { $0.id == id && $0.agentOwnerID != nil }
+        session.allTabs.first { $0.id == id && $0.agentOwnerID != nil }
     }
 
     /// Follows an agent tab's folder, so that the owner hears when the user takes the tab over: by moving it out of the folder, deleting the folder, or keeping its tabs. The tab's next documents then run the target check only while an agent folder still holds it.
     private func follow(_ tab: Tab, owner: UUID) {
+        if tab.isPrivate {
+            followed[tab.id] = (owner, AnyCancellable {})
+            return
+        }
         let tabID = tab.id
         let observer = tab.$folderID.combineLatest(session.$folders)
             .dropFirst()
@@ -195,7 +213,7 @@ import Foundation
                     MainActor.assumeIsolated {
                         guard let self, self.followed[tabID]?.owner == owner else { return }
                         self.followed[tabID] = nil
-                        if let tab = self.session.allTabs.first(where: { $0.id == tabID }) {
+                        if let tab = self.agentVisibleTabs.first(where: { $0.id == tabID }) {
                             let plugins = self.session.plugins(in: tab.personaID).contributions.pageScripts
                             tab.webContents.setPageScripts(TabUnloading.pageScripts(withPluginScripts: plugins, inAgentTab: tab.agentOwnerID != nil))
                         }
@@ -209,10 +227,12 @@ import Foundation
 
 extension BrowserAgentHost: AgentTabMonitor {
     func userDocumentDidEnd(in tabID: UUID, document: UUID) {
+        guard session.allTabs.first(where: { $0.id == tabID })?.isPrivate != true else { return }
         userDocumentDidEnd?(tabID, document)
     }
 
     func userTabAddressDidChange(_ tabID: UUID) {
+        guard session.allTabs.first(where: { $0.id == tabID })?.isPrivate != true else { return }
         userTabAddressDidChange?(tabID)
     }
 
@@ -249,11 +269,11 @@ extension BrowserAgentHost: AgentTabMonitor {
 extension BrowserAgentHost: AgentTabNaming {
     /// An outside client's or its run's `rename_tab`: the suggested name under `BrowserHooks.suggest(_:for:to:applying:)`, whose title change names the client's grant as its cause.
     public func suggestName(_ name: String?, forTab id: UUID, showing document: URL, byGrant grant: UUID, applying: Bool) -> Bool {
-        guard let tab = session.tabs.first(where: { $0.id == id }) else { return false }
+        guard let tab = session.tabs.first(where: { $0.id == id && !$0.isPrivate }) else { return false }
         return session.events.withCause(BrowserEventCause(origin: .outsideClient(grant: grant))) { BrowserHooks.suggest(name, for: document, to: tab, applying: applying) }
     }
 
     public func committedAddress(ofTab id: UUID) -> URL? {
-        session.tabs.first { $0.id == id }?.committedURL
+        session.tabs.first { $0.id == id && !$0.isPrivate }?.committedURL
     }
 }

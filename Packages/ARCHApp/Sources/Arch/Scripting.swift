@@ -8,16 +8,16 @@ extension ArchApplication {
 
     /// Every tab in sidebar order (`BrowserSession.tabsInSidebarOrder`): the favorites' open tabs, then each space's pinned tabs and its open tabs, then the small windows' tabs.
     @objc var scriptTabs: [ScriptTab] {
-        browserSession?.tabsInSidebarOrder.map { ScriptTab($0) } ?? []
+        browserSession?.tabsInSidebarOrder.filter { !$0.isPrivate }.map { ScriptTab($0) } ?? []
     }
 
     /// The active window's selected tab.
-    @objc var scriptActiveTab: ScriptTab? { browserSession?.focusedTab.map { ScriptTab($0) } }
+    @objc var scriptActiveTab: ScriptTab? { browserSession?.focusedTab.flatMap { $0.isPrivate ? nil : ScriptTab($0) } }
 
     /// Resolves `tab id "…"`. The identifier comes from the script, so it may not be text.
     @objc(valueInScriptTabsWithUniqueID:) func scriptTab(withUniqueID uniqueID: Any) -> ScriptTab? {
         guard let text = uniqueID as? String, let id = UUID(uuidString: text) else { return nil }
-        return browserSession?.allTabs.first { $0.id == id }.map { ScriptTab($0) }
+        return browserSession?.allTabs.first { $0.id == id && !$0.isPrivate }.map { ScriptTab($0) }
     }
 }
 

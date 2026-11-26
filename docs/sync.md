@@ -83,6 +83,7 @@ Code comments and documents cite these as "sync decision 4".
 
 ## What never syncs
 
+- Private windows and their tabs, addresses, titles, downloads, and storage. They belong to no Persona or space, never enter the saved sidebar snapshot, and publish no remote-tab records.
 - Cookies, site storage, caches, and HTTP authentication credentials. They stay separate for each engine and Mac. A Persona that arrives from another Mac starts signed out of every site.
 - Passwords, passkeys, cards, and addresses. Arch does not store them. Apple Passwords and 1Password sync their own data.
 - Keychain items.

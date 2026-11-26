@@ -18,10 +18,15 @@ import Foundation
     @Published public internal(set) var isInSmallWindow = false
     /// The Persona of the space or favorite the tab opened in. It never changes, because the tab's pages keep one Persona's engine storage.
     public let personaID: UUID
+    /// The in-memory window session, independent of every Persona and space. `personaID` is only an internal runtime lookup key for these tabs.
+    public internal(set) var privateSessionID: UUID?
+    public var isPrivate: Bool { privateSessionID != nil }
+    /// A private tab has no agent folder; ownership stays with the client that opened it.
+    var privateAgentOwnerID: UUID?
     /// The current main document, including reloads at the same address. Never stored or sent to a model.
     @Published private(set) var documentID = UUID() {
         didSet {
-            if agentOwnerID == nil { agentMonitor?.userDocumentDidEnd(in: id, document: oldValue) }
+            if !isPrivate, agentOwnerID == nil { agentMonitor?.userDocumentDidEnd(in: id, document: oldValue) }
         }
     }
     /// Pinning saves the page the tab shows as its saved page, or the first address its page reports when it shows none yet, and unpinning forgets it (bookmark rule 2). Pin Tab, Unpin Tab, and drops among the pinned or open tabs or into a folder of either list all set it, so each follows the rule; a tab made pinned, as one that restores or reopens, takes its saved page from the caller.
@@ -297,7 +302,7 @@ import Foundation
 
     /// The agent session or outside client's grant whose agent folder holds the tab, or nil for the user's own tab. It follows the folder: a tab the user drags out of its folder, or whose folder's tabs the user keeps, is the user's from then on.
     public var agentOwnerID: UUID? {
-        folderID.flatMap { agentOwnerOfFolder?($0) }
+        privateAgentOwnerID ?? folderID.flatMap { agentOwnerOfFolder?($0) }
     }
 
     /// Reports to the agent monitor when the tab is an agent's.
@@ -333,7 +338,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
     public func webContentsDidChangeURL(_ webContents: any EngineWebContents) {
         let previous = url
         url = webContents.url?.withoutCredentials
-        if agentOwnerID == nil, url != previous { agentMonitor?.userTabAddressDidChange(id) }
+        if !isPrivate, agentOwnerID == nil, url != previous { agentMonitor?.userTabAddressDidChange(id) }
         if let originalEngineState, let url, originalEngineState.url != url { self.originalEngineState = nil }
         reportToAgent(.addressChanged(url))
         if Self.site(of: url) != declinedExternalAppSite { declinedExternalAppSite = nil }
@@ -364,7 +369,7 @@ extension Tab: @preconcurrency EngineWebContentsUIDelegate {
         }
         if wasLoading, !isLoading { reportToAgent(.stoppedLoading) }
         // Record a page when it finishes loading, when its title is usually known, in the tab's Persona. An agent's tab records none (`docs/agents.md`, agent decision 10), so an agent's pages enter no Persona's suggestions.
-        if !isLoading, !isDownloadOnly, agentOwnerID == nil, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
+        if !isPrivate, !isLoading, !isDownloadOnly, agentOwnerID == nil, let url = webContents.url?.withoutCredentials, url != recordedURL, url.scheme == "http" || url.scheme == "https" {
             recordedURL = url
             recordVisit?(url, webContents.title)
         }

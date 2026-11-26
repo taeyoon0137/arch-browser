@@ -145,6 +145,14 @@ public final class ChromiumApplication: EngineApplication {
         _ = context.extensions
         completion(.success(context))
     }
+    public func createEphemeralBrowserContext(completion: @escaping (Result<any EngineBrowserContext, Error>) -> Void) {
+        guard let requestContext = ARCHCEFRequestContext.makeEphemeral() else {
+            return completion(.failure(EngineBrowserContextError.ephemeralStorageUnavailable))
+        }
+        let context = ChromiumBrowserContext(requestContext: requestContext, allowsExtensions: false)
+        context.application = self
+        completion(.success(context))
+    }
     private var rendererCrashCount = 0
     /// Counts renderer process exits across all tabs and reports the running total.
     func rendererDidCrash() {
@@ -166,16 +174,18 @@ public final class ChromiumBrowserContext: NSObject, EngineBrowserContext, ARCHC
     weak var application: ChromiumApplication?
     let chromiumDownloads = ChromiumDownloads()
     let requestContext: ARCHCEFRequestContext
+    private let allowsExtensions: Bool
 
     /// The context hears the requests of the profile's service workers. A request context that two contexts share, as the global one would be, reaches the one made last.
-    init(requestContext: ARCHCEFRequestContext) {
+    init(requestContext: ARCHCEFRequestContext, allowsExtensions: Bool = true) {
         self.requestContext = requestContext
+        self.allowsExtensions = allowsExtensions
         super.init()
         requestContext.delegate = self
     }
 
     public var downloads: any EngineDownloads { chromiumDownloads }
-    public var extensions: (any EngineExtensions)? { chromiumExtensions }
+    public var extensions: (any EngineExtensions)? { allowsExtensions ? chromiumExtensions : nil }
     private lazy var chromiumExtensions = ChromiumExtensions(context: self)
 
     /// Chromium keeps every answer its own prompt gives, such as one for geolocation or notifications, and gives it without asking again, so the kept answers follow the app's.

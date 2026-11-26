@@ -247,6 +247,7 @@ extension SessionSnapshot {
 
     /// The space tabs and folders that `session.json` keeps: agent folders and their tabs stay out (docs/agents.md, agent decision 10), so that an agent's tabs never reopen at the next launch, and so does a small window's tab, which goes with its window (`docs/windows-personas.md`, open decision 4) unless it moves to a main window first. A folder whose tabs the user kept is an ordinary folder.
     @MainActor static func keptSidebar(tabs: [Tab], folders: [TabFolder]) -> (tabs: [Tab], folders: [TabFolder]) {
+        let tabs = tabs.filter { !$0.isPrivate }
         let agentFolderIDs = Set(folders.filter(\.isAgentFolder).map(\.id))
         return (tabs.filter { $0.isListedInSidebar && ($0.folderID.map { !agentFolderIDs.contains($0) } ?? true) }, folders.filter { !$0.isAgentFolder })
     }

@@ -192,7 +192,7 @@ struct SiteRuleMenu: View {
     }
 
     var body: some View {
-        if let url = tab.url, (try? SiteRuleSite(parsing: url.absoluteString)) != nil {
+        if !tab.isPrivate, let url = tab.url, (try? SiteRuleSite(parsing: url.absoluteString)) != nil {
             Menu(localized("Always Open This Site In")) {
                 let selected = session.siteRule(for: url).flatMap(session.siteRuleDestination)?.id
                 Toggle(localized("Anywhere"), isOn: Binding(get: { selected == nil }, set: { _ in session.setSiteRuleFromMenu(for: url, destination: nil) }))
@@ -230,7 +230,7 @@ struct SiteRulePopoverSection: View {
     }
 
     var body: some View {
-        if let url = tab.url, (try? SiteRuleSite(parsing: url.absoluteString)) != nil {
+        if !tab.isPrivate, let url = tab.url, (try? SiteRuleSite(parsing: url.absoluteString)) != nil {
             let destination = session.siteRule(for: url).flatMap(session.siteRuleDestination)
             let notes = [session.quickRuleNote(for: url), session.quickRuleNote(for: url, removing: true),
                          destination?.resolvedPersonaID != nil && destination?.resolvedPersonaID != tab.personaID
@@ -313,7 +313,7 @@ struct SiteRuleCommand: Identifiable {
 extension BrowserSession {
     func siteRuleCommands(matching text: String, forTab tab: Tab) -> [SiteRuleCommand] {
         let words = text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard !words.isEmpty, !siteRules.isReadOnly, let url = tab.url,
+        guard !tab.isPrivate, !words.isEmpty, !siteRules.isReadOnly, let url = tab.url,
               (try? SiteRuleSite(parsing: url.absoluteString)) != nil else { return [] }
         return siteRuleDestinations.compactMap { space in
             let place = siteRulePlace(space)

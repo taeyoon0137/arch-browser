@@ -30,17 +30,17 @@ import Hooks
 
     /// Returns the event-facing facts for an open tab.
     public func tab(_ id: UUID) -> BrowserTabRef? {
-        session.allTabs.first { $0.id == id }.map(Self.ref)
+        session.allTabs.first { $0.id == id && !$0.isPrivate }.map(Self.ref)
     }
 
     /// Returns the Persona's sidebar tabs in order, excluding agent tabs.
     public func tabs(inPersona id: UUID) -> [BrowserTabRef] {
-        session.tabsInSidebarOrder.filter { $0.personaID == id }.map(Self.ref).filter { $0.kind != .agent }
+        session.tabsInSidebarOrder.filter { $0.personaID == id && !$0.isPrivate }.map(Self.ref).filter { $0.kind != .agent }
     }
 
     /// The session posts `tabClosed` while it still lists the tab, so during that delivery this is the closing tab's last name and committed address.
     public func closingTab(_ id: UUID) -> AgentRunClosedTab? {
-        session.allTabs.first { $0.id == id }.map { AgentRunClosedTab(name: $0.displayTitle, url: $0.committedURL) }
+        session.allTabs.first { $0.id == id && !$0.isPrivate }.map { AgentRunClosedTab(name: $0.displayTitle, url: $0.committedURL) }
     }
 
     /// The tab as `BrowserEventSource` describes it in events: with its committed address, not the address a WebKit navigation shows before it commits, so a run's documents and site checks follow the page the tab shows.

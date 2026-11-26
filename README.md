@@ -98,7 +98,7 @@ git config core.hooksPath .githooks
 - [`docs/features.md`](./docs/features.md): planned features with the implementation approach and status of each.
 - [`docs/sync.md`](./docs/sync.md): the sync design: CloudKit record types, conflict handling, offline behavior, and what never syncs.
 - [`docs/remote-tabs.md`](./docs/remote-tabs.md): other Macs' open tabs in the sidebar, the local switch, publishing and expiry, and the CloudKit schema to deploy.
-- [`docs/windows-personas.md`](./docs/windows-personas.md): the design for multiple windows, the small window, and Personas, with its implementation order.
+- [`docs/windows-personas.md`](./docs/windows-personas.md): multiple windows, private windows, the small window, and Personas, with the implementation order.
 - [`docs/plugins.md`](./docs/plugins.md): the plugin system design: kinds, contributions, permissions, sandboxing, lifecycle, storage, and the Swift API.
 - [`docs/ai.md`](./docs/ai.md): the AI interface, providers, routing, page access, hooks, and plugins that AI writes.
 - [`docs/agent-panel-design.md`](./docs/agent-panel-design.md): the agent panel layout by state and its review cases.

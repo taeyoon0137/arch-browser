@@ -189,6 +189,7 @@ public enum AgentToolCatalog {
             ref(required: false, "A link's ref from a snapshot of the tab named by tab."),
             tab(required: false, "The tab whose snapshot holds ref."),
             AgentToolParameter("engine", .choice(["chromium", "webkit"]), "The new tab's engine; the default engine when absent."),
+            AgentToolParameter("private", .boolean, "Open in a private window with independent in-memory storage. Only this client or session can access this tab; false by default."),
         ]),
         AgentTool("navigate", .navigates, [], "Loads an address or a link from the tab's snapshot in an agent tab, or goes back, forward, or reloads, and returns the address and title once the document loads, or after 30 seconds.", [
             tab(),

@@ -52,7 +52,7 @@ public struct BrowserWindowView: View {
 
     /// How far the open library pushes the page aside. The page keeps its size, so it moves rather than narrows.
     private var libraryPush: CGFloat {
-        guard windowModel.isSidebarVisible, !windowModel.isPageFullscreen else { return 0 }
+        guard !windowModel.isPrivate, windowModel.isSidebarVisible, !windowModel.isPageFullscreen else { return 0 }
         return librarySwipePush ?? (windowModel.isLibraryVisible ? SidebarColumn.libraryWidening : 0)
     }
 
@@ -71,13 +71,13 @@ public struct BrowserWindowView: View {
                     PageAreaView(session: session, sidebarDrag: sidebarDrag, margins: pageMargins)
                         // In the page's own corner, so an agent panel or page reader beside the page keeps its controls.
                         .overlay(alignment: .bottomTrailing) {
-                            if !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
+                            if !windowModel.isPrivate, !windowModel.isSidebarVisible, !isSidebarPeeking, !windowModel.isPageFullscreen {
                                 LibraryButton(session: session, activityOnly: true)
                                     .background(.regularMaterial, in: Capsule())
                                     .padding(2 * Self.pageMargin)
                             }
                         }
-                    if !windowModel.isPageFullscreen {
+                    if !windowModel.isPrivate, !windowModel.isPageFullscreen {
                         if windowModel.agentPanel != nil {
                             AgentPanelColumn(session: session)
                         } else {
@@ -128,7 +128,8 @@ public struct BrowserWindowView: View {
                 .onChange(of: proxy.size) { windowSize = $1 }
         })
         .background(SpaceBackgroundView())
-        .modifier(SpaceThemeModifier(tint: windowModel.currentSpace.tint))
+        .modifier(SpaceThemeModifier(tint: windowModel.isPrivate ? .gray : windowModel.currentSpace.tint, isPrivate: windowModel.isPrivate))
+        .preferredColorScheme(windowModel.isPrivate ? .dark : nil)
         .background(WindowButtonsReader { windowButtons = $0 })
         // Showing, hiding, or pushing the sidebar aside for the library slides it and resizes the page.
         .animation(SidebarView.pageSpring, value: windowModel.isSidebarVisible)
@@ -354,9 +355,11 @@ struct SpaceBackgroundView: View {
 
     var body: some View {
         ZStack {
-            WindowMaterialView(cornerRadius: cornerRadius)
+            if !theme.isPrivate {
+                WindowMaterialView(cornerRadius: cornerRadius)
+            }
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(LinearGradient(colors: [theme.tint.opacity(theme.strength.opacities.start), theme.tint.opacity(theme.strength.opacities.end)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(LinearGradient(colors: theme.backgroundColors, startPoint: .topLeading, endPoint: .bottomTrailing))
         }
         .animation(.easeInOut(duration: 0.25), value: theme)
     }

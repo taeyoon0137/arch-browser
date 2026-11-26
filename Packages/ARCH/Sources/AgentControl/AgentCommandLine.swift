@@ -123,7 +123,7 @@ public enum AgentCommandLine {
         AgentCLICommandSpec(name: "setup", arguments: "claude|codex", summary: "Shows the command that adds arch-mcp to Claude Code or Codex for your user, asks, and runs it.", needsArch: false),
         AgentCLICommandSpec(name: "links", arguments: "install|remove [--dir folder]", summary: "Links arch-cli and arch-mcp into a writable folder on your PATH inside your home folder, ~/.local/bin first, or removes those links.", needsArch: false),
         AgentCLICommandSpec(name: "skills", arguments: "list|install|remove [--target t] [--path folder]", summary: "Lists, installs, or removes the \(AgentHarness.entrySkillName) skill, which tells an agent how to use Arch, in Claude Code's skill folder (--target claude), Codex's (--target codex or codex-home), or a folder of skill folders (--path). Install and remove change only the places named.", needsArch: false),
-        AgentCLICommandSpec(name: "open", arguments: "<url>", summary: "Opens an agent tab in the background at an http or https address, waits for its page, and prints the tab's handle, title, and address.", needsArch: true),
+        AgentCLICommandSpec(name: "open", arguments: "<url> [--private]", summary: "Opens an agent tab in the background at an http or https address, waits for its page, and prints the tab's handle, title, and address.", needsArch: true),
         AgentCLICommandSpec(name: "navigate", arguments: "<tab> <url>", summary: "Loads an address in one of this client's agent tabs and prints its title and address.", needsArch: true),
         AgentCLICommandSpec(name: "back", arguments: "<tab>", summary: "Goes back in an agent tab.", needsArch: true),
         AgentCLICommandSpec(name: "forward", arguments: "<tab>", summary: "Goes forward in an agent tab.", needsArch: true),
@@ -154,6 +154,7 @@ public enum AgentCommandLine {
     /// The options that take a value, and the commands that take each option.
     private static let valueOptions: Set<String> = ["--offset", "--text", "--url", "--timeout", "--ref", "-o", "--amount"]
     private static let optionCommands: [String: Set<String>] = [
+        "--private": ["open"],
         "--shared": ["tabs"], "--offset": ["text"], "--load": ["wait"], "--text": ["type", "wait"], "--url": ["wait"], "--timeout": ["wait"],
         "--full": ["screenshot", "snapshot"], "--ref": ["press", "screenshot", "snapshot"], "--diff": ["snapshot"], "-o": ["screenshot"],
         "--replace": ["type"], "--submit": ["type"], "--amount": ["scroll"],
@@ -352,7 +353,9 @@ public enum AgentCommandLine {
         switch name {
         case "open":
             let url = try expectOperands(operands, ["url"], for: name)[0]
-            return AgentToolCall(name: "open_tab", arguments: ["url": .string(url)])
+            var arguments: [String: AgentJSON] = ["url": .string(url)]
+            if options["--private"] != nil { arguments["private"] = true }
+            return AgentToolCall(name: "open_tab", arguments: arguments)
         case "navigate":
             let given = try expectOperands(operands, ["tab", "url"], for: name)
             return AgentToolCall(name: "navigate", arguments: ["tab": .string(given[0]), "url": .string(given[1])])

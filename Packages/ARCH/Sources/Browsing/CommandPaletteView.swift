@@ -37,7 +37,7 @@ struct CommandPaletteView: View {
 
     /// Matching commands of the enabled plugins of the window's Persona.
     private var pluginCommands: [Attributed<PluginCommand>] {
-        if argumentCommand != nil { return [] }
+        if windowModel.isPrivate || argumentCommand != nil { return [] }
         return Array(windowModel.plugins.contributions.paletteCommands(matching: text).prefix(5))
     }
 
@@ -45,14 +45,16 @@ struct CommandPaletteView: View {
     private var matchingTabs: [Tab] {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty, windowModel.kind == .main else { return [] }
-        return Array(session.allTabs.filter { tab in
-            tab.id != windowModel.selectedTabID && tab.isListedInSidebar && tab.personaID == windowModel.personaID &&
+        let tabs = windowModel.isPrivate ? windowModel.privateTabs : session.allTabs.filter { !$0.isPrivate && $0.isListedInSidebar && $0.personaID == windowModel.personaID }
+        return Array(tabs.filter { tab in
+            tab.id != windowModel.selectedTabID &&
                 (tab.shownTitle.lowercased().contains(query) || tab.url?.absoluteString.lowercased().contains(query) == true)
         }.prefix(5))
     }
 
     /// Pages that share a title and site, such as the steps of a sign-in flow, appear once. The site is the one the row shows, so a page with `www.` and one without it count as one. Typing more cancels the read, and the result of a cancelled read is dropped, so the list always belongs to the latest text.
     private func loadHistorySuggestions() async {
+        guard !windowModel.isPrivate else { historySuggestions = []; return }
         let entries = await session.history.suggestions(for: text, limit: 15, in: windowModel.personaID)
         guard !Task.isCancelled else { return }
         var seen = Set<String>()
@@ -83,7 +85,7 @@ struct CommandPaletteView: View {
 
     /// The name of the web extension in the window's Persona whose page is at `url`, which the primary row names as the address pill does (`AddressPillView.extensionName(ofPageAt:in:session:)`).
     private func extensionName(ofPageAt url: URL) -> String? {
-        session.extensionName(ofPageAt: url, in: windowModel.personaID)
+        windowModel.isPrivate ? nil : session.extensionName(ofPageAt: url, in: windowModel.personaID)
     }
 
     /// Ask About This Page appears once the typed words begin its name, while the selected tab's page can be asked about.
@@ -94,18 +96,18 @@ struct CommandPaletteView: View {
 
     /// Move Tab to Space for the selected tab, one row per space that takes it, while the typed words begin the row's title (`BrowserSession.spaceMoveCommands(matching:forTab:)`). A small window's tab moves with its window's Persona menu instead.
     private var spaceMoveCommands: [SpaceMoveCommand] {
-        guard argumentCommand == nil, windowModel.kind == .main, let tab = windowModel.selectedTab else { return [] }
+        guard !windowModel.isPrivate, argumentCommand == nil, windowModel.kind == .main, let tab = windowModel.selectedTab else { return [] }
         return Array(session.spaceMoveCommands(matching: text, forTab: tab).prefix(5))
     }
 
     private var siteRuleCommands: [SiteRuleCommand] {
-        guard argumentCommand == nil, !windowModel.isSelectedPageCovered, let tab = windowModel.selectedTab else { return [] }
+        guard !windowModel.isPrivate, argumentCommand == nil, !windowModel.isSelectedPageCovered, let tab = windowModel.selectedTab else { return [] }
         return session.siteRuleCommands(matching: text, forTab: tab)
     }
 
     /// The Web Store rows for the text and the selected tab's page, which no internal page or preview panel covers, while the app shell can start a store install.
     private var webStoreRows: PaletteWebStoreRows {
-        guard session.installFromWebStore != nil else { return PaletteWebStoreRows() }
+        guard !windowModel.isPrivate, session.installFromWebStore != nil else { return PaletteWebStoreRows() }
         let isPageCovered = windowModel.internalPage != nil || windowModel.preview != nil
         return PaletteWebStoreRows(text: text, pageURL: isPageCovered ? nil : windowModel.selectedTab?.url)
     }
@@ -122,13 +124,13 @@ struct CommandPaletteView: View {
     }
 
     private var askAgentOffer: AskAgentOffer? {
-        windowModel.askAgentOffer(for: text, settings: aiSettings)
+        windowModel.isPrivate ? nil : windowModel.askAgentOffer(for: text, settings: aiSettings)
     }
 
     /// The live agent sessions whose titles contain the text, ignoring case, to show in the panel.
     private var matchingAgentSessions: [AgentSession] {
         let query = text.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty, let agents = session.agents else { return [] }
+        guard !windowModel.isPrivate, !query.isEmpty, let agents = session.agents else { return [] }
         return Array(agents.sessions.filter { !$0.hasEnded && $0.title.lowercased().contains(query) }.prefix(5))
     }
 
@@ -216,6 +218,7 @@ struct CommandPaletteView: View {
             windowModel.dismissCommandPalette()
             if let tab = windowModel.selectedTab { session.moveTab(tab.id, toSpace: command.space.id, windowsFollow: false, activating: windowModel) }
         case .siteRule(let command):
+            guard !windowModel.isPrivate, windowModel.selectedTab?.isPrivate != true else { return }
             let url = windowModel.selectedTab?.url
             windowModel.dismissCommandPalette()
             if let url { session.setSiteRuleFromMenu(for: url, destination: command.space) }

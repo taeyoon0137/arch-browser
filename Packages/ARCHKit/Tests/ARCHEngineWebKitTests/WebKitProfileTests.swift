@@ -21,6 +21,25 @@ import WebKit
         #expect(context.storageIdentifier == nil)
     }
 
+    @Test func privateWindowsGetDistinctNonpersistentStoresWithoutExtensions() throws {
+        var contexts: [WebKitBrowserContext] = []
+        for _ in 0..<2 {
+            application.createEphemeralBrowserContext { result in
+                if let context = try? result.get() as? WebKitBrowserContext { contexts.append(context) }
+            }
+        }
+        #expect(contexts.count == 2)
+        let first = try #require(contexts.first)
+        let last = try #require(contexts.last)
+        #expect(first.dataStore !== last.dataStore)
+        for context in contexts {
+            #expect(!context.dataStore.isPersistent)
+            #expect(context.storageIdentifier == nil)
+            #expect(context.extensions == nil)
+            if #available(macOS 15.4, *) { #expect(context.webExtensions == nil) }
+        }
+    }
+
     @Test func aPrivateProfileAndItsExtensionsKeepNothingOnDisk() throws {
         let context = application.makeBrowserContext(storageIdentifier: nil, dataStore: .nonPersistent())
         #expect(!context.dataStore.isPersistent)

@@ -95,6 +95,32 @@ import Testing
         #expect(await fixture.call("list_tabs").text == "This client has no agent tabs open.")
     }
 
+    @Test func privateTabsBelongOnlyToTheOpeningClientAndCannotBeShared() async throws {
+        let fixture = Fixture()
+        let opened = await fixture.call("open_tab", ["url": .string(Fixture.guide.absoluteString), "private": true])
+        #expect(opened.status == .ok)
+        #expect(fixture.host.openedOwners.last?.isPrivate == true)
+        let tab = try #require(fixture.host.tabs.first)
+        #expect(tab.isPrivate && tab.spaceID == nil && tab.agentOwnerID == fixture.grant.id)
+        #expect(await fixture.call("read_text", ["tab": "t1"]).status == .ok)
+        #expect(!tab.canShareWithAgent(allowsAI: { _ in true }))
+
+        // Even a stale or forged sharing entry cannot grant access to another opener's private tab.
+        fixture.host.tabs[0].agentOwnerID = UUID()
+        fixture.state.handles.sharedTabIDs.append(tab.id)
+        #expect(await fixture.call("list_tabs").text == "This client has no agent tabs open.")
+        #expect(await fixture.call("read_text", ["tab": "t1"]).code == "P17")
+        #expect(await fixture.call("navigate", ["tab": "t1", "action": "reload"]).code == "P17")
+        #expect(await fixture.call("close_tab", ["tab": "t1"]).code == "P17")
+
+        // A user-created private tab remains inaccessible even if an old handle and sharing entry exist.
+        fixture.host.tabs[0].agentOwnerID = nil
+        fixture.state.handles.sharedTabIDs.append(tab.id)
+        #expect(!fixture.host.tabs[0].canShareWithAgent(allowsAI: { _ in true }))
+        #expect(await fixture.call("read_text", ["tab": "t1"]).code == "P17")
+        #expect(await fixture.call("list_tabs", ["scope": "shared"]).text == "The user has shared no tabs with this client.")
+    }
+
     @Test func excludedSitesAndInternalPagesAreRefusedAtNavigation() async {
         let fixture = Fixture()
         for address in ["https://excluded.example/plans", "about:blank", "file:///etc/hosts", "arch://settings", "javascript:alert(1)", "chrome://version"] {

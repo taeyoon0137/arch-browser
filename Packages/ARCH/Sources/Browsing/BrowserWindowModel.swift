@@ -26,6 +26,14 @@ public enum BrowserWindowKind {
     /// The window's identity in `session.json`, which it keeps across launches.
     let id: UUID
     public let kind: BrowserWindowKind
+    public let privateSessionID: UUID?
+    /// An agent-owned private window never shares storage with tabs opened by the user or another agent.
+    let privateOwnerID: UUID?
+    public var isPrivate: Bool { privateSessionID != nil }
+    public var privateTabs: [Tab] {
+        guard let privateSessionID else { return [] }
+        return session.tabs.filter { $0.privateSessionID == privateSessionID }
+    }
     /// The AppKit window, set when it is created. Window sheets, printing, export, and sharing use it.
     public weak var nsWindow: NSWindow?
     /// The window's frame outside full screen, in screen coordinates: the saved one, where the window opens, then the one the window controller records as the window moves and resizes. `nil` until the window opens, when the window has no saved frame.
@@ -147,10 +155,12 @@ public enum BrowserWindowKind {
     private var sharePicker: PageSharePicker?
 
     /// A window of `kind` as `record` describes it: its ID, space, sidebar, and frame. The session selects its tab once the window exists.
-    init(session: BrowserSession, record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind) {
+    init(session: BrowserSession, record: SessionSnapshot.WindowRecord, kind: BrowserWindowKind, privateSessionID: UUID? = nil, privateOwnerID: UUID? = nil) {
         self.session = session
         id = record.id
         self.kind = kind
+        self.privateSessionID = privateSessionID
+        self.privateOwnerID = privateOwnerID
         currentSpaceID = record.currentSpaceID
         isSidebarVisible = record.isSidebarVisible
         restorableFrame = record.frame
@@ -179,6 +189,7 @@ public enum BrowserWindowKind {
     ///
     /// The prompts of the tabs that left the screen wait, and the panes that show a tab with a prompt show its card (`PanePromptLayer`). Step 1 can close another window, so every step reads the selection as it is when the step runs, not `id`.
     public func selectTab(_ id: UUID?) {
+        if let id, let tab = session.allTabs.first(where: { $0.id == id }), tab.privateSessionID != privateSessionID { return }
         if let tab = session.allTabs.first(where: { $0.id == id }),
            tab.personaID != personaID || (tab.spaceID != nil && tab.spaceID != currentSpaceID) {
             rememberSpaceSelection()
@@ -198,7 +209,7 @@ public enum BrowserWindowKind {
         }
         if let tab = selectedTab, tab.isUnread { tab.isUnread = false }
         // A favorite can be shown in any space of its Persona, including when a session in another Persona links to it.
-        if let tab = selectedTab {
+        if let tab = selectedTab, !isPrivate {
             if let spaceID = tab.spaceID, spaceID != currentSpaceID { currentSpaceID = spaceID }
             else if tab.spaceID == nil && personaID != tab.personaID { currentSpaceID = session.preferredSpace(in: tab.personaID).id }
         }
@@ -236,15 +247,17 @@ public enum BrowserWindowKind {
     }
 
     /// The Persona whose favorites, tabs, and plugins the window offers: the current space's, which for a small window is its tab's.
-    public var personaID: Persona.ID { currentSpace.resolvedPersonaID }
+    public var personaID: Persona.ID { privateSessionID ?? currentSpace.resolvedPersonaID }
 
     /// Adds a space to the window's Persona and shows it.
     public func addSpace() {
+        guard !isPrivate else { return }
         switchToSpace(session.makeSpace(in: personaID).id)
     }
 
     /// Shows a space with this window's last selected item there, or its first free tab without a valid memory.
     public func switchToSpace(_ id: UUID) {
+        guard !isPrivate else { return }
         guard let space = session.spaces.first(where: { $0.id == id }) else { return }
         isLibraryVisible = false
         guard currentSpaceID != id else { return }
@@ -333,7 +346,7 @@ public enum BrowserWindowKind {
     // MARK: Personas
 
     /// Whether New Persona…, Rename Persona…, and Delete Persona… can ask with their sheet: the window shows no other sheet, which theirs would wait behind.
-    public var canShowPersonaSheet: Bool { nsWindow?.attachedSheet == nil }
+    public var canShowPersonaSheet: Bool { !isPrivate && nsWindow?.attachedSheet == nil }
 
     /// Asks for a name in a sheet on the window, then adds a Persona with that name and shows its space. Create stays disabled until the field holds a name.
     public func promptForNewPersona() {
@@ -501,6 +514,7 @@ public enum BrowserWindowKind {
 
     /// Whether the selected tab shows a web page that can become a space's home page. An internal page over it has no address to use.
     public var canSetCurrentPageAsHome: Bool {
+        guard !isPrivate else { return false }
         guard internalPage == nil, let scheme = selectedTab?.url?.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
     }
@@ -512,7 +526,7 @@ public enum BrowserWindowKind {
     }
 
     /// Home needs a home page for the current space and no internal page or preview over the tab.
-    public var canGoHome: Bool { !isSelectedPageCovered && currentSpace.homeURL != nil }
+    public var canGoHome: Bool { !isPrivate && !isSelectedPageCovered && currentSpace.homeURL != nil }
 
     /// Loads the current space's home page in the selected tab, or in a new tab when no tab is selected.
     public func goHome() {
@@ -531,6 +545,7 @@ public enum BrowserWindowKind {
 
     /// Selects the favorite's own tab, which the session opens if needed.
     public func openFavorite(_ favorite: Favorite) {
+        guard !isPrivate else { return }
         selectTab(session.openTab(for: favorite).id)
     }
 
@@ -591,6 +606,11 @@ public enum BrowserWindowKind {
 
     /// Duplicate: opens a copy of the tab after it and selects it here.
     func duplicate(_ tab: Tab) {
+        if isPrivate {
+            guard tab.privateSessionID == privateSessionID else { return }
+            _ = session.openPrivateTab(url: tab.url, in: self, engine: tab.preferredEngine)
+            return
+        }
         guard let copy = session.duplicateTab(tab) else { return }
         selectTab(copy.id)
     }
@@ -637,6 +657,7 @@ public enum BrowserWindowKind {
 
     /// Shows `url` in the panel, in place of any other preview, in a web contents of the Persona's runtime for `engine` that no tab owns. A preview opened with the same address, Persona and requested engine stays as it is. The preview refuses the page's downloads, so closing the panel always closes the page at once.
     func showPreview(of url: URL, engine: EngineKind, in personaID: Persona.ID) {
+        guard !isPrivate, session.personas.contains(where: { $0.id == personaID }) else { return }
         if let preview, preview.openedURL == url, preview.personaID == personaID, preview.requestedEngine == engine { return }
         closePreview()
         // The panel covers the page that a search, a region capture, or the question popover belongs to, so all three end.
@@ -659,6 +680,7 @@ public enum BrowserWindowKind {
         // A preview asks the user nothing, so its page's permission requests are denied without changing the profile's kept answers.
         preview.requestPermission = { [weak self] request, completion in
             guard let self else { return completion(false) }
+            if self.isPrivate { return completion(false) }
             self.session.permissionAnswers.denyWithoutAsking(request, personaID: personaID, in: runtime.context, completion: completion)
         }
         preview.didClose = { [weak self] in self?.closePreview() }
@@ -698,11 +720,24 @@ public enum BrowserWindowKind {
 
     /// Opens a tab at `url` in the current space and the default engine, and selects it.
     func openTab(url: URL) {
+        if isPrivate { _ = session.openPrivateTab(url: url, in: self); return }
         selectTab(session.openTab(url: url, in: currentSpaceID, select: false).id)
     }
 
     /// Shows a page that one of the window's pages or its preview opened, which a runtime of the Persona created, in a new tab: selected in the current space of a main window, or in a small window of its own beside a small window, which shows only its tab (open decision 11). A page of another Persona, as from a preview that stayed open while the window moved to another Persona's space, goes to its Persona's preferred space instead. `opener` is the page that opened it, which the window returns to when the new page closes itself.
     func showOpenedPage(_ webContents: any EngineWebContents, personaID: Persona.ID, opener: (any EngineWebContents)? = nil, preferredEngine: EngineKind? = nil) {
+        if let id = privateSessionID {
+            guard personaID == id else { return }
+            if privateOwnerID != nil {
+                _ = session.openPrivateTab(url: webContents.url, in: self, engine: preferredEngine ?? webContents.engineKind)
+                session.retire(webContents, of: id)
+                return
+            }
+            let tab = session.adoptPrivate(webContents, sessionID: id, ownerID: nil, opener: opener)
+            if let preferredEngine { tab.preferredEngine = preferredEngine }
+            selectTab(tab.id)
+            return
+        }
         switch kind {
         case .main:
             selectTab(session.adopt(webContents, spaceID: currentSpaceID, personaID: personaID, pinned: false, select: false, opener: opener, preferredEngine: preferredEngine).id)
@@ -732,6 +767,10 @@ public enum BrowserWindowKind {
 
     /// Closes other tabs in the selected tab's space, keeping pinned tabs, the tabs of small windows, and agents' tabs. A small window has no other tabs.
     public func closeOtherTabs() {
+        if isPrivate {
+            privateTabs.filter { $0.id != selectedTabID }.forEach(session.requestCloseTab)
+            return
+        }
         guard kind == .main, let selected = selectedTab else { return }
         for tab in session.tabs where tab.spaceID == selected.spaceID && tab.isListedInSidebar && !tab.isPinned && tab.agentOwnerID == nil && tab.id != selected.id {
             session.requestCloseTab(tab)
@@ -740,6 +779,7 @@ public enum BrowserWindowKind {
 
     /// The current space's tab rows in sidebar order: pinned first, then open. A collapsed folder, at any level, shows only the selected tab.
     private var orderedTabs: [Tab] {
+        if isPrivate { return privateTabs }
         let tree = session.folderTree
         return (tree.tabs(in: currentSpaceID, pinned: true) + tree.tabs(in: currentSpaceID, pinned: false)).filter { $0.id == selectedTabID || !tree.isInCollapsedFolder($0) }
     }
@@ -812,7 +852,7 @@ public enum BrowserWindowKind {
         if let page = InternalPage(address: input) { return internalPage = page }
         guard let mode = commandPaletteMode, let url = BrowserSession.destination(forInput: input, siteSearch: session.siteSearch) else { return }
         internalPage = nil
-        if !bypassSiteRules, let destination = session.destination(forOpening: currentSpace, url: url) {
+        if !isPrivate, !bypassSiteRules, let destination = session.destination(forOpening: currentSpace, url: url) {
             session.openRoutedTab(url: url, destination: destination, source: self, background: false)
             return
         }
@@ -904,6 +944,7 @@ public enum BrowserWindowKind {
 
     /// Shows a plugin's sidebar panel while its space and plugin remain active.
     func showSidebarPanel(_ controller: NSViewController, for item: Attributed<PluginSidebarItem>, in space: Space.ID, plugins: PluginManager) {
+        guard !isPrivate else { return }
         guard currentSpaceID == space else { return }
         closeSidebarPanel()
         sidebarPanel = SidebarPluginPanel(spaceID: space, title: item.item.title, controller: controller)
@@ -928,6 +969,7 @@ public enum BrowserWindowKind {
 
     /// Runs a plugin command on the selected tab through the plugins of the window's Persona, as the palette, the Plugins menu, and sidebar items do.
     public func runPluginCommand(_ command: PluginCommandRef, source: PluginInvocation.Source = .menu, argument: String? = nil) {
+        guard !isPrivate else { return }
         let invocation = PluginInvocation(tab: selectedPluginTab(of: personaID), source: source, argument: argument)
         let plugins = self.plugins
         Task { await plugins.run(command, invocation) }
@@ -935,18 +977,21 @@ public enum BrowserWindowKind {
 
     /// Runs a plugin command from a tab row's context menu on that tab, with the plugins of the tab's Persona.
     func runPluginCommand(_ command: PluginCommandRef, onTab tab: Tab) {
+        guard !isPrivate else { return }
         let invocation = PluginInvocation(tab: session.pluginTab(tab), source: .contextMenu)
         Task { await session.plugins(in: tab.personaID).run(command, invocation) }
     }
 
     /// Runs a plugin command from a space's menu on the selected tab, with the space and the plugins of its Persona.
     func runPluginCommand(_ command: PluginCommandRef, inSpace space: Space) {
+        guard !isPrivate else { return }
         let invocation = PluginInvocation(tab: selectedPluginTab(of: space.resolvedPersonaID), spaceID: space.id)
         Task { await session.plugins(in: space.resolvedPersonaID).run(command, invocation) }
     }
 
     /// The selected tab, for the plugins of `personaID`, before the manager applies a plugin's grant: for their commands, and for their `selectedTab()` from the window that last became main. A plugin sees only its Persona's tabs, so it gets no tab of another Persona, such as a favorite's, and none while an internal page or the preview panel covers the tab's page.
     func selectedPluginTab(of personaID: Persona.ID) -> PluginTab? {
+        guard !isPrivate else { return nil }
         guard !isSelectedPageCovered, let tab = selectedTab, tab.personaID == personaID else { return nil }
         return session.pluginTab(tab)
     }
@@ -955,11 +1000,13 @@ public enum BrowserWindowKind {
 
     /// The reader opens beside a selected tab that no internal page covers, and closes at any time.
     public var canTogglePageReader: Bool {
-        isPageReaderVisible || (selectedTab != nil && internalPage == nil)
+        guard !isPrivate else { return false }
+        return isPageReaderVisible || (selectedTab != nil && internalPage == nil)
     }
 
     /// Shows or hides the page reader. Showing it summarizes the selected tab's page unless its conversation has begun or AI is off for its site; hiding it has the session stop the reader's replies (`BrowserSession.pageReaderDidHide`). The agent panel, which takes the same place, closes.
     public func togglePageReader() {
+        guard !isPrivate else { return }
         withAnimation(SidebarView.pageSpring) {
             isPageReaderVisible.toggle()
             if isPageReaderVisible { agentPanel = nil }
@@ -975,7 +1022,8 @@ public enum BrowserWindowKind {
 
     /// Whether a connected model can run a session, for the palette's Ask Agent row and Continue as Agent Task.
     var canStartAgentTask: Bool {
-        !(session.agents?.agentModels().isEmpty ?? true)
+        guard !isPrivate else { return false }
+        return !(session.agents?.agentModels().isEmpty ?? true)
     }
 
     /// Where a session started in this window goes and what it starts with: the window's current space, which for a small window is the space Move to Main Window would use, its Persona, and the selected tab unless an internal page or the preview covers it.
@@ -992,6 +1040,7 @@ public enum BrowserWindowKind {
 
     /// The sidebar command is about its row, including a background tab, while the window keeps its selected page.
     func sidebarAgentDraft(for tab: Tab, settings: AISettingsStore? = nil) -> AgentComposerContext? {
+        guard !isPrivate, !tab.isPrivate else { return nil }
         let settings = settings ?? AIService.shared.settings
         guard kind == .main, session.agents != nil, settings.route(for: .agent).isEnabled, tab.personaID == personaID, tab.isLoaded,
               session.allTabs.contains(where: { $0 === tab }) else { return nil }
@@ -1020,11 +1069,13 @@ public enum BrowserWindowKind {
 
     /// File ▸ New Agent Task: the composer for the window's current space and its Persona, with the selected tab to attach and `text` as the task.
     public func showAgentComposer(text: String = "") {
+        guard !isPrivate else { return }
         showAgentPanel(.composer(agentComposerContext(text: text)))
     }
 
     func askAgentOffer(for text: String, settings: AISettingsStore) -> AskAgentOffer? {
-        AskAgentOffer(text: text, canRunSession: canStartAgentTask, context: agentComposerContext(), allowsAI: settings.allowsAI(on:))
+        guard !isPrivate else { return nil }
+        return AskAgentOffer(text: text, canRunSession: canStartAgentTask, context: agentComposerContext(), allowsAI: settings.allowsAI(on:))
     }
 
     /// Start only with the place and disclosure offered in the palette. A changed context leaves the task for review.
@@ -1052,6 +1103,7 @@ public enum BrowserWindowKind {
 
     /// Continue as Agent Task in the page reader and the question popover, whose questions are about the selected tab's page: the composer with the question and that tab.
     func continueAsAgentTask(_ question: String, from source: AgentHandoffSource, excerpt: AgentReaderExcerpt?, settings: AISettingsStore? = nil) {
+        guard !isPrivate else { return }
         let settings = settings ?? AIService.shared.settings
         guard !isSelectedPageCovered, let tab = selectedTab, tab.id == source.tabID, tab.documentID == source.documentID,
               let url = tab.url, url == source.url, settings.allowsAI(on: url) else { return }
@@ -1167,7 +1219,7 @@ public enum BrowserWindowKind {
     }
 
     /// An open panel and this space’s unfinished setup draft stay reachable before a model can run.
-    public var canToggleAgentPanel: Bool { agentPanel != nil || resumableAgentDraft != nil || canStartAgentTask }
+    public var canToggleAgentPanel: Bool { !isPrivate && (agentPanel != nil || resumableAgentDraft != nil || canStartAgentTask) }
 
     /// Hides the panel, or resumes its draft in this space before showing the most recent session or a new composer.
     public func toggleAgentPanel() {
@@ -1194,6 +1246,7 @@ public enum BrowserWindowKind {
 
     /// Shows agent content in the trailing column and preserves a composer's draft.
     private func showAgentPanel(_ content: AgentPanelContent) {
+        guard !isPrivate else { return }
         if case .composer(let context) = content { agentDrafts[context.spaceID] = context }
         if isPageReaderVisible { session.pageReaderDidHide(in: self) }
         withAnimation(SidebarView.pageSpring) {
@@ -1204,6 +1257,7 @@ public enum BrowserWindowKind {
 
     /// Whether the palette offers Ask About This Page: a provider can answer, and the selected tab shows a page that neither an internal page nor the preview panel covers.
     var canAskAboutPage: Bool {
+        guard !isPrivate else { return false }
         guard !isSelectedPageCovered, !hasPromptOnSelectedTab, let url = selectedTab?.url else { return false }
         return PageAssistant.isQuestionAvailable && PageAssistant.canRead(url)
     }
@@ -1216,6 +1270,7 @@ public enum BrowserWindowKind {
 
     /// From the page's context menu, so the tab is this window's selected tab: a click in another pane selects that pane's tab first.
     func askAboutSelection(_ selection: AISelection, in tab: Tab) {
+        guard !isPrivate, !tab.isPrivate else { return }
         guard selectedTabID == tab.id, PageAssistant.isQuestionAvailable, !session.prompts.hasPrompt(for: tab.id),
               selection.pageURL == tab.url, PageAssistant.canRead(selection.pageURL) else { return }
         openPageQuestion(in: tab, selection: selection)
@@ -1235,6 +1290,7 @@ public enum BrowserWindowKind {
 
     /// Replaces the question popover with a conversation for the tab's current document.
     func openPageQuestion(in tab: Tab, selection: AISelection?) {
+        guard !isPrivate else { return }
         pageQuestion?.conversation.cancel()
         pageQuestion = PageQuestion(tabID: tab.id, documentID: tab.documentID, selection: selection, conversation: session.pageAssistant.makeQuestionConversation(for: tab))
     }
@@ -1346,6 +1402,7 @@ public enum BrowserWindowKind {
 
     /// A small window shows the library in its main window. A main window with its sidebar hidden reveals both together.
     public func toggleLibrary() {
+        guard !isPrivate else { return }
         if kind == .small {
             let main = session.sidebarTarget()
             main.isSidebarVisible = true
@@ -1621,6 +1678,7 @@ public enum BrowserWindowKind {
 
     /// The current space's listed tabs and the open tabs of the favorites that every space of the window's Persona shows, most recently selected first. Tabs not selected since launch follow by their last activation: restored tabs keep the one from the saved session, and tabs opened in the background count from their opening.
     public var recentTabs: [Tab] {
+        if isPrivate { return privateTabs.sorted { $0.lastActivatedAt > $1.lastActivatedAt } }
         let candidates = session.tabs.filter { $0.spaceID == currentSpaceID && $0.isListedInSidebar } + session.openFavoriteTabs.filter { $0.personaID == personaID }
         let selected = activationOrder.compactMap { id in candidates.first { $0.id == id } }
         let selectedIDs = Set(activationOrder)
@@ -1675,6 +1733,7 @@ public enum BrowserWindowKind {
 
     /// Whether Clear Site Data can act: the selected tab shows a web page that no internal page or preview covers and whose tab has no prompt waiting, and the window shows no sheet.
     public var canClearSiteData: Bool {
+        guard !isPrivate else { return false }
         guard !isSelectedPageCovered, !hasPromptOnSelectedTab, SiteDataScope(url: selectedTab?.url) != nil else { return false }
         return nsWindow?.attachedSheet == nil
     }

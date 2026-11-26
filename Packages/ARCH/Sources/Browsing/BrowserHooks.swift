@@ -113,7 +113,7 @@ final class BrowserHooks: AIHookHost {
 
     /// The load's tab while it is a space's tab that takes a hook's name for the loaded document. A favorite's tab goes by its favorite's name.
     private func unnamedTab(showing load: AIPageLoad) -> Tab? {
-        guard let tab = session?.tabs.first(where: { $0.id == load.tabID }), load.documentID.map({ $0 == tab.documentID }) != false,
+        guard let tab = session?.tabs.first(where: { $0.id == load.tabID && !$0.isPrivate }), load.documentID.map({ $0 == tab.documentID }) != false,
               Self.takesName(for: load.url, customTitle: tab.customTitle, suggestedTitle: tab.suggestedTitle, shownURL: tab.committedURL) else { return nil }
         return tab
     }
@@ -126,6 +126,7 @@ final class BrowserHooks: AIHookHost {
 
     /// Gives the tab the suggested name for the document at `document`, under the rules the AI hooks' names follow (`docs/hooks.md`, hook decision 13), for plugins and hook scripts: the name's first line, trimmed and cut, while the tab still shows the document, the user has not named it, and the user has not turned down a suggested name for the document. Nil removes a suggested name for the document, leaving the user's name and a turned-down name as they are, while the tab shows it and the user has not named it. Returns whether the tab took the change; with `applying` false nothing changes.
     static func suggest(_ name: String?, for document: URL, to tab: Tab, applying: Bool) -> Bool {
+        guard !tab.isPrivate else { return false }
         guard let name else {
             guard tab.customTitle == nil, tab.committedURL?.withoutFragment == document.withoutFragment else { return false }
             if applying, let suggested = tab.suggestedTitle, suggested.title != nil, suggested.isFor(document) { tab.suggestedTitle = nil }
